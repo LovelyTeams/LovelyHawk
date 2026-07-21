@@ -1,0 +1,244 @@
+/*
+ * 容器终端窗口样式（原 container-terminal.html 内联样式抽离）
+ * 由 src/entries/containerTerminalEntry.ts 动态引入，仅在容器终端窗口加载。
+ */
+
+:root {
+  --term-bg: #0d1117;
+  --term-bg-secondary: #161b22;
+  --term-bg-input: #0d1117;
+  --term-border: rgba(255, 255, 255, 0.08);
+  --term-text: #e6edf3;
+  --term-text-dim: #8b949e;
+  --term-accent: #58a6ff;
+  --term-success: #3fb950;
+  --term-error: #f85149;
+  --term-warning: #d29922;
+  --term-radius: 8px;
+  --term-font: 'Cascadia Code', 'JetBrains Mono', 'Fira Code', 'Consolas', 'Monaco', 'Courier New', monospace;
+}
+
+body.container-terminal-window {
+  font-family: var(--term-font);
+  background: var(--term-bg);
+  color: var(--term-text);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+.container-terminal {
+  width: 100vw; height: 100vh;
+  display: flex; flex-direction: column;
+  background: var(--term-bg);
+}
+
+/* ─── Title Bar ─── */
+.terminal-header {
+  background: var(--term-bg-secondary);
+  padding: 0 16px;
+  border-bottom: 1px solid var(--term-border);
+  display: flex; align-items: center; justify-content: space-between;
+  height: 42px; flex-shrink: 0;
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+.terminal-title-group {
+  display: flex; align-items: center; gap: 10px;
+}
+
+.terminal-title-icon {
+  width: 28px; height: 28px; border-radius: 6px;
+  background: rgba(88, 166, 255, 0.12);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px;
+}
+
+.terminal-title {
+  font-size: 13px; font-weight: 600;
+  color: var(--term-text);
+  max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.terminal-title-badge {
+  font-size: 10px; padding: 2px 6px; border-radius: 4px;
+  background: rgba(63, 185, 80, 0.15); color: var(--term-success);
+  font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+}
+
+.terminal-controls {
+  display: flex; gap: 8px; align-items: center;
+  -webkit-app-region: no-drag;
+}
+
+.shell-selector {
+  background: var(--term-bg); border: 1px solid var(--term-border);
+  color: var(--term-text); padding: 5px 10px;
+  border-radius: 6px; font-size: 12px; font-family: var(--term-font);
+  cursor: pointer; transition: border-color 0.2s;
+}
+.shell-selector:hover { border-color: var(--term-accent); }
+.shell-selector:focus { outline: none; border-color: var(--term-accent); box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.15); }
+
+.terminal-btn {
+  border: 1px solid var(--term-border); color: var(--term-text);
+  padding: 5px 14px; border-radius: 6px; font-size: 12px;
+  cursor: pointer; transition: all 0.15s; font-family: var(--term-font);
+  background: var(--term-bg); font-weight: 500;
+}
+.terminal-btn:hover { background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.15); }
+.terminal-btn.primary {
+  background: var(--term-accent); border-color: var(--term-accent); color: #fff;
+}
+.terminal-btn.primary:hover { background: #4c9aed; }
+.terminal-btn.danger { border-color: rgba(248, 81, 73, 0.4); color: var(--term-error); }
+.terminal-btn.danger:hover { background: rgba(248, 81, 73, 0.12); }
+
+/* ─── Command Input ─── */
+.terminal-input-section {
+  background: var(--term-bg-secondary);
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--term-border);
+  display: flex; gap: 8px; align-items: center;
+}
+
+.input-prompt {
+  color: var(--term-success); font-weight: 700; font-size: 14px;
+  flex-shrink: 0; padding-right: 4px;
+}
+
+.terminal-input {
+  flex: 1; background: var(--term-bg-input);
+  border: 1px solid var(--term-border); color: var(--term-text);
+  padding: 8px 14px; border-radius: 6px;
+  font-family: var(--term-font); font-size: 13px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.terminal-input:focus {
+  outline: none; border-color: var(--term-accent);
+  box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.1);
+}
+.terminal-input::placeholder { color: var(--term-text-dim); opacity: 0.5; }
+
+/* ─── Output Area ─── */
+.terminal-output {
+  flex: 1; padding: 16px; overflow-y: auto;
+  background: var(--term-bg); font-size: 13px; line-height: 1.6;
+}
+
+.command-line {
+  margin: 12px 0 4px 0; display: flex; align-items: baseline; gap: 8px;
+  padding: 6px 10px; border-radius: 4px;
+  background: rgba(88, 166, 255, 0.04);
+  border-left: 3px solid var(--term-accent);
+}
+.command-line .prompt-symbol { color: var(--term-success); font-weight: 700; }
+.command-line .command-text { color: var(--term-accent); font-weight: 500; }
+.command-line .command-time {
+  margin-left: auto; font-size: 11px; color: var(--term-text-dim);
+  font-weight: 400;
+}
+
+.command-output {
+  color: var(--term-text); white-space: pre-wrap; word-break: break-all;
+  margin: 4px 0 8px 0; padding: 8px 10px 8px 16px;
+  border-left: 1px solid var(--term-border);
+  font-size: 12px; line-height: 1.5;
+}
+
+.command-error {
+  color: var(--term-error); margin: 4px 0 8px 0; font-size: 12px;
+  padding: 6px 10px; border-radius: 4px;
+  background: rgba(248, 81, 73, 0.06);
+  border-left: 3px solid var(--term-error);
+}
+
+.loading-indicator {
+  color: var(--term-text-dim); margin: 4px 0;
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 10px;
+}
+.loading-indicator::before {
+  content: ''; width: 12px; height: 12px;
+  border: 2px solid var(--term-border); border-top-color: var(--term-accent);
+  border-radius: 50%; animation: ctSpin 0.8s linear infinite;
+}
+
+.system-message {
+  color: var(--term-text-dim); margin: 12px 0; font-size: 12px;
+  padding: 10px 14px; border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px dashed var(--term-border);
+  display: flex; align-items: center; gap: 8px;
+}
+.system-message::before {
+  content: '›'; font-size: 16px; color: var(--term-accent); font-weight: 700;
+}
+
+/* ─── Scrollbar ─── */
+.terminal-output::-webkit-scrollbar { width: 6px; }
+.terminal-output::-webkit-scrollbar-track { background: transparent; }
+.terminal-output::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 3px; }
+.terminal-output::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
+
+/* ─── Container-terminal 专用 Loading Screen ─── */
+.container-terminal-window .loading-screen {
+  position: fixed; inset: 0;
+  background: var(--term-bg);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  z-index: 9999; gap: 20px;
+}
+
+.loading-spinner-container {
+  position: relative; width: 48px; height: 48px;
+}
+.loading-spinner-ring {
+  width: 48px; height: 48px; border-radius: 50%;
+  border: 3px solid var(--term-border);
+  border-top-color: var(--term-accent);
+  animation: ctSpin 1s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+.loading-spinner-dot {
+  position: absolute; top: 50%; left: 50%;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--term-accent);
+  transform: translate(-50%, -50%);
+  animation: ctLoadingPulse 1.5s ease-in-out infinite;
+}
+
+.container-terminal-window .loading-text {
+  color: var(--term-text-dim); font-size: 13px;
+  animation: ctFadeInUp 0.5s ease-out 0.2s both;
+}
+.loading-sub-text {
+  color: var(--term-text-dim); font-size: 11px; opacity: 0.5;
+  animation: ctFadeInUp 0.5s ease-out 0.4s both;
+}
+
+@keyframes ctSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+@keyframes ctLoadingPulse {
+  0%, 100% { opacity: 0.4; transform: translate(-50%, -50%) scale(0.8); }
+  50% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); }
+}
+@keyframes ctFadeInUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ─── Status Bar ─── */
+.terminal-status-bar {
+  height: 24px; background: var(--term-bg-secondary);
+  border-top: 1px solid var(--term-border);
+  display: flex; align-items: center; padding: 0 12px;
+  font-size: 11px; color: var(--term-text-dim);
+  gap: 12px; flex-shrink: 0;
+}
+.status-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--term-success);
+  box-shadow: 0 0 6px rgba(63, 185, 80, 0.4);
+}
+.status-dot.disconnected { background: var(--term-error); box-shadow: 0 0 6px rgba(248, 81, 73, 0.4); }

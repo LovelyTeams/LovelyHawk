@@ -1,0 +1,201 @@
+/* 樱花主题 - LovelyRes */
+/* Aligned with LovelySpark pink palette: deeper rose primary on cream-pink surfaces */
+
+[data-theme="sakura"] {
+  /* 主色调 */
+  --primary-color: #e8849f;
+  --secondary-color: #dba0b4;
+  --accent-color: #f0a8bc;
+  --success-color: #15803d;
+  --warning-color: #b45309;
+  --error-color: #dc2626;
+  --info-color: #db2777;
+
+  /* 背景色 */
+  --bg-primary: #fef7fb;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #fdf0f5;
+  --bg-dark: #4a2039;
+  --bg-glass: rgba(254, 247, 251, 0.85);
+  --bg-hover: rgba(232, 132, 159, 0.10);
+  --hover-bg: rgba(232, 132, 159, 0.10);
+  --active-bg: rgba(232, 132, 159, 0.16);
+
+  /* 文字颜色 */
+  --text-primary: #4a2039;
+  --text-secondary: #9d7088;
+  --text-tertiary: #b08998;
+  --text-light: #c08aa0;
+  --text-white: #ffffff;
+
+  /* 边框和阴影 */
+  --border-color: #f3dce6;
+  --border-color-hover: #efc9d8;
+  --border-light: rgba(232, 132, 159, 0.12);
+  --shadow-sm: 0 1px 3px rgba(210, 140, 165, 0.10);
+  --shadow-md: 0 4px 12px rgba(210, 140, 165, 0.14);
+  --shadow-lg: 0 8px 24px rgba(210, 140, 165, 0.18);
+  --shadow-xl: 0 20px 60px rgba(210, 140, 165, 0.22);
+  --shadow-glass: 0 8px 32px 0 rgba(210, 140, 165, 0.10);
+  --glow-primary: rgba(232, 132, 159, 0.28);
+
+  /* Extended design tokens */
+  --surface-primary: #fef7fb;
+  --surface-secondary: #ffffff;
+  --surface-tertiary: #fdf0f5;
+  --primary-glow: rgba(232, 132, 159, 0.18);
+  --accent-contrast: #ffffff;
+  --gradient-accent: linear-gradient(135deg, #e8849f, #dba0b4);
+  --card-shadow: 0 1px 3px rgba(210, 140, 165, 0.08), 0 1px 2px rgba(210, 140, 165, 0.05);
+  --card-shadow-hover: 0 8px 24px rgba(210, 140, 165, 0.14), 0 2px 8px rgba(210, 140, 165, 0.07);
+  --modal-backdrop: rgba(74, 32, 57, 0.38);
+  --modal-shadow: 0 20px 60px rgba(210, 140, 165, 0.24);
+  --glass-bg: rgba(254, 247, 251, 0.85);
+  --glass-border: rgba(243, 220, 230, 0.5);
+  --glass-blur: 16px;
+
+  /* Brand sparkle palette (sakura variant) */
+  --brand-glow-amber: #fff1d6;
+  --brand-spark-soft: #fde68a;
+  --brand-spark-soft-inner: #fff2bf;
+  --brand-spark-core: #f59e0b;
+  --brand-spark-accent: #e8849f;
+  --brand-spark-neutral: #b08998;
+  --brand-wordmark-gradient: linear-gradient(135deg, #4a2039 0%, #f59e0b 48%, #e8849f 100%);
+  --brand-dot-color: #e8849f;
+
+  /* Semantic Colors */
+  --status-running: #22c55e;
+  --status-stopped: #ef4444;
+  --status-paused: #f59e0b;
+  --accent-blue: #6366f1;
+  --accent-purple: #d4a0c0;
+  --accent-green: #22c55e;
+  --accent-orange: #f59e0b;
+
+  /* Scrollbar */
+  --scrollbar-thumb: #f3dce6;
+  --scrollbar-thumb-hover: var(--primary-color);
+  --scrollbar-track: transparent;
+
+  /* Focus */
+  --focus-ring-color: var(--primary-color);
+  --focus-ring-shadow: 0 0 0 3px rgba(232, 132, 159, 0.20);
+
+  /* Selection */
+  --selection-bg: var(--primary-color);
+  --selection-text: #ffffff;
+
+  /* Activity Bar */
+  --activitybar-bg: #fdf0f5;
+  --activitybar-border: rgba(232, 132, 159, 0.15);
+  --activitybar-icon-active: #4a2039;
+  --activitybar-icon-inactive: rgba(157, 112, 136, 0.85);
+  --activitybar-indicator: var(--primary-color);
+
+  /* Status Bar — light-theme behaviour: gradient brand bar */
+  --statusbar-bg: var(--gradient-accent);
+  --statusbar-text: rgba(255, 255, 255, 0.92);
+  --statusbar-border: transparent;
+  --statusbar-border-top: transparent;
+
+  /* Tooltip */
+  --tooltip-bg: #4a2039;
+  --tooltip-text: #fef7fb;
+  --tooltip-border: rgba(232, 132, 159, 0.2);
+
+  /* Sidebar tokens */
+  --sidebar-bg: #fdf0f5;
+  --sidebar-hover-bg: rgba(232, 132, 159, 0.08);
+  --sidebar-active-bg: rgba(232, 132, 159, 0.12);
+
+  /* Severity (sakura: keep light theme darker-fg pattern, info in pink family) */
+  --sev-critical-fg: #b91c1c;
+  --sev-critical-bg: rgba(239, 68, 68, 0.10);
+  --sev-critical-bg-hover: rgba(239, 68, 68, 0.18);
+  --sev-critical-border: rgba(239, 68, 68, 0.45);
+  --sev-critical-border-strong: #dc2626;
+  --sev-critical-tag-fg: #991b1b;
+  --sev-critical-tag-bg: rgba(239, 68, 68, 0.18);
+
+  --sev-warn-fg: #b45309;
+  --sev-warn-bg: rgba(245, 158, 11, 0.10);
+  --sev-warn-bg-hover: rgba(245, 158, 11, 0.18);
+  --sev-warn-border: rgba(245, 158, 11, 0.45);
+  --sev-warn-tag-fg: #92400e;
+  --sev-warn-tag-bg: rgba(245, 158, 11, 0.18);
+
+  --sev-success-fg: #15803d;
+  --sev-success-bg: rgba(34, 197, 94, 0.10);
+  --sev-success-bg-hover: rgba(34, 197, 94, 0.18);
+  --sev-success-border: rgba(34, 197, 94, 0.45);
+  --sev-success-tag-fg: #14532d;
+  --sev-success-tag-bg: rgba(34, 197, 94, 0.18);
+
+  --sev-info-fg: #be185d;
+  --sev-info-bg: rgba(232, 132, 159, 0.10);
+  --sev-info-bg-hover: rgba(232, 132, 159, 0.20);
+  --sev-info-border: rgba(232, 132, 159, 0.50);
+  --sev-info-selected-bg: rgba(232, 132, 159, 0.25);
+  --sev-info-selected-fg: #831843;
+  --sev-info-selected-border: #db2777;
+
+  --chip-count-bg: rgba(74, 32, 57, 0.10);
+}
+
+/* Sakura decorative effects */
+[data-theme="sakura"] .luxe-text {
+  background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Sakura petal animation on logo */
+[data-theme="sakura"] .app-logo::before {
+  content: '';
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+  box-shadow: 0 0 6px rgba(232, 132, 159, 0.55);
+  animation: sakuraPetal 3s ease-in-out infinite;
+}
+
+@keyframes sakuraPetal {
+  0%, 100% { transform: scale(1); opacity: 0.7; }
+  50% { transform: scale(1.3); opacity: 1; }
+}
+
+/* Sakura gradient scrollbar */
+[data-theme="sakura"] ::-webkit-scrollbar-thumb {
+  background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+}
+[data-theme="sakura"] ::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(135deg, var(--secondary-color), var(--accent-color));
+}
+
+/* ── 终端调色板（樱花浅色：浅底深字）── */
+[data-theme="sakura"] {
+  --term-bg: #fff5f9;
+  --term-bg-elevated: #fdeaf1;
+  --term-fg: #4a2c3a;
+  --term-fg-dim: #9d7385;
+  --term-cursor: #db2777;
+  --term-selection: rgba(219, 39, 119, 0.16);
+  --term-border: #f3d4e0;
+  --term-scrollbar-thumb: #edc4d5;
+  --term-scrollbar-thumb-hover: #e0a5bd;
+  --term-accent: #db2777;
+  --term-ansi-black: #4a2c3a;   --term-ansi-red: #e11d48;
+  --term-ansi-green: #15803d;   --term-ansi-yellow: #b45309;
+  --term-ansi-blue: #2563eb;    --term-ansi-magenta: #db2777;
+  --term-ansi-cyan: #0e7490;    --term-ansi-white: #9d7385;
+  --term-ansi-bright-black: #9d7385;  --term-ansi-bright-red: #f43f5e;
+  --term-ansi-bright-green: #16a34a;  --term-ansi-bright-yellow: #d97706;
+  --term-ansi-bright-blue: #3b82f6;   --term-ansi-bright-magenta: #ec4899;
+  --term-ansi-bright-cyan: #0891b2;   --term-ansi-bright-white: #4a2c3a;
+}

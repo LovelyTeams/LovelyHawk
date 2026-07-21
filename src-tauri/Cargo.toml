@@ -1,0 +1,54 @@
+[package]
+name = "lovelyres"
+version = "0.7.0"
+description = "LovelyRes - Linux Emergency Response Tool"
+authors = ["LovelyRes Team"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "lovelyres_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.1", features = [] }
+
+[dependencies]
+tauri = { version = "2.1", features = ["protocol-asset", "unstable", "devtools"] }
+tauri-plugin-opener = "2.0"
+tauri-plugin-dialog = "2.0"
+tauri-plugin-fs = "2.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+dirs = "5.0"
+uuid = { version = "1.0", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1.0"
+thiserror = "1.0"
+# SSH 和加密相关依赖 - 使用 russh 替代 ssh2 以支持 OpenSSH 10.0+ 的现代加密算法
+# 使用 ring 后端而不是 aws-lc-rs，避免 Windows 上需要 NASM
+russh = { version = "0.54.6", default-features = false, features = ["ring", "flate2", "rsa"] }
+russh-sftp = "2.1.1"
+russh-keys = "0.49.2"
+async-trait = "0.1.89"
+futures = "0.3.31"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+aes-gcm = "0.10"
+base64 = "0.21"
+rand = "0.8"
+
+# Windows API 依赖
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = ["wingdi", "winuser", "windef"] }
+
+[profile.release]
+panic = "unwind"
+lto = true
+opt-level = "z"
+strip = true
+codegen-units = 1

@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LovelyRes - Linux Emergency Response Tool</title>
+  <meta name="description" content="Linux应急响应工具，支持SSH连接、终端操作、文件管理和Docker容器管理" />
+  <!-- 语法高亮(highlight.js)与 Inter 字体均已改为本地打包引入,见 src/modules/core/vendorAssets.ts。
+       赛场断网环境禁止依赖 CDN,请勿再在此处引入外部资源。 -->
+  <style>
+    /* 防止页面闪烁的基础样式 */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: var(--bg-primary, #0f172a);
+      color: var(--text-primary, #e2e8f0);
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    #app {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* Loading Screen — follows theme via CSS variables with dark fallbacks.
+       Composed of a radial brand glow over the canvas, mirroring the
+       LovelySpark license boot card aesthetic. */
+    .loading-screen {
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(circle at 50% 30%, var(--primary-glow, rgba(196,181,253,0.18)), transparent 38%),
+        var(--bg-primary, #0f172a);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      transition: opacity 0.5s ease-out, visibility 0.5s ease-out;
+    }
+    .loading-screen.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+
+    .loading-content {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
+      animation: lsFadeIn 0.6s ease-out;
+    }
+
+    /* Logo star */
+    .logo-container {
+      position: relative;
+      width: 72px;
+      height: 72px;
+      animation: lsPulse 2s ease-in-out infinite;
+    }
+    .logo-container::after {
+      content: '';
+      position: absolute;
+      inset: -16px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(249,168,212,0.20) 0%, transparent 70%);
+      animation: lsGlow 2s ease-in-out infinite;
+    }
+    .logo-ring { display: none; }
+    .logo-circle { display: none; }
+    .logo-star {
+      width: 72px;
+      height: 72px;
+      position: relative;
+      z-index: 1;
+      filter: drop-shadow(0 4px 16px rgba(196,181,253,0.32));
+    }
+    @keyframes lsPulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.1); }
+    }
+    @keyframes lsGlow {
+      0%, 100% { opacity: 0.6; transform: scale(1); }
+      50% { opacity: 1; transform: scale(1.15); }
+    }
+
+    .app-title {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      color: var(--text-primary, #f1f5f9);
+      font-family: 'Quicksand', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      opacity: 0;
+      animation: lsSlideUp 0.6s ease-out 0.15s forwards;
+    }
+
+    /* Progress bar */
+    .loading-bar-container {
+      width: 168px;
+      height: 3px;
+      background: var(--bg-tertiary, rgba(255,255,255,0.08));
+      border-radius: 2px;
+      overflow: hidden;
+      opacity: 0;
+      animation: lsFadeIn 0.6s ease-out 0.3s forwards;
+    }
+    .loading-bar {
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, #f9a8d4, #c4b5fd);
+      transform-origin: left;
+      animation: lsProgress 2s ease-in-out infinite;
+    }
+
+    .loading-text {
+      color: var(--text-secondary, #94a3b8);
+      font-size: 12px;
+      font-weight: 500;
+      opacity: 0;
+      animation: lsFadeIn 0.6s ease-out 0.4s forwards;
+    }
+
+    @keyframes lsSpin   { to { transform: rotate(360deg); } }
+    @keyframes lsFadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes lsSlideUp {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes lsProgress {
+      0%   { transform: scaleX(0); }
+      50%  { transform: scaleX(0.7); }
+      100% { transform: scaleX(1); transform-origin: right; }
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <!-- 初始加载屏幕 -->
+  <div id="loading-screen" class="loading-screen">
+    <div class="loading-content">
+      <div class="logo-container">
+        <svg class="logo-star" width="72" height="72" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="ls-s" x1=".1" y1="0" x2=".9" y2="1"><stop offset="0" stop-color="#f9a8d4"/><stop offset="1" stop-color="#c4b5fd"/></linearGradient>
+            <linearGradient id="ls-h" x1=".36" y1="0" x2=".5" y2=".5"><stop offset="0" stop-color="#fff" stop-opacity=".5"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+          </defs>
+          <g transform="rotate(-15 64 62)">
+            <path d="M64,16 L75.8,47.8 L109.2,48.8 L83.2,68.8 L93,101.2 L64,83.2 L35,101.2 L44.8,68.8 L18.8,48.8 L52.2,47.8 Z" fill="url(#ls-s)" stroke="url(#ls-s)" stroke-width="12" stroke-linejoin="round" paint-order="stroke fill"/>
+            <path d="M64,16 L75.8,47.8 L109.2,48.8 L83.2,68.8 L93,101.2 L64,83.2 L35,101.2 L44.8,68.8 L18.8,48.8 L52.2,47.8 Z" fill="url(#ls-h)" stroke="url(#ls-h)" stroke-width="12" stroke-linejoin="round" paint-order="stroke fill"/>
+          </g>
+        </svg>
+      </div>
+      <div class="app-title">LovelyRes</div>
+      <div class="loading-bar-container">
+        <div class="loading-bar"></div>
+      </div>
+      <div class="loading-text">正在初始化系统...</div>
+    </div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+
+</html>

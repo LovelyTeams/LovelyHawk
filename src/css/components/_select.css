@@ -1,0 +1,6 @@
+/* Select Elements — 由 dropdowns.css 提供全局基础样式
+   此文件仅保留 .app-layout 内的焦点环变量覆盖 */
+
+.app-layout select:focus {
+  box-shadow: var(--focus-ring-shadow, 0 0 0 2px color-mix(in srgb, var(--primary-color) 12%, transparent));
+}

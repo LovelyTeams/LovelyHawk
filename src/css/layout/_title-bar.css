@@ -1,0 +1,132 @@
+/* Title Bar */
+.modern-title-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 38px;
+  background: var(--titlebar-bg);
+  color: var(--titlebar-text);
+  border-bottom: 1px solid var(--border-color);
+  padding: 0 var(--spacing-md);
+  -webkit-app-region: drag;
+  z-index: 50;
+  position: relative;
+}
+
+/* Subtle accent glow line at the bottom edge (LovelySpark parity) */
+.modern-title-bar::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--gradient-accent);
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.title-bar-left {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  flex: 1;
+  min-width: 0;
+}
+
+.title-bar-right {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  -webkit-app-region: no-drag;
+}
+
+.app-logo {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  position: relative;
+}
+
+.app-name {
+  font-size: 14px;
+  font-weight: 700;
+  font-family: var(--font-brand);
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+  /* Brand wordmark gradient — matches LovelySpark wordmark treatment.
+     Falls back to plain color where background-clip is unsupported. */
+  background: var(--brand-wordmark-gradient);
+  background-size: 200% 200%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: gradientShift 6s ease infinite;
+}
+
+.luxe-text {
+  background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: luxeFlow 3s ease-in-out infinite;
+  background-size: 200% 200%;
+}
+
+.window-controls {
+  display: flex;
+  gap: 2px;
+  -webkit-app-region: no-drag;
+}
+
+.control-button {
+  width: 36px;
+  height: 32px;
+  border: none;
+  border-radius: var(--border-radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-app-region: no-drag;
+}
+
+.control-button:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.control-button.close:hover {
+  background: var(--error-color);
+  color: #ffffff;
+}
+
+/* SSH Terminal Floating Button */
+.ssh-terminal-floating-btn {
+  position: fixed;
+  bottom: 32px; right: 32px;
+  width: 64px; height: 64px;
+  border-radius: 50%;
+  background: var(--gradient-accent);
+  box-shadow: 0 8px 24px var(--primary-glow), 0 4px 12px rgba(0, 0, 0, 0.18);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform var(--motion-slow) var(--ease-out-expo),
+              box-shadow var(--motion-slow) var(--ease-out-expo);
+  z-index: 10000;
+  border: 3px solid var(--bg-primary);
+  pointer-events: auto;
+  user-select: none;
+  animation: floatingPulse 2.4s ease-in-out infinite;
+}
+.ssh-terminal-floating-btn:hover {
+  transform: translateY(-4px) scale(1.05);
+  box-shadow: 0 12px 32px var(--primary-glow), 0 6px 16px rgba(0, 0, 0, 0.28);
+}
+.ssh-terminal-floating-btn:active { transform: translateY(-2px) scale(1.02); }
+.ssh-terminal-floating-btn svg { filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.25)); pointer-events: none; }

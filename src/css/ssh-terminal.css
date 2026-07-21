@@ -1,0 +1,81 @@
+/*
+ * SSH 终端窗口样式（原 ssh-terminal.html 内联样式抽离）
+ * 终端窗口始终为 LovelySpark 深色（与 xterm 画布一致），不随应用浅色主题变化；
+ * 仅主色强调跟随当前主题。由 src/entries/sshTerminalEntry.ts 引入。
+ */
+
+body.ssh-terminal-window {
+  margin: 0;
+  padding: 0;
+  background: #0c1222;
+  font-family: var(--font-family);
+  overflow: hidden;
+}
+
+.ssh-terminal-window #app {
+  width: 100vw;
+  height: 100vh;
+}
+
+/* 自定义标题栏（始终深色） */
+.ssh-terminal-window .modern-title-bar {
+  background: #0f1729;
+  border-bottom: 1px solid #283548;
+}
+.ssh-terminal-window .modern-title-bar .app-name {
+  color: #f8fafc;
+}
+
+/* 控制按钮样式 */
+.ssh-terminal-window .control-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  -webkit-app-region: no-drag;
+}
+
+.ssh-terminal-window .control-button:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f8fafc;
+}
+
+.ssh-terminal-window .control-button.minimize-btn:hover {
+  background: #f59e0b;
+  color: white;
+}
+
+.ssh-terminal-window .control-button.maximize-btn:hover {
+  background: #22c55e;
+  color: white;
+}
+
+.ssh-terminal-window .control-button.close-btn:hover {
+  background: #ef4444;
+  color: white;
+}
+
+/* 调整命令建议面板位置到右侧 */
+.ssh-terminal-window .command-suggestions-panel {
+  left: auto !important;
+  right: 20px !important;
+  animation: sshSlideInRight 0.2s ease-out !important;
+}
+
+@keyframes sshSlideInRight {
+  from {
+    opacity: 0;
+    transform: translateY(-50%) translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(-50%) translateX(0);
+  }
+}

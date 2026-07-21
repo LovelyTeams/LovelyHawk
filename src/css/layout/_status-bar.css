@@ -1,0 +1,84 @@
+/* Status Bar — Modern Redesign (LovelySpark parity)
+ * Light themes paint a gradient brand bar; dark themes use a deep
+ * blue→indigo gradient with a hairline top border. Tokens come from
+ * each theme's --statusbar-bg / --statusbar-text / --statusbar-border-top.
+ */
+.status-bar {
+  height: 24px;
+  background: var(--statusbar-bg, var(--bg-secondary));
+  border-top: 1px solid var(--statusbar-border-top, var(--statusbar-border, var(--border-color)));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  font-size: 11px;
+  color: var(--statusbar-text, var(--text-secondary));
+  gap: 6px;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.status-left,
+.status-right {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.status-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  height: 24px;
+  font-size: 11px;
+  color: inherit;
+  cursor: default;
+  transition: background var(--transition-fast);
+  white-space: nowrap;
+  border: none;
+  background: none;
+}
+
+.status-item:hover {
+  background: rgba(255, 255, 255, 0.10);
+}
+
+.status-item.clickable {
+  cursor: pointer;
+}
+
+.status-item svg {
+  flex-shrink: 0;
+}
+
+/* Connection status dot in status bar */
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #94a3b8;
+  flex-shrink: 0;
+}
+
+.status-dot.connected { background: #22c55e; }
+.status-dot.disconnected { background: #ef4444; }
+
+/* Terminal button in status bar */
+.status-terminal-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  height: 24px;
+  font-size: 11px;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.status-terminal-btn:hover {
+  background: rgba(255, 255, 255, 0.10);
+}

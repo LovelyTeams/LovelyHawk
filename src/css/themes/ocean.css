@@ -1,0 +1,220 @@
+/* Ocean 主题 - LovelyRes */
+/* 蓝绿冷色调，沉浸专注，适合长时间使用 */
+
+[data-theme="ocean"] {
+  /* 主色调 - 青蓝色 */
+  --primary-color: #06b6d4;
+  --secondary-color: #22d3ee;
+  --accent-color: #67e8f9;
+  --success-color: #2dd4bf;
+  --warning-color: #fbbf24;
+  --error-color: #fb7185;
+  --info-color: #38bdf8;
+
+  /* 背景色 - 深海蓝 */
+  --bg-primary: #0b1120;
+  --bg-secondary: #111c32;
+  --bg-tertiary: #182642;
+  --bg-dark: #1e3050;
+  --bg-glass: rgba(11, 17, 32, 0.85);
+  --bg-hover: rgba(6, 182, 212, 0.08);
+  --hover-bg: rgba(6, 182, 212, 0.08);
+  --active-bg: rgba(6, 182, 212, 0.16);
+
+  /* 文字颜色 */
+  --text-primary: #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-tertiary: #64748b;
+  --text-light: #64748b;
+  --text-white: #ffffff;
+
+  /* 边框和阴影 */
+  --border-color: rgba(6, 182, 212, 0.16);
+  --border-color-hover: rgba(6, 182, 212, 0.32);
+  --border-light: rgba(6, 182, 212, 0.06);
+  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
+  --shadow-xl: 0 20px 60px rgba(0, 0, 0, 0.6);
+  --shadow-glass: 0 8px 32px rgba(6, 182, 212, 0.08);
+  --glow-primary: rgba(6, 182, 212, 0.45);
+
+  /* Extended design tokens */
+  --surface-primary: #0b1120;
+  --surface-secondary: #111c32;
+  --surface-tertiary: #182642;
+  --primary-glow: rgba(6, 182, 212, 0.28);
+  --accent-contrast: #ffffff;
+  --gradient-accent: linear-gradient(135deg, #06b6d4, #0891b2);
+  --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.30);
+  --card-shadow-hover: 0 8px 24px rgba(6, 182, 212, 0.18), 0 2px 8px rgba(0, 0, 0, 0.3);
+  --modal-backdrop: rgba(0, 0, 0, 0.65);
+  --modal-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+  --glass-bg: rgba(11, 17, 32, 0.85);
+  --glass-border: rgba(6, 182, 212, 0.10);
+  --glass-blur: 16px;
+
+  /* Brand sparkle palette (ocean variant) */
+  --brand-glow-amber: rgba(56, 189, 248, 0.22);
+  --brand-spark-soft: #67e8f9;
+  --brand-spark-soft-inner: #a5f3fc;
+  --brand-spark-core: #06b6d4;
+  --brand-spark-accent: #38bdf8;
+  --brand-spark-neutral: #94a3b8;
+  --brand-wordmark-gradient: linear-gradient(135deg, #e2e8f0 0%, #06b6d4 50%, #38bdf8 100%);
+  --brand-dot-color: #22d3ee;
+
+  /* Semantic Colors */
+  --status-running: #2dd4bf;
+  --status-stopped: #fb7185;
+  --status-paused: #fbbf24;
+  --accent-blue: #38bdf8;
+  --accent-purple: #818cf8;
+  --accent-green: #2dd4bf;
+  --accent-orange: #fbbf24;
+
+  /* Scrollbar */
+  --scrollbar-thumb: rgba(6, 182, 212, 0.30);
+  --scrollbar-thumb-hover: rgba(6, 182, 212, 0.55);
+  --scrollbar-track: transparent;
+
+  /* Focus */
+  --focus-ring-color: var(--primary-color);
+  --focus-ring-shadow: 0 0 0 3px rgba(6, 182, 212, 0.20);
+
+  /* Selection */
+  --selection-bg: var(--primary-color);
+  --selection-text: #0b1120;
+
+  /* Activity Bar */
+  --activitybar-bg: #070c18;
+  --activitybar-border: rgba(6, 182, 212, 0.08);
+  --activitybar-icon-active: #e2e8f0;
+  --activitybar-icon-inactive: rgba(148, 163, 184, 0.75);
+  --activitybar-indicator: var(--primary-color);
+
+  /* Status Bar */
+  --statusbar-bg: linear-gradient(135deg, #0b1828, #122436);
+  --statusbar-text: #94a3b8;
+  --statusbar-border: transparent;
+  --statusbar-border-top: rgba(6, 182, 212, 0.08);
+
+  /* Tooltip */
+  --tooltip-bg: #111c32;
+  --tooltip-text: #e2e8f0;
+  --tooltip-border: rgba(6, 182, 212, 0.16);
+
+  /* Sidebar tokens */
+  --sidebar-bg: #070c18;
+  --sidebar-hover-bg: rgba(6, 182, 212, 0.06);
+  --sidebar-active-bg: rgba(6, 182, 212, 0.14);
+
+  /* Severity (ocean: pastel fg on dark surface) */
+  --sev-critical-fg: #fda4af;
+  --sev-critical-bg: rgba(251, 113, 133, 0.10);
+  --sev-critical-bg-hover: rgba(251, 113, 133, 0.20);
+  --sev-critical-border: rgba(251, 113, 133, 0.45);
+  --sev-critical-border-strong: #fb7185;
+  --sev-critical-tag-fg: #ffe4e6;
+  --sev-critical-tag-bg: rgba(251, 113, 133, 0.30);
+
+  --sev-warn-fg: #fde68a;
+  --sev-warn-bg: rgba(251, 191, 36, 0.10);
+  --sev-warn-bg-hover: rgba(251, 191, 36, 0.20);
+  --sev-warn-border: rgba(251, 191, 36, 0.45);
+  --sev-warn-tag-fg: #fef9c3;
+  --sev-warn-tag-bg: rgba(251, 191, 36, 0.30);
+
+  --sev-success-fg: #5eead4;
+  --sev-success-bg: rgba(45, 212, 191, 0.10);
+  --sev-success-bg-hover: rgba(45, 212, 191, 0.20);
+  --sev-success-border: rgba(45, 212, 191, 0.45);
+  --sev-success-tag-fg: #ccfbf1;
+  --sev-success-tag-bg: rgba(45, 212, 191, 0.30);
+
+  --sev-info-fg: #7dd3fc;
+  --sev-info-bg: rgba(56, 189, 248, 0.08);
+  --sev-info-bg-hover: rgba(56, 189, 248, 0.20);
+  --sev-info-border: rgba(56, 189, 248, 0.45);
+  --sev-info-selected-bg: rgba(56, 189, 248, 0.30);
+  --sev-info-selected-fg: #e0f2fe;
+  --sev-info-selected-border: #38bdf8;
+
+  --chip-count-bg: rgba(226, 232, 240, 0.10);
+}
+
+/* Ocean decorative effects */
+[data-theme="ocean"] .luxe-text {
+  background: linear-gradient(135deg, #06b6d4, #38bdf8, #818cf8);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  background-size: 200% 200%;
+  animation: luxeFlow 5s ease-in-out infinite;
+}
+
+/* Ocean deep-sea buttons */
+[data-theme="ocean"] .modern-btn.primary {
+  background: linear-gradient(135deg, #06b6d4, #0891b2);
+  box-shadow: 0 0 12px rgba(6, 182, 212, 0.32);
+}
+[data-theme="ocean"] .modern-btn.primary:hover {
+  box-shadow: 0 0 20px rgba(6, 182, 212, 0.5), 0 0 40px rgba(6, 182, 212, 0.15);
+}
+
+/* Ocean sidebar & workspace borders */
+[data-theme="ocean"] .sidebar-nav { border-color: rgba(6, 182, 212, 0.08); }
+[data-theme="ocean"] .main-workspace { border-color: rgba(6, 182, 212, 0.05); }
+
+/* Nav hover effects */
+[data-theme="ocean"] .sidebar-item.active,
+[data-theme="ocean"] .sidebar-group-row.active { color: #22d3ee; }
+[data-theme="ocean"] .sidebar-item:hover,
+[data-theme="ocean"] .sidebar-group-row:hover { color: #22d3ee; }
+
+/* Connected card ocean pulse */
+[data-theme="ocean"] .connection-card.connected {
+  border-color: rgba(45, 212, 191, 0.32);
+  box-shadow: 0 0 10px rgba(45, 212, 191, 0.10);
+}
+
+/* Ocean wave effect on logo */
+[data-theme="ocean"] .app-logo::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #06b6d4, #22d3ee);
+  box-shadow: 0 0 6px rgba(6, 182, 212, 0.5);
+  animation: oceanPulse 3s ease-in-out infinite;
+}
+
+@keyframes oceanPulse {
+  0%, 100% { transform: scale(1); opacity: 0.6; }
+  50% { transform: scale(1.4); opacity: 1; }
+}
+
+/* ── 终端调色板（SSH / 容器终端共用，随主题切换）── */
+[data-theme="ocean"] {
+  --term-bg: #0b1120;
+  --term-bg-elevated: #111a2e;
+  --term-fg: #cbd5e1;
+  --term-fg-dim: #7c93b0;
+  --term-cursor: #38bdf8;
+  --term-selection: rgba(56, 189, 248, 0.28);
+  --term-border: #1e2b44;
+  --term-scrollbar-thumb: #24344f;
+  --term-scrollbar-thumb-hover: #35496a;
+  --term-accent: #38bdf8;
+  --term-ansi-black: #1e2b44;   --term-ansi-red: #fb7185;
+  --term-ansi-green: #34d399;   --term-ansi-yellow: #fbbf24;
+  --term-ansi-blue: #38bdf8;    --term-ansi-magenta: #a78bfa;
+  --term-ansi-cyan: #22d3ee;    --term-ansi-white: #cbd5e1;
+  --term-ansi-bright-black: #7c93b0;  --term-ansi-bright-red: #fda4af;
+  --term-ansi-bright-green: #6ee7b7;  --term-ansi-bright-yellow: #fcd34d;
+  --term-ansi-bright-blue: #7dd3fc;   --term-ansi-bright-magenta: #c4b5fd;
+  --term-ansi-bright-cyan: #67e8f9;   --term-ansi-bright-white: #f1f5f9;
+}
