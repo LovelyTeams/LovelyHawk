@@ -108,6 +108,10 @@ pub async fn sftp_upload(
     remote_path: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    // local_path 来自 webview：只放行 save_temp_file 产出的受管暂存文件，
+    // 否则一个 XSS 就能把 ~/.ssh/id_rsa 上传到攻击者控制的靶机上。
+    crate::path_guard::ensure_managed_upload_source(&local_path)?;
+
     let manager = &state.ssh_manager;
     let result = manager
         .upload_file(&local_path, &remote_path)
@@ -128,6 +132,10 @@ pub async fn sftp_download(
     local_path: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    // 部分缓解：拒 .. 与敏感目录。完整修复需把保存对话框挪进 Rust，
+    // 让路径不经 webview 往返 —— 详见 path_guard::ensure_safe_download_target
+    crate::path_guard::ensure_safe_download_target(&local_path)?;
+
     let manager = &state.ssh_manager;
     manager
         .download_file(&remote_path, &local_path)
@@ -202,17 +210,5 @@ pub async fn save_temp_file(file_name: String, data: Vec<u8>) -> Result<String, 
     Ok(temp_file_path.to_string_lossy().to_string())
 }
 
-fn managed_upload_temp_dir() -> std::path::PathBuf {
-    std::env::temp_dir().join("lovelyres-upload")
-}
-
-fn is_managed_upload_temp_file(path: &str) -> bool {
-    let Ok(candidate) = std::fs::canonicalize(path) else {
-        return false;
-    };
-    let Ok(root) = std::fs::canonicalize(managed_upload_temp_dir()) else {
-        return false;
-    };
-
-    candidate.parent() == Some(root.as_path())
-}
+// 实现已移入 crate::path_guard，与 sftp_upload 的准入校验共用同一份判定
+use crate::path_guard::{is_managed_upload_temp_file, managed_upload_temp_dir};

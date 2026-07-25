@@ -9,6 +9,7 @@ import { version as APP_VERSION } from '../../../package.json';
 import { KubernetesRenderer } from './kubernetesRenderer';
 import { dockerPageManager } from '../docker/dockerPageManager';
 import { SftpContextMenuRenderer } from './sftpContextMenu';
+import { sftpManager } from '../remote/sftpManager';
 import { LogAnalysisRenderer } from './logAnalysisRenderer';
 import { DatabaseRenderer } from './databaseRenderer';
 import { PacketCaptureRenderer } from './packetCaptureRenderer';
@@ -49,7 +50,9 @@ import {
   Fire,
   // 笔记 & 安全速查
   DocDetail,
-  Protection
+  Protection,
+  // SFTP 工具栏溢出菜单
+  MoreOne
 } from '@icon-park/svg';
 import { createIconHTML, statusIcon } from './iconMapping';
 
@@ -1035,26 +1038,48 @@ export class ModernUIRenderer {
 
     // 延迟初始化远程操作页面
     ModernUIRenderer.remoteOperationsInitTimer = window.setTimeout(() => {
+      // 事件委托必须每次渲染都重绑：工作区是 outerHTML 整体替换的，
+      // 切走再回来时这些节点全是新的。而 initRemoteOperationsPage 有个
+      // 模块级 initialized 标志会提前 return，绑定不能依赖它。
+      sftpManager.bindUIEvents();
       (window as any).initRemoteOperationsPage?.();
       ModernUIRenderer.remoteOperationsInitTimer = null;
     }, 100);
 
     const sideCollapsed = (() => { try { return localStorage.getItem('sftp-side-collapsed') === 'true'; } catch { return false; } })();
 
+    // 所有交互一律 data-sftp-action + 事件委托（sftpManager.bindPageEvents）：
+    // 不再写内联 onclick，既去掉属性内 JS 注入面，也是 CSP 收紧的前提。
+    const icon = (fn: (o: any) => string, size = '15') =>
+      fn({ theme: 'outline', size, fill: 'currentColor' });
+
     return `
-      <div class="sftp-page-container">
-        <!-- 头部：面包屑 + 标题 + 操作 -->
+      <div class="sftp-page-container" id="sftp-page">
+        <!-- 头部：标题 + 计数 chips + 主操作（其余收进"更多"） -->
         <div class="sftp-header">
-          <div class="sftp-breadcrumb-top"><span>文件调查</span><span class="sftp-bc-sep">/</span><span class="sftp-bc-cur">SFTP文件</span></div>
           <div class="sftp-head-row">
-            <h2 class="sftp-title">远程文件</h2>
+            <div class="sftp-title-wrap">
+              <h2 class="sftp-title">远程文件</h2>
+              <span class="sftp-chip" id="sftp-chip-count">0 项</span>
+              <span class="sftp-chip sftp-chip-risk" id="sftp-chip-risk" hidden>
+                ${statusIcon('warning', { size: 13 })} <span id="sftp-risk-count">0</span> 个可疑
+              </span>
+              <span class="sftp-chip sftp-chip-conn ${this.state.isConnected ? 'is-on' : 'is-off'}">
+                ${this.state.isConnected ? '已连接' : '未连接'}
+              </span>
+            </div>
             <div class="sftp-head-actions">
-              <button class="sftp-act-btn" onclick="window.sftpRefresh && window.sftpRefresh()">${Refresh({ theme: 'outline', size: '15', fill: 'currentColor' })}<span>刷新</span></button>
-              <button class="sftp-act-btn" onclick="window.sftpOpenCreateFolder && window.sftpOpenCreateFolder()">${FolderPlus({ theme: 'outline', size: '15', fill: 'currentColor' })}<span>新建文件夹</span></button>
-              <button class="sftp-act-btn" onclick="window.sftpCreateFile && window.sftpCreateFile()">${FileText({ theme: 'outline', size: '15', fill: 'currentColor' })}<span>新建文件</span></button>
-              <button class="sftp-act-btn" onclick="window.sftpIntegritySnapshot && window.sftpIntegritySnapshot()">${Shield({ theme: 'outline', size: '15', fill: 'currentColor' })}<span>完整性快照</span></button>
-              <button class="sftp-act-btn" onclick="window.toggleSftpHistory && window.toggleSftpHistory()">${History({ theme: 'outline', size: '15', fill: 'currentColor' })}<span>历史记录</span></button>
-              <button id="sftp-upload-btn" class="sftp-act-btn primary" onclick="window.sftpOpenUpload && window.sftpOpenUpload()">${Upload({ theme: 'outline', size: '15', fill: 'currentColor' })}<span>上传</span></button>
+              <button id="sftp-upload-btn" class="sftp-act-btn primary" data-sftp-action="upload">${icon(Upload)}<span>上传</span></button>
+              <button class="sftp-act-btn" data-sftp-action="refresh">${icon(Refresh)}<span>刷新</span></button>
+              <div class="sftp-more-wrap">
+                <button class="sftp-act-btn sftp-more-btn" data-sftp-action="toggle-more" title="更多操作" aria-haspopup="true" aria-expanded="false">${icon(MoreOne, '16')}</button>
+                <div class="sftp-more-menu" id="sftp-more-menu">
+                  <button class="dropdown-item" data-sftp-action="new-folder">${icon(FolderPlus, '14')}<span>新建文件夹</span></button>
+                  <button class="dropdown-item" data-sftp-action="new-file">${icon(FileText, '14')}<span>新建文件</span></button>
+                  <button class="dropdown-item" data-sftp-action="snapshot">${icon(Shield, '14')}<span>完整性快照</span></button>
+                  <button class="dropdown-item" data-sftp-action="history">${icon(History, '14')}<span>历史记录</span></button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -1062,34 +1087,26 @@ export class ModernUIRenderer {
         <!-- 路径栏：导航 + 路径面包屑 + 搜索 -->
         <div class="sftp-pathbar">
           <div class="sftp-nav-controls">
-            <button class="sftp-nav-btn" onclick="sftpManager.navigateToParent()" title="返回上一级">${Up({ theme: 'outline', size: '16', fill: 'currentColor' })}</button>
-            <button class="sftp-nav-btn" onclick="sftpManager.navigateToPath('/')" title="根目录">${Home({ theme: 'outline', size: '16', fill: 'currentColor' })}</button>
+            <button class="sftp-nav-btn" data-sftp-action="up" title="返回上一级">${icon(Up, '16')}</button>
+            <button class="sftp-nav-btn" data-sftp-action="home" title="根目录">${icon(Home, '16')}</button>
           </div>
           <div class="sftp-breadcrumb-bar">
             <div id="sftp-breadcrumb" class="sftp-breadcrumb">
-              <span class="breadcrumb-segment breadcrumb-root" onclick="sftpManager.navigateToPath('/')" title="根目录">/</span>
+              <span class="breadcrumb-segment breadcrumb-root" data-path="/" title="根目录">/</span>
             </div>
-            <input
-              type="text"
-              id="sftp-path-input"
-              class="sftp-path-input"
-              placeholder="输入路径..."
-              onkeydown="if(event.key === 'Enter') sftpManager.navigateToPath(this.value)"
-              onfocus="this.parentElement.classList.add('editing')"
-              onblur="this.parentElement.classList.remove('editing')"
-            />
+            <input type="text" id="sftp-path-input" class="sftp-path-input" placeholder="输入路径..." />
           </div>
           <div class="sftp-search">
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="M21 21l-4.3-4.3"></path></svg>
-            <input type="text" id="sftp-search-input" placeholder="搜索当前目录..." oninput="window.sftpFilterFiles && window.sftpFilterFiles(this.value)" />
+            <input type="text" id="sftp-search-input" placeholder="搜索当前目录..." />
           </div>
         </div>
 
         <!-- 敏感目录审计横幅 -->
         <div class="sftp-audit-banner" id="sftp-audit-banner" style="display:none;">
-          <span class="sftp-audit-icon">${Shield({ theme: 'outline', size: '15', fill: 'currentColor' })}</span>
+          <span class="sftp-audit-icon">${icon(Shield)}</span>
           <span class="sftp-audit-text"><strong>敏感目录</strong> · 操作将记录到审计日志</span>
-          <button class="sftp-audit-link" onclick="window.toggleSftpHistory && window.toggleSftpHistory()">查看日志</button>
+          <button class="sftp-audit-link" data-sftp-action="history">查看日志</button>
         </div>
 
         <!-- Body: 文件表格 + 文件详情侧栏 -->
@@ -1098,21 +1115,21 @@ export class ModernUIRenderer {
             <table class="sftp-table">
               <thead>
                 <tr>
-                  <th class="sftp-col-check"><input type="checkbox" id="sftp-check-all" onclick="window.sftpToggleAll && window.sftpToggleAll(this.checked)"></th>
-                  <th class="sftp-th-sortable sftp-col-name" onclick="window.setSftpSortMode(sftpManager.getSortMode() === 'name-asc' ? 'name-desc' : 'name-asc')" id="sftp-th-name">名称 <span class="sort-indicator" id="sort-ind-name">▲</span></th>
+                  <th class="sftp-col-check"><input type="checkbox" id="sftp-check-all"></th>
+                  <th class="sftp-th-sortable sftp-col-name" data-sftp-sort="name" id="sftp-th-name">名称 <span class="sort-indicator" id="sort-ind-name">▲</span></th>
                   <th class="sftp-col-type">类型</th>
-                  <th class="sftp-th-sortable sftp-col-size" onclick="window.setSftpSortMode(sftpManager.getSortMode() === 'size-asc' ? 'size-desc' : 'size-asc')" id="sftp-th-size">大小 <span class="sort-indicator" id="sort-ind-size"></span></th>
+                  <th class="sftp-th-sortable sftp-col-size" data-sftp-sort="size" id="sftp-th-size">大小 <span class="sort-indicator" id="sort-ind-size"></span></th>
                   <th class="sftp-col-perms">权限</th>
                   <th class="sftp-col-owner">所有者</th>
-                  <th class="sftp-th-sortable sftp-col-time" onclick="window.setSftpSortMode(sftpManager.getSortMode() === 'modified-asc' ? 'modified-desc' : 'modified-asc')" id="sftp-th-modified">修改时间 <span class="sort-indicator" id="sort-ind-modified"></span></th>
+                  <th class="sftp-th-sortable sftp-col-time" data-sftp-sort="modified" id="sftp-th-modified">修改时间 <span class="sort-indicator" id="sort-ind-modified"></span></th>
                   <th class="sftp-col-risk">风险</th>
                 </tr>
               </thead>
               <tbody id="sftp-file-list">
                 <tr>
-                  <td colspan="8" style="text-align: center; padding: 40px; color: var(--text-secondary);">
-                    <div style="display: flex; flex-direction: column; align-items: center; gap: 10px;">
-                      <div class="loading-spinner" style="width: 24px; height: 24px;"></div>
+                  <td colspan="8" class="sftp-placeholder-cell">
+                    <div class="sftp-placeholder">
+                      <div class="loading-spinner"></div>
                       <span>正在加载文件列表...</span>
                     </div>
                   </td>
@@ -1124,7 +1141,7 @@ export class ModernUIRenderer {
           <aside class="sftp-side${sideCollapsed ? ' collapsed' : ''}" id="sftp-side">
             <div class="sftp-side-head">
               <span class="sftp-side-title">文件详情</span>
-              <button class="sftp-side-toggle" onclick="window.toggleSftpSide && window.toggleSftpSide()" title="收起 / 展开">
+              <button class="sftp-side-toggle" data-sftp-action="toggle-side" title="收起 / 展开">
                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
               </button>
             </div>
@@ -1135,26 +1152,6 @@ export class ModernUIRenderer {
               </div>
             </div>
           </aside>
-        </div>
-
-        <!-- Status Bar -->
-        <div class="sftp-status-bar">
-          <div class="sftp-status-left">
-            <div class="status-item" id="sftp-status-count">
-              <span>0 项</span>
-            </div>
-            <div class="status-item" id="sftp-status-risk" style="display: none;">
-              <span style="color: var(--error-color);">${statusIcon('warning', { size: 14 })} <span id="sftp-risk-count">0</span> 个可疑项</span>
-            </div>
-          </div>
-          <div class="sftp-status-right">
-            <div class="status-item" id="sftp-status-path" style="opacity: 0.7;">
-              <span>/</span>
-            </div>
-            <div class="status-item">
-              ${this.state.isConnected ? '<span style="color: var(--success-color);">● 已连接</span>' : '<span style="color: var(--error-color);">● 未连接</span>'}
-            </div>
-          </div>
         </div>
       </div>
       ${this.sftpContextMenuRenderer.renderContextMenu()}

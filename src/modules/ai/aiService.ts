@@ -568,6 +568,58 @@ ${context ? `\n上下文信息：${context}` : ''}`;
   }
 
   /**
+   * 以 OpenAI 兼容格式流式请求一个"纯 system prompt"补全。
+   *
+   * 存在的理由：emergencyModal（命令输出解释）与 fileContextMenu（文件分析）
+   * 读的是**后端设置文件**里的 `settings.ai.providers[...]`，而不是本类的
+   * localStorage 配置 —— 两套配置至今并存，且 Ollama 这类无 apiKey 的本地
+   * 提供商只存在于前者（settingsPageManager 仅在 apiKey 非空时才同步到本类）。
+   * 所以这里只接管**传输**，不接管配置来源：调用方照旧用自己的 config，
+   * 请求则统一经 ai_proxy_stream 走 Rust 侧发出。
+   *
+   * 这样 webview 里就不再有任何 fetch()，CSP 才能收紧到 connect-src 'self'。
+   */
+  public async streamOpenAICompatible(
+    config: { baseUrl: string; apiKey?: string; model?: string },
+    systemPrompt: string,
+    onChunk?: (text: string) => void,
+  ): Promise<string> {
+    // 保持与原有两处实现逐字节一致的 URL 拼法与请求体，避免行为漂移
+    const url = `${config.baseUrl}/chat/completions`;
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${config.apiKey ?? ''}`,
+    };
+    const body = JSON.stringify({
+      model: config.model,
+      messages: [{ role: 'system', content: systemPrompt }],
+      temperature: 0.7,
+      max_tokens: 1000,
+      stream: true,
+    });
+
+    let fullContent = '';
+    const sse = createSseDataBuffer((data) => {
+      if (data === '[DONE]') return;
+      try {
+        const parsed = JSON.parse(data);
+        const text = parsed.choices?.[0]?.delta?.content || parsed.delta?.text || '';
+        if (text) {
+          fullContent += text;
+          onChunk?.(text);
+        }
+      } catch {
+        /* intentional: SSE 中途截断的半条 JSON，下一个 chunk 会补齐 */
+      }
+    });
+
+    await this.tauriStreamFetch(url, headers, body, sse.push);
+    sse.flush();
+
+    return fullContent.trim();
+  }
+
+  /**
    * 解析 AI 返回的解决方案
    */
   private parseSolution(content: string): AISolution {

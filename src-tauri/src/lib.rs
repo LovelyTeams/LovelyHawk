@@ -42,6 +42,9 @@ pub mod types;
 pub mod window_manager;
 pub mod commands;
 pub mod ai_proxy;
+pub mod net_guard;           // 出站请求防护（SSRF / header 白名单 / 共享客户端）
+pub mod shell_escape;        // shell / SQL 转义，全 crate 唯一实现
+pub mod path_guard;          // 本地路径防护（上传源收敛 / 下载目标校验）
 pub mod db_manager;
 
 use std::sync::Mutex;
@@ -57,20 +60,24 @@ pub struct AppState {
     pub ssh_terminal_creation_lock: Mutex<()>,
 }
 
+/// 获取互斥锁，遇到中毒锁则恢复而非 panic。
+///
+/// `AppState` 里的这几把锁保护的都是**不可变配置**（SSHConnectionManager 只
+/// 持有路径与 AES 密钥；terminal_creation_lock 是 `Mutex<()>`，纯串行化闸门），
+/// 没有任何 panic 能损坏的可变状态 —— 所以"锁中毒"在这里不带数据完整性含义。
+///
+/// 而 `.unwrap()` 的代价很实在：任意一次 panic 会**永久**毒化这把锁，之后
+/// load/save 连接、加解密密码全部 panic，等于本次会话再也连不上任何机器。
+pub fn lock_or_recover<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// 打开 Web 终端窗口（ttyd/wetty/shellinabox 等）
 #[tauri::command]
 async fn open_web_terminal(app: tauri::AppHandle, url: String, title: String) -> Result<String, String> {
-    let parsed = url.parse::<tauri::Url>()
-        .map_err(|e| format!("无效的 Web 终端 URL: {}", e))?;
-    if !matches!(parsed.scheme(), "http" | "https") {
-        return Err("Web 终端只允许 http/https URL".to_string());
-    }
-    if parsed.host_str().is_none() {
-        return Err("Web 终端 URL 必须包含主机名".to_string());
-    }
-    if !parsed.username().is_empty() || parsed.password().is_some() {
-        return Err("Web 终端 URL 不允许内嵌用户名或密码".to_string());
-    }
+    // 与 ai_proxy 共用同一套校验（scheme / host / 内嵌凭据 / 链路本地地址）
+    net_guard::validate_outbound_url(&url)
+        .map_err(|e| format!("Web 终端 URL 校验失败: {}", e))?;
 
     let label = format!("web-term-{}", std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());

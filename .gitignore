@@ -22,7 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-doc/*
 
 # Security - prevent sensitive data from being committed
 .env
@@ -39,10 +38,7 @@ config/secrets.json
 secrets/
 **/secrets/
 
-# API keys and passwords (backup protection)
-**/*api-key*
-**/*apikey*
-**/*api_key*
-**/*password*
-**/*secret*
-**/*token*
+# 注意：这里刻意不使用 `**/*token*` / `**/*secret*` 之类的文件名子串通配。
+# 它们挡不住 creds.json，却会误伤源码目录 —— 历史上 `**/*token*` 曾把
+# src/css/tokens/ 整个排除出仓库，导致干净 clone 构建不出正确 UI。
+# 需要额外保障请上 CI secret-scan，不要再加子串通配。

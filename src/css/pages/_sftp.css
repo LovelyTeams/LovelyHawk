@@ -14,14 +14,87 @@
 .sftp-loc-dot.high { background: var(--sev-critical-border-strong, #ef4444); }
 .sftp-loc-dot.warn { background: var(--sev-warn-fg); }
 
-/* ──── 新版头部 + 路径栏 ──── */
+/* ──── 头部 + 路径栏 ────
+   装饰性的静态面包屑（"文件调查 / SFTP文件"）已移除：它不可点击、不反映
+   任何状态，却占掉一整条横带。底部状态栏同样移除，其中的计数/风险数改为
+   标题旁的 chip，路径本就由下面的面包屑呈现。 */
 .sftp-header { flex-shrink: 0; padding: 16px 16px 0; }
-.sftp-breadcrumb-top { display: flex; align-items: center; gap: 7px; margin-bottom: 10px; font-size: 12.5px; color: var(--text-secondary); }
-.sftp-bc-sep { opacity: 0.5; }
-.sftp-bc-cur { color: var(--text-primary); font-weight: 500; }
-.sftp-head-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
-.sftp-title { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.01em; color: var(--text-primary); }
-.sftp-head-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.sftp-head-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.sftp-title-wrap { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
+.sftp-title { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; color: var(--text-primary); white-space: nowrap; }
+
+/* 计数 chips —— 与 .sys-chip 同源的视觉语言 */
+.sftp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: nowrap;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+}
+.sftp-chip[hidden] { display: none; }
+.sftp-chip-risk {
+  background: var(--sev-critical-bg);
+  color: var(--sev-critical-fg);
+  border-color: var(--sev-critical-border);
+  font-weight: 600;
+}
+.sftp-chip-risk svg { width: 13px; height: 13px; }
+.sftp-chip-conn::before { content: '●'; font-size: 9px; }
+.sftp-chip-conn.is-on { color: var(--sev-success-fg); border-color: var(--sev-success-border, var(--border-color)); }
+.sftp-chip-conn.is-off { color: var(--text-secondary); opacity: 0.75; }
+
+.sftp-head-actions { display: flex; align-items: center; gap: 8px; justify-content: flex-end; flex-shrink: 0; }
+
+/* "更多"溢出菜单：把新建文件夹/新建文件/完整性快照/历史记录 4 个低频操作
+   从工具栏收进来，头部只留上传 + 刷新两个主操作。 */
+.sftp-more-wrap { position: relative; }
+.sftp-more-btn { padding: 7px 9px; }
+.sftp-more-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 168px;
+  padding: 6px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+  z-index: 200;
+  flex-direction: column;
+  gap: 2px;
+}
+.sftp-more-menu.show { display: flex; }
+.sftp-more-menu .dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.sftp-more-menu .dropdown-item:hover { background: var(--bg-hover, var(--bg-secondary)); }
+.sftp-more-menu .dropdown-item svg { width: 14px; height: 14px; flex-shrink: 0; color: var(--text-secondary); }
+
+/* 表格占位（加载中 / 空目录 / 未连接） */
+.sftp-placeholder-cell { text-align: center; padding: 40px; color: var(--text-secondary); font-size: 13px; }
+.sftp-placeholder { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.sftp-placeholder .loading-spinner { width: 24px; height: 24px; }
+.sftp-placeholder-icon { font-size: 24px; opacity: 0.5; }
 .sftp-act-btn {
   display: inline-flex;
   align-items: center;
@@ -84,7 +157,11 @@
 /* 表格新列宽 + 现代化（名称列不设宽，吃掉剩余空间）*/
 .sftp-table .sftp-col-check, .sftp-table .sftp-td-check { width: 34px; text-align: center; }
 .sftp-table .sftp-col-name { width: auto; min-width: 120px; }
-.sftp-table .file-icon-cell { overflow: hidden; }
+/* min-width:0 是必须的：.file-icon-cell 是 flex 容器，.file-name 作为 flex
+   子项默认 min-width:auto 会拒绝收缩，于是 text-overflow:ellipsis 永远不触发，
+   长文件名被父级的 overflow:hidden 从字形中间硬切断。 */
+.sftp-table .file-icon-cell { overflow: hidden; min-width: 0; }
+.sftp-table .file-icon-cell .file-name { min-width: 0; flex: 1 1 auto; }
 .sftp-table .sftp-col-type, .sftp-table .sftp-td-type { width: 56px; color: var(--text-secondary); }
 .sftp-table .sftp-col-size, .sftp-table .sftp-td-size { width: 64px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 .sftp-table .sftp-col-perms, .sftp-table .perms-cell { width: 90px; font-family: var(--font-mono), monospace; font-size: 11px; }
@@ -510,30 +587,32 @@
   background-color: var(--primary-color-alpha-10);
 }
 
-/* Risk Highlighting */
+/* Risk Highlighting
+   全部走 token：原先写死 rgba(239,68,68,…) / #ef4444，深色主题下 8% 的红
+   叠在深背景上几乎看不见，而文字色又固定成浅色主题的红。 */
 .sftp-file-row.risk-critical {
-  background-color: rgba(239, 68, 68, 0.08);
+  background-color: var(--sev-critical-bg);
 }
 
 .sftp-file-row.risk-critical:hover {
-  background-color: rgba(239, 68, 68, 0.15);
+  background-color: var(--sev-critical-bg-hover);
 }
 
 .sftp-file-row.risk-critical .file-name {
-  color: #ef4444;
+  color: var(--sev-critical-fg);
   font-weight: 600;
 }
 
 .sftp-file-row.risk-warning {
-  background-color: rgba(245, 158, 11, 0.08);
+  background-color: var(--sev-warn-bg);
 }
 
 .sftp-file-row.risk-warning:hover {
-  background-color: rgba(245, 158, 11, 0.15);
+  background-color: var(--sev-warn-bg-hover);
 }
 
 .sftp-file-row.risk-warning .file-name {
-  color: #f59e0b;
+  color: var(--sev-warn-fg);
   font-weight: 600;
 }
 
@@ -600,31 +679,8 @@
   font-weight: 500;
 }
 
-/* Status Bar */
-.sftp-status-bar {
-  min-height: 32px;
-  background: var(--bg-tertiary);
-  border-top: 1px solid var(--border-color);
-  padding: 0 var(--spacing-lg);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 11px;
-  color: var(--text-secondary);
-}
-
-.sftp-status-left,
-.sftp-status-right {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.status-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
+/* 底部状态栏已移除：它常年占 32px，却只重复呈现别处已有的信息 ——
+   计数与风险数现在是标题旁的 chip，路径由面包屑负责。 */
 
 /* Scrollbar Customization */
 .sftp-file-list-container::-webkit-scrollbar {
@@ -645,13 +701,9 @@
   background: var(--scrollbar-thumb-hover);
 }
 
-/* Animations */
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(5px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.sftp-file-row {
-  animation: fadeIn 0.2s ease forwards;
-  animation-delay: calc(var(--row-index, 0) * 0.02s);
-}
+/* 逐行入场动画已移除。
+   原实现 `animation: fadeIn .2s ease forwards` + `animation-delay:
+   calc(var(--row-index) * .02s)`：用了 forwards 却没有 backwards，所以每行
+   先以 opacity:1 画出来，等自己的延迟到点了才**突然跳回 0** 再淡入。
+   一个 500 项的目录会级联闪烁约 10 秒 —— 这正是"界面很乱"的直接来源。
+   文件列表不需要入场动画，删掉比修参数更对。行的 hover 过渡仍保留。 */

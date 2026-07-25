@@ -953,12 +953,9 @@ fn to_iso_string(value: &str) -> String {
     }
 }
 
-fn shell_quote(value: &str) -> String {
-    if value.is_empty() {
-        return "''".to_string();
-    }
-    format!("'{}'", value.replace("'", "'\\''"))
-}
+// 统一实现见 crate::shell_escape —— 此前本函数在 6 个文件里各存一份复制。
+// 本处原有的空串特判是冗余的：format!("'{}'", "") 本就产出 ''。
+use crate::shell_escape::shq as shell_quote;
 
 fn sanitize_name(name: &str) -> String {
     name.trim_start_matches('/').to_string()

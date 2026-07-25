@@ -6,9 +6,8 @@ use crate::ssh_manager_russh;
 use crate::types;
 use crate::packet_capture;
 
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
-}
+// 统一实现见 crate::shell_escape —— 此前本函数在 6 个文件里各存一份复制
+use crate::shell_escape::shq as shell_quote;
 
 fn command_timeout(timeout_sec: Option<u64>) -> std::time::Duration {
     std::time::Duration::from_secs(timeout_sec.unwrap_or(60).clamp(5, 600))
@@ -26,7 +25,7 @@ fn command_with_cwd(command: &str, cwd: Option<&str>) -> String {
 pub async fn load_ssh_connections(
     state: State<'_, AppState>,
 ) -> Result<Vec<types::SSHConnection>, String> {
-    let manager = state.ssh_connection_manager.lock().unwrap();
+    let manager = crate::lock_or_recover(&state.ssh_connection_manager);
     manager.load_connections().map_err(|e| e.to_string())
 }
 
@@ -35,7 +34,7 @@ pub async fn save_ssh_connections(
     connections: Vec<types::SSHConnection>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let manager = state.ssh_connection_manager.lock().unwrap();
+    let manager = crate::lock_or_recover(&state.ssh_connection_manager);
     manager
         .save_connections(&connections)
         .map_err(|e| e.to_string())
@@ -43,7 +42,7 @@ pub async fn save_ssh_connections(
 
 #[tauri::command]
 pub async fn encrypt_password(password: String, state: State<'_, AppState>) -> Result<String, String> {
-    let manager = state.ssh_connection_manager.lock().unwrap();
+    let manager = crate::lock_or_recover(&state.ssh_connection_manager);
     manager
         .encrypt_password(&password)
         .map_err(|e| e.to_string())
@@ -54,7 +53,7 @@ pub async fn decrypt_password(
     encrypted_password: String,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let manager = state.ssh_connection_manager.lock().unwrap();
+    let manager = crate::lock_or_recover(&state.ssh_connection_manager);
     manager
         .decrypt_password(&encrypted_password)
         .map_err(|e| e.to_string())
@@ -580,7 +579,7 @@ pub async fn ssh_create_terminal_session(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     // 获取终端创建锁，确保原子性
-    let _creation_lock = state.ssh_terminal_creation_lock.lock().unwrap();
+    let _creation_lock = crate::lock_or_recover(&state.ssh_terminal_creation_lock);
 
     let manager = &state.ssh_manager;
 
@@ -717,11 +716,11 @@ pub async fn ssh_get_completion(
 
                 for file in files {
                     if file.starts_with(filename_prefix) && file != "." && file != ".." {
-                        let full_path = if last_word.contains('/') {
-                            let dir_part = &last_word[..last_word.rfind('/').unwrap() + 1];
-                            format!("{}{}", dir_part, file)
-                        } else {
-                            file.to_string()
+                        // 用 match 而非 contains + unwrap：两者本来是耦合的，
+                        // 一旦有人改了上面的判空条件，unwrap 就会变成崩溃点。
+                        let full_path = match last_word.rfind('/') {
+                            Some(idx) => format!("{}{}", &last_word[..idx + 1], file),
+                            None => file.to_string(),
                         };
                         completions.push(full_path);
                     }

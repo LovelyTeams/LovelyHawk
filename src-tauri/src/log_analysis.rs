@@ -4,9 +4,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
-}
+// 统一实现见 crate::shell_escape —— 此前本函数在 6 个文件里各存一份复制
+use crate::shell_escape::shq as shell_quote;
 
 // ==================== 数据结构 ====================
 

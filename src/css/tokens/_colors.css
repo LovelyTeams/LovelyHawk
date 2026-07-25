@@ -1,0 +1,128 @@
+/* Semantic Color Tokens - defaults overridden by themes */
+:root {
+  /* Status Colors */
+  --status-running: #10b981;
+  --status-stopped: #ef4444;
+  --status-paused: #f59e0b;
+
+  /* Accent Colors */
+  --accent-blue: #3b82f6;
+  --accent-purple: #8B5CF6;
+  --accent-green: #10b981;
+  --accent-orange: #F59E0B;
+
+  /* Scrollbar */
+  --scrollbar-thumb: rgba(156, 163, 175, 0.3);
+  --scrollbar-thumb-hover: rgba(156, 163, 175, 0.6);
+  --scrollbar-track: transparent;
+
+  /* Focus Ring */
+  --focus-ring-color: var(--primary-color, #3b82f6);
+  --focus-ring-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color, #3b82f6) 22%, transparent);
+
+  /* Selection */
+  --selection-bg: var(--primary-color, #3b82f6);
+  --selection-text: #ffffff;
+
+  /* Glass */
+  --glass-blur: 16px;
+  --glass-bg: rgba(255, 255, 255, 0.05);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+
+  /* Activity Bar (VS Code style sidebar) */
+  --activitybar-bg: var(--bg-secondary, #1e293b);
+  --activitybar-border: var(--border-color, #334155);
+  --activitybar-icon-active: var(--text-primary, #ffffff);
+  --activitybar-icon-inactive: var(--text-secondary, rgba(255,255,255,0.5));
+  --activitybar-indicator: var(--primary-color, #ffffff);
+
+  /* Tooltip */
+  --tooltip-bg: var(--bg-secondary, #383838);
+  --tooltip-text: var(--text-primary, #cccccc);
+  --tooltip-border: var(--border-color, #454545);
+
+  /* Status Bar */
+  --statusbar-bg: var(--bg-secondary);
+  --statusbar-text: var(--text-secondary);
+  --statusbar-border: var(--border-color);
+
+  /* Title Bar — LovelySpark parity: titlebar tracks bg-primary across themes */
+  --titlebar-bg: var(--bg-primary);
+  --titlebar-text: var(--text-primary);
+
+  /* Hero CTA button (welcome "连接服务器") — theme-adaptive: a dark navy
+     button on white in light themes (matches the connection design), and a
+     high-contrast inverse in dark themes. */
+  --btn-hero-bg: var(--text-primary);
+  --btn-hero-text: var(--bg-secondary);
+
+  /* ─── LovelySpark-inspired extended design tokens ───
+     These provide a richer surface system, gradient accents, and
+     per-severity palettes. Themes override the specific values; the
+     tokens defined here are safe defaults so any new component can
+     reference them without per-theme plumbing. */
+
+  /* Surface tints (gradient-friendly aliases) */
+  --surface-primary: var(--bg-primary);
+  --surface-secondary: var(--bg-secondary);
+  --surface-tertiary: var(--bg-tertiary);
+
+  /* Primary glow + gradient accent — used by buttons, CTAs, badges */
+  --primary-glow: rgba(59, 130, 246, 0.25);
+  --accent-contrast: #ffffff;
+  --gradient-accent: linear-gradient(135deg, var(--primary-color, #3b82f6), var(--secondary-color, #818cf8));
+
+  /* Card / modal elevation */
+  --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --card-shadow-hover: 0 8px 24px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04);
+  --modal-backdrop: rgba(15, 23, 42, 0.45);
+  --modal-shadow: 0 20px 60px rgba(15, 23, 42, 0.18);
+
+  /* Brand sparkle palette — used for decorative accents on welcome / loading */
+  --brand-glow-amber: #fef0cf;
+  --brand-spark-soft: #fde68a;
+  --brand-spark-soft-inner: #fef3c7;
+  --brand-spark-core: #f59e0b;
+  --brand-spark-accent: #fb7185;
+  --brand-spark-neutral: #94a3b8;
+  --brand-wordmark-gradient: linear-gradient(135deg, #0f172a 0%, #f59e0b 58%, #fb7185 100%);
+  --brand-dot-color: #f59e0b;
+
+  /* ── Severity tokens (theme-aware foregrounds) ──
+     Per-severity foreground / background / border triplet, used by
+     status chips, badges, alert tags. Light/sakura themes use darker
+     saturated foregrounds; dark themes override with pastel set. */
+  --sev-critical-fg: #b91c1c;
+  --sev-critical-bg: rgba(239, 68, 68, 0.10);
+  --sev-critical-bg-hover: rgba(239, 68, 68, 0.18);
+  --sev-critical-border: rgba(239, 68, 68, 0.45);
+  --sev-critical-border-strong: #dc2626;
+  --sev-critical-tag-fg: #991b1b;
+  --sev-critical-tag-bg: rgba(239, 68, 68, 0.18);
+
+  --sev-warn-fg: #b45309;
+  --sev-warn-bg: rgba(245, 158, 11, 0.10);
+  --sev-warn-bg-hover: rgba(245, 158, 11, 0.18);
+  --sev-warn-border: rgba(245, 158, 11, 0.45);
+  --sev-warn-tag-fg: #92400e;
+  --sev-warn-tag-bg: rgba(245, 158, 11, 0.18);
+
+  --sev-success-fg: #15803d;
+  --sev-success-bg: rgba(34, 197, 94, 0.10);
+  --sev-success-bg-hover: rgba(34, 197, 94, 0.18);
+  --sev-success-border: rgba(34, 197, 94, 0.45);
+  --sev-success-tag-fg: #14532d;
+  --sev-success-tag-bg: rgba(34, 197, 94, 0.18);
+
+  --sev-info-fg: #4338ca;
+  --sev-info-bg: rgba(99, 102, 241, 0.08);
+  --sev-info-bg-hover: rgba(99, 102, 241, 0.16);
+  --sev-info-border: rgba(99, 102, 241, 0.45);
+  --sev-info-selected-bg: rgba(99, 102, 241, 0.20);
+  --sev-info-selected-fg: #312e81;
+  --sev-info-selected-border: #4f46e5;
+
+  /* Chip count badge background — subtle tint on light surfaces */
+  --chip-count-bg: rgba(15, 23, 42, 0.08);
+}

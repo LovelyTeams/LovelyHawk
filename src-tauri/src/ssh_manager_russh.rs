@@ -129,9 +129,8 @@ impl Handler for ClientHandler {
     }
 }
 
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
-}
+// 统一实现见 crate::shell_escape —— 此前本函数在 6 个文件里各存一份复制
+use crate::shell_escape::shq as shell_quote;
 
 // ================== Worker Thread Messages ==================
 
@@ -320,17 +319,25 @@ async fn connect_async(
     
     // Authenticate with timeout
     let auth_result = if let Some(key_str) = private_key {
-        // Try key authentication
+        // 密钥认证时，`password` 形参承载的是**私钥口令**：
+        // ssh_connect_direct 传的就是 key_passphrase（见 commands/ssh_commands.rs）。
+        // 这两处此前写死 None，导致带口令保护的私钥永远解不开 —— 而下面
+        // `else if let Some(pwd) = password` 分支在 private_key 为 Some 时不可达，
+        // 于是用户输入的口令被完全丢弃，报错还是"Failed to decode private key"。
+        let key_passphrase = password.filter(|p| !p.is_empty());
+
         let key_pair = if key_str.contains("OPENSSH PRIVATE KEY") || key_str.contains("RSA PRIVATE KEY") || key_str.contains("-----BEGIN") {
-            russh_keys::decode_secret_key(key_str, None)
+            russh_keys::decode_secret_key(key_str, key_passphrase)
                 .map_err(|e| format!("Failed to decode private key: {}", e))?
         } else {
             // Assume it's a file path
-            russh_keys::load_secret_key(key_str, None)
+            russh_keys::load_secret_key(key_str, key_passphrase)
                 .map_err(|e| format!("Failed to load private key: {}", e))?
         };
-        
+
         // Convert russh_keys::PrivateKey to russh::keys::PrivateKey
+        // 这里的 None 是对的：to_openssh 产出的是**未加密**的 OpenSSH 文本，
+        // 口令在上一步就已经用掉了。
         let key_bytes = key_pair.to_openssh(russh_keys::ssh_key::LineEnding::LF)
             .map_err(|e| format!("Failed to encode key: {}", e))?;
         let russh_key = russh::keys::decode_secret_key(&key_bytes, None)

@@ -20,17 +20,21 @@ pub struct AIProxyResponse {
 
 /// 非流式 AI 请求代理
 pub async fn proxy_ai_request(request: AIProxyRequest) -> Result<AIProxyResponse, String> {
-    // 断网/目标不可达时靠 connect_timeout 快速失败(默认无连接超时会干等约 30s);
-    // 再加一个宽松的整体上限,避免异常挂死,同时不至于切断正常的较慢补全。
-    let client = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(8))
-        .timeout(std::time::Duration::from_secs(60))
-        .build()
-        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+    // URL 与 header 都来自 webview，先过防护再发出。
+    let url = crate::net_guard::validate_outbound_url(&request.url)?;
+    let (headers, dropped) = crate::net_guard::filter_headers(&request.headers);
+    if !dropped.is_empty() {
+        eprintln!("[ai_proxy] 已丢弃不在白名单的 header: {:?}", dropped);
+    }
 
-    let mut builder = client.post(&request.url);
+    // 共享客户端：每请求重建会丢掉连接池并重做 TLS 握手。
+    // connect_timeout 让断网时快速失败(默认无连接超时会干等约 30s)，
+    // 整体上限宽松，避免异常挂死又不切断正常的较慢补全。
+    let client = crate::net_guard::http_client()?;
 
-    for (key, value) in &request.headers {
+    let mut builder = client.post(url);
+
+    for (key, value) in &headers {
         builder = builder.header(key.as_str(), value.as_str());
     }
 

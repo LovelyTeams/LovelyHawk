@@ -47,6 +47,39 @@ This repository hosts the LovelyRes codebase, a cross-platform Linux Emergency R
 >
 > Tests run in the **node** environment (no jsdom). Stub `localStorage`/DOM if needed
 > rather than pulling in a DOM environment. For Rust use `#[cfg(test)]` + `cargo test`.
+>
+> **Anything reading `window`/`document`/`localStorage` outside a `try` must guard
+> with `typeof x === 'undefined'`** — `reportError()` is called from `catch` blocks,
+> so an unguarded `window` read there throws a `ReferenceError` that *replaces* the
+> original error.
+
+### 🔒 Ratchet gates (`tests/gates/`)
+
+Four source-scanning tests run as part of `npm test` and enforce the non-negotiables
+below. Each compares per-file violation counts against a committed baseline in
+`tests/gates/baselines/`:
+
+| Gate | Counts | Current |
+|---|---|---|
+| `shellInterpolation` | `${}` in shell commands not wrapped in `shq()` | 43 files / 1062 |
+| `inlineHandlers` | inline `onclick=` etc. in HTML strings | 32 files / 232 |
+| `errorSwallowing` | empty `catch {}` or console-only `catch` | 60 files / 116 |
+| `destructiveActions` | destructive commands in files with no `showConfirm`/journal | 18 files / 100 |
+
+**It is a ratchet, not a wall.** Existing debt is accepted; the counts can only go
+down. Adding a violation fails the build and names the file. Removing one also fails,
+telling you to re-tighten the baseline — so run:
+
+```
+UPDATE_GATE_BASELINE=1 npm test
+```
+
+and commit `tests/gates/baselines/`. Per-site opt-outs, when the gate is genuinely
+wrong, are inline comments: `/* shell-safe: … */`, `/* intentional: … */`,
+`/* destructive-ok: … */`.
+
+No ESLint on purpose — 151 files with no lint history would produce thousands of
+day-one errors and get ignored. These three rules are the ones that actually matter.
 
 ## 🎨 Code Style & Conventions
 

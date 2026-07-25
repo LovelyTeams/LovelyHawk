@@ -7,6 +7,9 @@
 use crate::ssh_manager_russh::SSHManagerRussh;
 use tauri::State;
 use crate::AppState;
+// 本文件此前把 replace("'", "'\\''") 内联了 27 次 —— analyze_symlinks 里有一行
+// 忘了用转义后的值，混在 26 行长得一模一样的代码中间，成了可达的命令注入。
+use crate::shell_escape::shq_inner;
 
 /// 执行文件安全分析（使用独立 session，不阻塞）
 /// 注意：这个版本暂时使用共享 session，但通过异步执行避免阻塞
@@ -102,7 +105,7 @@ fn execute_ssh_command(ssh_manager: &SSHManagerRussh, command: &str) -> Result<S
 /// 计算文件哈希值（MD5, SHA1, SHA256）
 fn calculate_file_hash(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<String, String> {
     let mut result = String::new();
-    let escaped_path = file_path.replace("'", "'\\''");
+    let escaped_path = shq_inner(file_path);
 
     // MD5
     let md5_cmd = format!("md5sum '{}'", escaped_path);
@@ -138,14 +141,14 @@ fn calculate_file_hash(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result
 
 /// 分析文件签名（文件类型）
 fn analyze_file_signature(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<String, String> {
-    let escaped_path = file_path.replace("'", "'\\''");
+    let escaped_path = shq_inner(file_path);
     let cmd = format!("file -b '{}'", escaped_path);
     execute_ssh_command(ssh_manager, &cmd)
 }
 
 /// 分析文件权限
 fn analyze_file_permissions(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<String, String> {
-    let escaped_path = file_path.replace("'", "'\\''");
+    let escaped_path = shq_inner(file_path);
     let cmd = format!(
         "stat -c '权限: %a (%A)\n所有者: %U (UID: %u)\n所属组: %G (GID: %g)\n文件类型: %F' '{}'",
         escaped_path
@@ -155,7 +158,7 @@ fn analyze_file_permissions(ssh_manager: &SSHManagerRussh, file_path: &str) -> R
 
 /// 分析文件时间戳
 fn analyze_file_timestamps(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<String, String> {
-    let escaped_path = file_path.replace("'", "'\\''");
+    let escaped_path = shq_inner(file_path);
     let cmd = format!(
         "stat -c '访问时间: %x\n修改时间: %y\n状态改变时间: %z' '{}'",
         escaped_path
@@ -165,7 +168,7 @@ fn analyze_file_timestamps(ssh_manager: &SSHManagerRussh, file_path: &str) -> Re
 
 /// 提取文件中的可打印字符串
 fn extract_file_strings(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<String, String> {
-    let escaped_path = file_path.replace("'", "'\\''");
+    let escaped_path = shq_inner(file_path);
     let cmd = format!("strings -n 8 '{}' | head -n 100", escaped_path);
     let output = execute_ssh_command(ssh_manager, &cmd)?;
 
@@ -175,7 +178,7 @@ fn extract_file_strings(ssh_manager: &SSHManagerRussh, file_path: &str) -> Resul
 
 /// 查找使用该文件的进程
 fn find_related_processes(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<String, String> {
-    let escaped_path = file_path.replace("'", "'\\''");
+    let escaped_path = shq_inner(file_path);
     let cmd = format!("lsof '{}'", escaped_path);
 
     match execute_ssh_command(ssh_manager, &cmd) {
@@ -240,7 +243,7 @@ fn detect_hidden_file(_ssh_manager: &SSHManagerRussh, file_path: &str) -> Result
 
 /// 检测 SUID/SGID 权限
 fn detect_suid_sgid(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<String, String> {
-    let escaped_path = file_path.replace("'", "'\\''");
+    let escaped_path = shq_inner(file_path);
     let cmd = format!("stat -c '%a %A' '{}'", escaped_path);
     let output = execute_ssh_command(ssh_manager, &cmd)?;
 
@@ -262,7 +265,7 @@ fn detect_suid_sgid(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<St
 
 /// 检测 Webshell 特征
 fn detect_webshell(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<String, String> {
-    let escaped_path = file_path.replace("'", "'\\''");
+    let escaped_path = shq_inner(file_path);
 
     // Webshell 常见特征关键词
     let patterns = vec![
@@ -297,7 +300,7 @@ fn detect_webshell(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<Str
 
 /// 检测后门特征
 fn detect_backdoor(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<String, String> {
-    let escaped_path = file_path.replace("'", "'\\''");
+    let escaped_path = shq_inner(file_path);
 
     let patterns = vec![
         "nc -", "netcat", "/bin/bash", "/bin/sh",
@@ -330,7 +333,7 @@ fn detect_backdoor(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<Str
 
 /// 检测挖矿程序特征
 fn detect_crypto_mining(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<String, String> {
-    let escaped_path = file_path.replace("'", "'\\''");
+    let escaped_path = shq_inner(file_path);
 
     let patterns = vec![
         "stratum", "xmrig", "minerd", "cpuminer",
@@ -363,7 +366,7 @@ fn detect_crypto_mining(ssh_manager: &SSHManagerRussh, file_path: &str) -> Resul
 
 /// 检测反弹 Shell 特征
 fn detect_reverse_shell(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<String, String> {
-    let escaped_path = file_path.replace("'", "'\\''");
+    let escaped_path = shq_inner(file_path);
 
     let patterns = vec![
         "bash -i", "sh -i", "/dev/tcp", "/dev/udp",
@@ -398,7 +401,7 @@ fn detect_reverse_shell(ssh_manager: &SSHManagerRussh, file_path: &str) -> Resul
 
 /// 分析 inode 信息
 fn analyze_inode_info(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<String, String> {
-    let escaped_path = file_path.replace("'", "'\\''");
+    let escaped_path = shq_inner(file_path);
     let cmd = format!(
         "stat -c 'Inode: %i\n硬链接数: %h\n设备号: %d\n文件大小: %s 字节\n块大小: %B\n块数: %b' '{}'",
         escaped_path
@@ -408,7 +411,7 @@ fn analyze_inode_info(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<
 
 /// 分析 MIME 类型
 fn analyze_mime_type(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<String, String> {
-    let escaped_path = file_path.replace("'", "'\\''");
+    let escaped_path = shq_inner(file_path);
     let cmd = format!("file --mime-type -b '{}'", escaped_path);
     let mime_type = execute_ssh_command(ssh_manager, &cmd)?;
 
@@ -420,7 +423,7 @@ fn analyze_mime_type(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<S
 
 /// 分析文件大小（详细）
 fn analyze_file_size(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<String, String> {
-    let escaped_path = file_path.replace("'", "'\\''");
+    let escaped_path = shq_inner(file_path);
     let cmd = format!(
         "stat -c '文件大小: %s 字节\n人类可读: %s\n块大小: %B 字节\n分配块数: %b\n实际占用: %b * %B = %b*%B 字节' '{}' | head -1",
         escaped_path
@@ -437,7 +440,7 @@ fn analyze_file_size(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<S
 
 /// HEX 十六进制查看
 fn analyze_hex_dump(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<String, String> {
-    let escaped_path = file_path.replace("'", "'\\''");
+    let escaped_path = shq_inner(file_path);
     let cmd = format!("xxd -l 512 '{}'", escaped_path);
     let output = execute_ssh_command(ssh_manager, &cmd)?;
     Ok(format!("文件前 512 字节的十六进制内容:\n\n{}", output))
@@ -445,7 +448,7 @@ fn analyze_hex_dump(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<St
 
 /// 统计文件行数
 fn count_file_lines(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<String, String> {
-    let escaped_path = file_path.replace("'", "'\\''");
+    let escaped_path = shq_inner(file_path);
     let cmd = format!("wc -l '{}' | awk '{{print $1}}'", escaped_path);
     let lines = execute_ssh_command(ssh_manager, &cmd)?;
 
@@ -460,7 +463,7 @@ fn count_file_lines(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<St
 
 /// 列出压缩文件内容
 fn list_archive_contents(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<String, String> {
-    let escaped_path = file_path.replace("'", "'\\''");
+    let escaped_path = shq_inner(file_path);
 
     // 检测文件类型
     let file_type_cmd = format!("file -b '{}'", escaped_path);
@@ -488,7 +491,7 @@ fn list_archive_contents(ssh_manager: &SSHManagerRussh, file_path: &str) -> Resu
 
 /// 分析 ELF 文件头
 fn analyze_elf_header(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<String, String> {
-    let escaped_path = file_path.replace("'", "'\\''");
+    let escaped_path = shq_inner(file_path);
 
     // 先检查是否是 ELF 文件
     let file_type_cmd = format!("file -b '{}'", escaped_path);
@@ -516,7 +519,7 @@ fn analyze_elf_header(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<
 
 /// 查找文件所属的包
 fn find_package_owner(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<String, String> {
-    let escaped_path = file_path.replace("'", "'\\''");
+    let escaped_path = shq_inner(file_path);
 
     // 尝试 RPM 系统（CentOS, RHEL, Fedora）
     let rpm_cmd = format!("rpm -qf '{}'", escaped_path);
@@ -539,7 +542,7 @@ fn find_package_owner(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<
 
 /// 查找硬链接
 fn find_hard_links(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<String, String> {
-    let escaped_path = file_path.replace("'", "'\\''");
+    let escaped_path = shq_inner(file_path);
 
     // 获取 inode
     let inode_cmd = format!("stat -c '%i' '{}'", escaped_path);
@@ -558,7 +561,7 @@ fn find_hard_links(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<Str
 
 /// 查找进程内存映射
 fn find_process_maps(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<String, String> {
-    let escaped_path = file_path.replace("'", "'\\''");
+    let escaped_path = shq_inner(file_path);
     let cmd = format!("grep -l '{}' /proc/*/maps 2>/dev/null | head -n 10", escaped_path);
 
     match execute_ssh_command(ssh_manager, &cmd) {
@@ -568,7 +571,14 @@ fn find_process_maps(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<S
             } else {
                 let mut result = String::from("以下进程在内存中映射了此文件:\n\n");
                 for line in output.lines() {
-                    if let Some(pid) = line.split('/').nth(2) {
+                    // pid 是从**远程输出**里切出来的，按威胁模型属于不可信输入：
+                    // 若 grep 结果不是预期的 /proc/<pid>/maps 形状，nth(2) 可能
+                    // 是任意文本。这里只放行纯数字，而不是靠 /proc/ 前缀兜底。
+                    let pid = match line.split('/').nth(2) {
+                        Some(p) if !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()) => p,
+                        _ => continue,
+                    };
+                    {
                         let cmdline_cmd = format!("cat /proc/{}/cmdline 2>/dev/null | tr '\\0' ' '", pid);
                         if let Ok(cmdline) = execute_ssh_command(ssh_manager, &cmdline_cmd) {
                             result.push_str(&format!("PID {}: {}\n", pid, cmdline));
@@ -586,7 +596,7 @@ fn find_process_maps(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<S
 
 /// 分析扩展属性
 fn analyze_extended_attributes(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<String, String> {
-    let escaped_path = file_path.replace("'", "'\\''");
+    let escaped_path = shq_inner(file_path);
     let cmd = format!("getfattr -d '{}'", escaped_path);
 
     match execute_ssh_command(ssh_manager, &cmd) {
@@ -603,7 +613,7 @@ fn analyze_extended_attributes(ssh_manager: &SSHManagerRussh, file_path: &str) -
 
 /// 分析文件能力
 fn analyze_file_capabilities(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<String, String> {
-    let escaped_path = file_path.replace("'", "'\\''");
+    let escaped_path = shq_inner(file_path);
     let cmd = format!("getcap '{}'", escaped_path);
 
     match execute_ssh_command(ssh_manager, &cmd) {
@@ -620,7 +630,7 @@ fn analyze_file_capabilities(ssh_manager: &SSHManagerRussh, file_path: &str) -> 
 
 /// 分析 SELinux 上下文
 fn analyze_selinux_context(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<String, String> {
-    let escaped_path = file_path.replace("'", "'\\''");
+    let escaped_path = shq_inner(file_path);
     let cmd = format!("ls -Z '{}'", escaped_path);
 
     match execute_ssh_command(ssh_manager, &cmd) {
@@ -639,7 +649,7 @@ fn analyze_selinux_context(ssh_manager: &SSHManagerRussh, file_path: &str) -> Re
 
 /// 分析动态依赖
 fn analyze_dynamic_dependencies(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<String, String> {
-    let escaped_path = file_path.replace("'", "'\\''");
+    let escaped_path = shq_inner(file_path);
 
     // 先检查是否是 ELF 文件
     let file_type_cmd = format!("file -b '{}'", escaped_path);
@@ -666,7 +676,7 @@ fn analyze_dynamic_dependencies(ssh_manager: &SSHManagerRussh, file_path: &str) 
 /// 查找配置文件引用
 fn find_config_references(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<String, String> {
     let file_name = file_path.rsplit('/').next().unwrap_or(file_path);
-    let escaped_name = file_name.replace("'", "'\\''");
+    let escaped_name = shq_inner(file_name);
 
     let cmd = format!("grep -r '{}' /etc 2>/dev/null | head -n 20", escaped_name);
 
@@ -684,7 +694,7 @@ fn find_config_references(ssh_manager: &SSHManagerRussh, file_path: &str) -> Res
 
 /// 分析符号链接
 fn analyze_symlinks(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<String, String> {
-    let escaped_path = file_path.replace("'", "'\\''");
+    let escaped_path = shq_inner(file_path);
 
     // 检查文件本身是否是符号链接
     let cmd = format!("ls -l '{}'", escaped_path);
@@ -702,7 +712,9 @@ fn analyze_symlinks(ssh_manager: &SSHManagerRussh, file_path: &str) -> Result<St
     }
 
     // 查找指向此文件的符号链接
-    let find_cmd = format!("find / -type l -ls 2>/dev/null | grep '{}' | head -n 10", file_path);
+    // 注意用 escaped_path 而非裸 file_path：此处曾是一处可达的命令注入
+    // （sftp_file_analysis 的 file_path 直接来自 webview）。
+    let find_cmd = format!("find / -type l -ls 2>/dev/null | grep '{}' | head -n 10", escaped_path);
     match execute_ssh_command(ssh_manager, &find_cmd) {
         Ok(output) => {
             if !output.is_empty() {

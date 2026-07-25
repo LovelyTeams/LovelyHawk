@@ -61,6 +61,11 @@ export function reportError(err: unknown, opts: ReportOptions): void {
   if (opts.silent) return;
   if (opts.notify === false) return;
 
+  // 必须守 typeof: 本函数常在 catch 块里被调用, 若在无 window 的环境
+  // (vitest 的 node env / 未来的 worker) 裸读 window 会抛 ReferenceError,
+  // 把原始错误顶掉 —— 那正是本模块要消灭的失败模式。
+  if (typeof window === 'undefined') return;
+
   const toast = (window as unknown as {
     showNotification?: (m: string, t: 'error' | 'warning' | 'info' | 'success') => void;
   }).showNotification;

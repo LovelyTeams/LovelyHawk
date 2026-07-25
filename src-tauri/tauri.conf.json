@@ -30,9 +30,10 @@
       }
     ],
     "security": {
+      "csp": "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost; media-src 'self' blob:; object-src 'none'; worker-src 'none'; child-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      "dangerousDisableAssetCspModification": ["style-src"],
       "assetProtocol": {
-        "enable": true,
-        "scope": ["**"]
+        "enable": false
       },
       "capabilities": ["default", "ssh-terminal", "web-terminal"]
     }

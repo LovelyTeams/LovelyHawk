@@ -1,0 +1,12 @@
+/* Layout tokens
+ *
+ * --sidebar-width is the single source of truth for the collapsible
+ * grouped sidebar (LovelySpark parity). The collapse toggle swaps the
+ * sidebar element between the expanded and collapsed widths; routing the
+ * width through a token keeps a future switch to a fixed-position sidebar
+ * (with main-content margin driven by the same var) a localized change.
+ */
+:root {
+  --sidebar-width: 268px;
+  --sidebar-width-collapsed: 52px;
+}
