@@ -12,6 +12,7 @@ import { showAlert, showConfirm } from '../ui/confirmDialog';
 import { getFixActionsForFinding, getFixActionsForDetectionItem, HARDENING_ITEMS, type FixActionDef, type HardeningItem } from './detectionFixMapper';
 import { fixExecutor, type FixAction, type FixResult, type ResolvedBaselineItem } from './fixExecutor';
 import { fixHistoryManager, type FixHistoryEntry } from './fixHistoryManager';
+import { SystemDetector } from '../utils/systemDetector';
 import { invoke } from '@tauri-apps/api/core';
 
 // 检测项目类型
@@ -71,6 +72,9 @@ export class QuickDetectionManager {
   private detectionModules: DetectionModules;
   private reportRenderer: DetectionReportRenderer;
   private aiManager: DetectionAIManager;
+
+  /** 探测到的目标发行版 ID（懒加载，复用 SystemDetector 的内部缓存） */
+  private detectedDistro: string | null = null;
 
   /** 并发组大小 — 同时发出的检测请求数 */
   private static readonly CONCURRENCY = 3;
@@ -1044,6 +1048,17 @@ export class QuickDetectionManager {
     } catch (e) { return `failed: ${e}`; }
   }
 
+  /** 探测目标发行版类型，供 resolveForDistro 选择对应发行版的命令；失败保底 generic */
+  private async getDetectedDistro(): Promise<string> {
+    if (this.detectedDistro) return this.detectedDistro;
+    try {
+      this.detectedDistro = (await SystemDetector.detectSystem()).type;
+    } catch {
+      this.detectedDistro = 'generic';
+    }
+    return this.detectedDistro;
+  }
+
   /** 解析 baseline 配置项为可执行数据 */
   private async resolveBaselineItem(baselineItemId: string, overrideValue?: string): Promise<ResolvedBaselineItem | undefined> {
     try {
@@ -1053,7 +1068,8 @@ export class QuickDetectionManager {
       for (const cat of baselineCategories) {
         for (const item of cat.items) {
           if (item.id === baselineItemId) {
-            const resolved = resolveForDistro ? resolveForDistro(item, 'generic') : item;
+            const distro = await this.getDetectedDistro();
+            const resolved = resolveForDistro ? resolveForDistro(item, distro) : item;
             return {
               id: item.id,
               readCommand: resolved.readCommand || item.readCommand,

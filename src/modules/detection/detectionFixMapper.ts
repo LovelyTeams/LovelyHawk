@@ -30,6 +30,14 @@ export interface FixMapping {
 // 映射表: 检测项 → 修复动作
 // ════════════════════════════════════════════════════
 
+/**
+ * 服务管理兼容函数：systemd → OpenRC(Alpine) → SysVinit 三级回退。
+ * 凡涉及服务启停/开机自启的修复命令都以此为前缀，保证在非 systemd 靶机上也生效。
+ * systemd 分支保持原样：systemd 靶机第一条 systemctl 即成功，不改变既有行为。
+ * 破坏性命令上赛场前需在 Alpine/OpenRC VM 实测（见 AGENTS.md 非协商项）。
+ */
+const SVC = `__svc(){ a=$1;n=$2;case "$a" in start|stop|restart)systemctl "$a" "$n" 2>/dev/null||rc-service "$n" "$a" 2>/dev/null||service "$n" "$a" 2>/dev/null;;enable)systemctl enable "$n" 2>/dev/null||rc-update add "$n" 2>/dev/null||chkconfig "$n" on 2>/dev/null;;disable)systemctl disable "$n" 2>/dev/null||rc-update del "$n" 2>/dev/null||chkconfig "$n" off 2>/dev/null;;active)systemctl is-active "$n" 2>/dev/null||{ rc-service "$n" status >/dev/null 2>&1 && echo active;}||service "$n" status 2>/dev/null;;esac;};`;
+
 const FIX_MAPPINGS: FixMapping[] = [
   // ──── SSH 安全 ────
   {
@@ -78,7 +86,7 @@ const FIX_MAPPINGS: FixMapping[] = [
     actions: [{
       type: 'command', title: '启用防火墙',
       description: '启动 firewalld 或 ufw',
-      command: 'systemctl start firewalld 2>/dev/null && systemctl enable firewalld 2>/dev/null || (ufw --force enable 2>/dev/null)',
+      command: `${SVC} __svc start firewalld && __svc enable firewalld || ufw --force enable 2>/dev/null`,
       priority: 1,
     }, {
       type: 'command', title: '设置默认拒绝入站',
@@ -176,7 +184,7 @@ const FIX_MAPPINGS: FixMapping[] = [
     actions: [{
       type: 'command', title: '关闭 Telnet 服务',
       description: '停止并禁用 telnet',
-      command: 'systemctl stop telnet.socket 2>/dev/null; systemctl disable telnet.socket 2>/dev/null; systemctl stop xinetd 2>/dev/null; echo "telnet disabled"',
+      command: `${SVC} __svc stop telnet.socket; __svc disable telnet.socket; __svc stop xinetd; echo "telnet disabled"`,
       priority: 1,
     }],
   },
@@ -186,7 +194,7 @@ const FIX_MAPPINGS: FixMapping[] = [
     actions: [{
       type: 'command', title: '关闭 FTP 服务',
       description: '停止并禁用 vsftpd / proftpd',
-      command: 'systemctl stop vsftpd 2>/dev/null; systemctl disable vsftpd 2>/dev/null; systemctl stop proftpd 2>/dev/null; echo "ftp disabled"',
+      command: `${SVC} __svc stop vsftpd; __svc disable vsftpd; __svc stop proftpd; echo "ftp disabled"`,
       priority: 2,
     }],
   },
@@ -196,7 +204,7 @@ const FIX_MAPPINGS: FixMapping[] = [
     actions: [{
       type: 'command', title: '停止不必要服务',
       description: '停止常见不必要服务: avahi, cups, bluetooth',
-      command: 'for svc in avahi-daemon cups bluetooth rpcbind; do systemctl stop $svc 2>/dev/null; systemctl disable $svc 2>/dev/null; done; echo "services disabled"',
+      command: `${SVC} for svc in avahi-daemon cups bluetooth rpcbind; do __svc stop "$svc"; __svc disable "$svc"; done; echo "services disabled"`,
       priority: 1,
     }],
   },
@@ -206,7 +214,7 @@ const FIX_MAPPINGS: FixMapping[] = [
     actions: [{
       type: 'command', title: '启用 auditd',
       description: '启动审计守护进程',
-      command: 'systemctl start auditd 2>/dev/null && systemctl enable auditd 2>/dev/null && auditctl -e 1 2>/dev/null && echo "auditd enabled"',
+      command: `${SVC} __svc start auditd && __svc enable auditd; auditctl -e 1 2>/dev/null; echo "auditd enabled"`,
       priority: 1,
     }],
   },
@@ -216,7 +224,7 @@ const FIX_MAPPINGS: FixMapping[] = [
     actions: [{
       type: 'command', title: '启用时间同步',
       description: '启动 chronyd 或 ntpd',
-      command: 'systemctl start chronyd 2>/dev/null && systemctl enable chronyd 2>/dev/null || (systemctl start ntpd 2>/dev/null && systemctl enable ntpd 2>/dev/null); echo "NTP enabled"',
+      command: `${SVC} { __svc start chronyd && __svc enable chronyd; } || { __svc start ntpd && __svc enable ntpd; }; echo "NTP enabled"`,
       priority: 1,
     }],
   },
@@ -282,7 +290,7 @@ const FIX_MAPPINGS: FixMapping[] = [
     actions: [{
       type: 'command', title: '验证系统命令完整性',
       description: '用包管理器验证已安装文件',
-      command: 'rpm -Va 2>/dev/null | grep "^..5" | head -20 || dpkg -V 2>/dev/null | head -20 || echo "package verify not available"',
+      command: 'rpm -Va 2>/dev/null | grep "^..5" | head -20 || dpkg -V 2>/dev/null | head -20 || { command -v pacman >/dev/null 2>&1 && pacman -Qkk 2>/dev/null | grep -v " 0 altered" | head -20; } || { command -v apk >/dev/null 2>&1 && apk audit --system 2>/dev/null | head -20; } || echo "package verify not available"',
       priority: 1,
     }],
   },
@@ -386,16 +394,16 @@ export interface HardeningItem {
 
 export const HARDENING_ITEMS: HardeningItem[] = [
   // SSH
-  { id: 'h-ssh-root', group: 'SSH加固', title: '禁止root登录', checkCommand: 'grep -E "^\\s*PermitRootLogin" /etc/ssh/sshd_config 2>/dev/null', checkPassed: /no/i, fixCommand: 'sed -i "s/^#*\\s*PermitRootLogin.*/PermitRootLogin no/" /etc/ssh/sshd_config && systemctl restart sshd', priority: 1 },
-  { id: 'h-ssh-maxauth', group: 'SSH加固', title: '限制认证尝试(3次)', checkCommand: 'grep -E "^\\s*MaxAuthTries" /etc/ssh/sshd_config 2>/dev/null', checkPassed: /[1-3]$/, fixCommand: 'sed -i "s/^#*\\s*MaxAuthTries.*/MaxAuthTries 3/" /etc/ssh/sshd_config && systemctl restart sshd', priority: 2 },
-  { id: 'h-ssh-empty', group: 'SSH加固', title: '禁止空密码', checkCommand: 'grep -E "^\\s*PermitEmptyPasswords" /etc/ssh/sshd_config 2>/dev/null', checkPassed: /no/i, fixCommand: 'sed -i "s/^#*\\s*PermitEmptyPasswords.*/PermitEmptyPasswords no/" /etc/ssh/sshd_config && systemctl restart sshd', priority: 3 },
+  { id: 'h-ssh-root', group: 'SSH加固', title: '禁止root登录', checkCommand: 'grep -E "^\\s*PermitRootLogin" /etc/ssh/sshd_config 2>/dev/null', checkPassed: /no/i, fixCommand: `${SVC} sed -i "s/^#*\\s*PermitRootLogin.*/PermitRootLogin no/" /etc/ssh/sshd_config && { __svc restart sshd || __svc restart ssh; }`, priority: 1 },
+  { id: 'h-ssh-maxauth', group: 'SSH加固', title: '限制认证尝试(3次)', checkCommand: 'grep -E "^\\s*MaxAuthTries" /etc/ssh/sshd_config 2>/dev/null', checkPassed: /[1-3]$/, fixCommand: `${SVC} sed -i "s/^#*\\s*MaxAuthTries.*/MaxAuthTries 3/" /etc/ssh/sshd_config && { __svc restart sshd || __svc restart ssh; }`, priority: 2 },
+  { id: 'h-ssh-empty', group: 'SSH加固', title: '禁止空密码', checkCommand: 'grep -E "^\\s*PermitEmptyPasswords" /etc/ssh/sshd_config 2>/dev/null', checkPassed: /no/i, fixCommand: `${SVC} sed -i "s/^#*\\s*PermitEmptyPasswords.*/PermitEmptyPasswords no/" /etc/ssh/sshd_config && { __svc restart sshd || __svc restart ssh; }`, priority: 3 },
   // 防火墙
-  { id: 'h-fw-active', group: '防火墙', title: '防火墙已启用', checkCommand: 'systemctl is-active firewalld 2>/dev/null || ufw status 2>/dev/null | head -1', checkPassed: /active|Status: active/i, fixCommand: 'systemctl start firewalld 2>/dev/null && systemctl enable firewalld 2>/dev/null || ufw --force enable 2>/dev/null', priority: 1 },
+  { id: 'h-fw-active', group: '防火墙', title: '防火墙已启用', checkCommand: 'systemctl is-active firewalld 2>/dev/null || ufw status 2>/dev/null | head -1', checkPassed: /active|Status: active/i, fixCommand: `${SVC} __svc start firewalld && __svc enable firewalld || ufw --force enable 2>/dev/null`, priority: 1 },
   { id: 'h-fw-default', group: '防火墙', title: '默认拒绝入站', checkCommand: 'iptables -L INPUT 2>/dev/null | head -1', checkPassed: /DROP|REJECT/i, fixCommand: 'iptables -P INPUT DROP && iptables -A INPUT -i lo -j ACCEPT && iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT && iptables -A INPUT -p tcp -m multiport --dports 22,80,443 -j ACCEPT', priority: 2 },
   // PHP
-  { id: 'h-php-disable', group: 'PHP加固', title: 'PHP禁用危险函数', checkCommand: 'php -i 2>/dev/null | grep disable_functions | head -1', checkPassed: /system|exec|passthru/, fixCommand: 'for f in /etc/php.ini /etc/php/*/fpm/php.ini /etc/php/*/apache2/php.ini; do [ -f "$f" ] && sed -i "s/^\\s*;*\\s*disable_functions.*/disable_functions = system,exec,passthru,shell_exec,popen,proc_open,pcntl_exec,eval,assert/" "$f" 2>/dev/null; done && systemctl restart php-fpm 2>/dev/null; true', priority: 1 },
-  { id: 'h-php-expose', group: 'PHP加固', title: '隐藏PHP版本', checkCommand: 'php -i 2>/dev/null | grep expose_php | head -1', checkPassed: /Off/i, fixCommand: 'for f in /etc/php.ini /etc/php/*/fpm/php.ini; do [ -f "$f" ] && sed -i "s/^\\s*;*\\s*expose_php.*/expose_php = Off/" "$f" 2>/dev/null; done && systemctl restart php-fpm 2>/dev/null; true', priority: 2 },
-  { id: 'h-php-errors', group: 'PHP加固', title: '关闭错误显示', checkCommand: 'php -i 2>/dev/null | grep "display_errors =>" | head -1', checkPassed: /Off/i, fixCommand: 'for f in /etc/php.ini /etc/php/*/fpm/php.ini; do [ -f "$f" ] && sed -i "s/^\\s*;*\\s*display_errors.*/display_errors = Off/" "$f" 2>/dev/null; done && systemctl restart php-fpm 2>/dev/null; true', priority: 3 },
+  { id: 'h-php-disable', group: 'PHP加固', title: 'PHP禁用危险函数', checkCommand: 'php -i 2>/dev/null | grep disable_functions | head -1', checkPassed: /system|exec|passthru/, fixCommand: `${SVC} for f in /etc/php.ini /etc/php/*/fpm/php.ini /etc/php/*/apache2/php.ini; do [ -f "$f" ] && sed -i "s/^\\s*;*\\s*disable_functions.*/disable_functions = system,exec,passthru,shell_exec,popen,proc_open,pcntl_exec,eval,assert/" "$f" 2>/dev/null; done; __svc restart php-fpm 2>/dev/null; true`, priority: 1 },
+  { id: 'h-php-expose', group: 'PHP加固', title: '隐藏PHP版本', checkCommand: 'php -i 2>/dev/null | grep expose_php | head -1', checkPassed: /Off/i, fixCommand: `${SVC} for f in /etc/php.ini /etc/php/*/fpm/php.ini; do [ -f "$f" ] && sed -i "s/^\\s*;*\\s*expose_php.*/expose_php = Off/" "$f" 2>/dev/null; done; __svc restart php-fpm 2>/dev/null; true`, priority: 2 },
+  { id: 'h-php-errors', group: 'PHP加固', title: '关闭错误显示', checkCommand: 'php -i 2>/dev/null | grep "display_errors =>" | head -1', checkPassed: /Off/i, fixCommand: `${SVC} for f in /etc/php.ini /etc/php/*/fpm/php.ini; do [ -f "$f" ] && sed -i "s/^\\s*;*\\s*display_errors.*/display_errors = Off/" "$f" 2>/dev/null; done; __svc restart php-fpm 2>/dev/null; true`, priority: 3 },
   // 用户权限
   { id: 'h-passwd-perms', group: '用户权限', title: '/etc/passwd 权限 644', checkCommand: 'stat -c "%a" /etc/passwd 2>/dev/null', checkPassed: /^644$/, fixCommand: 'chmod 644 /etc/passwd && echo "fixed"', priority: 1 },
   { id: 'h-shadow-perms', group: '用户权限', title: '/etc/shadow 权限 600', checkCommand: 'stat -c "%a" /etc/shadow 2>/dev/null', checkPassed: /^600$|^000$/, fixCommand: 'chmod 600 /etc/shadow && echo "fixed"', priority: 2 },
@@ -404,8 +412,8 @@ export const HARDENING_ITEMS: HardeningItem[] = [
   { id: 'h-chattr-passwd', group: '文件权限', title: '锁定 passwd/shadow', checkCommand: 'lsattr /etc/passwd 2>/dev/null | head -1', checkPassed: /i/, fixCommand: 'chattr +i /etc/passwd /etc/shadow /etc/group && echo "locked"', priority: 1 },
   { id: 'h-tmp-noexec', group: '文件权限', title: '/tmp noexec 挂载', checkCommand: 'mount | grep "/tmp " | head -1', checkPassed: /noexec/, fixCommand: 'mount -o remount,noexec /tmp 2>/dev/null && echo "tmp noexec" || echo "remount failed"', priority: 2 },
   // 服务管理
-  { id: 'h-svc-telnet', group: '服务管理', title: 'Telnet 已禁用', checkCommand: 'systemctl is-active telnet.socket 2>/dev/null || echo "inactive"', checkPassed: /inactive|unknown/, fixCommand: 'systemctl stop telnet.socket 2>/dev/null; systemctl disable telnet.socket 2>/dev/null; echo "telnet disabled"', priority: 1 },
-  { id: 'h-svc-auditd', group: '服务管理', title: 'auditd 已启用', checkCommand: 'systemctl is-active auditd 2>/dev/null', checkPassed: /^active/, fixCommand: 'systemctl start auditd 2>/dev/null && systemctl enable auditd 2>/dev/null && echo "auditd started"', priority: 2 },
+  { id: 'h-svc-telnet', group: '服务管理', title: 'Telnet 已禁用', checkCommand: 'systemctl is-active telnet.socket 2>/dev/null || echo "inactive"', checkPassed: /inactive|unknown/, fixCommand: `${SVC} __svc stop telnet.socket; __svc disable telnet.socket; echo "telnet disabled"`, priority: 1 },
+  { id: 'h-svc-auditd', group: '服务管理', title: 'auditd 已启用', checkCommand: 'systemctl is-active auditd 2>/dev/null', checkPassed: /^active/, fixCommand: `${SVC} __svc start auditd && __svc enable auditd && echo "auditd started"`, priority: 2 },
 ];
 
 // ════════════════════════════════════════════════════

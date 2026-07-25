@@ -133,13 +133,16 @@ class UserDisposal {
       confirmText: '锁定', cancelText: '取消', dangerous: true,
     });
     if (!ok) return;
-    const cmd = `usermod -L ${shq(user)} && passwd -S ${shq(user)}`;
-    await this.record(`锁定账号 ${user}`, cmd, `usermod -U ${shq(user)}`, () => this.exec(cmd));
+    // busybox/Alpine 默认无 usermod / passwd -S，回退到 busybox 自带的 passwd -l/-u
+    const cmd = `usermod -L ${shq(user)} 2>/dev/null || passwd -l ${shq(user)}; passwd -S ${shq(user)} 2>/dev/null || grep ${shq('^' + user + ':')} /etc/shadow`;
+    const restore = `usermod -U ${shq(user)} 2>/dev/null || passwd -u ${shq(user)}`;
+    await this.record(`锁定账号 ${user}`, cmd, restore, () => this.exec(cmd));
   }
 
   private async unlock(user: string): Promise<void> {
-    const cmd = `usermod -U ${shq(user)} && passwd -S ${shq(user)}`;
-    await this.record(`解锁账号 ${user}`, cmd, `usermod -L ${shq(user)}`, () => this.exec(cmd));
+    const cmd = `usermod -U ${shq(user)} 2>/dev/null || passwd -u ${shq(user)}; passwd -S ${shq(user)} 2>/dev/null || grep ${shq('^' + user + ':')} /etc/shadow`;
+    const restore = `usermod -L ${shq(user)} 2>/dev/null || passwd -l ${shq(user)}`;
+    await this.record(`解锁账号 ${user}`, cmd, restore, () => this.exec(cmd));
   }
 
   private async remove(user: string): Promise<void> {
@@ -149,7 +152,8 @@ class UserDisposal {
       confirmText: '删除', cancelText: '取消', dangerous: true,
     });
     if (!ok) return;
-    const cmd = `userdel -r ${shq(user)} 2>&1; echo "done"`;
+    // Alpine/busybox 用 deluser --remove-home；shadow-utils 用 userdel -r
+    const cmd = `userdel -r ${shq(user)} 2>/dev/null || deluser --remove-home ${shq(user)} 2>&1; echo "done"`;
     await this.record(`删除账号 ${user}`, cmd, undefined, () => this.exec(cmd));
   }
 
@@ -162,9 +166,12 @@ class UserDisposal {
     });
     if (!ok) return;
     // 先备份原口令 hash 以便回滚，再改
-    const backup = `mkdir -p ${shq(KEY_BACKUP_DIR)} && getent shadow ${shq(user)} | cut -d: -f2 > ${shq(`${KEY_BACKUP_DIR}/${user}.hash`)}`;
+    // getent 在 busybox/Alpine 可能缺失，回退直接读 /etc/shadow
+    const hashFile = shq(`${KEY_BACKUP_DIR}/${user}.hash`);
+    const backup = `mkdir -p ${shq(KEY_BACKUP_DIR)} && { getent shadow ${shq(user)} 2>/dev/null || grep ${shq('^' + user + ':')} /etc/shadow; } | cut -d: -f2 > ${hashFile}`;
     const change = `echo ${shq(`${user}:${pass}`)} | chpasswd`;
-    const restore = `[ -s ${shq(`${KEY_BACKUP_DIR}/${user}.hash`)} ] && usermod -p "$(cat ${shq(`${KEY_BACKUP_DIR}/${user}.hash`)})" ${shq(user)}`;
+    // usermod -p 在 Alpine 缺失，回退 chpasswd -e（busybox 与 shadow 均支持已加密 hash）
+    const restore = `[ -s ${hashFile} ] && { usermod -p "$(cat ${hashFile})" ${shq(user)} 2>/dev/null || echo "${user}:$(cat ${hashFile})" | chpasswd -e; }`;
     const cmd = `${backup}; ${change} && echo "password changed"`;
     await this.record(`修改账号 ${user} 口令`, change, restore, () => this.exec(cmd));
   }
