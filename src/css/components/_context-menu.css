@@ -90,10 +90,10 @@
 
 /* Danger item (delete) */
 .sftp-ctx-menu .ctx-item-danger {
-  color: #ef4444;
+  color: var(--sev-critical-fg);
 }
 
 .sftp-ctx-menu .ctx-item-danger:hover {
-  background-color: rgba(239, 68, 68, 0.1);
+  background-color: var(--sev-critical-bg);
 }
 

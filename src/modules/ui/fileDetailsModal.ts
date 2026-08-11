@@ -4,6 +4,7 @@
  */
 
 import { createIconHTML, statusIcon } from './iconMapping';
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH';
 
 export class FileDetailsModal {
   private modal: HTMLElement | null = null;
@@ -258,7 +259,7 @@ export class FileDetailsModal {
 
     try {
       // 调用后端API获取文件详细信息
-      const details = await (window as any).__TAURI__.core.invoke('sftp_get_file_details', {
+      const details = await invokeTargetBoundSSH<any>('sftp_get_file_details', {
         path: filePath
       });
 

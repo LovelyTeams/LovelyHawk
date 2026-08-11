@@ -3,18 +3,16 @@
   "src/modules/baseline/quickActionCommands.ts": 1,
   "src/modules/baseline/webserverBaselineConfigs.ts": 6,
   "src/modules/detection/detectionModules.ts": 1,
-  "src/modules/docker/dockerEmergencyManager.ts": 2,
-  "src/modules/docker/dockerManager.ts": 4,
+  "src/modules/docker/dockerManager.ts": 1,
   "src/modules/secfix/secfixData.ts": 25,
   "src/modules/ui/cronContextMenu.ts": 2,
   "src/modules/ui/firewallContextMenu.ts": 7,
   "src/modules/ui/kernelModuleContextMenu.ts": 1,
   "src/modules/ui/loginHistoryContextMenu.ts": 2,
   "src/modules/ui/networkContextMenu.ts": 3,
-  "src/modules/ui/processContextMenu.ts": 2,
+  "src/modules/ui/processContextMenu.ts": 4,
   "src/modules/ui/renderers/systemInfoRenderer.ts": 1,
   "src/modules/ui/serviceContextMenu.ts": 2,
-  "src/modules/ui/startupContextMenu.ts": 1,
-  "src/modules/ui/timerContextMenu.ts": 3,
-  "src/modules/ui/userContextMenu.ts": 6
+  "src/modules/ui/startupContextMenu.ts": 2,
+  "src/modules/ui/timerContextMenu.ts": 3
 }

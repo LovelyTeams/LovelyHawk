@@ -13,6 +13,9 @@ import { sftpManager } from '../remote/sftpManager';
 import { LogAnalysisRenderer } from './logAnalysisRenderer';
 import { DatabaseRenderer } from './databaseRenderer';
 import { PacketCaptureRenderer } from './packetCaptureRenderer';
+import { activeTargetContext } from '../core/targetContext';
+import { escapeHtml } from '../core/htmlEscape';
+import { incidentCaseManager } from '../case/incidentCaseManager';
 
 import { SystemInfoRenderer } from './renderers/systemInfoRenderer';
 import { ServerModalRenderer } from './renderers/serverModalRenderer';
@@ -20,11 +23,8 @@ import { EmergencyRenderer } from './renderers/emergencyRenderer';
 import { BaselineRenderer } from './renderers/baselineRenderer';
 import {
   SettingTwo,
-  ApplicationMenu,
-  FolderOpen,
   Whale,
   CheckOne,
-  Code,
   Plus,
   LinkInterrupt,
   Connection,
@@ -37,20 +37,30 @@ import {
   // 快速检测图标
   Shield,
   FileText,
-  NetworkTree,
   System,
   SettingConfig,
-  LinkCloud,
-  Log,
   Left,
   Right,
-  Data,
   // 设置菜单图标
   Bug,
   Fire,
-  // 笔记 & 安全速查
+  // 笔记
   DocDetail,
-  Protection,
+  Terminal,
+  ApplicationTwo,
+  Robot,
+  AutoFocus,
+  Compass,
+  DatabaseSearch,
+  FileFocus,
+  FileSearch,
+  FolderProtection,
+  Monitor,
+  Radar,
+  ShieldAdd,
+  TargetTwo,
+  Timeline,
+  Trace,
   // SFTP 工具栏溢出菜单
   MoreOne
 } from '@icon-park/svg';
@@ -246,38 +256,22 @@ export class ModernUIRenderer {
       sudoers: detailedInfo.sudoersConfig?.length || 0,
       timers: detailedInfo.systemdTimers?.length || 0,
       kernelmodules: detailedInfo.kernelModules?.length || 0,
-      recentfiles: detailedInfo.recentFiles?.length || 0
+      recentfiles: detailedInfo.recentFiles?.length || 0,
+      established: detailedInfo.established?.length || 0,
+      openports: detailedInfo.openPorts?.length || 0,
+      autoruns: detailedInfo.autoruns?.length || 0,
+      rootcheck: detailedInfo.rootcheck?.length || 0,
+      sensitive: detailedInfo.sensitiveFiles?.length || 0,
+      docker: detailedInfo.dockerContainers?.length || 0,
+      kubernetes: detailedInfo.kubernetesPods?.length || 0,
+      webapps: detailedInfo.webApps?.length || 0,
     };
 
-    const tabNames: Record<string, string> = {
-      processes: '进程详情',
-      network: '网络详情',
-      services: '系统服务',
-      users: '用户列表',
-      autostart: '自启动',
-      cron: '计划任务',
-      firewall: '防火墙',
-      sshkeys: 'SSH密钥',
-      loginhistory: '登录历史',
-      suidfiles: 'SUID文件',
-      envvars: '环境变量',
-      shellconfigs: 'Shell配置',
-      packages: '软件包',
-      sudoers: 'Sudoers',
-      timers: '定时器',
-      kernelmodules: '内核模块',
-      recentfiles: '最近文件'
-    };
-
-    Object.keys(counts).forEach(key => {
-      const tabBtn = document.querySelector(`.tab-btn[data-tab="${key}"]`);
-      if (tabBtn) {
-        const count = counts[key as keyof typeof counts];
-        const name = tabNames[key] || key;
-        const badgeHtml = count > 0 ? `<span class="count-badge">${count}</span>` : '';
-        // 保持 active 类和其他属性不变，只更新内容
-        tabBtn.innerHTML = `${name} ${badgeHtml}`;
-      }
+    Object.entries(counts).forEach(([key, count]) => {
+      document.querySelectorAll<HTMLElement>(`[data-system-tab="${key}"] .si-lens-count`).forEach(badge => {
+        badge.textContent = count > 0 ? String(count) : '';
+        badge.classList.toggle('empty', count === 0);
+      });
     });
   }
 
@@ -288,27 +282,34 @@ export class ModernUIRenderer {
     const isMac = this.isMacOS();
 
     return `
-      <div class="modern-title-bar" data-tauri-drag-region>
+      <div class="modern-title-bar incident-title-bar" data-tauri-drag-region>
         <div class="title-bar-left">
           <div class="app-logo">
-            <div class="logo-icon" style="width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;">
-              <svg width="22" height="22" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
-                <defs>
-                  <linearGradient id="tbl-s" x1=".1" y1="0" x2=".9" y2="1"><stop offset="0" stop-color="#f9a8d4"/><stop offset="1" stop-color="#c4b5fd"/></linearGradient>
-                  <linearGradient id="tbl-h" x1=".36" y1="0" x2=".5" y2=".5"><stop offset="0" stop-color="#fff" stop-opacity=".5"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
-                </defs>
-                <g transform="rotate(-15 64 62)">
-                  <path d="M64,16 L75.8,47.8 L109.2,48.8 L83.2,68.8 L93,101.2 L64,83.2 L35,101.2 L44.8,68.8 L18.8,48.8 L52.2,47.8 Z" fill="url(#tbl-s)" stroke="url(#tbl-s)" stroke-width="12" stroke-linejoin="round" paint-order="stroke fill"/>
-                  <path d="M64,16 L75.8,47.8 L109.2,48.8 L83.2,68.8 L93,101.2 L64,83.2 L35,101.2 L44.8,68.8 L18.8,48.8 L52.2,47.8 Z" fill="url(#tbl-h)" stroke="url(#tbl-h)" stroke-width="12" stroke-linejoin="round" paint-order="stroke fill"/>
-                </g>
+            <div class="logo-icon" aria-hidden="true">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M3.5 7.25A2.25 2.25 0 0 1 5.75 5h3l1.6 1.75h7.9A2.25 2.25 0 0 1 20.5 9v8.25a2.25 2.25 0 0 1-2.25 2.25H5.75a2.25 2.25 0 0 1-2.25-2.25v-10Z" fill="currentColor" opacity=".18"/>
+                <path d="M3.5 8.25h17M5.75 5h3l1.6 1.75h7.9A2.25 2.25 0 0 1 20.5 9v8.25a2.25 2.25 0 0 1-2.25 2.25H5.75a2.25 2.25 0 0 1-2.25-2.25V7.25A2.25 2.25 0 0 1 5.75 5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+                <circle cx="12" cy="13.75" r="3.25" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M12 9.5v2M12 16v2M7.75 13.75h2M14.25 13.75h2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
               </svg>
             </div>
             <span class="app-name">LovelyRes</span>
+            <span class="app-edition">Incident Canvas</span>
           </div>
 
         </div>
 
+        ${this.renderIncidentContextBar()}
+
         <div class="title-bar-right">
+          <button id="sftp-title-btn" class="title-bar-btn" type="button" title="打开 SFTP 文件管理窗口">
+            ${FolderProtection({ theme: 'outline', size: '14', fill: 'currentColor' })}
+            SFTP
+          </button>
+          <button id="ssh-terminal-title-btn" class="title-bar-btn" type="button" title="打开 SSH 终端窗口">
+            ${Terminal({ theme: 'outline', size: '14', fill: 'currentColor' })}
+            终端
+          </button>
           ${!isMac ? `
           <div class="window-controls">
             <button class="control-button minimize-btn" title="最小化">
@@ -339,39 +340,36 @@ export class ModernUIRenderer {
   renderSidebar(): string {
     return `
       <nav class="sidebar-nav">
-        <!-- 搜索 -->
-        <div class="sidebar-head">
-          <div class="sidebar-search">
-            <span class="sidebar-search-icon">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-            </span>
-            <input id="sidebar-filter" type="text" placeholder="搜索功能…" spellcheck="false" autocomplete="off"
-                   oninput="window.filterSidebar && window.filterSidebar(this.value)" />
-          </div>
-        </div>
-
         <!-- 分组导航树 -->
         <div class="sidebar-tree">
           ${this.renderNavigationMenu()}
         </div>
 
-        <!-- 底部：连接面板 + 操作按钮 -->
+        <!-- 底部：连接面板 + 操作按钮（单排，按钮靠右） -->
         <div class="sidebar-foot">
-          <div class="connection-card-wrapper">
-            ${this.renderConnectionPanel()}
+          <div class="sidebar-search sidebar-bottom-search">
+            <span class="sidebar-search-icon">
+              ${FileSearch({ theme: 'outline', size: '14', fill: 'currentColor' })}
+            </span>
+            <input id="sidebar-filter" type="text" placeholder="搜索页面或动作…" spellcheck="false" autocomplete="off"
+                   oninput="window.filterSidebar && window.filterSidebar(this.value)" />
           </div>
-          <div class="sidebar-foot-actions">
-            <div class="sidebar-settings-container">
-              ${this.renderSettingsMenu()}
-              <button class="sidebar-foot-btn" type="button" title="设置" data-ui-action="toggle-settings-dropdown"
-                onclick="event.stopPropagation(); document.getElementById('settings-dropdown-menu')?.classList.toggle('show')">
-                ${SettingTwo({ theme: 'outline', size: '18', fill: 'currentColor' })}
+          <div class="sidebar-foot-row">
+            <div class="connection-card-wrapper">
+              ${this.renderConnectionPanel()}
+            </div>
+            <div class="sidebar-foot-actions">
+              <div class="sidebar-settings-container">
+                ${this.renderSettingsMenu()}
+                <button class="sidebar-foot-btn" type="button" title="设置" data-ui-action="toggle-settings-dropdown"
+                  onclick="event.stopPropagation(); document.getElementById('settings-dropdown-menu')?.classList.toggle('show')">
+                  ${SettingTwo({ theme: 'outline', size: '18', fill: 'currentColor' })}
+                </button>
+              </div>
+              <button class="sidebar-foot-btn sidebar-collapse-btn" type="button" title="折叠侧边栏" onclick="window.toggleSidebar && window.toggleSidebar()">
+                ${Left({ theme: 'outline', size: '18', fill: 'currentColor' })}
               </button>
             </div>
-            <div class="sidebar-foot-spacer"></div>
-            <button class="sidebar-foot-btn sidebar-collapse-btn" type="button" title="折叠侧边栏" onclick="window.toggleSidebar && window.toggleSidebar()">
-              ${Left({ theme: 'outline', size: '18', fill: 'currentColor' })}
-            </button>
           </div>
         </div>
       </nav>
@@ -383,7 +381,12 @@ export class ModernUIRenderer {
    */
   private renderSettingsMenu(): string {
     const currentTheme = this.state.theme;
-    
+    const themes: Array<{ value: string; label: string; dot: string; ring: string }> = [
+      { value: 'light', label: '浅色', dot: 'linear-gradient(135deg, #f8fafc, #e2e8f0)', ring: '#cbd5e1' },
+      { value: 'dark', label: '深色', dot: 'linear-gradient(135deg, #10182b, #0a0e1a)', ring: '#3aa0ff' },
+      { value: 'sakura', label: '粉色', dot: 'linear-gradient(135deg, #ffb3c1, #ff9bb3)', ring: '#ff9bb3' },
+    ];
+
     return `
       <div id="settings-dropdown-menu" class="settings-dropdown-menu">
         <div class="settings-group">
@@ -400,27 +403,12 @@ export class ModernUIRenderer {
 
         <div class="settings-group">
             <div class="settings-group-title">主题设置</div>
-            <div class="theme-grid" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; width: 100%;">
-                <button class="theme-swatch ${currentTheme === 'light' ? 'active' : ''}" data-theme-value="light" title="浅色" style="display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px; border-radius: 8px; border: 2px solid ${currentTheme === 'light' ? 'var(--primary-color)' : 'transparent'}; background: transparent; cursor: pointer; transition: all 0.2s;">
-                    <div style="width: 24px; height: 24px; border-radius: 50%; background: linear-gradient(135deg, #f8fafc, #e2e8f0); border: 2px solid #cbd5e1;"></div>
-                    <span style="font-size: 10px; color: var(--text-secondary);">浅色</span>
-                </button>
-                <button class="theme-swatch ${currentTheme === 'dark' ? 'active' : ''}" data-theme-value="dark" title="深色" style="display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px; border-radius: 8px; border: 2px solid ${currentTheme === 'dark' ? 'var(--primary-color)' : 'transparent'}; background: transparent; cursor: pointer; transition: all 0.2s;">
-                    <div style="width: 24px; height: 24px; border-radius: 50%; background: linear-gradient(135deg, #1e293b, #0f172a); border: 2px solid #4299e1;"></div>
-                    <span style="font-size: 10px; color: var(--text-secondary);">深色</span>
-                </button>
-                <button class="theme-swatch ${currentTheme === 'sakura' ? 'active' : ''}" data-theme-value="sakura" title="樱花" style="display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px; border-radius: 8px; border: 2px solid ${currentTheme === 'sakura' ? 'var(--primary-color)' : 'transparent'}; background: transparent; cursor: pointer; transition: all 0.2s;">
-                    <div style="width: 24px; height: 24px; border-radius: 50%; background: linear-gradient(135deg, #ffb3c1, #ff9bb3); border: 2px solid #ff9bb3;"></div>
-                    <span style="font-size: 10px; color: var(--text-secondary);">樱花</span>
-                </button>
-                <button class="theme-swatch ${currentTheme === 'midnight' ? 'active' : ''}" data-theme-value="midnight" title="暗夜" style="display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px; border-radius: 8px; border: 2px solid ${currentTheme === 'midnight' ? 'var(--primary-color)' : 'transparent'}; background: transparent; cursor: pointer; transition: all 0.2s;">
-                    <div style="width: 24px; height: 24px; border-radius: 50%; background: linear-gradient(135deg, #7c3aed, #000000); border: 2px solid #a855f7;"></div>
-                    <span style="font-size: 10px; color: var(--text-secondary);">暗夜</span>
-                </button>
-                <button class="theme-swatch ${currentTheme === 'ocean' ? 'active' : ''}" data-theme-value="ocean" title="深海" style="display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px; border-radius: 8px; border: 2px solid ${currentTheme === 'ocean' ? 'var(--primary-color)' : 'transparent'}; background: transparent; cursor: pointer; transition: all 0.2s;">
-                    <div style="width: 24px; height: 24px; border-radius: 50%; background: linear-gradient(135deg, #06b6d4, #0b1120); border: 2px solid #22d3ee;"></div>
-                    <span style="font-size: 10px; color: var(--text-secondary);">深海</span>
-                </button>
+            <div class="theme-grid">
+                ${themes.map((t) => `
+                <button class="theme-swatch ${currentTheme === t.value ? 'active' : ''}" data-theme-value="${t.value}" title="${t.label}">
+                    <span class="theme-swatch-dot" style="background: ${t.dot}; border-color: ${t.ring};"></span>
+                    <span class="theme-swatch-label">${t.label}</span>
+                </button>`).join('')}
             </div>
         </div>
 
@@ -428,14 +416,20 @@ export class ModernUIRenderer {
 
         <div class="settings-group">
             <div class="settings-group-title">连接</div>
-            <button class="settings-item ${this.state.isConnected ? 'danger' : 'disabled'}"
-                onclick="window.confirmDisconnect()"
-                ${this.state.isConnected ? '' : 'disabled'}>
-                <div class="settings-item-icon" style="${this.state.isConnected ? 'color:var(--error-color)' : ''}">
+            ${this.state.isConnected ? `
+            <button class="settings-item danger" onclick="window.confirmDisconnect()">
+                <div class="settings-item-icon" style="color:var(--error-color)">
                     ${LinkInterrupt({ theme: 'outline', size: '16', fill: 'currentColor' })}
                 </div>
-                <span>${this.state.isConnected ? '断开服务器' : '未连接'}</span>
-            </button>
+                <span>断开服务器</span>
+            </button>` : `
+            <button class="settings-item"
+                onclick="window.switchPage?.('system-info'); window.hideSettingsDropdown?.();">
+                <div class="settings-item-icon">
+                    ${Connection({ theme: 'outline', size: '16', fill: 'currentColor' })}
+                </div>
+                <span>连接服务器</span>
+            </button>`}
         </div>
 
         <div class="dropdown-divider"></div>
@@ -462,42 +456,30 @@ export class ModernUIRenderer {
   }
 
   /**
-   * 渲染连接面板
+   * 渲染连接面板（纯状态展示；连接/断开操作在设置菜单的「连接」分组里）
    */
   private renderConnectionPanel(): string {
     const isConnected = this.state.isConnected;
-    const serverName = isConnected && this.state.serverInfo
-      ? (this.state.serverInfo.name || this.state.serverInfo.host)
-      : '';
+    const target = activeTargetContext.get();
+    const serverName = isConnected && target
+      ? `${target.username}@${target.host}:${target.port}`
+      : isConnected && this.state.serverInfo
+        ? (this.state.serverInfo.name || this.state.serverInfo.host)
+        : '';
+    const targetTitle = target
+      ? `${serverName}\n主机指纹：${target.hostKeyFingerprint}\n会话 epoch：${target.epoch}`
+      : serverName;
 
     return `
-      <!-- 连接面板 -->
-      <div class="user-panel" onclick="window.toggleUserDropdown?.()">
-        <img class="user-panel-avatar" src="/logo.png" alt="avatar" />
+      <div class="user-panel">
+        <span class="user-panel-avatar-mark" aria-hidden="true">
+          ${TargetTwo({ theme: 'outline', size: '15', fill: 'currentColor' })}
+        </span>
         <div class="user-panel-info">
-          <span class="user-panel-name">LovelyRes</span>
-          <span class="user-panel-status">${isConnected ? serverName : '未连接'}</span>
+          <span class="user-panel-name">${isConnected ? 'Trusted target' : 'LovelyRes'}</span>
+          <span class="user-panel-status" title="${escapeHtml(targetTitle)}">${isConnected ? escapeHtml(serverName) : '未连接'}</span>
         </div>
         ${isConnected ? '<span class="user-panel-dot connected"></span>' : '<span class="user-panel-dot"></span>'}
-      </div>
-
-      <!-- 连接下拉菜单 -->
-      <div id="user-dropdown-menu" class="user-dropdown-menu" style="display:none;">
-        ${isConnected ? `
-          <div class="user-dropdown-item" onclick="window.confirmDisconnect?.(); document.getElementById('user-dropdown-menu').style.display='none';">
-            ${LinkInterrupt({ theme: 'outline', size: '14', fill: 'currentColor' })}
-            <span>断开连接</span>
-          </div>
-        ` : `
-          <div class="user-dropdown-item" onclick="window.switchPage?.('system-info'); document.getElementById('user-dropdown-menu').style.display='none';">
-            ${Connection({ theme: 'outline', size: '14', fill: 'currentColor' })}
-            <span>连接服务器</span>
-          </div>
-        `}
-        <div class="user-dropdown-item" onclick="window.showSettingsOverlay?.(); document.getElementById('user-dropdown-menu').style.display='none';">
-          ${SettingTwo({ theme: 'outline', size: '14', fill: 'currentColor' })}
-          <span>设置</span>
-        </div>
       </div>
     `;
   }
@@ -509,82 +491,86 @@ export class ModernUIRenderer {
     const currentPage = this.state.currentPage;
     const ico = { theme: 'outline' as const, size: '18', fill: 'currentColor' };
 
-    // 14 个页面归入 5 个分组；每组的 --accent 为主题中性的字面色（唯一允许的硬编码颜色）
-    const navGroups = [
-      {
-        id: 'overview', label: '概览', accent: '#6db3ff', icon: System(ico),
-        items: [
-          { id: 'system-info', icon: ApplicationMenu(ico), title: '系统信息' },
-          { id: 'remote-operations', icon: FolderOpen(ico), title: 'SFTP文件' },
-        ],
-      },
-      {
-        id: 'containers', label: '容器编排', accent: '#06b6d4', icon: Whale(ico),
-        items: [
-          { id: 'docker', icon: Whale(ico), title: 'Docker容器' },
-          { id: 'kubernetes', icon: LinkCloud(ico), title: 'Kubernetes' },
-        ],
-      },
-      {
-        id: 'emergency', label: '应急响应', accent: '#f87171', icon: Shield(ico),
-        items: [
-          // 安全速查是比赛核心的一键修复库,置于应急响应组首位,冷启动即可秒达
-          { id: 'secfix', icon: Protection(ico), title: '安全速查' },
-          { id: 'quick-detection', icon: CheckOne(ico), title: '快速检测' },
-          { id: 'emergency-commands', icon: Code(ico), title: '命令执行' },
-          { id: 'firewall', icon: Shield(ico), title: '防火墙' },
-          { id: 'integrity', icon: Bug(ico), title: '文件完整性' },
-          { id: 'snapshot', icon: History(ico), title: '快照回滚' },
-          { id: 'packet-capture', icon: NetworkTree(ico), title: '网络抓包' },
-          { id: 'log-analysis', icon: Log(ico), title: '日志审计' },
-          { id: 'check-audit', icon: Bug(ico), title: 'Check审计' },
-        ],
-      },
-      {
-        id: 'operations', label: '运维操作', accent: '#a855f7', icon: SettingConfig(ico),
-        items: [
-          { id: 'database', icon: Data(ico), title: '数据库' },
-          { id: 'java-hot-update', icon: Fire(ico), title: 'Java热更新' },
-          { id: 'baseline-quick-edit', icon: SettingConfig(ico), title: '快速编辑' },
-          { id: 'batch-servers', icon: System(ico), title: '多机批量' },
-        ],
-      },
-      {
-        id: 'knowledge', label: '资料', accent: '#34d399', icon: DocDetail(ico),
-        items: [
-          { id: 'notes', icon: DocDetail(ico), title: '笔记' },
-          { id: 'ai-history', icon: History(ico), title: 'AI历史' },
-        ],
+    type NavItem = { id: string; icon: string; title: string };
+    type NavGroup = {
+      id: string; label: string; accent: string; icon: string;
+      items?: NavItem[];
+      sections?: Array<{ label: string; items: NavItem[] }>;
+    };
 
+    // Incident Canvas：18 个页面按目标、摸底、调查、处置、运维、分析六段组织。
+    // 智能折叠：渲染时只展开含当前页的组，用户显式展开的组由 applySidebarState() 恢复。
+    const navGroups: NavGroup[] = [
+      {
+        id: 'target', label: '目标与环境', accent: '#b85c4b', icon: TargetTwo(ico),
+        items: [
+          { id: 'system-info', icon: TargetTwo(ico), title: '主机全景' },
+          { id: 'docker', icon: Whale(ico), title: 'Docker容器' },
+          { id: 'kubernetes', icon: Trace(ico), title: 'Kubernetes' },
+        ],
+      },
+      {
+        id: 'triage', label: '快速摸底', accent: '#c86f51', icon: Radar(ico),
+        items: [
+          { id: 'quick-detection', icon: Radar(ico), title: '快速检测' },
+          { id: 'secfix', icon: AutoFocus(ico), title: '安全速查' },
+          { id: 'emergency-commands', icon: Terminal(ico), title: '命令工作台' },
+        ],
+      },
+      {
+        id: 'investigation', label: '调查与证据', accent: '#a66b5b', icon: FolderProtection(ico),
+        items: [
+          { id: 'log-analysis', icon: Timeline(ico), title: '日志时间线' },
+          { id: 'packet-capture', icon: Trace(ico), title: '网络证据' },
+          { id: 'check-audit', icon: FileSearch(ico), title: '核查审计' },
+          { id: 'integrity', icon: FileFocus(ico), title: '文件完整性' },
+          { id: 'notes', icon: DocDetail(ico), title: '调查笔记' },
+        ],
+      },
+      {
+        id: 'response', label: '处置与恢复', accent: '#bc5d4c', icon: ShieldAdd(ico),
+        items: [
+          { id: 'firewall', icon: ShieldAdd(ico), title: '边界隔离' },
+          { id: 'snapshot', icon: History(ico), title: '快照回滚' },
+          { id: 'baseline-quick-edit', icon: SettingConfig(ico), title: '基线修复' },
+        ],
+      },
+      {
+        id: 'operations', label: '日常运维', accent: '#72867b', icon: Monitor(ico),
+        items: [
+          { id: 'database', icon: DatabaseSearch(ico), title: '数据库' },
+          { id: 'java-hot-update', icon: Fire(ico), title: 'Java热更新' },
+          { id: 'batch-servers', icon: ApplicationTwo(ico), title: '多机批量' },
+        ],
+      },
+      {
+        id: 'intelligence', label: '分析助手', accent: '#8a746d', icon: Compass(ico),
+        items: [
+          { id: 'ai-history', icon: Robot(ico), title: 'AI分析记录' },
+        ],
       },
     ];
 
-    const chevSmall = Right({ theme: 'outline', size: '13', fill: 'currentColor' });
-
-    return navGroups.map(group => {
-      const hasActive = group.items.some(it => it.id === currentPage);
-      const itemsHtml = group.items.map(it => {
-        const active = it.id === currentPage;
-        // 有「页内子导航」的页面（系统信息 / SFTP）在选中后，将其子菜单嵌套在本项下方（二级），
-        // 而非在侧边栏插入新的一级分组。
-        const hasSub = it.id === 'system-info' || it.id === 'remote-operations';
-        const btn = `
-          <button class="sidebar-item ${active ? 'active' : ''}${hasSub ? ' has-sub' : ''}" type="button" data-nav-id="${it.id}" title="${it.title}">
+    const renderItem = (it: NavItem): string => {
+      const active = it.id === currentPage;
+      return `
+          <button class="sidebar-item ${active ? 'active' : ''}" type="button" data-nav-id="${it.id}" title="${it.title}">
             <span class="sidebar-item-icon">${it.icon}</span>
             <span class="sidebar-item-label">${it.title}</span>
-            ${hasSub ? `<span class="sidebar-item-chev">${chevSmall}</span>` : ''}
           </button>`;
-        if (active && hasSub) {
-          const sub = it.id === 'system-info'
-            ? this.systemInfoRenderer.renderSidebarSubtree(this.state)
-            : this.renderSftpSubtree();
-          return `<div class="sidebar-item-wrap expanded">${btn}<div class="sidebar-subtree">${sub}</div></div>`;
-        }
-        return btn;
-      }).join('');
+    };
+
+    return navGroups.map(group => {
+      const allItems = group.sections ? group.sections.flatMap(s => s.items) : (group.items || []);
+      const hasActive = allItems.some(it => it.id === currentPage);
+      const itemsHtml = group.sections
+        ? group.sections.map(sec =>
+            `<div class="sidebar-itemsec">${sec.label}</div>${sec.items.map(renderItem).join('')}`
+          ).join('')
+        : allItems.map(renderItem).join('');
 
       return `
-        <div class="sidebar-group ${hasActive ? 'open' : ''}" data-group-id="${group.id}" style="--accent:${group.accent}">
+        <div class="sidebar-group ${hasActive ? 'open has-active' : ''}" data-group-id="${group.id}" style="--accent:${group.accent}">
           <button class="sidebar-group-row ${hasActive ? 'active' : ''}" type="button" title="${group.label}"
                   onclick="window.toggleSidebarGroup && window.toggleSidebarGroup('${group.id}')">
             <span class="sidebar-gicon">${group.icon}</span>
@@ -599,52 +585,83 @@ export class ModernUIRenderer {
     }).join('');
   }
 
-  /** SFTP「文件调查」页内子导航（嵌套在「SFTP文件」项下方，二级）。叶子点击导航到对应路径。 */
-  private renderSftpSubtree(): string {
-    const ico = { theme: 'outline' as const, size: '18', fill: 'currentColor' };
-    const folder = FolderOpen(ico);
-    const cur = String((window as any).sftpManager?.currentPath || '');
-
-    const groups: Array<{ id: string; label: string; accent: string; items: Array<{ path: string; label: string; risk?: string }> }> = [
-      { id: 'sftp-common', label: '常用位置', accent: '#6db3ff', items: [
-        { path: '/', label: '根目录' },
-        { path: '/root', label: '/root' },
-        { path: '/home', label: '/home' },
-        { path: '/tmp', label: '/tmp' },
-        { path: '/var/log', label: '/var/log' },
-      ]},
-      { id: 'sftp-sensitive', label: '敏感目录', accent: '#f87171', items: [
-        { path: '/root/.ssh', label: '/root/.ssh', risk: 'warn' },
-        { path: '/etc/cron.d', label: '/etc/cron.d', risk: 'warn' },
-        { path: '/var/spool/cron', label: '/var/spool/cron', risk: 'warn' },
-        { path: '/etc/init.d', label: '/etc/init.d', risk: 'warn' },
-        { path: '/dev/shm', label: '/dev/shm', risk: 'high' },
-      ]},
-      { id: 'sftp-fav', label: '收藏位置', accent: '#34d399', items: [
-        { path: '/var/www', label: '/var/www' },
-        { path: '/opt', label: '/opt' },
-        { path: '/usr/local/bin', label: '/usr/local/bin' },
-      ]},
-    ];
-
-    return groups.map(g => {
-      const items = g.items.map(it => {
-        const active = it.path === cur;
-        const dot = it.risk ? `<span class="sftp-loc-dot ${it.risk}"></span>` : '';
-        return `
-          <button class="sidebar-item sidebar-subitem${active ? ' active' : ''}" type="button" data-path="${it.path}" title="${it.path}" onclick="window.sftpManager && window.sftpManager.navigateToPath('${it.path}')">
-            <span class="sidebar-item-icon">${folder}</span>
-            <span class="sidebar-item-label">${it.label}</span>
-            ${dot}
-          </button>`;
-      }).join('');
-      return `<div class="sidebar-subsec" style="--accent:${g.accent}">${g.label}</div>${items}`;
-    }).join('');
-  }
-
   /**
    * 渲染主工作区
    */
+  public renderIncidentContextBar(): string {
+    const target = activeTargetContext.get();
+    const incident = target ? incidentCaseManager.getActiveCase() : null;
+    const targetLabel = target
+      ? `${target.username}@${target.host}:${target.port}`
+      : '未连接目标';
+    const targetDetail = target
+      ? `指纹 ${target.hostKeyFingerprint}`
+      : '建立 SSH 会话后锁定目标身份与证据范围';
+    const caseTitle = incident?.title || '尚未建立案件';
+    const caseMeta = incident
+      ? `${incident.evidence.length} 证据 · ${incident.iocs.length} IOC`
+      : '目标连接后自动创建隔离案件';
+
+    const stages = ['识别', '取证', '分析', '处置', '复核'];
+    const stageByPage: Record<string, number> = {
+      'system-info': 0,
+      docker: 0,
+      kubernetes: 0,
+      'quick-detection': 1,
+      secfix: 1,
+      'log-analysis': 1,
+      'packet-capture': 1,
+      'check-audit': 2,
+      integrity: 2,
+      notes: 2,
+      'ai-history': 2,
+      'emergency-commands': 3,
+      firewall: 3,
+      'baseline-quick-edit': 3,
+      snapshot: 4,
+      database: 0,
+      'java-hot-update': 3,
+      'batch-servers': 0,
+    };
+    const activeStage = stageByPage[this.state.currentPage] ?? 0;
+    const stageHtml = stages.map((stage, index) => `
+      <span class="incident-stage ${index === activeStage ? 'active' : ''} ${index < activeStage ? 'complete' : ''}">
+        <span class="incident-stage-index">${index + 1}</span>
+        <span>${stage}</span>
+      </span>`).join('');
+
+    return `
+      <section class="incident-context-bar" aria-label="当前目标与响应阶段">
+        <div class="incident-target-block">
+          <span class="incident-context-icon ${target ? 'connected' : ''}" aria-hidden="true">
+            ${TargetTwo({ theme: 'outline', size: '18', fill: 'currentColor' })}
+          </span>
+          <div class="incident-context-copy">
+            <span class="incident-eyebrow">${target ? 'ACTIVE TARGET' : 'TARGET CONTEXT'}</span>
+            <strong title="${escapeHtml(targetLabel)}">${escapeHtml(targetLabel)}</strong>
+            <small title="${escapeHtml(targetDetail)}">${escapeHtml(targetDetail)}</small>
+          </div>
+          <span class="incident-trust-state ${target ? 'trusted' : ''}">${target ? '指纹已锁定' : '等待连接'}</span>
+        </div>
+
+        <div class="incident-stage-track" aria-label="响应阶段">
+          ${stageHtml}
+        </div>
+
+        <button type="button" class="incident-case-summary" data-ui-action="open-case-workspace" title="打开案件工作区">
+          <span class="incident-case-icon" aria-hidden="true">
+            ${FolderProtection({ theme: 'outline', size: '18', fill: 'currentColor' })}
+          </span>
+          <span class="incident-context-copy">
+            <span class="incident-eyebrow">CASE WORKSPACE</span>
+            <strong>${escapeHtml(caseTitle)}</strong>
+            <small>${escapeHtml(caseMeta)}</small>
+          </span>
+          ${Right({ theme: 'outline', size: '14', fill: 'currentColor' })}
+        </button>
+      </section>`;
+  }
+
   renderMainWorkspace(): string {
     return `
       <div class="main-workspace">
@@ -1030,7 +1047,10 @@ export class ModernUIRenderer {
    */
   private static remoteOperationsInitTimer: number | null = null;
 
-  private renderRemoteOperationsPage(): string {
+  /**
+   * 渲染 SFTP 远程文件页面（主窗口工作区与 SFTP 独立窗口共用）
+   */
+  public renderRemoteOperationsPage(): string {
     // 防止重复设置定时器
     if (ModernUIRenderer.remoteOperationsInitTimer) {
       clearTimeout(ModernUIRenderer.remoteOperationsInitTimer);
@@ -1214,7 +1234,7 @@ export class ModernUIRenderer {
 
         <div class="bs-warn">
           ${statusIcon('warning', { size: 14 })}
-          <span>批量执行会逐台建立独立 SSH 连接，因此<strong>会断开你当前的会话</strong>。任务结束后会尝试自动重连；密码不落盘，密码认证的连接可能需要手动重连。</span>
+          <span>批量执行使用独立 SSH 会话，不替换当前工作目标。为防止中间人攻击，目标必须先交互连接一次并保存主机指纹。</span>
         </div>
 
         <div class="bs-body">
@@ -1225,11 +1245,25 @@ export class ModernUIRenderer {
               <button class="modern-btn secondary bs-mini" data-bs-action="select-all">全选</button>
               <button class="modern-btn secondary bs-mini" data-bs-action="select-none">清空</button>
             </div>
+            <div class="bs-filter-row">
+              <input id="bs-target-filter" class="bs-input" placeholder="按名称、主机、角色、分组或标签筛选" />
+              <select id="bs-environment-filter" class="bs-input">
+                <option value="">全部环境</option>
+                <option value="production">production</option><option value="staging">staging</option>
+                <option value="development">development</option><option value="ctf">ctf</option>
+              </select>
+            </div>
             <div id="bs-server-list" class="bs-server-list"></div>
           </section>
 
           <section class="bs-panel bs-compose">
-            <div class="bs-panel-head"><span class="bs-panel-title">命令</span></div>
+            <div class="bs-panel-head">
+              <span class="bs-panel-title">命令与发布策略</span>
+              <select id="bs-template" class="bs-input bs-template-select"><option value="">选择任务模板…</option></select>
+              <button class="modern-btn secondary bs-mini" data-bs-action="load-template">载入</button>
+              <button class="modern-btn secondary bs-mini" data-bs-action="save-template">保存模板</button>
+              <button class="modern-btn secondary bs-mini" data-bs-action="delete-template">删除</button>
+            </div>
             <label class="bs-field">
               <span class="bs-label">任务名称（可选）</span>
               <input id="bs-task-name" type="text" class="bs-input" placeholder="例如：统一关闭 SSH root 登录" />
@@ -1244,6 +1278,16 @@ export class ModernUIRenderer {
               <input id="bs-restore" type="text" class="bs-input" spellcheck="false"
                 placeholder="填写后会随每台记录写入操作日志，可在「快照回滚」里一键撤销" />
             </label>
+            <label class="bs-field">
+              <span class="bs-label">独立验证命令（退出码必须为 0）</span>
+              <input id="bs-verify" type="text" class="bs-input" spellcheck="false"
+                placeholder="例如：systemctl is-active sshd &amp;&amp; sshd -t" />
+            </label>
+            <div class="bs-strategy-row">
+              <label class="bs-field"><span class="bs-label">发布策略</span><select id="bs-strategy" class="bs-input"><option value="rolling">Rolling 逐台</option><option value="canary">Canary 先试点</option></select></label>
+              <label class="bs-field"><span class="bs-label">Canary 台数</span><input id="bs-canary-count" type="number" class="bs-input" value="1" min="1" max="100"></label>
+              <label class="bs-check"><input id="bs-stop-on-failure" type="checkbox" checked><span>Rolling 遇错即停</span></label>
+            </div>
             <div class="bs-actions">
               <button id="bs-run" class="modern-btn primary" data-bs-action="run" disabled>开始执行</button>
               <button id="bs-cancel" class="modern-btn secondary" data-bs-action="cancel" hidden>取消</button>
@@ -1284,26 +1328,25 @@ export class ModernUIRenderer {
    */
   renderStatusBar(): string {
     const isConn = this.state.isConnected;
-    const server = isConn ? (this.state.serverInfo?.name || this.state.currentServer || '') : '';
+    const target = activeTargetContext.get();
+    const server = isConn && target
+      ? `${target.username}@${target.host}:${target.port}`
+      : isConn ? (this.state.serverInfo?.name || this.state.currentServer || '') : '';
+    const targetTitle = target
+      ? `主机指纹：${target.hostKeyFingerprint} · 会话 epoch：${target.epoch}`
+      : '';
 
     return `
       <div class="status-bar">
         <div class="status-left">
-          <span class="status-item">
+          <span class="status-item" title="${escapeHtml(targetTitle)}">
             <span class="status-dot ${isConn ? 'connected' : 'disconnected'}"></span>
-            ${isConn ? server : '未连接'}
+            ${isConn ? escapeHtml(server) : '未连接'}
           </span>
-          ${isConn ? `
-            <button class="status-terminal-btn" onclick="window.switchPage?.('ssh-terminal')" title="打开 SSH 终端">
-              <svg width="12" height="12" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="4" y="8" width="40" height="32" rx="2" fill="none"/>
-                <path d="M12 18L19 24L12 30"/><path d="M23 32H36"/>
-              </svg>
-              终端
-            </button>
-          ` : ''}
         </div>
         <div class="status-right">
+          <button type="button" class="status-item clickable" id="status-case-btn" title="打开当前目标的案件工作区">案件</button>
+          <button type="button" class="status-item clickable" id="status-log-btn" title="查看前后端运行日志">${createIconHTML('Log', { size: 13 })}</button>
           <span class="status-item">v${APP_VERSION}</span>
         </div>
       </div>
@@ -1613,6 +1656,7 @@ export class ModernUIRenderer {
                         <option value="openai">OpenAI (GPT-4o/GPT-3.5)</option>
                         <option value="deepseek">DeepSeek (国产大模型)</option>
                         <option value="claude">Claude (Anthropic)</option>
+                        <option value="ollama">Ollama (本地模型)</option>
                         <option value="custom">自定义 API</option>
                       </select>
                     </div>
@@ -1675,16 +1719,42 @@ export class ModernUIRenderer {
                       display: block;
                       margin-bottom: 8px;
                     ">模型</label>
-                    <input type="text" id="ai-model" placeholder="例如: gpt-3.5-turbo" style="
-                      width: 100%;
-                      padding: 10px 12px;
-                      border: 1px solid var(--border-color);
-                      border-radius: var(--border-radius);
-                      background: var(--bg-primary);
-                      color: var(--text-primary);
-                      font-size: 14px;
-                      box-sizing: border-box;
-                    ">
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                      <input type="text" id="ai-model" list="ai-model-list" placeholder="例如: gpt-4o-mini" style="
+                        flex: 1;
+                        padding: 10px 12px;
+                        border: 1px solid var(--border-color);
+                        border-radius: var(--border-radius);
+                        background: var(--bg-primary);
+                        color: var(--text-primary);
+                        font-size: 14px;
+                        box-sizing: border-box;
+                      ">
+                      <button type="button" id="ai-fetch-models" class="modern-btn secondary" style="
+                        padding: 10px 14px;
+                        font-size: 13px;
+                        white-space: nowrap;
+                        flex-shrink: 0;
+                      ">拉取模型</button>
+                    </div>
+                    <datalist id="ai-model-list">
+                      <option value="gpt-4o" label="OpenAI GPT-4o">
+                      <option value="gpt-4o-mini" label="OpenAI GPT-4o Mini">
+                      <option value="gpt-4-turbo" label="OpenAI GPT-4 Turbo">
+                      <option value="claude-sonnet-4-20250514" label="Claude Sonnet 4">
+                      <option value="claude-3-5-sonnet-20241022" label="Claude 3.5 Sonnet">
+                      <option value="claude-3-haiku-20240307" label="Claude 3 Haiku">
+                      <option value="deepseek-chat" label="DeepSeek Chat">
+                      <option value="deepseek-reasoner" label="DeepSeek Reasoner">
+                      <option value="qwen-turbo" label="通义千问 Turbo">
+                      <option value="qwen-plus" label="通义千问 Plus">
+                    </datalist>
+                    <div id="ai-models-status" style="
+                      font-size: 12px;
+                      color: var(--text-secondary);
+                      margin-top: 4px;
+                      display: none;
+                    "></div>
                   </div>
 
                   <div class="setting-item" style="margin-bottom: var(--spacing-lg);">
@@ -1726,6 +1796,11 @@ export class ModernUIRenderer {
                       ">
                       使用代理
                     </label>
+                    <div style="
+                      font-size: 12px;
+                      color: var(--text-secondary);
+                      margin: -6px 0 12px 26px;
+                    ">代理仅对 AI 请求生效</div>
 
                     <div id="ai-proxy-settings" style="
                       display: none;
@@ -1901,54 +1976,6 @@ export class ModernUIRenderer {
                   max-height:220px;overflow-y:auto;display:none;
                   background:var(--bg-tertiary);padding:8px;border-radius:6px;
                 "></div>
-              </div>
-
-              <!-- 诊断日志:正式包 drop 掉了 console,logger 的环形缓冲区是唯一能
-                   看到运行时错误的地方,必须给它一个出口,否则赛场上排障无从下手 -->
-              <div class="settings-section" style="
-                background: var(--bg-secondary);
-                border-radius: var(--border-radius-lg);
-                padding: var(--spacing-lg);
-                margin-bottom: var(--spacing-lg);
-              ">
-                <h3 style="
-                  font-size: 16px;
-                  font-weight: 600;
-                  color: var(--text-primary);
-                  margin: 0 0 var(--spacing-md) 0;
-                ">诊断日志</h3>
-                <p style="font-size:12px;color:var(--text-secondary);margin:0 0 12px;">
-                  记录最近 500 条运行日志。正式打包会移除所有 console 输出，出问题时请从这里导出日志。
-                  排查具体问题时把级别调到「调试」可拿到最详细的过程记录。
-                </p>
-                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
-                  <label style="font-size:12px;color:var(--text-secondary);">记录级别</label>
-                  <select id="diag-log-level" onchange="window.__diagLogSetLevel?.(this.value)" style="
-                    padding:6px 10px;font-size:12px;background:var(--bg-tertiary);color:var(--text-primary);
-                    border:1px solid var(--border-color);border-radius:6px;">
-                    <option value="debug">调试（最详细）</option>
-                    <option value="info">信息（默认）</option>
-                    <option value="warn">警告</option>
-                    <option value="error">仅错误</option>
-                  </select>
-                </div>
-                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-                  <button class="modern-btn primary" style="padding:8px 16px;font-size:13px;"
-                    onclick="window.__diagLogRefresh?.()">刷新</button>
-                  <button class="modern-btn secondary" style="padding:8px 16px;font-size:13px;"
-                    onclick="window.__diagLogCopy?.()">复制</button>
-                  <button class="modern-btn secondary" style="padding:8px 16px;font-size:13px;"
-                    onclick="window.__diagLogExport?.()">导出为文件</button>
-                  <button class="modern-btn secondary" style="padding:8px 16px;font-size:13px;"
-                    onclick="window.__diagLogClear?.()">清空</button>
-                  <span id="diag-log-count" style="font-size:12px;color:var(--text-secondary);"></span>
-                </div>
-                <div id="diag-log-view" style="
-                  margin-top:12px;font-size:11px;font-family:var(--font-mono, monospace);
-                  color:var(--text-secondary);white-space:pre-wrap;word-break:break-all;
-                  max-height:240px;overflow-y:auto;
-                  background:var(--bg-tertiary);padding:8px;border-radius:6px;
-                ">点击「刷新」查看日志</div>
               </div>
             </div>
 

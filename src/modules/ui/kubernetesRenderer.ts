@@ -3,7 +3,7 @@ import {
     Refresh, Delete, Shield, Lock, Fire,
     Log, Terminal, FileText, Analysis,
     Config, Rocket,
-    CheckOne, CloseOne
+    CheckOne, CloseOne, Trace
 } from '@icon-park/svg';
 import {
     K8sPod, K8sDeployment, K8sService, K8sNode, K8sClusterStats,
@@ -139,6 +139,24 @@ export class KubernetesRenderer {
             this.loading = false;
             this.updateContentArea();
         }
+    }
+
+    /** 丢弃上一 SSH 会话渲染出的集群数据，避免新目标首屏短暂显示旧集群。 */
+    public resetTargetState(): void {
+        this.currentNamespace = '';
+        this.searchTerm = '';
+        this.loading = false;
+        this.data = {
+            pods: [], deployments: [], services: [], nodes: [],
+            stats: null, namespaces: [], events: [],
+            networkPolicies: [], configMaps: [], secrets: [],
+            pvs: [], pvcs: [], daemonSets: [], statefulSets: [],
+            cronJobs: [], jobs: [], hpas: [], ingresses: [],
+            roles: [], clusterRoles: [], roleBindings: [], clusterRoleBindings: [],
+            auditResult: null, anomalies: [], emergencyActions: [],
+            isolatedPods: [], forensicReport: null,
+        };
+        this.updateContentArea();
     }
 
     private async fetchTabData(manager: any, ns?: string): Promise<void> {
@@ -279,7 +297,7 @@ export class KubernetesRenderer {
         return `
         <div class="k8s-header">
             <div class="k8s-header-left">
-                <div class="k8s-header-icon">${icon(LinkCloud, '24', 'filled')}</div>
+                <div class="k8s-header-icon">${icon(Trace, '22')}</div>
                 <div>
                     <h2 class="k8s-header-title">Kubernetes 管理</h2>
                     <div class="k8s-header-subtitle">集群资源管理与应急响应</div>
@@ -984,32 +1002,32 @@ export class KubernetesRenderer {
             <h3 style="display:flex;align-items:center;gap:8px;">${icon(Fire, '18')} 快速操作</h3>
             <div class="k8s-emergency-actions">
                 <button class="k8s-emergency-action-btn danger" data-k8s-action="emergency-isolate">
-                    <div class="k8s-emergency-action-icon" style="background:rgba(220,38,38,0.1);color:#dc2626;">${icon(Lock, '24')}</div>
+                    <div class="k8s-emergency-action-icon" style="background:var(--sev-critical-bg);color:var(--sev-critical-fg);">${icon(Lock, '24')}</div>
                     <div class="k8s-emergency-action-title">隔离 Pod</div>
                     <div class="k8s-emergency-action-desc">应用 deny-all NetworkPolicy</div>
                 </button>
                 <button class="k8s-emergency-action-btn danger" data-k8s-action="emergency-scale-zero">
-                    <div class="k8s-emergency-action-icon" style="background:rgba(239,68,68,0.1);color:#ef4444;">${icon(CloseOne, '24')}</div>
+                    <div class="k8s-emergency-action-icon" style="background:var(--sev-critical-bg);color:var(--sev-critical-fg);">${icon(CloseOne, '24')}</div>
                     <div class="k8s-emergency-action-title">缩容至 0</div>
                     <div class="k8s-emergency-action-desc">将 Deployment 副本数缩至 0</div>
                 </button>
                 <button class="k8s-emergency-action-btn" data-k8s-action="emergency-cordon">
-                    <div class="k8s-emergency-action-icon" style="background:rgba(245,158,11,0.1);color:#f59e0b;">${icon(Shield, '24')}</div>
+                    <div class="k8s-emergency-action-icon" style="background:var(--sev-warn-bg);color:var(--sev-warn-fg);">${icon(Shield, '24')}</div>
                     <div class="k8s-emergency-action-title">封锁节点</div>
                     <div class="k8s-emergency-action-desc">阻止新 Pod 调度到节点</div>
                 </button>
                 <button class="k8s-emergency-action-btn" data-k8s-action="emergency-drain">
-                    <div class="k8s-emergency-action-icon" style="background:rgba(59,130,246,0.1);color:#3b82f6;">${icon(Rocket, '24')}</div>
+                    <div class="k8s-emergency-action-icon" style="background:color-mix(in srgb, var(--primary-color) 10%, transparent);color:var(--primary-color);">${icon(Rocket, '24')}</div>
                     <div class="k8s-emergency-action-title">排空节点</div>
                     <div class="k8s-emergency-action-desc">安全驱逐节点上所有 Pod</div>
                 </button>
                 <button class="k8s-emergency-action-btn" data-k8s-action="emergency-forensic">
-                    <div class="k8s-emergency-action-icon" style="background:rgba(139,92,246,0.1);color:#8b5cf6;">${icon(Analysis, '24')}</div>
+                    <div class="k8s-emergency-action-icon" style="background:color-mix(in srgb, var(--accent-purple) 10%, transparent);color:var(--accent-purple);">${icon(Analysis, '24')}</div>
                     <div class="k8s-emergency-action-title">取证快照</div>
                     <div class="k8s-emergency-action-desc">捕获 Pod 完整取证数据</div>
                 </button>
                 <button class="k8s-emergency-action-btn" data-k8s-action="run-audit">
-                    <div class="k8s-emergency-action-icon" style="background:rgba(16,185,129,0.1);color:#10b981;">${icon(CheckOne, '24')}</div>
+                    <div class="k8s-emergency-action-icon" style="background:var(--sev-success-bg);color:var(--sev-success-fg);">${icon(CheckOne, '24')}</div>
                     <div class="k8s-emergency-action-title">安全审计</div>
                     <div class="k8s-emergency-action-desc">一键扫描集群安全风险</div>
                 </button>

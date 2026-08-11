@@ -2,6 +2,8 @@
  * 文件/文件夹打包模态对话框
  */
 
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH';
+
 export class CompressModal {
   private modal: HTMLElement | null = null;
   private isVisible: boolean = false;
@@ -309,7 +311,7 @@ export class CompressModal {
 
     try {
       // 调用后端API进行压缩
-      await (window as any).__TAURI__.core.invoke('sftp_compress', {
+      await invokeTargetBoundSSH('sftp_compress', {
         sourcePath: this.currentSourcePath,
         targetPath: targetPath,
         format: format

@@ -4,6 +4,7 @@
 
 import * as IconPark from '@icon-park/svg'
 import { BaseContextMenu, type MenuAction } from './contextMenu/baseContextMenu'
+import { shq } from '../core/shellEscape'
 
 export class ServiceContextMenu extends BaseContextMenu {
   private currentService: string = ''
@@ -257,6 +258,10 @@ export class ServiceContextMenu extends BaseContextMenu {
 
   protected resolveAction(action: string): MenuAction | null {
     const service = this.currentService
+    if (!/^[A-Za-z0-9_.@:-]{1,256}$/.test(service)) return null
+    const quotedService = shq(service)
+    const activeState = `if systemctl is-active --quiet ${quotedService}; then echo active; else echo inactive; fi`
+    const enabledState = `if systemctl is-enabled --quiet ${quotedService}; then echo enabled; else echo disabled; fi`
     const actions: Record<string, MenuAction> = {
       // 基本信息
       'status': { command: `systemctl status ${service} 2>/dev/null || service ${service} status 2>/dev/null || echo "无法获取服务状态"`, title: `服务状态 - ${service}`, actionName: '查看服务状态' },
@@ -264,12 +269,36 @@ export class ServiceContextMenu extends BaseContextMenu {
       'details': { command: `systemctl show ${service} 2>/dev/null || echo "无法获取详细信息"`, title: `详细信息 - ${service}`, actionName: '查看详细信息' },
 
       // 服务控制
-      'start': { command: `systemctl start ${service} 2>&1 || service ${service} start 2>&1`, title: `启动服务 - ${service}`, actionName: '启动服务' },
-      'stop': { command: `systemctl stop ${service} 2>&1 || service ${service} stop 2>&1`, title: `停止服务 - ${service}`, actionName: '停止服务' },
-      'restart': { command: `systemctl restart ${service} 2>&1 || service ${service} restart 2>&1`, title: `重启服务 - ${service}`, actionName: '重启服务' },
-      'reload': { command: `systemctl reload ${service} 2>&1 || service ${service} reload 2>&1 || echo "该服务不支持reload操作"`, title: `重新加载配置 - ${service}`, actionName: '重新加载配置' },
-      'enable': { command: `systemctl enable ${service} 2>&1 && echo "✓ 已启用开机自启" || echo "✗ 启用失败"`, title: `启用开机自启 - ${service}`, actionName: '启用开机自启' },
-      'disable': { command: `systemctl disable ${service} 2>&1 && echo "✓ 已禁用开机自启" || echo "✗ 禁用失败"`, title: `禁用开机自启 - ${service}`, actionName: '禁用开机自启' },
+      'start': {
+        command: `systemctl start ${quotedService} 2>&1 || service ${quotedService} start 2>&1`,
+        title: `启动服务 - ${service}`, actionName: '启动服务', mutating: true, dangerous: false,
+        verifyCommand: activeState, verifyExpected: 'active',
+      },
+      'stop': {
+        command: `systemctl stop ${quotedService} 2>&1 || service ${quotedService} stop 2>&1`,
+        title: `停止服务 - ${service}`, actionName: '停止服务', mutating: true, dangerous: true,
+        verifyCommand: activeState, verifyExpected: 'inactive',
+      },
+      'restart': {
+        command: `systemctl restart ${quotedService} 2>&1 || service ${quotedService} restart 2>&1`,
+        title: `重启服务 - ${service}`, actionName: '重启服务', mutating: true, dangerous: true,
+        verifyCommand: activeState, verifyExpected: 'active',
+      },
+      'reload': {
+        command: `systemctl reload ${quotedService} 2>&1 || service ${quotedService} reload 2>&1`,
+        title: `重新加载配置 - ${service}`, actionName: '重新加载配置', mutating: true, dangerous: true,
+        verifyCommand: activeState, verifyExpected: 'active',
+      },
+      'enable': {
+        command: `systemctl enable ${quotedService}`,
+        title: `启用开机自启 - ${service}`, actionName: '启用开机自启', mutating: true, dangerous: false,
+        verifyCommand: enabledState, verifyExpected: 'enabled',
+      },
+      'disable': {
+        command: `systemctl disable ${quotedService}`,
+        title: `禁用开机自启 - ${service}`, actionName: '禁用开机自启', mutating: true, dangerous: true,
+        verifyCommand: enabledState, verifyExpected: 'disabled',
+      },
 
       // 日志查询
       'logs': { command: `journalctl -u ${service} -n 100 --no-pager 2>/dev/null || tail -100 /var/log/${service}.log 2>/dev/null || echo "无法获取日志"`, title: `服务日志 - ${service}`, actionName: '查看服务日志' },

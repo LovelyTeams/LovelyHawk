@@ -7,9 +7,11 @@ import { sshConnectionManager } from './sshConnectionManager';
 import { iconForFile, createIconHTML } from '../ui/iconMapping';
 // 目标机由攻击者控制：文件名、属主、路径都是不可信输入，全部要转义后才能进 innerHTML
 import { escapeHtml } from '../core/htmlEscape';
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH';
+import { activeTargetContext } from '../core/targetContext';
 
 import { logger } from '../core/logger';
-/** 正式包 drop 掉 console，诊断信息只有进 logger 才留得下来（设置→工具→诊断日志 可导出） */
+/** 正式包 drop 掉 console，诊断信息只有进 logger 才留得下来（状态栏「日志」按钮可导出） */
 const log = logger.module('SFTP');
 
 
@@ -39,6 +41,7 @@ export class SftpManager {
   private collator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true, ignorePunctuation: true });
   private uidNameCache: Record<string, string> = {};
   private uidCacheLoaded = false;
+  private targetSessionId = '';
   /** getCurrentFiles() 的排序结果缓存；fileList 或 sortMode 变化时置空 */
   private sortedCache: SftpFileInfo[] | null = null;
 
@@ -108,6 +111,7 @@ export class SftpManager {
    * 右键"删除"删掉的是另一个文件，而详情面板显示的又是对的那个。
    */
   getCurrentFiles(): SftpFileInfo[] {
+    this.synchronizeTarget();
     if (!this.sortedCache) this.sortedCache = this.sortFiles(this.fileList);
     return this.sortedCache;
   }
@@ -127,6 +131,7 @@ export class SftpManager {
    * 获取当前路径
    */
   getCurrentPath(): string {
+    this.synchronizeTarget();
     return this.currentPath;
   }
 
@@ -145,16 +150,34 @@ export class SftpManager {
    * 获取当前文件列表
    */
   getFileList(): SftpFileInfo[] {
+    this.synchronizeTarget();
     return this.fileList;
+  }
+
+  /** 清除上一 SSH 会话的目录、文件和 UID 映射，避免目标切换后展示旧主机数据。 */
+  synchronizeTarget(): boolean {
+    const nextSessionId = activeTargetContext.get()?.sessionId || '';
+    if (nextSessionId === this.targetSessionId) return false;
+    this.targetSessionId = nextSessionId;
+    this.currentPath = '/';
+    this.fileList = [];
+    this.sortedCache = null;
+    this.uidNameCache = {};
+    this.uidCacheLoaded = false;
+    this.notifyListeners();
+    return true;
   }
 
   /**
    * 异步加载 uid→username 映射缓存
    */
   private async loadUidNameCache(): Promise<void> {
+    this.synchronizeTarget();
     if (this.uidCacheLoaded) return;
+    const target = activeTargetContext.get();
+    if (!target) return;
     try {
-      const result: any = await (window as any).__TAURI__.core.invoke('ssh_execute_command_direct', {
+      const result: any = await invokeTargetBoundSSH('ssh_execute_command_direct', {
         command: "cat /etc/passwd 2>/dev/null | cut -d: -f1,3"
       });
       const output = result?.output || '';
@@ -162,8 +185,9 @@ export class SftpManager {
         const [name, uid] = line.split(':');
         if (name && uid) this.uidNameCache[uid.trim()] = name.trim();
       }
+      if (!activeTargetContext.matches(target)) throw new Error('UID 缓存加载期间活动目标已变化');
       // Also load group names
-      const gResult: any = await (window as any).__TAURI__.core.invoke('ssh_execute_command_direct', {
+      const gResult: any = await invokeTargetBoundSSH('ssh_execute_command_direct', {
         command: "cat /etc/group 2>/dev/null | cut -d: -f1,3"
       });
       const gOutput = gResult?.output || '';
@@ -171,9 +195,11 @@ export class SftpManager {
         const [name, gid] = line.split(':');
         if (name && gid) this.uidNameCache[`g${gid.trim()}`] = name.trim();
       }
+      if (!activeTargetContext.matches(target)) throw new Error('GID 缓存加载期间活动目标已变化');
       this.uidCacheLoaded = true;
-    } catch {
-      // Silent fail - will show numeric uids
+    } catch (error) {
+      log.warn('UID/GID 名称缓存加载失败，将显示数字 ID:', error);
+      this.synchronizeTarget();
     }
   }
 
@@ -203,6 +229,7 @@ export class SftpManager {
    *          决定是否回滚已经改掉的 currentPath。
    */
   async refreshFileList(): Promise<boolean> {
+    this.synchronizeTarget();
     if (!sshConnectionManager.isConnected()) {
       log.warn('SSH未连接，无法刷新SFTP文件列表');
       return false;
@@ -214,7 +241,7 @@ export class SftpManager {
         this.loadUidNameCache().catch((e) => log.warn('UID缓存加载失败:', e));
       }
 
-      const files = await (window as any).__TAURI__.core.invoke('sftp_list_files', {
+      const files = await invokeTargetBoundSSH<SftpFileInfo[]>('sftp_list_files', {
         path: this.currentPath
       });
 
@@ -227,6 +254,7 @@ export class SftpManager {
       return true;
 
     } catch (error) {
+      this.synchronizeTarget();
       log.error('获取SFTP文件列表失败:', error);
       window.showNotification && window.showNotification(`获取文件列表失败: ${error}`, 'error');
       // 返回 false 而不是 throw：本方法有 8 个调用点，其中几个是裸 await，
@@ -245,6 +273,8 @@ export class SftpManager {
       return;
     }
 
+    this.synchronizeTarget();
+    const navigationSessionId = this.targetSessionId;
     const previousPath = this.currentPath;
     try {
       this.isNavigating = true;
@@ -252,6 +282,7 @@ export class SftpManager {
       log.debug('导航到路径:', normalized);
       this.currentPath = normalized;
       const ok = await this.refreshFileList();
+      if (this.targetSessionId !== navigationSessionId) return;
       if (!ok && previousPath !== normalized) {
         // 加载失败（如权限不足）时回到原路径并重绘，
         // 避免出现"面包屑显示新目录、列表却是旧目录内容"的错位状态。
@@ -361,6 +392,7 @@ export class SftpManager {
    * 渲染面包屑导航 HTML
    */
   renderBreadcrumbHTML(): string {
+    this.synchronizeTarget();
     const parts = this.currentPath.split('/').filter(Boolean);
     // 路径经 data-path 传递、由委托监听读取 dataset —— 值不会被当作 JS 解析。
     // 原先是内联 onclick 里拼 navigateToPath('<路径>')，一个名为
@@ -547,6 +579,7 @@ export class SftpManager {
    * 渲染文件列表HTML（返回<tr>行，供#sftp-file-list tbody插入）
    */
   renderFileListHTML(): string {
+    this.synchronizeTarget();
     // 未连接时显示一行提示
     if (!sshConnectionManager.isConnected()) {
       return `

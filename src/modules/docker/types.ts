@@ -72,6 +72,14 @@ export interface DockerActionResult {
   message: string;
   updatedState?: string | null;
   updatedStatus?: string | null;
+  command?: string;
+  backupInfo?: string;
+  restoreCommand?: string;
+  verifyCommand?: string;
+  verifyOutput?: string;
+  verified?: boolean;
+  restoreVerifyCommand?: string;
+  restoreVerifyExpected?: string;
 }
 
 export interface DockerLogsOptions {
@@ -243,6 +251,12 @@ export interface DockerEmergencyAction {
   rollbackCommand: string;
   result?: string;
   error?: string;
+  targetIdentity?: import('../core/targetContext').TargetIdentity;
+  exitCode?: number | null;
+  timedOut?: boolean;
+  verified?: boolean;
+  verifyOutput?: string;
+  operationId?: string;
 }
 
 export interface DockerForensicReport {

@@ -3,6 +3,8 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
+import { activeTargetContext, type TargetIdentity } from '../core/targetContext';
+import { classifyCommandResult } from '../emergency/commandExecution';
 
 export interface FixHistoryEntry {
   id: string;
@@ -16,11 +18,15 @@ export interface FixHistoryEntry {
   afterValue?: string;
   backupInfo?: string;      // 备份文件路径或命令
   restoreCommand?: string;  // 回滚命令
+  restoreVerifyCommand?: string;
+  restoreVerifyPattern?: string;
+  restoreExpectedValue?: string;
   command?: string;
   output: string;
   success: boolean;
   rolledBack: boolean;
   server: string;
+  target?: TargetIdentity;
 }
 
 const STORAGE_KEY = 'detection-fix-history';
@@ -46,8 +52,20 @@ class FixHistoryManager {
 
   addEntry(entry: Omit<FixHistoryEntry, 'id' | 'timestamp' | 'rolledBack'>): FixHistoryEntry {
     this.load();
+    const activeTarget = activeTargetContext.get();
     const full: FixHistoryEntry = {
       ...entry,
+      target: entry.target ?? (
+        activeTarget?.host === entry.server
+          ? {
+              sessionId: activeTarget.sessionId,
+              hostKeyFingerprint: activeTarget.hostKeyFingerprint,
+              host: activeTarget.host,
+              port: activeTarget.port,
+              username: activeTarget.username,
+            }
+          : undefined
+      ),
       id: `fix_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
       timestamp: Date.now(),
       rolledBack: false,
@@ -73,13 +91,39 @@ class FixHistoryManager {
     if (!entry) return { success: false, output: '记录不存在' };
     if (entry.rolledBack) return { success: false, output: '已回滚过' };
     if (!entry.restoreCommand) return { success: false, output: '无回滚命令' };
+    if (!entry.restoreVerifyCommand || !entry.restoreVerifyPattern || entry.restoreExpectedValue === undefined) {
+      return { success: false, output: '旧修复记录缺少回滚验证契约，已阻止自动回滚' };
+    }
+    if (!entry.target) return { success: false, output: '旧修复记录缺少精确目标身份，已阻止自动回滚' };
+    if (!activeTargetContext.matches(entry.target)) {
+      return { success: false, output: '当前目标与修复记录不一致，已阻止回滚' };
+    }
 
     try {
-      const result = await invoke('ssh_execute_command_direct', { command: entry.restoreCommand }) as any;
-      const output = result?.output || '';
+      const result = await invoke('ssh_execute_command_direct', {
+        command: entry.restoreCommand,
+        sessionId: entry.target.sessionId,
+      }) as any;
+      const execution = classifyCommandResult(result, entry.restoreCommand);
+      if (!execution.success) {
+        return { success: false, output: `${execution.message}${execution.output ? `\n${execution.output}` : ''}` };
+      }
+      const verifyResult = await invoke('ssh_execute_command_direct', {
+        command: entry.restoreVerifyCommand,
+        sessionId: entry.target.sessionId,
+      }) as any;
+      const verification = classifyCommandResult(verifyResult, entry.restoreVerifyCommand);
+      if (!verification.success) {
+        return { success: false, output: `恢复命令已执行，但验证失败: ${verification.message}\n${verification.output}` };
+      }
+      const match = new RegExp(entry.restoreVerifyPattern).exec(verification.output);
+      const actual = match?.[1]?.trim();
+      if (actual === undefined || actual.replace(/\s+/g, ' ').toLowerCase() !== entry.restoreExpectedValue.replace(/\s+/g, ' ').toLowerCase()) {
+        return { success: false, output: `恢复命令已执行，但读回值不一致：期望 ${entry.restoreExpectedValue}，实际 ${actual ?? '无法解析'}` };
+      }
       entry.rolledBack = true;
       this.save();
-      return { success: true, output };
+      return { success: true, output: `${execution.output}\n验证通过: ${actual}`.trim() };
     } catch (e) {
       return { success: false, output: `回滚失败: ${e}` };
     }

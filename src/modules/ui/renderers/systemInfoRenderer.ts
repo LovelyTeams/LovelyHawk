@@ -5,13 +5,12 @@
 
 import type { AppState } from '../../core/app';
 import { renderSysSide } from '../systemDetailDrawer';
+import { isProcSideExpanded } from '../processDetailDrawer';
 import {
-  List,
   Earth,
   Rocket,
   Calendar,
   User,
-  Shield,
   System,
   Time,
   Key,
@@ -24,7 +23,14 @@ import {
   Cpu,
   FolderOpen,
   Whale,
-  NetworkTree
+  FileSearch,
+  FolderProtection,
+  Monitor,
+  Radar,
+  ShieldAdd,
+  TargetTwo,
+  Timeline,
+  Trace
 } from '@icon-park/svg';
 
 export class SystemInfoRenderer {
@@ -33,10 +39,9 @@ export class SystemInfoRenderer {
    * 渲染系统信息页面
    */
   public renderSystemInfo(state: AppState): string {
-    // 子导航已并入主侧边栏左侧的 section-tree（见 renderSectionTree），
-    // 这里只渲染全宽的内容区，默认展示进程详情。
     return `
       <div class="system-info-container">
+        ${this.renderInvestigationNavigator(state)}
         <div class="system-info-content" id="system-info-content">
           ${this.renderSystemInfoTab(state, 'processes')}
         </div>
@@ -44,12 +49,8 @@ export class SystemInfoRenderer {
     `;
   }
 
-  /**
-   * 渲染「系统信息」页内子导航（嵌套在主侧边栏「系统信息」项下方，二级）。
-   * 叶子复用 .sidebar-item[data-tab] + window.switchSystemInfoTab + 计数徽标，
-   * 因此切换/高亮逻辑沿用原有实现；分类以 .sidebar-subsec 分隔标签呈现，非独立一级分组。
-   */
-  public renderSidebarSubtree(state: AppState): string {
+  /** 系统调查镜头：把 25 个数据面收进四个页内菜单，避免挤占全局导航。 */
+  private renderInvestigationNavigator(state: AppState): string {
     const di: any = state.serverInfo?.detailedInfo;
     const countMap: Record<string, any[] | undefined> = {
       processes: di?.processes, network: di?.networkDetails, services: di?.services,
@@ -62,64 +63,80 @@ export class SystemInfoRenderer {
       docker: di?.dockerContainers, kubernetes: di?.kubernetesPods, webapps: di?.webApps,
     };
     const count = (id: string) => countMap[id]?.length || 0;
-    const i18 = (fn: any) => fn({ theme: 'outline', size: '18', fill: 'currentColor' });
+    const renderIcon = (fn: any, size = '16') => fn({ theme: 'outline', size, fill: 'currentColor' });
 
-    // 侧边栏重渲时保留当前激活的 tab 高亮；默认进程详情
     let activeTab = 'processes';
     try {
-      activeTab = document.querySelector('.sidebar-item[data-tab].active')?.getAttribute('data-tab') || 'processes';
+      activeTab = document.querySelector('[data-system-tab].active')?.getAttribute('data-system-tab') || 'processes';
     } catch { /* 非浏览器环境 */ }
 
     type Leaf = { id: string; label: string; icon: any };
     const groups: Array<{ id: string; label: string; accent: string; icon: any; items: Leaf[] }> = [
-      { id: 'si-realtime', label: '实时状态', accent: '#6db3ff', icon: System, items: [
-        { id: 'processes', label: '进程详情', icon: List },
-        { id: 'network', label: '网络详情', icon: Earth },
+      { id: 'si-realtime', label: '实时态势', accent: '#b85c4b', icon: Radar, items: [
+        { id: 'processes', label: '进程详情', icon: Monitor },
+        { id: 'network', label: '网络详情', icon: Trace },
         { id: 'services', label: '系统服务', icon: System },
-        { id: 'established', label: '外连排查', icon: NetworkTree },
+        { id: 'established', label: '外连排查', icon: TargetTwo },
         { id: 'openports', label: '开放端口', icon: Lock },
       ]},
-      { id: 'si-persist', label: '账户与持久化', accent: '#a855f7', icon: User, items: [
+      { id: 'si-persist', label: '账户与持久化', accent: '#9b6a57', icon: Timeline, items: [
         { id: 'users', label: '用户列表', icon: User },
         { id: 'autostart', label: '自启动', icon: Rocket },
         { id: 'cron', label: '计划任务', icon: Time },
         { id: 'sshkeys', label: 'SSH密钥', icon: Key },
         { id: 'loginhistory', label: '登录历史', icon: History },
-        { id: 'suidfiles', label: 'SUID文件', icon: Lock },
-        { id: 'autoruns', label: '启动项汇总', icon: Rocket },
+        { id: 'suidfiles', label: 'SUID文件', icon: FileSearch },
+        { id: 'autoruns', label: '启动项汇总', icon: Timeline },
       ]},
-      { id: 'si-security', label: '安全配置', accent: '#f87171', icon: Shield, items: [
-        { id: 'firewall', label: '防火墙', icon: Shield },
+      { id: 'si-security', label: '安全与痕迹', accent: '#c56b5b', icon: FolderProtection, items: [
+        { id: 'firewall', label: '防火墙', icon: ShieldAdd },
         { id: 'envvars', label: '环境变量', icon: Terminal },
         { id: 'shellconfigs', label: 'Shell配置', icon: Config },
         { id: 'packages', label: '软件包', icon: Box },
         { id: 'sudoers', label: 'Sudoers', icon: DataFile },
         { id: 'timers', label: '定时器', icon: Calendar },
         { id: 'kernelmodules', label: '内核模块', icon: Cpu },
-        { id: 'rootcheck', label: 'Rootkit检查', icon: Shield },
-        { id: 'sensitive', label: '敏感文件', icon: Key },
+        { id: 'rootcheck', label: 'Rootkit检查', icon: Radar },
+        { id: 'sensitive', label: '敏感文件', icon: FileSearch },
         { id: 'recentfiles', label: '最近文件', icon: FolderOpen },
       ]},
-      { id: 'si-workload', label: '工作负载', accent: '#34d399', icon: Box, items: [
+      { id: 'si-workload', label: '工作负载', accent: '#70857a', icon: Monitor, items: [
         { id: 'docker', label: 'Docker', icon: Whale },
-        { id: 'kubernetes', label: 'Kubernetes', icon: NetworkTree },
+        { id: 'kubernetes', label: 'Kubernetes', icon: Trace },
         { id: 'webapps', label: 'Web应用', icon: Earth },
       ]},
     ];
 
-    return groups.map(g => {
-      const leaves = g.items.map(it => {
-        const n = count(it.id);
-        const active = it.id === activeTab;
+    const groupsHtml = groups.map(group => {
+      const groupActive = group.items.some(item => item.id === activeTab);
+      const groupCount = group.items.reduce((total, item) => total + count(item.id), 0);
+      const options = group.items.map(item => {
+        const n = count(item.id);
+        const active = item.id === activeTab;
         return `
-          <button class="sidebar-item sidebar-subitem${active ? ' active' : ''}" type="button" data-tab="${it.id}" title="${it.label}" onclick="window.switchSystemInfoTab && window.switchSystemInfoTab('${it.id}')">
-            <span class="sidebar-item-icon">${i18(it.icon)}</span>
-            <span class="sidebar-item-label">${it.label}</span>
-            ${n > 0 ? `<span class="sidebar-item-badge">${n}</span>` : ''}
+          <button class="si-lens-option${active ? ' active' : ''}" type="button"
+                  data-system-tab="${item.id}">
+            <span class="si-lens-option-icon">${renderIcon(item.icon, '15')}</span>
+            <span>${item.label}</span>
+            <span class="si-lens-count${n > 0 ? '' : ' empty'}">${n || ''}</span>
           </button>`;
       }).join('');
-      return `<div class="sidebar-subsec" style="--accent:${g.accent}">${g.label}</div>${leaves}`;
+      return `
+        <details class="si-lens-group${groupActive ? ' active' : ''}" style="--lens-accent:${group.accent}">
+          <summary>
+            <span class="si-lens-group-icon">${renderIcon(group.icon)}</span>
+            <span>${group.label}</span>
+            <span class="si-lens-group-count">${groupCount}</span>
+          </summary>
+          <div class="si-lens-menu">${options}</div>
+        </details>`;
     }).join('');
+
+    return `
+      <nav class="si-lensbar" aria-label="系统调查视图">
+        <div class="si-lens-groups">${groupsHtml}</div>
+        <span class="si-lens-hint">选择调查数据面</span>
+      </nav>`;
   }
 
   /**
@@ -234,12 +251,15 @@ export class SystemInfoRenderer {
     side?: boolean;
   }): string {
     const SIC = SystemInfoRenderer.SYS_IC;
-    const chips = cfg.chips || [];
+    // 总量已显示在标题旁；chips 只保留状态/风险等额外判断信息。
+    const chips = (cfg.chips || []).filter(chip => chip.key !== 'total');
     const chipsHtml = chips.map(c => `
       <div class="sys-chip" id="${cfg.tab}-chip-${c.key}-wrap">
         <span class="sys-chip-ico ${c.tone}">${SIC[c.icon] || SIC.list}</span>
-        <span class="sys-chip-label">${c.label}</span>
-        <span class="sys-chip-val" id="${cfg.tab}-chip-${c.key}">0</span>
+        <span class="sys-chip-main">
+          <span class="sys-chip-label">${c.label}</span>
+          <span class="sys-chip-val" id="${cfg.tab}-chip-${c.key}">0</span>
+        </span>
       </div>`).join('');
     const ths = cfg.columns.map(c => `<th${c.cls ? ` class="${c.cls}"` : ''}>${c.label}</th>`).join('');
     const panel = `
@@ -295,13 +315,13 @@ export class SystemInfoRenderer {
     const I_REFRESH = ic('<path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 4v5h-5"/>');
     const I_EXPORT = ic('<path d="M12 15V3"/><path d="M7 8l5-5 5 5"/><path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/>');
     const I_SEARCH = ic('<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>');
-    const I_PROC = ic('<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9z"/>');
     const I_USER = ic('<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>');
     const I_CPU = ic('<rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M9 1v4M15 1v4M9 19v4M15 19v4M1 9h4M1 15h4M19 9h4M19 15h4"/>');
     const I_WARN = ic('<path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17.5v.5"/>');
     const I_CHEV = ic('<path d="M9 6l6 6-6 6"/>');
     const I_PANEL = ic('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M14 4v16"/>');
-    const sideCollapsed = (() => { try { return localStorage.getItem('proc-side-collapsed') === 'true'; } catch { return false; } })();
+    // 进程详情侧栏：默认收缩（会话内记忆，点击进程行才展开），见 processDetailDrawer
+    const sideCollapsed = !isProcSideExpanded();
 
     return `
       <div class="proc-view">
@@ -320,10 +340,9 @@ export class SystemInfoRenderer {
         </div>
 
         <div class="sys-chips">
-          <div class="sys-chip"><span class="sys-chip-ico c-proc">${I_PROC}</span><span class="sys-chip-label">进程</span><span class="sys-chip-val" id="proc-chip-total">0</span></div>
-          <div class="sys-chip"><span class="sys-chip-ico c-user">${I_USER}</span><span class="sys-chip-label">用户</span><span class="sys-chip-val" id="proc-chip-users">0</span></div>
-          <div class="sys-chip"><span class="sys-chip-ico c-cpu">${I_CPU}</span><span class="sys-chip-label">高 CPU</span><span class="sys-chip-val" id="proc-chip-cpu">0</span></div>
-          <div class="sys-chip"><span class="sys-chip-ico c-susp">${I_WARN}</span><span class="sys-chip-label">可疑</span><span class="sys-chip-val" id="proc-chip-susp">0</span></div>
+          <div class="sys-chip"><span class="sys-chip-ico c-user">${I_USER}</span><span class="sys-chip-main"><span class="sys-chip-label">用户</span><span class="sys-chip-val" id="proc-chip-users">0</span></span></div>
+          <div class="sys-chip"><span class="sys-chip-ico c-cpu">${I_CPU}</span><span class="sys-chip-main"><span class="sys-chip-label">高 CPU</span><span class="sys-chip-val" id="proc-chip-cpu">0</span></span></div>
+          <div class="sys-chip"><span class="sys-chip-ico c-susp">${I_WARN}</span><span class="sys-chip-main"><span class="sys-chip-label">可疑</span><span class="sys-chip-val" id="proc-chip-susp">0</span></span></div>
         </div>
 
         <div class="sys-toolbar">
@@ -612,8 +631,10 @@ export class SystemInfoRenderer {
     const chip = (key: string, label: string, tone: string, icon: string) => `
       <div class="sys-chip" id="shellconfigs-chip-${key}-wrap">
         <span class="sys-chip-ico ${tone}">${I[icon] || I.list}</span>
-        <span class="sys-chip-label">${label}</span>
-        <span class="sys-chip-val" id="shellconfigs-chip-${key}">0</span>
+        <span class="sys-chip-main">
+          <span class="sys-chip-label">${label}</span>
+          <span class="sys-chip-val" id="shellconfigs-chip-${key}">0</span>
+        </span>
       </div>`;
     return `
       <div class="sys-panel shc-panel">
@@ -630,7 +651,6 @@ export class SystemInfoRenderer {
         </div>
 
         <div class="sys-chips">
-          ${chip('total', '配置文件', 'c-info', 'file')}
           ${chip('susp', '可疑行', 'c-warn', 'warn')}
           ${chip('high', '高危', 'c-high', 'skull')}
         </div>

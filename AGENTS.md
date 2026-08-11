@@ -112,6 +112,8 @@ day-one errors and get ignored. These three rules are the ones that actually mat
 - **Secrets**: NEVER commit `.env`, private keys, or credentials.
 - **Tauri Commands**: Validate all inputs from frontend in Rust.
 - **Permissions**: Check `capabilities` in `src-tauri/capabilities/` when adding new plugins.
+  `tauri.conf.json` 的 `security.capabilities` 是显式白名单——新建 capability 文件后必须把它的
+  identifier 加进那个数组，否则整份文件被忽略（典型症状：`event.listen not allowed on window "xxx"`）。
 
 ## 🤖 Agent Instructions
 - **Modifying UI**: Check `src/modules/ui/` for existing renderers (e.g., `modernUIRenderer.ts`) before creating new ones.
@@ -129,6 +131,14 @@ day-one errors and get ignored. These three rules are the ones that actually mat
 - **Don't leave features unwired.** If you write a module but don't hook up its UI,
   register it in `docs/UNWIRED_FEATURES.md` so it isn't lost.
 - **Refactoring**: Be careful with global window objects (`(window as any).app`). Legacy code relies heavily on them.
+- **AI 功能**：
+  - 配置唯一来源是后端 settings 文件（`settings.ai.providers`），一律经 `src/modules/ai/aiConfig.ts`
+    的 `loadAIConfig()` 解析；不要新写读 settings 或 localStorage 的 AI 配置代码。
+  - API Key 以 `enc:v1:` 密文落盘（`crypto.rs`，AES-256-GCM）；前端不接触明文——调
+    `ai_proxy_request`/`ai_proxy_stream` 时把密文作 `apiKey` 传给后端，由后端解密并注入认证头。
+  - 提示词集中在 `src/modules/ai/aiPrompts.ts`，AI 输出统一用 `src/modules/ai/aiOutput.ts` 的
+    `renderAIMarkdown()` 渲染；aiHistory 由 aiService 统一记录，调用点不要再自己写。
+  - 流式请求必须带 `streamId`（事件按 id 过滤，支持 `ai_proxy_stream_cancel` 取消）。
 
 ## 🔒 Non-negotiables
 

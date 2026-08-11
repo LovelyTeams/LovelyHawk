@@ -125,7 +125,7 @@
 
 .tab-btn.active .count-badge {
   background: var(--accent-color);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 /* ──── Refresh Button ──── */
@@ -293,23 +293,23 @@
 }
 
 .status-badge.running, .status-badge.active {
-  background: rgba(34, 197, 94, 0.1);
-  color: #22c55e;
+  background: var(--sev-success-bg);
+  color: var(--sev-success-fg);
 }
 
 .status-badge.stopped, .status-badge.inactive {
-  background: rgba(148, 163, 184, 0.1);
+  background: var(--sev-neutral-bg);
   color: var(--text-secondary);
 }
 
 .status-badge.failed {
-  background: rgba(239, 68, 68, 0.1);
-  color: #ef4444;
+  background: var(--sev-critical-bg);
+  color: var(--sev-critical-fg);
 }
 
 .status-badge.sleeping {
-  background: rgba(59, 130, 246, 0.1);
-  color: #3b82f6;
+  background: var(--sev-info-bg);
+  color: var(--sev-info-fg);
 }
 
 /* ──── Scrollbar ──── */
@@ -381,50 +381,51 @@
 .sys-act-btn:hover { background: var(--hover-bg); border-color: var(--primary-color); }
 .sys-act-btn svg { width: 15px; height: 15px; }
 
-/* Stat chips */
+/* Stat chips — 独立卡片行（对齐设计稿：每张卡独立边框+背景+圆角） */
 .sys-chips {
   display: flex;
+  gap: 12px;
   margin-bottom: 14px;
-  padding: 4px;
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  background: var(--bg-secondary);
 }
 .sys-chip {
   position: relative;
   flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 12px 16px;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  box-shadow: var(--card-shadow);
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
-.sys-chip + .sys-chip::before {
-  content: "";
-  position: absolute;
-  left: 0; top: 20%; bottom: 20%;
-  width: 1px;
-  background: var(--border-color);
+.sys-chip:hover {
+  border-color: var(--border-color-hover);
+  box-shadow: var(--card-shadow-hover);
 }
 .sys-chip-ico {
-  width: 30px; height: 30px;
+  width: 38px; height: 38px;
   flex-shrink: 0;
   display: grid;
   place-items: center;
-  border-radius: 8px;
+  border-radius: 9px;
 }
-.sys-chip-ico svg { width: 17px; height: 17px; }
-.sys-chip-ico.c-proc { background: color-mix(in srgb, var(--primary-color) 12%, transparent); color: var(--primary-color); }
+.sys-chip-ico svg { width: 20px; height: 20px; }
+.sys-chip-ico.c-proc { background: color-mix(in srgb, var(--primary-color) 13%, transparent); color: var(--primary-color); }
 .sys-chip-ico.c-user { background: color-mix(in srgb, var(--accent-purple, #8b5cf6) 14%, transparent); color: var(--accent-purple, #8b5cf6); }
 .sys-chip-ico.c-cpu  { background: var(--sev-warn-bg); color: var(--sev-warn-fg); }
 .sys-chip-ico.c-susp { background: var(--sev-critical-bg); color: var(--sev-critical-fg); }
-.sys-chip-ico.c-info { background: color-mix(in srgb, var(--primary-color) 12%, transparent); color: var(--primary-color); }
+.sys-chip-ico.c-info { background: var(--sev-info-bg); color: var(--sev-info-fg); }
 .sys-chip-ico.c-net  { background: color-mix(in srgb, var(--info-color, #06b6d4) 16%, transparent); color: var(--info-color, #06b6d4); }
 .sys-chip-ico.c-ok   { background: var(--sev-success-bg); color: var(--sev-success-fg); }
 .sys-chip-ico.c-warn { background: var(--sev-warn-bg); color: var(--sev-warn-fg); }
-.sys-chip-ico.c-high { background: var(--sev-critical-bg); color: var(--sev-critical-fg); }
+.sys-chip-ico.c-high { background: var(--sev-high-bg); color: var(--sev-high-fg); }
 .sys-chip-ico.c-key  { background: color-mix(in srgb, var(--accent-purple, #8b5cf6) 14%, transparent); color: var(--accent-purple, #8b5cf6); }
-.sys-chip-label { font-size: 13px; color: var(--text-secondary); }
-.sys-chip-val { margin-left: 7px; font-size: 18px; font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.sys-chip-label { font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sys-chip-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sys-chip-val { font-size: 22px; font-weight: 700; line-height: 1.15; color: var(--text-primary); font-variant-numeric: tabular-nums; }
 .sys-chip.has-susp .sys-chip-val { color: var(--sev-critical-fg); }
 
 /* Toolbar (connects with the table below into one card) */
@@ -570,19 +571,22 @@
 
 /* Risk dot + tag in table */
 .risk-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; vertical-align: middle; }
-.risk-dot.normal { background: color-mix(in srgb, var(--text-secondary) 45%, transparent); }
+.risk-dot.normal { background: var(--sev-neutral-fg); opacity: 0.6; }
 .risk-dot.warn { background: var(--sev-warn-fg); box-shadow: 0 0 0 3px var(--sev-warn-bg); }
-.risk-dot.high { background: var(--sev-critical-border-strong, #ef4444); box-shadow: 0 0 0 3px var(--sev-critical-bg); }
+.risk-dot.high { background: var(--sev-critical-fg); box-shadow: 0 0 0 3px var(--sev-critical-bg); }
 .risk-tag {
   margin-left: 7px;
-  padding: 1px 7px;
-  border-radius: 6px;
+  padding: 2px 8px;
+  border-radius: 5px;
   font-size: 11px;
   font-weight: 600;
+  line-height: 16px;
   vertical-align: middle;
+  border: 1px solid transparent;
 }
-.risk-tag.high, .risk-tag.ext { background: var(--sev-critical-bg); color: var(--sev-critical-fg); }
-.risk-tag.warn { background: var(--sev-warn-bg); color: var(--sev-warn-fg); }
+.risk-tag.high { background: var(--sev-critical-bg); color: var(--sev-critical-fg); border-color: var(--sev-critical-border); }
+.risk-tag.ext { background: var(--sev-high-bg); color: var(--sev-high-fg); border-color: var(--sev-high-border); }
+.risk-tag.warn { background: var(--sev-warn-bg); color: var(--sev-warn-fg); border-color: var(--sev-warn-border); }
 
 /* State dot in table */
 .stat-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 7px; vertical-align: middle; background: var(--sev-success-fg); }
@@ -593,7 +597,9 @@
 
 /* Risky-row left accent */
 .proc-table tbody tr.is-risky.warn td:first-child { box-shadow: inset 3px 0 0 var(--sev-warn-fg); }
-.proc-table tbody tr.is-risky.high td:first-child { box-shadow: inset 3px 0 0 var(--sev-critical-border-strong, #ef4444); }
+.proc-table tbody tr.is-risky.high td:first-child { box-shadow: inset 3px 0 0 var(--sev-critical-fg); }
+.proc-table tbody tr.is-risky.high td { background: var(--sev-critical-bg); }
+.proc-table tbody tr.is-risky.high:hover td { background: var(--sev-critical-bg-hover); }
 /* Selection wins over risk accent */
 .sys-table tbody tr.selected td { background: color-mix(in srgb, var(--primary-color) 7%, transparent); }
 .sys-table tbody tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--primary-color); }
@@ -692,14 +698,15 @@
 
 .pd-id { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 4px; }
 .pd-dot { width: 10px; height: 10px; border-radius: 50%; }
-.pd-dot.normal { background: #94a3b8; }
+.pd-dot.normal { background: var(--sev-neutral-fg); }
 .pd-dot.warn { background: var(--sev-warn-fg); box-shadow: 0 0 0 4px var(--sev-warn-bg); }
-.pd-dot.high { background: var(--sev-critical-border-strong, #ef4444); box-shadow: 0 0 0 4px var(--sev-critical-bg); }
+.pd-dot.high { background: var(--sev-critical-fg); box-shadow: 0 0 0 4px var(--sev-critical-bg); }
 .pd-pid { font-size: 22px; font-weight: 800; color: var(--text-primary); font-variant-numeric: tabular-nums; }
-.pd-rbadge { padding: 2px 9px; border-radius: 7px; font-size: 12px; font-weight: 700; }
-.pd-rbadge.high { background: var(--sev-critical-bg); color: var(--sev-critical-fg); }
-.pd-rbadge.warn { background: var(--sev-warn-bg); color: var(--sev-warn-fg); }
-.pd-rbadge.ok { background: var(--sev-success-bg); color: var(--sev-success-fg); }
+.pd-rbadge { padding: 2px 9px; border-radius: 6px; font-size: 12px; font-weight: 700; border: 1px solid transparent; }
+.pd-rbadge.high { background: var(--sev-critical-bg); color: var(--sev-critical-fg); border-color: var(--sev-critical-border); }
+.pd-rbadge.warn { background: var(--sev-warn-bg); color: var(--sev-warn-fg); border-color: var(--sev-warn-border); }
+.pd-rbadge.ok { background: var(--sev-success-bg); color: var(--sev-success-fg); border-color: var(--sev-success-border); }
+.pd-rbadge.info { background: var(--sev-info-bg); color: var(--sev-info-fg); border-color: var(--sev-info-border); }
 .pd-tag { padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; background: var(--surface-tertiary); color: var(--text-secondary); }
 .pd-tag.ext { background: var(--sev-critical-bg); color: var(--sev-critical-fg); }
 
@@ -760,8 +767,8 @@
   transition: background 0.15s, filter 0.15s, border-color 0.15s;
 }
 .pd-action:hover { background: var(--hover-bg); }
-.pd-action.danger { color: var(--sev-critical-fg); border-color: color-mix(in srgb, var(--sev-critical-fg) 35%, var(--border-color)); }
-.pd-action.danger:hover { background: var(--sev-critical-bg); }
+.pd-action.danger { color: var(--sev-critical-fg); background: var(--sev-critical-bg); border-color: var(--sev-critical-border); }
+.pd-action.danger:hover { background: var(--sev-critical-bg-hover); }
 .pd-action.primary { background: var(--primary-color); color: var(--accent-contrast); border-color: var(--primary-color); }
 .pd-action.primary:hover { filter: brightness(1.06); }
 
@@ -913,7 +920,7 @@
   background: var(--surface-tertiary);
   color: var(--text-secondary);
 }
-.section-tree .tab-btn.active .count-badge { background: var(--accent, var(--primary-color)); color: #fff; }
+.section-tree .tab-btn.active .count-badge { background: var(--accent, var(--primary-color)); color: var(--accent-contrast); }
 .section-tree .count-badge.danger-badge { background: var(--sev-critical-bg); color: var(--sev-critical-fg); }
 
 .section-tree-foot {
@@ -1000,24 +1007,6 @@
 .system-table tbody tr:hover td { background: var(--hover-bg); }
 .system-table tbody tr.selected td { background: color-mix(in srgb, var(--primary-color) 7%, transparent); box-shadow: none; }
 .system-table tbody tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--primary-color); }
-
-/* ─── Count badge on system-info tab leaves (merged into the main sidebar tree) ─── */
-.sidebar-item-badge {
-  flex-shrink: 0;
-  min-width: 18px;
-  height: 16px;
-  padding: 0 5px;
-  border-radius: 8px;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 16px;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-  background: var(--surface-tertiary, var(--bg-tertiary));
-  color: var(--text-secondary);
-}
-.sidebar-item.active .sidebar-item-badge { background: var(--accent, var(--primary-color)); color: #fff; }
-.sidebar-nav.collapsed .sidebar-item-badge { display: none; }
 
 /* ════════════════════════════════════
    Shell 配置查看器（展示全文 + 协助定位后门）
@@ -1311,8 +1300,8 @@
   transition: background 0.14s, border-color 0.14s, color 0.14s;
 }
 .sd-act:hover { background: var(--hover-bg); border-color: var(--primary-color); }
-.sd-act.danger { color: var(--sev-critical-fg); border-color: color-mix(in srgb, var(--sev-critical-fg) 30%, var(--border-color)); }
-.sd-act.danger:hover { background: var(--sev-critical-bg); }
+.sd-act.danger { color: var(--sev-critical-fg); background: var(--sev-critical-bg); border-color: var(--sev-critical-border); }
+.sd-act.danger:hover { background: var(--sev-critical-bg-hover); }
 .sd-act.primary { background: var(--primary-color); color: var(--accent-contrast); border-color: var(--primary-color); }
 .sd-act.primary:hover { filter: brightness(1.06); }
 

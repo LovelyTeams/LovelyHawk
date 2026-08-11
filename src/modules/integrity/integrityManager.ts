@@ -11,15 +11,19 @@
  * Rust/SQLite 改动，更轻量且符合离线约束。
  */
 
-import { invoke } from '@tauri-apps/api/core';
 import { operationJournal } from '../core/operationJournal';
+import { isArtifactForTarget, targetDisplayName } from '../core/targetBoundArtifact';
+import { activeTargetContext, type TargetIdentity } from '../core/targetContext';
+import { executeEmergencyCommand } from '../emergency/commandExecution';
+import { openSftpAt } from '../remote/sftpWindowBridge';
 import { sshConnectionManager } from '../remote/sshConnectionManager';
 import { showConfirm } from '../ui/confirmDialog';
 import { shq } from '../core/shellEscape';
 
-interface Baseline {
+export interface IntegrityBaseline {
   id: string;
   server: string;
+  target?: TargetIdentity;
   timestamp: number;
   paths: string[];
   remoteFile: string;
@@ -45,14 +49,21 @@ const PRESET_PATHS: Array<{ label: string; path: string; defaultOn: boolean }> =
 ];
 
 class IntegrityManager {
-  private baselines: Baseline[] = [];
+  private baselines: IntegrityBaseline[] = [];
   private loaded = false;
   private eventsBound = false;
   private busy = false;
   private lastDiff: { baselineId: string; entries: DiffEntry[] } | null = null;
+  private targetSessionId = '';
 
   initialize(): void {
     this.load();
+    const target = activeTargetContext.get();
+    if (this.targetSessionId !== (target?.sessionId || '')) {
+      this.targetSessionId = target?.sessionId || '';
+      this.lastDiff = null;
+      this.busy = false;
+    }
     if (!this.eventsBound) { this.bindEvents(); this.eventsBound = true; }
     this.render();
   }
@@ -62,10 +73,9 @@ class IntegrityManager {
   }
 
   private async exec(cmd: string, timeoutSec = 300): Promise<string> {
-    const r = await invoke('ssh_execute_emergency_command_direct', {
-      command: cmd, username: null, timeoutSec, cwd: null,
-    }) as any;
-    return r?.output || '';
+    const result = await executeEmergencyCommand({ command: cmd, timeoutSec });
+    if (!result.success) throw new Error(`${result.message}${result.output ? `: ${result.output}` : ''}`);
+    return result.output;
   }
 
   private load(): void {
@@ -111,15 +121,21 @@ class IntegrityManager {
 
   private async onBuildBaseline(): Promise<void> {
     if (!sshConnectionManager.isConnected()) { window.showNotification?.('请先连接服务器', 'error'); return; }
+    const target = activeTargetContext.get();
+    if (!target) { window.showNotification?.('当前 SSH 目标尚未完成可信身份确认', 'error'); return; }
     const paths = this.selectedPaths();
     if (paths.length === 0) { window.showNotification?.('请至少选择一个路径', 'info'); return; }
 
     const ok = await showConfirm({
       title: '建立完整性基线',
-      message: `将对 ${paths.length} 个位置计算 sha256 并落盘到靶机 ${FIM_DIR}/。\n\n路径：${paths.join('  ')}\n\n目录大时可能耗时较久。`,
+      message: `目标：${targetDisplayName(target)}\n\n将对 ${paths.length} 个位置计算 sha256 并落盘到靶机 ${FIM_DIR}/。\n\n路径：${paths.join('  ')}\n\n目录大时可能耗时较久。`,
       confirmText: '开始', cancelText: '取消',
     });
     if (!ok) return;
+    if (!activeTargetContext.matches(target)) {
+      window.showNotification?.('确认期间活动目标已变化，已取消建立基线', 'error');
+      return;
+    }
 
     this.busy = true; this.render();
     const id = `fim_${this.stamp()}`;
@@ -136,7 +152,7 @@ class IntegrityManager {
       this.busy = false; this.render(); return;
     }
 
-    this.baselines.push({ id, server: this.server(), timestamp: Date.now(), paths, remoteFile, fileCount: count });
+    this.baselines.push({ id, server: target.host, target, timestamp: Date.now(), paths, remoteFile, fileCount: count });
     this.save();
     this.busy = false;
     window.showNotification?.(`基线建立完成，共 ${count} 个文件`, 'success');
@@ -148,6 +164,11 @@ class IntegrityManager {
   private async onDiff(baselineId: string): Promise<void> {
     const bl = this.baselines.find(b => b.id === baselineId);
     if (!bl) return;
+    const target = activeTargetContext.get();
+    if (!isArtifactForTarget(bl, target)) {
+      window.showNotification?.('该基线未绑定当前可信目标，已阻止对比', 'error');
+      return;
+    }
     this.busy = true; this.render();
 
     const pathArgs = bl.paths.map(shq).join(' ');
@@ -213,12 +234,26 @@ class IntegrityManager {
   private async onDeleteBaseline(id: string): Promise<void> {
     const bl = this.baselines.find(b => b.id === id);
     if (!bl) return;
+    const target = activeTargetContext.get();
+    if (!isArtifactForTarget(bl, target) || !target) {
+      window.showNotification?.('该基线未绑定当前可信目标，已阻止删除', 'error');
+      return;
+    }
     const ok = await showConfirm({
-      title: '删除基线', message: `删除靶机上的 ${bl.remoteFile} 并移除本地记录？`,
+      title: '删除基线', message: `目标：${targetDisplayName(target)}\n\n删除靶机上的 ${bl.remoteFile} 并移除本地记录？`,
       confirmText: '删除', cancelText: '取消', dangerous: true,
     });
     if (!ok) return;
-    try { await this.exec(`rm -f ${shq(bl.remoteFile)}`, 30); } catch { /* ignore */ }
+    if (!activeTargetContext.matches(target)) {
+      window.showNotification?.('确认期间活动目标已变化，已取消删除', 'error');
+      return;
+    }
+    try {
+      await this.exec(`rm -f ${shq(bl.remoteFile)}`, 30);
+    } catch (e) {
+      window.showNotification?.(`删除基线失败，本地记录已保留: ${e}`, 'error');
+      return;
+    }
     this.baselines = this.baselines.filter(b => b.id !== id);
     if (this.lastDiff?.baselineId === id) this.lastDiff = null;
     this.save();
@@ -228,24 +263,32 @@ class IntegrityManager {
   // ──────── 联动处置 ────────
 
   private onViewFile(path: string): void {
-    const dir = path.replace(/\/[^/]*$/, '') || '/';
-    const sftp = (window as any).sftpManager;
-    if (sftp?.navigateToPath) {
-      (window as any).switchPage?.('remote-operations');
-      setTimeout(() => sftp.navigateToPath(dir), 150);
-    } else {
-      navigator.clipboard.writeText(path).catch(() => {});
-      window.showNotification?.('已复制文件路径', 'info');
+    const baseline = this.lastDiff && this.baselines.find(b => b.id === this.lastDiff!.baselineId);
+    if (!baseline || !isArtifactForTarget(baseline, activeTargetContext.get())) {
+      window.showNotification?.('对比结果不属于当前可信目标，已阻止打开文件', 'error');
+      return;
     }
+    const dir = path.replace(/\/[^/]*$/, '') || '/';
+    void openSftpAt(dir);
   }
 
   private async onQuarantine(path: string): Promise<void> {
+    const baseline = this.lastDiff && this.baselines.find(b => b.id === this.lastDiff!.baselineId);
+    const target = activeTargetContext.get();
+    if (!baseline || !isArtifactForTarget(baseline, target) || !target) {
+      window.showNotification?.('对比结果不属于当前可信目标，已阻止隔离', 'error');
+      return;
+    }
     const ok = await showConfirm({
       title: '隔离文件',
-      message: `将把可疑文件移入隔离目录 ${FIM_DIR}/quarantine/：\n${path}\n\n原位置文件会被移走（业务可能受影响），可在快照回滚中心一键还原。`,
+      message: `目标：${targetDisplayName(target)}\n\n将把可疑文件移入隔离目录 ${FIM_DIR}/quarantine/：\n${path}\n\n原位置文件会被移走（业务可能受影响），可在快照回滚中心一键还原。`,
       confirmText: '隔离', cancelText: '取消', dangerous: true,
     });
     if (!ok) return;
+    if (!activeTargetContext.matches(target)) {
+      window.showNotification?.('确认期间活动目标已变化，已取消隔离', 'error');
+      return;
+    }
 
     const qDir = `${FIM_DIR}/quarantine`;
     const qFile = `${qDir}/${this.safeName(path)}.${this.stamp()}`;
@@ -256,7 +299,7 @@ class IntegrityManager {
     try { output = await this.exec(cmd, 60); } catch (e) { success = false; output = String(e); }
 
     operationJournal.record({
-      source: 'integrity', server: this.server(),
+      source: 'integrity', server: target.host, target, allowStableTargetReconnect: true,
       title: `隔离文件 ${path}`, command: cmd,
       backupInfo: qFile, restoreCommand: restore,
       output, success,
@@ -278,7 +321,9 @@ class IntegrityManager {
       return;
     }
 
-    const mine = this.baselines.filter(b => b.server === this.server()).sort((a, b) => b.timestamp - a.timestamp);
+    const target = activeTargetContext.get();
+    const mine = this.baselines.filter(b => isArtifactForTarget(b, target)).sort((a, b) => b.timestamp - a.timestamp);
+    const legacyCount = this.baselines.filter(b => !b.target && b.server === this.server()).length;
     const checks = PRESET_PATHS.map(p =>
       `<label class="fim-check"><input type="checkbox" class="fim-path-check" ${p.defaultOn ? 'checked' : ''}/> ${this.esc(p.label)}</label>`
     ).join('');
@@ -304,6 +349,7 @@ class IntegrityManager {
       </div>
 
       <div class="fim-section-title" style="margin-top:16px;">已有基线（本机 ${mine.length} 个）</div>
+      ${legacyCount > 0 ? `<div class="fim-warning">发现 ${legacyCount} 条旧版 host-only 基线。因无法验证端口、账号和主机指纹，已禁止对比与删除；请在当前目标重新建立基线。</div>` : ''}
       ${mine.length === 0 ? '<div class="fim-empty">尚无基线。建议进场后尽早对 Web 目录和系统 bin 建立基线。</div>' : baselineList}
 
       ${this.renderDiff()}
@@ -313,6 +359,8 @@ class IntegrityManager {
 
   private renderDiff(): string {
     if (!this.lastDiff) return '';
+    const baseline = this.baselines.find(b => b.id === this.lastDiff!.baselineId);
+    if (!baseline || !isArtifactForTarget(baseline, activeTargetContext.get())) return '';
     const { entries } = this.lastDiff;
     const counts = {
       added: entries.filter(e => e.kind === 'added').length,
@@ -358,6 +406,7 @@ class IntegrityManager {
     if (document.getElementById('fim-styles')) return '';
     return `<style id="fim-styles">
       .fim-empty{color:var(--text-secondary);text-align:center;padding:30px;font-size:13px;line-height:1.6;}
+      .fim-warning{color:#f59e0b;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);border-radius:6px;padding:10px 12px;margin-bottom:10px;font-size:12px;line-height:1.5;}
       .fim-panel{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:16px;}
       .fim-section-title{color:var(--text-primary);font-weight:600;font-size:13px;margin-bottom:10px;}
       .fim-checks{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;}

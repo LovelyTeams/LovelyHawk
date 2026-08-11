@@ -2,13 +2,35 @@
  * AI 服务
  * 用于生成安全问题的解决方案
  * 所有 HTTP 请求通过 Tauri 后端代理发送，绕过浏览器 CORS 限制
+ *
+ * 配置唯一来源是后端 settings 文件，经 ./aiConfig 解析（localStorage 旧配置
+ * 由 aiConfig 在首次加载时一次性迁移）。apiKey 可能是 enc:v1: 密文，前端不解密、
+ * 也不把 Key 放进 headers —— 由后端 ai_proxy_* 解密并注入认证头。
+ * 流式请求带 stream_id，事件按 stream_id 过滤，因此不再有全局 isStreaming 锁，
+ * 多窗口/多请求并发流互不干扰。
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 import { logger } from '../core/logger';
-/** 正式包 drop 掉 console，诊断信息只有进 logger 才留得下来（设置→工具→诊断日志 可导出） */
+import {
+  ensureCompletionsPath,
+  loadAIConfig,
+  PROVIDER_PRESETS,
+  type AIKeyHeader,
+} from './aiConfig';
+import {
+  conciseSolutionPrompt,
+  conciseSolutionUserPrompt,
+  detailedSolutionPrompt,
+  detailedSolutionUserPrompt,
+  logExplainPrompt,
+  logExplainUserPrompt,
+} from './aiPrompts';
+import { aiHistoryManager } from './aiHistoryManager';
+
+/** 正式包 drop 掉 console，诊断信息只有进 logger 才留得下来（状态栏「日志」按钮可导出） */
 const log = logger.module('AIService');
 
 
@@ -38,17 +60,6 @@ function createSseDataBuffer(onData: (data: string) => void): {
   };
 }
 
-// AI 提供商类型
-export type AIProvider = 'openai' | 'deepseek' | 'claude' | 'custom';
-
-// AI 配置接口
-export interface AIConfig {
-  provider: AIProvider;
-  apiKey: string;
-  baseUrl?: string; // 自定义 API 端点（用于自托管或代理）
-  model?: string; // 模型名称
-}
-
 // AI 响应接口
 export interface AISolution {
   solution: string;
@@ -57,17 +68,28 @@ export interface AISolution {
   timeEstimate?: string;
 }
 
+/** 一次流式请求的句柄：done 在流结束/失败/取消时 settle，cancel 主动中止 */
+interface StreamHandle {
+  done: Promise<void>;
+  cancel: () => void;
+}
+
+function newStreamId(): string {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+  } catch { /* intentional: 非安全上下文下 randomUUID 可能抛错，走时间戳回退 */ }
+  return `stream-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 /**
  * AI 服务类
  */
 export class AIService {
   private static instance: AIService;
-  private config: AIConfig | null = null;
-  private isStreaming = false;
 
-  private constructor() {
-    this.loadConfigFromStorage();
-  }
+  private constructor() {}
 
   /**
    * 获取单例实例
@@ -77,77 +99,6 @@ export class AIService {
       AIService.instance = new AIService();
     }
     return AIService.instance;
-  }
-
-  /**
-   * 从本地存储加载配置
-   */
-  private loadConfigFromStorage(): void {
-    try {
-      const configStr = localStorage.getItem('lovelyres-ai-config');
-      if (configStr) {
-        const config = JSON.parse(configStr);
-        
-        // 验证配置的提供商类型是否有效
-        const validProviders: AIProvider[] = ['openai', 'deepseek', 'claude', 'custom'];
-        if (config.provider && !validProviders.includes(config.provider)) {
-          log.warn('检测到无效的 AI 提供商配置:', config.provider);
-          log.warn('已清除无效配置，请重新配置 AI 服务');
-          localStorage.removeItem('lovelyres-ai-config');
-          this.config = null;
-          return;
-        }
-        
-        this.config = config;
-      }
-    } catch (error) {
-      log.error('加载 AI 配置失败:', error);
-      // 清除可能损坏的配置
-      localStorage.removeItem('lovelyres-ai-config');
-      this.config = null;
-    }
-  }
-
-  /**
-   * 保存配置到本地存储
-   */
-  public saveConfig(config: AIConfig): void {
-    try {
-      // 验证配置的提供商类型是否有效
-      const validProviders: AIProvider[] = ['openai', 'deepseek', 'claude', 'custom'];
-      if (!validProviders.includes(config.provider)) {
-        throw new Error(`无效的 AI 提供商类型: ${config.provider}。有效的类型为: ${validProviders.join(', ')}`);
-      }
-      
-      this.config = config;
-      localStorage.setItem('lovelyres-ai-config', JSON.stringify(config));
-      log.debug('AI 配置已保存');
-    } catch (error) {
-      log.error('保存 AI 配置失败:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * 获取当前配置
-   */
-  public getConfig(): AIConfig | null {
-    return this.config;
-  }
-
-  /**
-   * 检查是否已配置
-   */
-  public isConfigured(): boolean {
-    return this.config !== null && !!this.config.apiKey;
-  }
-
-  /**
-   * 清除配置
-   */
-  public clearConfig(): void {
-    this.config = null;
-    localStorage.removeItem('lovelyres-ai-config');
   }
 
   // ==================== Tauri 代理请求（绕过 CORS） ====================
@@ -165,12 +116,27 @@ export class AIService {
     return e instanceof Error ? e : new Error(raw);
   }
 
+  /** 组装发给 ai_proxy_* 的可选认证参数（apiKey 为空时省略，如 Ollama） */
+  private authArgs(config: { apiKey: string; apiKeyHeader: AIKeyHeader }): Record<string, string> {
+    return config.apiKey
+      ? { apiKey: config.apiKey, apiKeyHeader: config.apiKeyHeader }
+      : {};
+  }
+
   /**
    * 通过 Tauri 后端发送非流式 AI 请求
    */
-  private async tauriFetch(url: string, headers: Record<string, string>, body: string): Promise<{ ok: boolean; status: number; body: string }> {
+  private async tauriFetch(
+    url: string,
+    headers: Record<string, string>,
+    body: string,
+    auth?: { apiKey: string; apiKeyHeader: AIKeyHeader },
+  ): Promise<{ ok: boolean; status: number; body: string }> {
     try {
-      const result = await invoke('ai_proxy_request', { url, headers, body }) as { ok: boolean; status: number; body: string };
+      const result = await invoke('ai_proxy_request', {
+        url, headers, body,
+        ...(auth ? this.authArgs(auth) : {}),
+      }) as { ok: boolean; status: number; body: string };
       return result;
     } catch (e) {
       throw this.toFriendlyError(e);
@@ -178,154 +144,157 @@ export class AIService {
   }
 
   /**
-   * 通过 Tauri 后端发送流式 AI 请求，通过事件接收数据块
+   * 通过 Tauri 后端发送流式 AI 请求，通过事件接收数据块。
+   *
+   * 每个请求生成独立 stream_id，事件（ai_stream_chunk/error/done）按
+   * stream_id 过滤，外来事件直接忽略；cancel() 通知后端取消并清理监听。
    */
-  private async tauriStreamFetch(
-    url: string,
-    headers: Record<string, string>,
-    body: string,
-    onChunk: (text: string) => void
-  ): Promise<void> {
-    // 防止并发流式请求互相干扰（共享相同事件名）
-    if (this.isStreaming) {
-      throw new Error('已有流式请求进行中，请等待完成后再试');
-    }
-    this.isStreaming = true;
+  private startAIStream(opts: {
+    url: string;
+    headers: Record<string, string>;
+    body: string;
+    apiKey: string;
+    apiKeyHeader: AIKeyHeader;
+    onChunk: (text: string) => void;
+  }): StreamHandle {
+    const streamId = newStreamId();
 
-    let unlistenChunk: (() => void) | null = null;
-    let unlistenError: (() => void) | null = null;
-    let unlistenDone: (() => void) | null = null;
+    let unlistenChunk: UnlistenFn | null = null;
+    let unlistenError: UnlistenFn | null = null;
+    let unlistenDone: UnlistenFn | null = null;
+    let settled = false;
+    let cancelRequested = false;
+
+    let resolveDone!: () => void;
+    let rejectDone!: (e: Error) => void;
+    const done = new Promise<void>((resolve, reject) => {
+      resolveDone = resolve;
+      rejectDone = reject;
+    });
+    // cancel 先于调用方 await done 时不产生 unhandled rejection 噪音
+    done.catch(() => { /* intentional: 拒绝理由会传给 await done 的调用方 */ });
 
     const cleanup = () => {
-      this.isStreaming = false;
       unlistenChunk?.();
       unlistenError?.();
       unlistenDone?.();
+      unlistenChunk = unlistenError = unlistenDone = null;
+    };
+    const finishResolve = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolveDone();
+    };
+    const finishReject = (e: Error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      rejectDone(e);
     };
 
-    try {
-      // 先注册所有事件监听，用 try/catch 确保部分失败时清理
-      const streamResult = await new Promise<void>(async (resolve, reject) => {
-        let settled = false;
-        const settle = (fn: () => void) => {
-          if (!settled) { settled = true; fn(); }
-        };
+    const cancel = () => {
+      if (settled) return;
+      cancelRequested = true;
+      invoke('ai_proxy_stream_cancel', { streamId })
+        .catch((e) => log.debug('流取消命令发送失败', e));
+      const err = new Error('AI 流式请求已取消');
+      err.name = 'AbortError';
+      finishReject(err);
+    };
 
-        try {
-          unlistenChunk = await listen('ai_stream_chunk', (event: any) => {
-            onChunk(event.payload as string);
-          });
-          unlistenError = await listen('ai_stream_error', (event: any) => {
-            settle(() => {
-              cleanup();
-              reject(new Error(`AI 流式请求失败: ${JSON.stringify(event.payload)}`));
-            });
-          });
-          unlistenDone = await listen('ai_stream_done', () => {
-            settle(() => {
-              cleanup();
-              resolve();
-            });
-          });
-        } catch (listenErr) {
-          cleanup();
-          reject(new Error(`AI 事件监听注册失败: ${listenErr}`));
-          return;
-        }
+    (async () => {
+      try {
+        unlistenChunk = await listen<{ stream_id: string; chunk?: string }>('ai_stream_chunk', (event) => {
+          if (event.payload?.stream_id !== streamId) return;
+          if (typeof event.payload.chunk === 'string') opts.onChunk(event.payload.chunk);
+        });
+        unlistenError = await listen<{ stream_id: string; error?: string }>('ai_stream_error', (event) => {
+          if (event.payload?.stream_id !== streamId) return;
+          finishReject(new Error(`AI 流式请求失败: ${event.payload.error ?? '未知错误'}`));
+        });
+        unlistenDone = await listen<{ stream_id: string }>('ai_stream_done', (event) => {
+          if (event.payload?.stream_id !== streamId) return;
+          finishResolve();
+        });
+      } catch (listenErr) {
+        finishReject(new Error(`AI 事件监听注册失败: ${listenErr}`));
+        return;
+      }
 
-        try {
-          await invoke('ai_proxy_stream', { url, headers, body });
-        } catch (e) {
-          settle(() => {
-            cleanup();
-            reject(this.toFriendlyError(e));
-          });
-        }
+      // 监听注册期间用户已取消：cancel() 已 settle 并清理，无需再发请求
+      if (cancelRequested) return;
+
+      try {
+        await invoke('ai_proxy_stream', {
+          url: opts.url,
+          headers: opts.headers,
+          body: opts.body,
+          streamId,
+          ...this.authArgs(opts),
+        });
+      } catch (e) {
+        finishReject(this.toFriendlyError(e));
+      }
+    })();
+
+    return { done, cancel };
+  }
+
+  /** 请求头：认证头由后端注入，前端只带 Content-Type（Claude 另带 anthropic-version） */
+  private buildHeaders(isClaude: boolean): Record<string, string> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (isClaude) headers['anthropic-version'] = '2023-06-01';
+    return headers;
+  }
+
+  /** 按提供商类型组装聊天请求体（Claude 无 system role，合并进单条 user 消息） */
+  private buildChatBody(
+    isClaude: boolean,
+    model: string,
+    systemPrompt: string,
+    userPrompt: string | null,
+    maxTokens: number,
+    stream: boolean,
+  ): string {
+    if (isClaude) {
+      return JSON.stringify({
+        model, max_tokens: maxTokens, ...(stream ? { stream: true } : {}),
+        messages: [{ role: 'user', content: userPrompt ? `${systemPrompt}\n\n${userPrompt}` : systemPrompt }],
       });
+    }
+    const messages = userPrompt
+      ? [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }]
+      : [{ role: 'system', content: systemPrompt }];
+    return JSON.stringify({
+      model, temperature: 0.7, max_tokens: maxTokens, ...(stream ? { stream: true } : {}),
+      messages,
+    });
+  }
 
-      return streamResult;
+  /** 从 SSE data 负载里提取增量文本（OpenAI delta / Claude delta 两种形状） */
+  private extractDeltaText(data: string): string {
+    if (data === '[DONE]') return '';
+    try {
+      const parsed = JSON.parse(data);
+      return parsed.choices?.[0]?.delta?.content  // OpenAI
+        || parsed.delta?.text                     // Claude
+        || '';
     } catch (e) {
-      // 确保 cleanup 在所有异常路径执行
-      if (this.isStreaming) cleanup();
-      throw e;
+      // SSE 中途截断的半条 JSON，下一个 chunk 会补齐
+      log.debug('SSE 数据块解析失败，已跳过', e);
+      return '';
     }
   }
 
-  /**
-   * 获取 API 端点和请求头
-   */
-  private getAPIEndpoint(): { url: string; headers: Record<string, string>; model: string } {
-    if (!this.config) {
-      throw new Error('AI 未配置');
+  /** 成功后写 AI 历史；尽力而为，绝不失败主流程 */
+  private recordHistory(question: string, answer: string, source: string): void {
+    if (!answer) return;
+    try {
+      aiHistoryManager.addRecord({ question, answer, source });
+    } catch (e) {
+      log.debug('AI 历史记录写入失败', e);
     }
-
-    let url: string;
-    let headers: Record<string, string>;
-    let model: string;
-
-    // 自动补全 URL 路径（如果用户只填了域名）
-    const ensureCompletionsPath = (base: string): string => {
-      const trimmed = base.replace(/\/+$/, '');
-      if (trimmed.endsWith('/chat/completions') || trimmed.endsWith('/messages')) {
-        return trimmed;
-      }
-      if (trimmed.endsWith('/v1')) {
-        return `${trimmed}/chat/completions`;
-      }
-      // 没有路径的纯域名 → 自动补全 /v1/chat/completions
-      if (!trimmed.includes('/v1/') && !trimmed.includes('/api/')) {
-        return `${trimmed}/v1/chat/completions`;
-      }
-      return trimmed;
-    };
-
-    switch (this.config.provider) {
-      case 'openai':
-        url = ensureCompletionsPath(this.config.baseUrl || 'https://api.openai.com/v1/chat/completions');
-        headers = {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.config.apiKey}`,
-        };
-        model = this.config.model || 'gpt-4o-mini';
-        break;
-
-      case 'deepseek':
-        url = ensureCompletionsPath(this.config.baseUrl || 'https://api.deepseek.com/v1/chat/completions');
-        headers = {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.config.apiKey}`,
-        };
-        model = this.config.model || 'deepseek-chat';
-        break;
-
-      case 'claude':
-        url = this.config.baseUrl || 'https://api.anthropic.com/v1/messages';
-        headers = {
-          'Content-Type': 'application/json',
-          'x-api-key': this.config.apiKey,
-          'anthropic-version': '2023-06-01',
-        };
-        model = this.config.model || 'claude-3-5-sonnet-20241022';
-        break;
-
-      case 'custom':
-        if (!this.config.baseUrl) {
-          throw new Error('自定义提供商需要提供 API 端点（Base URL）');
-        }
-        url = ensureCompletionsPath(this.config.baseUrl);
-        headers = {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.config.apiKey}`,
-        };
-        model = this.config.model || 'gpt-4o-mini';
-        break;
-
-      default:
-        throw new Error(`未知的 AI 提供商: ${this.config.provider}`);
-    }
-
-    log.debug(`AI 请求: ${this.config.provider} → ${url} (model: ${model})`);
-    return { url, headers, model };
   }
 
   /**
@@ -337,52 +306,13 @@ export class AIService {
     severity: string,
     serverInfo?: string
   ): Promise<AISolution> {
-    if (!this.isConfigured()) {
-      throw new Error('请先配置 AI 服务（设置 -> AI 配置）');
-    }
-
-    const { url, headers, model } = this.getAPIEndpoint();
-
-    // 构建提示词
-    const systemPrompt = `你是一位资深的 Linux 系统安全专家和运维工程师。你的任务是为用户提供清晰、可执行的安全问题解决方案。
-
-请遵循以下要求：
-1. 提供具体的解决步骤，包含完整的命令
-2. 解释每个步骤的作用
-3. 指出潜在的风险和注意事项
-4. 估算解决时间
-5. 使用中文回答
-6. 回答要专业、准确、实用`;
-
-    const userPrompt = `我在服务器上检测到以下安全问题：
-
-**问题标题**: ${title}
-**严重程度**: ${severity}
-**问题描述**: ${description}
-${serverInfo ? `**服务器信息**: ${serverInfo}` : ''}
-
-请提供详细的解决方案，包括：
-1. 问题分析
-2. 解决步骤（带命令）
-3. 风险提示
-4. 预计耗时
-
-请以结构化的格式回答，便于阅读和执行。`;
+    const config = await loadAIConfig();
+    const systemPrompt = detailedSolutionPrompt();
+    const userPrompt = detailedSolutionUserPrompt(title, description, severity, serverInfo);
 
     try {
-      const isClaude = this.config!.provider === 'claude';
-      const requestBody = isClaude ? JSON.stringify({
-        model, max_tokens: 2048,
-        messages: [{ role: 'user', content: `${systemPrompt}\n\n${userPrompt}` }],
-      }) : JSON.stringify({
-        model, temperature: 0.7, max_tokens: 2048,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-      });
-
-      const response = await this.tauriFetch(url, headers, requestBody);
+      const requestBody = this.buildChatBody(config.isClaude, config.model, systemPrompt, userPrompt, 2048, false);
+      const response = await this.tauriFetch(config.baseUrl, this.buildHeaders(config.isClaude), requestBody, config);
 
       if (!response.ok) {
         // 截取前 200 字符，避免 HTML 页面堆栈
@@ -399,7 +329,7 @@ ${serverInfo ? `**服务器信息**: ${serverInfo}` : ''}
         throw new Error(`AI API 返回了非 JSON 响应，请检查 Base URL 是否正确。\n响应内容: ${preview}`);
       }
 
-      const content = isClaude
+      const content = config.isClaude
         ? responseData.content?.[0]?.text || ''
         : responseData.choices?.[0]?.message?.content || '';
 
@@ -407,7 +337,9 @@ ${serverInfo ? `**服务器信息**: ${serverInfo}` : ''}
         throw new Error('AI 返回了空响应，请检查模型名称是否正确');
       }
 
-      return this.parseSolution(content);
+      const solution = this.parseSolution(content);
+      this.recordHistory(`[${severity}] ${title}\n${description}`, solution.solution, 'solution');
+      return solution;
     } catch (error) {
       log.error('AI 解决方案生成失败:', error);
       throw error;
@@ -425,78 +357,33 @@ ${serverInfo ? `**服务器信息**: ${serverInfo}` : ''}
     onChunk?: (text: string) => void,
     onComplete?: (fullText: string) => void
   ): Promise<void> {
-    if (!this.isConfigured()) {
-      throw new Error('请先配置 AI 服务（设置 -> AI 配置）');
-    }
-
-    const { url, headers, model } = this.getAPIEndpoint();
-
-    // 构建简洁提示词
-    const systemPrompt = `你是一位资深的 Linux 系统安全专家。请提供简洁、可执行的解决方案。
-
-格式要求：
-1. 每个步骤简短说明（不超过2句话）
-2. 命令格式严格遵循：
-   - 每个命令单独一行，用 \`\`\` 包裹
-   - 只包含完整的、可直接执行的命令
-   - 不要包含命令提示符（如 $、# 等）
-   - 不要包含注释或解释
-   - 一个代码块只包含一条命令
-
-示例格式：
-步骤1：检查当前用户权限
-\`\`\`
-whoami
-\`\`\`
-
-步骤2：查看文件权限
-\`\`\`
-ls -la /etc/passwd
-\`\`\`
-
-3. 总字数控制在300字以内
-4. 使用中文描述，命令使用英文`;
-
-    const userPrompt = `安全问题：${title}
-严重程度：${severity}
-描述：${description}
-${serverInfo ? `服务器：${serverInfo}` : ''}
-
-请按照格式要求给出简洁的解决步骤（包含可执行的命令）：`;
+    const config = await loadAIConfig();
+    const systemPrompt = conciseSolutionPrompt();
+    const userPrompt = conciseSolutionUserPrompt(title, description, severity, serverInfo);
 
     try {
       let fullText = '';
-      const isClaude = this.config!.provider === 'claude';
-
-      const requestBody = isClaude ? JSON.stringify({
-        model, max_tokens: 500, stream: true,
-        messages: [{ role: 'user', content: `${systemPrompt}\n\n${userPrompt}` }],
-      }) : JSON.stringify({
-        model, temperature: 0.7, max_tokens: 500, stream: true,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-      });
+      const requestBody = this.buildChatBody(config.isClaude, config.model, systemPrompt, userPrompt, 500, true);
 
       const sse = createSseDataBuffer((data) => {
-          if (data === '[DONE]') return;
-          try {
-            const parsed = JSON.parse(data);
-            const text = parsed.choices?.[0]?.delta?.content  // OpenAI
-              || parsed.delta?.text                            // Claude
-              || '';
-            if (text) {
-              fullText += text;
-              onChunk?.(text);
-            }
-          } catch {
-            // 忽略解析错误
-          }
+        const text = this.extractDeltaText(data);
+        if (text) {
+          fullText += text;
+          onChunk?.(text);
+        }
       });
-      await this.tauriStreamFetch(url, headers, requestBody, sse.push);
+      const stream = this.startAIStream({
+        url: config.baseUrl,
+        headers: this.buildHeaders(config.isClaude),
+        body: requestBody,
+        apiKey: config.apiKey,
+        apiKeyHeader: config.apiKeyHeader,
+        onChunk: sse.push,
+      });
+      await stream.done;
       sse.flush();
 
+      this.recordHistory(`[${severity}] ${title}\n${description}`, fullText, 'solution');
       onComplete?.(fullText);
     } catch (error) {
       log.error('AI 流式生成失败:', error);
@@ -513,53 +400,33 @@ ${serverInfo ? `服务器：${serverInfo}` : ''}
     onChunk?: (text: string) => void,
     onComplete?: (fullText: string) => void
   ): Promise<void> {
-    if (!this.isConfigured()) {
-      throw new Error('请先配置 AI 服务（设置 -> AI 配置）');
-    }
-
-    const { url, headers, model } = this.getAPIEndpoint();
-
-    const systemPrompt = `你是一位资深的 Linux 系统日志分析专家。请解释用户提供的系统日志。
-1. 解释日志的含义，发生了什么事件。
-2. 分析日志级别（如 Error, Warning）及其严重性。
-3. 如果是错误或警告，给出可能的原因和排查建议。
-4. 使用中文回答，保持简洁专业。`;
-
-    const userPrompt = `请解释这条系统日志：
-${logContent}
-${context ? `\n上下文信息：${context}` : ''}`;
+    const config = await loadAIConfig();
+    const systemPrompt = logExplainPrompt();
+    const userPrompt = logExplainUserPrompt(logContent, context);
 
     try {
       let fullText = '';
-      const isClaude = this.config!.provider === 'claude';
-
-      const requestBody = isClaude ? JSON.stringify({
-        model, max_tokens: 1000, stream: true,
-        messages: [{ role: 'user', content: `${systemPrompt}\n\n${userPrompt}` }],
-      }) : JSON.stringify({
-        model, temperature: 0.7, max_tokens: 1000, stream: true,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-      });
+      const requestBody = this.buildChatBody(config.isClaude, config.model, systemPrompt, userPrompt, 1000, true);
 
       const sse = createSseDataBuffer((data) => {
-          if (data === '[DONE]') return;
-          try {
-            const parsed = JSON.parse(data);
-            const text = parsed.choices?.[0]?.delta?.content || parsed.delta?.text || '';
-            if (text) {
-              fullText += text;
-              onChunk?.(text);
-            }
-          } catch {
-            // 忽略解析错误
-          }
+        const text = this.extractDeltaText(data);
+        if (text) {
+          fullText += text;
+          onChunk?.(text);
+        }
       });
-      await this.tauriStreamFetch(url, headers, requestBody, sse.push);
+      const stream = this.startAIStream({
+        url: config.baseUrl,
+        headers: this.buildHeaders(config.isClaude),
+        body: requestBody,
+        apiKey: config.apiKey,
+        apiKeyHeader: config.apiKeyHeader,
+        onChunk: sse.push,
+      });
+      await stream.done;
       sse.flush();
 
+      this.recordHistory(context ? `[${context}]\n${logContent}` : logContent, fullText, 'log-explain');
       onComplete?.(fullText);
     } catch (error) {
       log.error('AI 日志解释失败:', error);
@@ -570,53 +437,48 @@ ${context ? `\n上下文信息：${context}` : ''}`;
   /**
    * 以 OpenAI 兼容格式流式请求一个"纯 system prompt"补全。
    *
-   * 存在的理由：emergencyModal（命令输出解释）与 fileContextMenu（文件分析）
-   * 读的是**后端设置文件**里的 `settings.ai.providers[...]`，而不是本类的
-   * localStorage 配置 —— 两套配置至今并存，且 Ollama 这类无 apiKey 的本地
-   * 提供商只存在于前者（settingsPageManager 仅在 apiKey 非空时才同步到本类）。
-   * 所以这里只接管**传输**，不接管配置来源：调用方照旧用自己的 config，
-   * 请求则统一经 ai_proxy_stream 走 Rust 侧发出。
+   * 配置经 aiConfig.loadAIConfig() 解析（默认当前 provider，可用
+   * opts.providerKey 指定其他 provider）；前端不发送任何认证头，
+   * apiKey（可能是 enc:v1: 密文）与 apiKeyHeader 交给后端注入。
    *
-   * 这样 webview 里就不再有任何 fetch()，CSP 才能收紧到 connect-src 'self'。
+   * 返回的 Promise 在流完成时 resolve 出 { text, cancel }；若需要在流
+   * 进行中拿到取消句柄（如「取消生成」按钮），传 opts.onStart —— 它在
+   * 流注册完成后立刻以 cancel 回调。
    */
   public async streamOpenAICompatible(
-    config: { baseUrl: string; apiKey?: string; model?: string },
     systemPrompt: string,
     onChunk?: (text: string) => void,
-  ): Promise<string> {
-    // 保持与原有两处实现逐字节一致的 URL 拼法与请求体，避免行为漂移
-    const url = `${config.baseUrl}/chat/completions`;
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${config.apiKey ?? ''}`,
-    };
-    const body = JSON.stringify({
-      model: config.model,
-      messages: [{ role: 'system', content: systemPrompt }],
-      temperature: 0.7,
-      max_tokens: 1000,
-      stream: true,
-    });
+    opts?: { providerKey?: string; onStart?: (cancel: () => void) => void },
+  ): Promise<{ text: string; cancel: () => void }> {
+    const config = await loadAIConfig(opts?.providerKey);
+
+    const body = this.buildChatBody(config.isClaude, config.model, systemPrompt, null, 1000, true);
 
     let fullContent = '';
     const sse = createSseDataBuffer((data) => {
-      if (data === '[DONE]') return;
-      try {
-        const parsed = JSON.parse(data);
-        const text = parsed.choices?.[0]?.delta?.content || parsed.delta?.text || '';
-        if (text) {
-          fullContent += text;
-          onChunk?.(text);
-        }
-      } catch {
-        /* intentional: SSE 中途截断的半条 JSON，下一个 chunk 会补齐 */
+      const text = this.extractDeltaText(data);
+      if (text) {
+        fullContent += text;
+        onChunk?.(text);
       }
     });
 
-    await this.tauriStreamFetch(url, headers, body, sse.push);
+    const stream = this.startAIStream({
+      url: config.baseUrl,
+      headers: this.buildHeaders(config.isClaude),
+      body,
+      apiKey: config.apiKey,
+      apiKeyHeader: config.apiKeyHeader,
+      onChunk: sse.push,
+    });
+    opts?.onStart?.(stream.cancel);
+
+    await stream.done;
     sse.flush();
 
-    return fullContent.trim();
+    const text = fullContent.trim();
+    this.recordHistory(systemPrompt, text, 'explain');
+    return { text, cancel: stream.cancel };
   }
 
   /**
@@ -664,61 +526,68 @@ ${context ? `\n上下文信息：${context}` : ''}`;
   }
 
   /**
-   * 批量生成解决方案
+   * 测试 API 连接（无状态：不读写任何已保存配置，直接使用传入的配置）。
+   *
+   * 发一条最小的非流式聊天请求，成功返回简短的成功描述，失败抛出
+   * toFriendlyError 富化后的错误。
    */
-  public async generateBatchSolutions(
-    problems: Array<{
-      title: string;
-      description: string;
-      severity: string;
-    }>,
-    serverInfo?: string,
-    onProgress?: (current: number, total: number) => void
-  ): Promise<Map<string, AISolution>> {
-    const solutions = new Map<string, AISolution>();
+  public async testConnection(config: {
+    providerType: string;
+    apiKey: string;
+    baseUrl?: string;
+    model?: string;
+  }): Promise<string> {
+    const isClaude = /claude|anthropic/i.test(config.providerType);
+    const preset = PROVIDER_PRESETS[config.providerType] ?? PROVIDER_PRESETS[isClaude ? 'claude' : 'custom'];
 
-    for (let i = 0; i < problems.length; i++) {
-      const problem = problems[i];
-      if (onProgress) {
-        onProgress(i + 1, problems.length);
-      }
-
-      try {
-        const solution = await this.generateSolution(
-          problem.title,
-          problem.description,
-          problem.severity,
-          serverInfo
-        );
-        solutions.set(problem.title, solution);
-
-        // 添加延迟避免 API 限流
-        if (i < problems.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-      } catch (error) {
-        log.error(`生成解决方案失败: ${problem.title}`, error);
-        // 继续处理下一个
-      }
+    const rawBaseUrl = config.baseUrl || preset?.defaultBaseUrl || '';
+    if (!rawBaseUrl) {
+      throw new Error('自定义提供商需要提供 API 端点（Base URL）');
     }
+    const url = ensureCompletionsPath(rawBaseUrl, isClaude);
+    const model = config.model || preset?.defaultModel || 'gpt-4o-mini';
 
-    return solutions;
+    const body = this.buildChatBody(isClaude, model, '回复"连接成功"两个字即可。', null, 16, false);
+    const response = await this.tauriFetch(url, this.buildHeaders(isClaude), body, {
+      apiKey: config.apiKey,
+      apiKeyHeader: isClaude ? 'x-api-key' : 'authorization-bearer',
+    });
+
+    if (!response.ok) {
+      const preview = response.body.substring(0, 200);
+      throw new Error(`AI API 请求失败 (${response.status}): ${preview}`);
+    }
+    return `连接成功（${model}）`;
   }
 
   /**
-   * 测试 API 连接
+   * 拉取提供商的模型列表（设置页「拉取模型」按钮）。
+   *
+   * 与 testConnection 一样的无状态风格：传入表单值即可，不触碰已保存配置；
+   * apiKey 可以是明文也可以是 enc:v1: 密文（后端自行解密）。
+   * 端点推导在后端完成（OpenAI/Claude → /models，Ollama → /api/tags）。
    */
-  public async testConnection(): Promise<boolean> {
+  public async listModels(config: {
+    providerType: string;
+    apiKey: string;
+    baseUrl?: string;
+  }): Promise<string[]> {
     try {
-      await this.generateSolution(
-        '测试问题',
-        '这是一个测试',
-        'low'
-      );
-      return true;
+      const isClaude = /claude|anthropic/i.test(config.providerType);
+      const preset = PROVIDER_PRESETS[config.providerType] ?? PROVIDER_PRESETS[isClaude ? 'claude' : 'custom'];
+      const baseUrl = (config.baseUrl || preset?.defaultBaseUrl || '').trim();
+      if (!baseUrl) {
+        throw new Error('自定义提供商需要提供 API 端点（Base URL）');
+      }
+
+      return await invoke<string[]>('ai_list_models', {
+        baseUrl,
+        providerType: isClaude ? 'claude' : config.providerType,
+        apiKey: config.apiKey || null,
+        apiKeyHeader: isClaude ? 'x-api-key' : 'authorization-bearer',
+      });
     } catch (error) {
-      log.error('AI API 连接测试失败:', error);
-      return false;
+      throw this.toFriendlyError(error);
     }
   }
 }

@@ -3,7 +3,7 @@
  * 负责获取和管理Linux系统信息
  */
 
-import { invoke } from '@tauri-apps/api/core';
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH';
 import { logger } from '../core/logger';
 import { reportError } from '../utils/errorHandler';
 
@@ -223,7 +223,7 @@ export class SystemInfoManager {
       ];
 
       // 单次IPC调用，后端并行打开14个SSH channel执行
-      const batchResults = await invoke('ssh_execute_batch_commands', { commands }) as Array<{
+      const batchResults = await invokeTargetBoundSSH('ssh_execute_batch_commands', { commands }) as Array<{
         command: string;
         success: boolean;
         output?: { output: string; exit_code?: number };
@@ -287,7 +287,7 @@ export class SystemInfoManager {
    */
   private async executeCommand(command: string): Promise<string> {
     try {
-      const result = await invoke('ssh_execute_dashboard_command_direct', { command }) as { output: string; exit_code?: number };
+      const result = await invokeTargetBoundSSH('ssh_execute_dashboard_command_direct', { command }) as { output: string; exit_code?: number };
       return result?.output ?? '';
     } catch (error) {
       // 每条命令都可能失败(靶机缺命令等)，静默记录即可，弹 toast 会刷屏

@@ -3,6 +3,7 @@
  */
 
 import { createIconHTML } from './iconMapping';
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH';
 
 export class UploadModal {
   private modal: HTMLElement | null = null;
@@ -473,7 +474,7 @@ export class UploadModal {
         
         try {
           // 调用后端API上传文件
-          await (window as any).__TAURI__.core.invoke('sftp_upload', {
+          await invokeTargetBoundSSH('sftp_upload', {
             localPath: localPath,
             remotePath: remotePath
           });

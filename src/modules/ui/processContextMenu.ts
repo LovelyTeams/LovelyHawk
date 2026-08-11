@@ -4,6 +4,7 @@
 
 import * as IconPark from '@icon-park/svg'
 import { BaseContextMenu, type MenuAction } from './contextMenu/baseContextMenu'
+import { isValidPid } from '../core/shellEscape'
 
 export class ProcessContextMenu extends BaseContextMenu {
   private currentPid: string = ''
@@ -349,6 +350,7 @@ export class ProcessContextMenu extends BaseContextMenu {
 
   protected resolveAction(action: string): MenuAction | null {
     const pid = this.currentPid
+    if (!isValidPid(pid)) return null
     const actions: Record<string, MenuAction> = {
       'cmdline': { command: `cat /proc/${pid}/cmdline | tr '\\0' ' '`, title: `进程 ${pid} - 命令行参数`, actionName: '获取命令行参数' },
       'exe': { command: `ls -l /proc/${pid}/exe 2>/dev/null || echo "无法访问"`, title: `进程 ${pid} - 可执行路径`, actionName: '获取可执行路径' },
@@ -390,8 +392,18 @@ export class ProcessContextMenu extends BaseContextMenu {
       'deleted-exe': { command: `ls -l /proc/${pid}/exe 2>/dev/null | grep deleted && echo "可执行文件已被删除（可能是恶意进程）" || echo "可执行文件未被删除"`, title: `进程 ${pid} - 已删除可执行文件检测`, actionName: '检测已删除可执行文件' },
       'suspicious-network': { command: `echo "网络连接:"; ss -tnp 2>/dev/null | grep "pid=${pid}"; echo ""; echo "可疑连接检测:"; ss -tnp 2>/dev/null | grep "pid=${pid}" | awk '{print $5}' | cut -d: -f1 | sort -u | while read ip; do echo "连接到: $ip"; whois $ip 2>/dev/null | grep -E "^(Country|OrgName):" || echo "无法查询"; done`, title: `进程 ${pid} - 可疑网络连接检测`, actionName: '检测可疑网络连接' },
       'crypto-mining': { command: `echo "挖矿特征检测:"; echo ""; echo "1. 命令行检测:"; cat /proc/${pid}/cmdline 2>/dev/null | tr '\\0' ' ' | grep -iE "(xmrig|minerd|cpuminer|stratum|pool|mining)" && echo "检测到挖矿关键词" || echo "未检测到挖矿关键词"; echo ""; echo "2. 网络连接检测:"; ss -tnp 2>/dev/null | grep "pid=${pid}" | grep -E ":(3333|4444|5555|8080|14444)" && echo "检测到常见矿池端口" || echo "未检测到矿池端口"; echo ""; echo "3. CPU使用率:"; ps -p ${pid} -o %cpu,cmd 2>/dev/null`, title: `进程 ${pid} - 挖矿特征检测`, actionName: '检测挖矿特征' },
-      'kill': { command: `kill ${pid} 2>&1 && echo "进程已发送终止信号" || echo "终止失败"`, title: `进程 ${pid} - 终止进程`, actionName: '终止进程' },
-      'kill-9': { command: `kill -9 ${pid} 2>&1 && echo "进程已强制终止" || echo "强制终止失败"`, title: `进程 ${pid} - 强制终止进程`, actionName: '强制终止进程' },
+      'kill': {
+        command: `kill ${pid}`,
+        title: `进程 ${pid} - 终止进程`, actionName: '终止进程', mutating: true, dangerous: true,
+        verifyCommand: `if kill -0 ${pid} 2>/dev/null; then echo alive; exit 1; else echo stopped; fi`,
+        verifyExpected: 'stopped',
+      },
+      'kill-9': {
+        command: `kill -9 ${pid}`,
+        title: `进程 ${pid} - 强制终止进程`, actionName: '强制终止进程', mutating: true, dangerous: true,
+        verifyCommand: `if kill -0 ${pid} 2>/dev/null; then echo alive; exit 1; else echo stopped; fi`,
+        verifyExpected: 'stopped',
+      },
     }
 
     return actions[action] || null

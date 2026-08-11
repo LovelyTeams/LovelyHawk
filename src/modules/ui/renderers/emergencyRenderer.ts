@@ -26,7 +26,8 @@ import {
   Code,
   Key,
   Rocket,
-  History
+  History,
+  Radar
 } from '@icon-park/svg';
 
 export class EmergencyRenderer {
@@ -172,16 +173,15 @@ export class EmergencyRenderer {
 
     const renderCheckItem = (check: any, category: string) => {
       const iconSVG = check.iconFunc ? check.iconFunc({ theme: 'filled', size: '18', fill: 'currentColor' }) : '';
+      const selectedByDefault = category !== 'performance';
       return `
-        <div class="detection-item qd-detection-item selected" data-check-id="${check.id}" data-category="${category}"
-             onclick="const cb=this.querySelector('input[type=checkbox]');cb.checked=!cb.checked;this.classList.toggle('selected',cb.checked);">
+        <div class="detection-item qd-detection-item${selectedByDefault ? ' selected' : ''}" data-check-id="${check.id}" data-category="${category}">
           <div class="qd-item-icon">${iconSVG}</div>
           <div class="qd-item-info">
             <div style="display:flex;justify-content:space-between;align-items:center;">
               <span class="qd-item-name">${check.name}</span>
-              <input type="checkbox" id="check-${check.id}" checked
-                style="width:14px;height:14px;accent-color:var(--primary-color);cursor:pointer;"
-                onclick="event.stopPropagation();">
+              <input type="checkbox" id="check-${check.id}"${selectedByDefault ? ' checked' : ''}
+                style="width:14px;height:14px;accent-color:var(--primary-color);cursor:pointer;">
             </div>
             <div class="qd-item-desc">${check.description}</div>
             <div id="status-${check.id}" class="qd-item-status">
@@ -199,20 +199,20 @@ export class EmergencyRenderer {
         <!-- Header -->
         <div class="qd-header">
           <div class="qd-header-left">
-            <div class="qd-header-icon">${icon(Shield, '22', 'filled')}</div>
+            <div class="qd-header-icon">${icon(Radar, '22')}</div>
             <div>
               <h2 class="qd-header-title">快速检测中心</h2>
               <div class="qd-header-subtitle">安全漏洞扫描 · 应急响应 · 竞赛模式</div>
             </div>
           </div>
           <div class="qd-header-right">
-            <button class="modern-btn secondary" onclick="window.quickDetection?.startCompetitionScan()" title="竞赛模式: 全量扫描 ${totalItems} 项">
-              <span class="qd-competition-badge">竞赛</span> 全量扫描
+            <button class="modern-btn secondary" data-qd-action="competition-scan" title="比赛首分钟: 环境预检后优先执行 8 项高价值只读检测">
+              <span class="qd-competition-badge">竞赛</span> 首分钟摸底
             </button>
-            <button class="modern-btn primary" onclick="window.quickDetection?.startFullScan()">
+            <button class="modern-btn primary" data-qd-action="full-scan">
               ${icon(Rocket, '16', 'filled')} 一键扫描
             </button>
-            <button class="modern-btn secondary" onclick="window.quickDetection?.viewReport()">
+            <button class="modern-btn secondary" data-qd-action="view-report">
               ${icon(Analysis, '16')} 报告
             </button>
           </div>
@@ -252,6 +252,7 @@ export class EmergencyRenderer {
                   <div id="detection-current-task" style="color:var(--text-secondary);font-size:12px;">正在初始化...</div>
                 </div>
                 <div id="detection-score-display" style="font-size:28px;font-weight:700;color:var(--primary-color);font-family:monospace;">--</div>
+                <button class="qd-action-btn danger" data-qd-action="cancel-scan">取消扫描</button>
               </div>
               <div class="qd-progress-bar-track">
                 <div id="detection-progress-bar" class="qd-progress-bar-fill" style="width:0%"></div>
@@ -274,12 +275,12 @@ export class EmergencyRenderer {
                   <div style="font-size:20px;font-weight:700;color:var(--error-color);" id="critical-count">0</div>
                   <div style="font-size:11px;color:var(--text-secondary);">严重</div>
                 </div>
-                <div class="qd-severity-card" style="border-left:3px solid var(--warning-color);">
-                  <div style="font-size:20px;font-weight:700;color:var(--warning-color);" id="high-count">0</div>
+                <div class="qd-severity-card" style="border-left:3px solid var(--sev-high-fg);">
+                  <div style="font-size:20px;font-weight:700;color:var(--sev-high-fg);" id="high-count">0</div>
                   <div style="font-size:11px;color:var(--text-secondary);">高危</div>
                 </div>
-                <div class="qd-severity-card" style="border-left:3px solid #eab308;">
-                  <div style="font-size:20px;font-weight:700;color:#eab308;" id="medium-count">0</div>
+                <div class="qd-severity-card" style="border-left:3px solid var(--sev-warn-border);">
+                  <div style="font-size:20px;font-weight:700;color:var(--sev-warn-fg);" id="medium-count">0</div>
                   <div style="font-size:11px;color:var(--text-secondary);">中危</div>
                 </div>
                 <div class="qd-severity-card" style="border-left:3px solid var(--info-color);">
@@ -300,7 +301,7 @@ export class EmergencyRenderer {
                 <div class="qd-stat-title">安全检测</div>
               </div>
               <div class="qd-stat-card">
-                <div class="qd-stat-value" style="color:#a855f7">${competitionChecks.length}</div>
+                <div class="qd-stat-value" style="color:var(--accent-purple)">${competitionChecks.length}</div>
                 <div class="qd-stat-title">竞赛检测</div>
               </div>
               <div class="qd-stat-card">
@@ -317,7 +318,7 @@ export class EmergencyRenderer {
                   <span style="font-size:14px;font-weight:600;">安全检测</span>
                   <span style="font-size:11px;color:var(--text-secondary);">${securityChecks.length} 项</span>
                 </div>
-                <button class="modern-btn text-only" style="font-size:11px;" onclick="window.quickDetection?.toggleAllChecks('security')">全选/取消</button>
+                <button class="modern-btn text-only" style="font-size:11px;" data-qd-action="toggle-category" data-category="security">全选/取消</button>
               </div>
               <div class="qd-items-grid">
                 ${securityChecks.map(c => renderCheckItem(c, 'security')).join('')}
@@ -333,7 +334,7 @@ export class EmergencyRenderer {
                   <span class="qd-competition-badge">NEW</span>
                   <span style="font-size:11px;color:var(--text-secondary);">${competitionChecks.length} 项</span>
                 </div>
-                <button class="modern-btn text-only" style="font-size:11px;" onclick="window.quickDetection?.toggleAllChecks('competition')">全选/取消</button>
+                <button class="modern-btn text-only" style="font-size:11px;" data-qd-action="toggle-category" data-category="competition">全选/取消</button>
               </div>
               <div class="qd-items-grid">
                 ${competitionChecks.map(c => renderCheckItem(c, 'competition')).join('')}
@@ -348,7 +349,7 @@ export class EmergencyRenderer {
                   <span style="font-size:14px;font-weight:600;">性能检测</span>
                   <span style="font-size:11px;color:var(--text-secondary);">${performanceChecks.length} 项</span>
                 </div>
-                <button class="modern-btn text-only" style="font-size:11px;" onclick="window.quickDetection?.toggleAllChecks('performance')">全选/取消</button>
+                <button class="modern-btn text-only" style="font-size:11px;" data-qd-action="toggle-category" data-category="performance">全选/取消</button>
               </div>
               <div class="qd-items-grid">
                 ${performanceChecks.map(c => renderCheckItem(c, 'performance')).join('')}
@@ -360,11 +361,11 @@ export class EmergencyRenderer {
           <div id="qd-tab-results" class="qd-tab-panel" style="display:none;padding:var(--spacing-md);">
             <div class="qd-results-toolbar">
               <div class="qd-filter-chips">
-                <button class="qd-filter-chip active" data-qd-filter="all">全部</button>
-                <button class="qd-filter-chip" data-qd-filter="critical">严重</button>
-                <button class="qd-filter-chip" data-qd-filter="high">高危</button>
-                <button class="qd-filter-chip" data-qd-filter="medium">中危</button>
-                <button class="qd-filter-chip" data-qd-filter="low">低危</button>
+                <button class="qd-filter-chip active" data-qd-action="filter" data-filter="all">全部</button>
+                <button class="qd-filter-chip" data-qd-action="filter" data-filter="critical">严重</button>
+                <button class="qd-filter-chip" data-qd-action="filter" data-filter="high">高危</button>
+                <button class="qd-filter-chip" data-qd-action="filter" data-filter="medium">中危</button>
+                <button class="qd-filter-chip" data-qd-action="filter" data-filter="low">低危</button>
               </div>
               <div style="flex:1"></div>
               <button class="qd-action-btn primary" data-qd-action="fix-all">一键全部修复</button>
@@ -373,6 +374,13 @@ export class EmergencyRenderer {
               <div style="text-align:center;padding:48px;color:var(--text-secondary);font-size:13px;">
                 运行检测后，结果将在此显示，每个问题旁边会有一键修复按钮
               </div>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin:20px 0 10px;">
+              <span style="font-size:14px;font-weight:600;color:var(--text-primary);">检测历史</span>
+              <button class="qd-action-btn danger" data-qd-action="clear-scan-history">清空历史</button>
+            </div>
+            <div id="qd-scan-history-list" class="qd-fix-history-list">
+              <div style="text-align:center;padding:32px;color:var(--text-secondary);font-size:13px;">暂无检测历史</div>
             </div>
           </div>
 
@@ -472,7 +480,7 @@ export class EmergencyRenderer {
               border-radius: var(--border-radius-lg);
               padding: var(--spacing-lg);
               text-align: center;
-              background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(147, 51, 234, 0.1) 100%);
+              background: linear-gradient(135deg, color-mix(in srgb, var(--primary-color) 10%, transparent) 0%, color-mix(in srgb, var(--accent-purple) 10%, transparent) 100%);
             ">
               <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 8px;">安全评分</div>
               <div style="display: flex; align-items: baseline; justify-content: center; gap: 4px;">
@@ -504,17 +512,17 @@ export class EmergencyRenderer {
                   </div>
                 </div>
                 <div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg-secondary); border-radius: var(--border-radius);">
-                  <div style="width: 8px; height: 8px; border-radius: 50%; background: var(--warning-color);"></div>
+                  <div style="width: 8px; height: 8px; border-radius: 50%; background: var(--sev-high-fg);"></div>
                   <div style="flex: 1;">
                     <div style="font-size: 12px; color: var(--text-secondary);">高危</div>
-                    <div id="report-high-count" style="font-size: 24px; font-weight: 600; color: var(--warning-color);">0</div>
+                    <div id="report-high-count" style="font-size: 24px; font-weight: 600; color: var(--sev-high-fg);">0</div>
                   </div>
                 </div>
                 <div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg-secondary); border-radius: var(--border-radius);">
-                  <div style="width: 8px; height: 8px; border-radius: 50%; background: var(--accent-orange);"></div>
+                  <div style="width: 8px; height: 8px; border-radius: 50%; background: var(--sev-warn-fg);"></div>
                   <div style="flex: 1;">
                     <div style="font-size: 12px; color: var(--text-secondary);">中危</div>
-                    <div id="report-medium-count" style="font-size: 24px; font-weight: 600; color: var(--accent-orange);">0</div>
+                    <div id="report-medium-count" style="font-size: 24px; font-weight: 600; color: var(--sev-warn-fg);">0</div>
                   </div>
                 </div>
                 <div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg-secondary); border-radius: var(--border-radius);">

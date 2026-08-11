@@ -87,6 +87,7 @@ interface ConfirmOptions {
   confirmText?: string;
   cancelText?: string;
   dangerous?: boolean;
+  defaultFocus?: 'confirm' | 'cancel';
 }
 
 interface PromptOptions {
@@ -96,6 +97,7 @@ interface PromptOptions {
   placeholder?: string;
   confirmText?: string;
   cancelText?: string;
+  inputType?: 'text' | 'password';
 }
 
 interface AlertOptions {
@@ -182,8 +184,12 @@ export function showConfirm(options: ConfirmOptions): Promise<boolean> {
     overlay.querySelector(`#cd-confirm-${id}`)?.addEventListener('click', () => done(true));
     overlay.addEventListener('click', (e) => { if (e.target === overlay) done(false); });
 
-    // 自动聚焦确认按钮
-    (overlay.querySelector(`#cd-confirm-${id}`) as HTMLElement)?.focus();
+    const shouldFocusCancel = options.defaultFocus === 'cancel'
+      || (options.dangerous === true && options.defaultFocus !== 'confirm');
+    const focusId = shouldFocusCancel
+      ? `#cd-cancel-${id}`
+      : `#cd-confirm-${id}`;
+    (overlay.querySelector(focusId) as HTMLElement)?.focus();
   });
 }
 
@@ -200,7 +206,7 @@ export function showPrompt(options: PromptOptions): Promise<string | null> {
         ${buildHeader(options.title, undefined, createIconHTML('✏️', { size: 20, color: '#6db3ff' }), 'rgba(59, 130, 246, 0.1)')}
         <div class="cd-body">
           <div class="cd-message">${escapeHtml(options.message)}</div>
-          <input id="cd-input-${id}" class="cd-input" type="text"
+          <input id="cd-input-${id}" class="cd-input" type="${options.inputType === 'password' ? 'password' : 'text'}"
             value="${escapeHtml(options.defaultValue || '')}"
             placeholder="${escapeHtml(options.placeholder || '')}" />
         </div>

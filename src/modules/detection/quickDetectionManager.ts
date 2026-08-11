@@ -13,7 +13,21 @@ import { getFixActionsForFinding, getFixActionsForDetectionItem, HARDENING_ITEMS
 import { fixExecutor, type FixAction, type FixResult, type ResolvedBaselineItem } from './fixExecutor';
 import { fixHistoryManager, type FixHistoryEntry } from './fixHistoryManager';
 import { SystemDetector } from '../utils/systemDetector';
-import { invoke } from '@tauri-apps/api/core';
+import { executeEmergencyCommand } from '../emergency/commandExecution';
+import { operationJournal } from '../core/operationJournal';
+import { activeTargetContext, type TargetIdentity } from '../core/targetContext';
+import {
+  COMPETITION_TRIAGE_IDS,
+  calculateCompleteness,
+  calculateTrustedScore,
+  normalizeOutcome,
+  notApplicableReason,
+  type DetectionOutcome,
+  type ScanEnvironment,
+  type ScanMode,
+} from './scanPlanning';
+import { reportError } from '../utils/errorHandler';
+import { targetCapabilityStore } from '../core/targetCapabilities';
 
 // 检测项目类型
 export interface DetectionItem {
@@ -21,7 +35,7 @@ export interface DetectionItem {
   name: string;
   description: string;
   category: 'security' | 'performance' | 'competition';
-  status: 'pending' | 'running' | 'completed' | 'failed';
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'not-applicable';
   result?: DetectionResult;
 }
 
@@ -34,6 +48,7 @@ export interface DetectionResult {
   duration: number; // 执行时间（毫秒）
   timestamp: Date;
   rawOutput?: any; // 原始命令返回结果
+  outcome?: DetectionOutcome;
 }
 
 // 检测发现
@@ -60,6 +75,12 @@ export interface DetectionReport {
     low: number;
     info: number;
   };
+  mode?: ScanMode;
+  status?: 'completed' | 'partial' | 'cancelled';
+  completeness?: ReturnType<typeof calculateCompleteness>;
+  environment?: ScanEnvironment;
+  target?: TargetIdentity;
+  timeBudgetMs?: number;
 }
 
 export class QuickDetectionManager {
@@ -75,6 +96,8 @@ export class QuickDetectionManager {
 
   /** 探测到的目标发行版 ID（懒加载，复用 SystemDetector 的内部缓存） */
   private detectedDistro: string | null = null;
+  private detectedDistroSessionId: string | null = null;
+  private scanEnvironmentCache: { sessionId: string; environment: ScanEnvironment } | null = null;
 
   /** 并发组大小 — 同时发出的检测请求数 */
   private static readonly CONCURRENCY = 3;
@@ -104,18 +127,42 @@ export class QuickDetectionManager {
    * 开始全面扫描
    */
   async startFullScan(selectedIds?: string[]): Promise<DetectionReport> {
+    return this.runScan(selectedIds || this.getAllCheckIds(), 'selected');
+  }
+
+  private async runScan(selectedIds: readonly string[], mode: ScanMode): Promise<DetectionReport> {
     if (this.isRunning) {
       throw new Error('检测已在进行中');
     }
 
+    const itemsToRun = [...new Set(selectedIds)];
+    if (itemsToRun.length === 0) throw new Error('没有选中的检测项');
+    const scanTarget = activeTargetContext.get();
+    if (!scanTarget) throw new Error('没有已确认的活动 SSH 目标');
+
     this.isRunning = true;
     this.cancelled = false;
+    this.detectionModules.setCommandTimeout(mode === 'competition-triage' ? 6 : undefined);
     this.showProgressPanel();
-
-    // 获取选中的检测项
-    const itemsToRun = selectedIds || this.getAllCheckIds();
     const totalItems = itemsToRun.length;
     let completedItems = 0;
+
+    this.updateProgress(0, '正在进行环境预检...');
+    let environment: ScanEnvironment;
+    try {
+      environment = await this.detectScanEnvironment();
+    } catch (error) {
+      this.isRunning = false;
+      this.detectionModules.setCommandTimeout(undefined);
+      this.hideProgressPanel();
+      throw error;
+    }
+    if (!activeTargetContext.matches(scanTarget)) {
+      this.isRunning = false;
+      this.detectionModules.setCommandTimeout(undefined);
+      this.hideProgressPanel();
+      throw new Error('环境预检期间活动目标已变化，已中止扫描');
+    }
 
     // 初始化报告
     this.currentReport = {
@@ -124,89 +171,101 @@ export class QuickDetectionManager {
       server: this.getCurrentServerInfo(),
       overallScore: 0,
       totalDuration: 0,
-      items: [],
+      items: itemsToRun.map(itemId => ({
+        id: itemId,
+        name: this.getCheckName(itemId),
+        description: this.getCheckDescription(itemId),
+        category: this.getCheckCategory(itemId),
+        status: 'pending',
+      })),
       summary: {
         critical: 0,
         high: 0,
         medium: 0,
         low: 0,
         info: 0
-      }
+      },
+      mode,
+      status: 'completed',
+      environment,
+      target: {
+        sessionId: scanTarget.sessionId,
+        hostKeyFingerprint: scanTarget.hostKeyFingerprint,
+        host: scanTarget.host,
+        port: scanTarget.port,
+        username: scanTarget.username,
+      },
+      timeBudgetMs: mode === 'competition-triage' ? 20_000 : undefined,
     };
 
     const startTime = Date.now();
 
     try {
-      // 分批并行执行检测（每批 CONCURRENCY 个同时执行）
-      for (let i = 0; i < itemsToRun.length; i += QuickDetectionManager.CONCURRENCY) {
-        if (this.cancelled) {
-          window.showNotification?.('检测已取消', 'warning');
-          break;
+      const queue: string[] = [];
+      for (const item of this.currentReport.items) {
+        const reason = notApplicableReason(item.id, environment);
+        if (!reason) {
+          queue.push(item.id);
+          continue;
         }
-
-        const batch = itemsToRun.slice(i, i + QuickDetectionManager.CONCURRENCY);
-
-        // 标记当前批次为运行中
-        batch.forEach(itemId => this.updateCheckStatus(itemId, 'running'));
-        this.updateProgress(
-          (completedItems / totalItems) * 100,
-          `正在执行: ${batch.map(id => this.getCheckName(id)).join(', ')}`
-        );
-
-        // 批次内并行执行
-        const results = await Promise.allSettled(
-          batch.map(async (itemId) => {
-            const result = await this.executeDetection(itemId);
-            return { itemId, result };
-          })
-        );
-
-        // 处理批次结果
-        for (const settled of results) {
-          if (this.cancelled) break;
-
-          if (settled.status === 'fulfilled') {
-            const { itemId, result } = settled.value;
-            this.updateCheckStatus(itemId, 'completed', result);
-
-            this.currentReport.items.push({
-              id: itemId,
-              name: this.getCheckName(itemId),
-              description: this.getCheckDescription(itemId),
-              category: this.getCheckCategory(itemId),
-              status: 'completed',
-              result
-            });
-
-            if (result.findings.length > 0) {
-              result.findings.forEach(finding => {
-                this.currentReport!.summary[finding.severity]++;
-              });
-            }
-          } else {
-            // rejected
-            const itemId = batch[results.indexOf(settled)];
-            console.error(`检测失败: ${itemId}`, settled.reason);
-            this.updateCheckStatus(itemId, 'failed');
-
-            this.currentReport.items.push({
-              id: itemId,
-              name: this.getCheckName(itemId),
-              description: this.getCheckDescription(itemId),
-              category: this.getCheckCategory(itemId),
-              status: 'failed'
-            });
-          }
-
-          completedItems++;
-        }
-
-        this.updateProgress((completedItems / totalItems) * 100, '');
+        item.status = 'not-applicable';
+        item.result = {
+          passed: false,
+          score: 0,
+          severity: 'info',
+          findings: [{ title: '不适用', description: reason, severity: 'info' }],
+          duration: 0,
+          timestamp: new Date(),
+          outcome: 'not-applicable',
+        };
+        completedItems += 1;
+        this.updateCheckStatus(item.id, 'not-applicable', item.result);
       }
+
+      let cursor = 0;
+      const concurrency = mode === 'competition-triage' ? 4 : QuickDetectionManager.CONCURRENCY;
+      const worker = async (): Promise<void> => {
+        while (!this.cancelled) {
+          const itemId = queue[cursor++];
+          if (!itemId) return;
+          const item = this.currentReport?.items.find(entry => entry.id === itemId);
+          if (!item) continue;
+          item.status = 'running';
+          this.updateCheckStatus(itemId, 'running');
+          this.updateProgress(
+            (completedItems / totalItems) * 100,
+            `正在执行: ${this.getCheckName(itemId)}`,
+          );
+
+          try {
+            const result = await this.executeDetection(itemId);
+            const outcome = normalizeOutcome({ status: 'completed', result });
+            result.outcome = outcome;
+            item.result = result;
+            item.status = outcome === 'error' ? 'failed' : 'completed';
+            this.updateCheckStatus(itemId, item.status, result);
+            if (outcome === 'passed' || outcome === 'failed') {
+              for (const finding of result.findings) this.currentReport!.summary[finding.severity] += 1;
+            }
+          } catch (error) {
+            item.status = 'failed';
+            reportError(error, { module: 'QuickDetection', action: itemId, silent: true });
+            this.updateCheckStatus(itemId, 'failed');
+          } finally {
+            completedItems += 1;
+            this.updateProgress((completedItems / totalItems) * 100, '');
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, worker));
 
       // 计算总体评分
       this.currentReport.totalDuration = Date.now() - startTime;
       this.currentReport.overallScore = this.calculateOverallScore(this.currentReport);
+      this.currentReport.completeness = calculateCompleteness(totalItems, this.currentReport.items);
+      this.currentReport.status = this.cancelled
+        ? 'cancelled'
+        : this.currentReport.completeness.failed > 0 ? 'partial' : 'completed';
 
       // 显示结果
       this.showSummaryPanel(this.currentReport);
@@ -214,12 +273,56 @@ export class QuickDetectionManager {
       // 保存到历史
       this.saveToHistory(this.currentReport);
 
+      if (this.cancelled) window.showNotification?.('检测已取消，已保存带完整度标记的部分报告', 'warning');
+
       return this.currentReport;
     } finally {
       this.isRunning = false;
       this.cancelled = false;
+      this.detectionModules.setCommandTimeout(undefined);
       this.hideProgressPanel();
     }
+  }
+
+  private async detectScanEnvironment(): Promise<ScanEnvironment> {
+    const target = activeTargetContext.get();
+    if (!target) throw new Error('没有已确认的活动 SSH 目标');
+    if (this.scanEnvironmentCache?.sessionId === target.sessionId) {
+      return this.scanEnvironmentCache.environment;
+    }
+
+    const capabilities = targetCapabilityStore.get(target);
+    if (capabilities && !capabilities.exec) {
+      const environment: ScanEnvironment = {
+        kubernetes: false,
+        webRoot: false,
+        containerRuntime: false,
+        checkedAt: Date.now(),
+      };
+      this.scanEnvironmentCache = { sessionId: target.sessionId, environment };
+      return environment;
+    }
+    const fallbackCapabilityProbe = capabilities
+      ? ''
+      : `printf 'KUBERNETES='; if command -v kubectl >/dev/null 2>&1 && kubectl version --request-timeout=2s >/dev/null 2>&1; then echo 1; else echo 0; fi; printf 'CONTAINER_RUNTIME='; if command -v docker >/dev/null 2>&1 || command -v podman >/dev/null 2>&1 || command -v crictl >/dev/null 2>&1 || command -v ctr >/dev/null 2>&1; then echo 1; else echo 0; fi; `;
+    const result = await executeEmergencyCommand({
+      command: `${fallbackCapabilityProbe}printf 'WEB_ROOT='; if [ -d /var/www ] || [ -d /srv/www ] || [ -d /usr/share/nginx/html ]; then echo 1; else echo 0; fi`,
+      timeoutSec: 8,
+    });
+    if (!result.success) throw new Error(`环境预检失败: ${result.message}`);
+    const value = (key: string) => new RegExp(`^${key}=1$`, 'm').test(result.output);
+    const environment: ScanEnvironment = {
+      kubernetes: capabilities
+        ? targetCapabilityStore.evaluate('kubernetes')?.available === true
+        : value('KUBERNETES'),
+      webRoot: value('WEB_ROOT'),
+      containerRuntime: capabilities
+        ? ['docker', 'podman', 'crictl', 'ctr'].some(tool => capabilities.tools[tool] === true)
+        : value('CONTAINER_RUNTIME'),
+      checkedAt: Date.now(),
+    };
+    this.scanEnvironmentCache = { sessionId: target.sessionId, environment };
+    return environment;
   }
 
   /**
@@ -517,10 +620,6 @@ export class QuickDetectionManager {
     this.reportRenderer.showSummaryPanel(report);
   }
 
-  private getScoreColor(score: number): string {
-    return this.reportRenderer.getScoreColor(score);
-  }
-
   viewReport(): void {
     this.reportRenderer.setCurrentReport(this.currentReport);
     this.reportRenderer.viewReport();
@@ -564,25 +663,7 @@ export class QuickDetectionManager {
    * 工具方法：计算总体评分
    */
   private calculateOverallScore(report: DetectionReport): number {
-    if (report.items.length === 0) return 0;
-
-    // 检查是否有严重问题
-    const hasCriticalIssues = report.items.some(item =>
-      item.result?.findings.some(f => f.severity === 'critical')
-    );
-
-    const totalScore = report.items.reduce((sum, item) => {
-      return sum + (item.result?.score || 0);
-    }, 0);
-
-    let overallScore = Math.round(totalScore / report.items.length);
-
-    // 如果有严重问题，总分不能超过 60 分
-    if (hasCriticalIssues && overallScore > 60) {
-      overallScore = 60;
-    }
-
-    return overallScore;
+    return calculateTrustedScore(report.items);
   }
 
   // ========== 历史记录方法（保留在本类中） ==========
@@ -613,8 +694,6 @@ export class QuickDetectionManager {
       window.showNotification?.('检测历史保存失败，可能存储空间不足', 'warning');
     }
 
-    // 更新 UI
-    this.updateHistoryList();
   }
 
   /**
@@ -632,54 +711,8 @@ export class QuickDetectionManager {
     }
   }
 
-  /**
-   * 历史记录：更新历史列表UI
-   */
-  private updateHistoryList(): void {
-    const listEl = document.getElementById('detection-history-list');
-    if (!listEl) return;
-
-    if (this.detectionHistory.length === 0) {
-      listEl.innerHTML = `
-        <div style="text-align: center; padding: var(--spacing-lg); color: var(--text-secondary);">
-          暂无检测历史
-        </div>
-      `;
-      return;
-    }
-
-    listEl.innerHTML = this.detectionHistory.map(report => `
-      <div class="history-item" style="
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 12px;
-        border: 1px solid var(--border-color);
-        border-radius: var(--border-radius);
-        background: var(--bg-primary);
-        cursor: pointer;
-        transition: all 0.2s ease;
-      " onmouseover="this.style.background='var(--bg-secondary)';"
-         onmouseout="this.style.background='var(--bg-primary)';"
-         onclick="window.quickDetection?.viewHistoryReport('${report.id}')">
-        <div>
-          <div style="font-weight: 500; color: var(--text-primary); font-size: 14px;">
-            ${new Date(report.timestamp).toLocaleString('zh-CN')}
-          </div>
-          <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
-            ${report.server} · ${report.items.length} 项检测 · ${(report.totalDuration / 1000).toFixed(1)}s
-          </div>
-        </div>
-        <div style="text-align: right;">
-          <div style="font-size: 24px; font-weight: 600; color: ${this.getScoreColor(report.overallScore)};">
-            ${report.overallScore}
-          </div>
-          <div style="font-size: 11px; color: var(--text-secondary);">
-            ${report.summary.critical + report.summary.high} 个问题
-          </div>
-        </div>
-      </div>
-    `).join('');
+  getScanHistory(): DetectionReport[] {
+    return [...this.detectionHistory];
   }
 
   /**
@@ -697,8 +730,11 @@ export class QuickDetectionManager {
 
     if (confirmed) {
       this.detectionHistory = [];
-      localStorage.removeItem('detection-history');
-      this.updateHistoryList();
+      try {
+        localStorage.removeItem('detection-history');
+      } catch (error) {
+        reportError(error, { module: 'QuickDetection', action: 'clear-history', silent: true });
+      }
     }
   }
 
@@ -707,10 +743,17 @@ export class QuickDetectionManager {
    */
   viewHistoryReport(reportId: string): void {
     const report = this.detectionHistory.find(r => r.id === reportId);
-    if (report) {
+    if (report?.target && activeTargetContext.matches(report.target)) {
       this.currentReport = report;
       this.viewReport();
     }
+  }
+
+  selectHistoryReport(reportId: string): boolean {
+    const report = this.detectionHistory.find(item => item.id === reportId);
+    if (!report?.target || !activeTargetContext.matches(report.target)) return false;
+    this.currentReport = report;
+    return true;
   }
 
   /**
@@ -733,7 +776,7 @@ export class QuickDetectionManager {
   /**
    * UI 方法：全选/取消检测项
    */
-  toggleAllChecks(category: 'security' | 'performance'): void {
+  toggleAllChecks(category: 'security' | 'performance' | 'competition'): void {
     const checkboxes = document.querySelectorAll(`.detection-item[data-category="${category}"] input[type="checkbox"]`);
     if (checkboxes.length === 0) return;
 
@@ -864,35 +907,9 @@ export class QuickDetectionManager {
     return 'security';
   }
 
-  /**
-   * 竞赛模式：全量扫描 35 项，并发提升到 5
-   */
+  /** 比赛首分钟摸底：高价值、只读、critical-first，不包含性能压测和无关 K8s 扫描。 */
   async startCompetitionScan(): Promise<DetectionReport> {
-    const allIds = [
-      // 安全检测 21 项
-      'port-scan', 'user-audit', 'backdoor-scan', 'process-analysis', 'file-permission',
-      'ssh-audit', 'log-analysis', 'firewall-check', 'password-policy', 'sudo-audit',
-      'pam-config', 'account-lockout', 'selinux-status', 'kernel-params', 'system-updates',
-      'unnecessary-services', 'auto-start-services', 'audit-config', 'history-audit',
-      'ntp-config', 'dns-config',
-      // 竞赛级检测 20 项
-      'webshell-scan', 'rootkit-scan', 'persistence-scan', 'log-tamper',
-      'network-backdoor', 'enhanced-user', 'hidden-cron', 'ssh-key-audit',
-      'timestomp-check', 'enhanced-process', 'bin-tamper', 'immutable-files',
-      'k8s-privileged-pod', 'k8s-reverse-shell', 'k8s-rbac-audit',
-      'k8s-container-escape', 'k8s-suspicious-cronjob', 'k8s-network-policy',
-      'k8s-sa-audit', 'k8s-node-persistence',
-      // 性能检测 4 项
-      'cpu-test', 'memory-test', 'disk-test', 'network-test',
-    ];
-    // 竞赛模式使用更高并发
-    const savedConcurrency = QuickDetectionManager.CONCURRENCY;
-    (QuickDetectionManager as any).CONCURRENCY = 5;
-    try {
-      return await this.startFullScan(allIds);
-    } finally {
-      (QuickDetectionManager as any).CONCURRENCY = savedConcurrency;
-    }
+    return this.runScan(COMPETITION_TRIAGE_IDS, 'competition-triage');
   }
 
   /**
@@ -1000,6 +1017,7 @@ export class QuickDetectionManager {
       confirmText: `执行 ${actions.length} 项修复`,
       cancelText: '取消',
       dangerous: true,
+      defaultFocus: 'cancel',
     });
     if (!confirmed) return [];
 
@@ -1009,6 +1027,27 @@ export class QuickDetectionManager {
   /** 重新验证某个检测项 */
   async reVerify(detectionItemId: string): Promise<DetectionResult> {
     return this.detectionModules.runSingleDetection(detectionItemId);
+  }
+
+  async reVerifyAndUpdate(detectionItemId: string): Promise<DetectionResult> {
+    const result = await this.reVerify(detectionItemId);
+    const item = this.currentReport?.items.find(entry => entry.id === detectionItemId);
+    if (item && this.currentReport) {
+      item.result = result;
+      item.status = 'completed';
+      this.currentReport.summary = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+      for (const reportItem of this.currentReport.items) {
+        const outcome = normalizeOutcome(reportItem);
+        if (outcome === 'passed' || outcome === 'failed') {
+          for (const finding of reportItem.result?.findings || []) {
+            this.currentReport.summary[finding.severity] += 1;
+          }
+        }
+      }
+      this.currentReport.overallScore = this.calculateOverallScore(this.currentReport);
+      this.showSummaryPanel(this.currentReport);
+    }
+    return result;
   }
 
   /** 回滚历史修复 */
@@ -1034,28 +1073,59 @@ export class QuickDetectionManager {
   /** 检查单个加固项状态 */
   async checkHardeningStatus(item: HardeningItem): Promise<boolean> {
     try {
-      const result = await invoke('ssh_execute_command_direct', { command: item.checkCommand }) as any;
-      const output = result?.output || '';
-      return item.checkPassed.test(output);
+      const result = await executeEmergencyCommand({ command: item.checkCommand });
+      return result.success && item.checkPassed.test(result.output);
     } catch { return false; }
   }
 
   /** 执行单个加固项 */
-  async executeHardening(item: HardeningItem): Promise<string> {
+  async executeHardening(item: HardeningItem): Promise<{ success: boolean; verified: boolean; output: string }> {
+    const beforeSafe = await this.checkHardeningStatus(item);
     try {
-      const result = await invoke('ssh_execute_command_direct', { command: item.fixCommand }) as any;
-      return result?.output || 'done';
-    } catch (e) { return `failed: ${e}`; }
+      const result = await executeEmergencyCommand({ command: item.fixCommand });
+      const verified = result.success && await this.checkHardeningStatus(item);
+      const output = result.success ? (result.output || 'done') : `${result.message}: ${result.output}`;
+      operationJournal.record({
+        source: 'detection-hardening',
+        server: this.getServerInfo(),
+        title: item.title,
+        command: item.fixCommand,
+        beforeValue: beforeSafe ? 'safe' : 'unsafe',
+        afterValue: verified ? 'safe' : 'verification-failed',
+        output,
+        success: result.success && verified,
+      });
+      return { success: result.success, verified, output };
+    } catch (e) {
+      const output = `failed: ${e}`;
+      operationJournal.record({
+        source: 'detection-hardening',
+        server: this.getServerInfo(),
+        title: item.title,
+        command: item.fixCommand,
+        beforeValue: beforeSafe ? 'safe' : 'unsafe',
+        afterValue: 'error',
+        output,
+        success: false,
+      });
+      return { success: false, verified: false, output };
+    }
   }
 
   /** 探测目标发行版类型，供 resolveForDistro 选择对应发行版的命令；失败保底 generic */
   private async getDetectedDistro(): Promise<string> {
-    if (this.detectedDistro) return this.detectedDistro;
+    const sessionId = activeTargetContext.get()?.sessionId || null;
+    if (this.detectedDistro && this.detectedDistroSessionId === sessionId) return this.detectedDistro;
+    if (this.detectedDistroSessionId !== sessionId) {
+      this.detectedDistro = null;
+      SystemDetector.clearCache();
+    }
     try {
       this.detectedDistro = (await SystemDetector.detectSystem()).type;
     } catch {
       this.detectedDistro = 'generic';
     }
+    this.detectedDistroSessionId = sessionId;
     return this.detectedDistro;
   }
 
@@ -1072,6 +1142,7 @@ export class QuickDetectionManager {
             const resolved = resolveForDistro ? resolveForDistro(item, distro) : item;
             return {
               id: item.id,
+              filePath: resolved.filePath || item.filePath,
               readCommand: resolved.readCommand || item.readCommand,
               writeCommand: resolved.writeCommand || item.writeCommand,
               parseRegex: item.parseRegex,

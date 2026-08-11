@@ -16,3 +16,87 @@
   border-color: color-mix(in srgb, var(--primary-color) 35%, var(--border-color));
   transform: translateY(-3px);
 }
+
+/* ──────────────────────────────────────────────────────────────
+ * SOC 统计卡片（对齐设计稿）：图标色块 + 大数字 + 标签 + 副信息
+ * 用法：
+ *   <div class="stat-card">
+ *     <div class="stat-card-ico tone-critical">…svg…</div>
+ *     <div class="stat-card-main">
+ *       <div class="stat-card-label">高风险进程</div>
+ *       <div class="stat-card-val">6</div>
+ *     </div>
+ *     <div class="stat-card-sub">较高风险 18</div>
+ *   </div>
+ * ────────────────────────────────────────────────────────────── */
+.stat-card {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  box-shadow: var(--card-shadow);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.stat-card:hover {
+  border-color: var(--border-color-hover);
+  box-shadow: var(--card-shadow-hover);
+}
+.stat-card-ico {
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+}
+.stat-card-ico svg { width: 20px; height: 20px; }
+.stat-card-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.stat-card-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stat-card-val {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.stat-card-sub {
+  margin-left: auto;
+  align-self: flex-end;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 色块基调 */
+.stat-card-ico.tone-primary { background: color-mix(in srgb, var(--primary-color) 13%, transparent); color: var(--primary-color); }
+.stat-card-ico.tone-purple  { background: color-mix(in srgb, var(--accent-purple) 14%, transparent); color: var(--accent-purple); }
+.stat-card-ico.tone-critical { background: var(--sev-critical-bg); color: var(--sev-critical-fg); }
+.stat-card-ico.tone-high    { background: var(--sev-high-bg); color: var(--sev-high-fg); }
+.stat-card-ico.tone-warn    { background: var(--sev-warn-bg); color: var(--sev-warn-fg); }
+.stat-card-ico.tone-info    { background: var(--sev-info-bg); color: var(--sev-info-fg); }
+.stat-card-ico.tone-success { background: var(--sev-success-bg); color: var(--sev-success-fg); }
+.stat-card-ico.tone-neutral { background: var(--sev-neutral-bg); color: var(--sev-neutral-fg); }
+
+/* 卡片行容器 */
+.stat-card-row {
+  display: flex;
+  gap: 12px;
+}
+@media (max-width: 1100px) {
+  .stat-card-row { flex-wrap: wrap; }
+  .stat-card-row .stat-card { flex: 1 1 220px; }
+}

@@ -5,6 +5,10 @@ import { KubernetesRenderer } from '../ui/kubernetesRenderer';
 import { sshConnectionManager } from '../remote/sshConnectionManager';
 import { showConfirm, showPrompt } from '../ui/confirmDialog';
 import type { K8sMainTab } from './types';
+import { activeTargetContext } from '../core/targetContext';
+import { operationJournal } from '../core/operationJournal';
+import { shq } from '../core/shellEscape';
+import { reportError } from '../utils/errorHandler';
 
 const AUTO_REFRESH_EMERGENCY = 10000;
 const SEARCH_DEBOUNCE = 200;
@@ -20,6 +24,7 @@ export class KubernetesPageManager {
     private autoRefreshTimer: number | null = null;
     private emergencyMode = false;
     private loading = false;
+    private targetSessionId = '';
     private searchDebounceTimer: number | null = null;
     private boundClickHandler: ((e: Event) => void) | null = null;
     private boundChangeHandler: ((e: Event) => void) | null = null;
@@ -42,16 +47,18 @@ export class KubernetesPageManager {
     // ============================================================
 
     public initialize(): void {
-        if (this.initialized) return;
+        this.synchronizeTargetState();
         this.bindEvents();
-        this.initialized = true;
+        if (!this.initialized) {
+            this.initialized = true;
 
-        // Expose managers on window for renderer access
-        (window as any).app = (window as any).app || {};
-        (window as any).app.kubernetesManager = this.manager;
-        (window as any).app.kubernetesEmergencyManager = this.emergencyManager;
-        (window as any).app.kubernetesSecurityAuditor = this.securityAuditor;
-        (window as any).kubernetesPageManager = this;
+            // Expose managers on window for renderer access
+            (window as any).app = (window as any).app || {};
+            (window as any).app.kubernetesManager = this.manager;
+            (window as any).app.kubernetesEmergencyManager = this.emergencyManager;
+            (window as any).app.kubernetesSecurityAuditor = this.securityAuditor;
+            (window as any).kubernetesPageManager = this;
+        }
     }
 
     public deactivate(): void {
@@ -76,23 +83,37 @@ export class KubernetesPageManager {
     }
 
     public async refresh(showNotification = false): Promise<void> {
+        this.synchronizeTargetState();
         if (!sshConnectionManager.isConnected()) {
             return;
         }
         if (this.loading) return; // 防止并发刷新
+        const target = activeTargetContext.get();
+        if (!target) return;
 
         try {
             this.loading = true;
             await this.renderer.refreshData();
+            if (!activeTargetContext.matches(target)) throw new Error('Kubernetes 刷新期间活动目标已变化');
             if (showNotification) {
                 window.showNotification?.('Kubernetes 数据已刷新', 'success');
             }
         } catch (error) {
-            console.error('Failed to refresh K8s data', error);
+            this.synchronizeTargetState();
+            reportError(error, { module: 'KubernetesPageManager', action: '刷新集群数据', silent: true });
             window.showNotification?.(`刷新 K8s 数据失败: ${error}`, 'error');
         } finally {
             this.loading = false;
         }
+    }
+
+    private synchronizeTargetState(): boolean {
+        const nextSessionId = activeTargetContext.get()?.sessionId || '';
+        if (nextSessionId === this.targetSessionId) return false;
+        this.targetSessionId = nextSessionId;
+        this.renderer.resetTargetState();
+        this.emergencyManager.resetTargetState();
+        return true;
     }
 
     public getRenderer(): KubernetesRenderer {
@@ -501,12 +522,54 @@ export class KubernetesPageManager {
     // Actions: Delete Resource
     // ============================================================
 
+    private async confirmK8sMutation(title: string, detail: string): Promise<boolean> {
+        const target = activeTargetContext.get();
+        if (!target) {
+            window.showNotification?.('没有已确认的活动 SSH 目标', 'error');
+            return false;
+        }
+        const confirmed = await showConfirm({
+            title,
+            message: `目标：${target.username}@${target.host}:${target.port}\n指纹：${target.hostKeyFingerprint}\n\n${detail}`,
+            dangerous: true,
+            defaultFocus: 'cancel',
+        });
+        if (!confirmed) return false;
+        if (!activeTargetContext.matches(target)) {
+            window.showNotification?.('确认后活动目标已变化，已阻止 Kubernetes 操作', 'error');
+            return false;
+        }
+        return true;
+    }
+
     private async deleteResource(kind: string, name: string, namespace?: string): Promise<void> {
-        const confirmed = await showConfirm({ title: '删除资源', message: `确定要删除 ${kind}/${name}${namespace ? ` (${namespace})` : ''} 吗？`, dangerous: true });
+        const target = activeTargetContext.get();
+        if (!target) {
+            window.showNotification?.('没有已确认的活动 SSH 目标', 'error');
+            return;
+        }
+        const confirmed = await showConfirm({
+            title: '删除资源',
+            message: `目标：${target.username}@${target.host}:${target.port}\n指纹：${target.hostKeyFingerprint}\n资源：${kind}/${name}${namespace ? ` (${namespace})` : ''}\n\n删除不可自动恢复。`,
+            dangerous: true,
+            defaultFocus: 'cancel',
+        });
         if (!confirmed) return;
+        if (!activeTargetContext.matches(target)) {
+            window.showNotification?.('确认后活动目标已变化，已阻止删除', 'error');
+            return;
+        }
 
         try {
             const result = await this.manager.deleteResource(kind, name, namespace);
+            operationJournal.record({
+                source: 'kubernetes', server: target.host, target,
+                title: `删除 Kubernetes ${kind}/${name}`,
+                command: result.command, output: result.output,
+                exitCode: result.exitCode, timedOut: result.timedOut,
+                verifyCommand: result.verifyCommand, verifyOutput: result.verifyOutput,
+                verified: result.verified, success: result.success,
+            });
             if (result.success) {
                 window.showNotification?.(`${kind}/${name} 已删除`, 'success');
                 await this.refresh();
@@ -514,7 +577,7 @@ export class KubernetesPageManager {
                 window.showNotification?.(`删除失败: ${result.output}`, 'error');
             }
         } catch (e) {
-            window.showNotification?.(`删除失败: ${e}`, 'error');
+            reportError(e, { module: 'KubernetesPageManager', action: '删除资源' });
         }
     }
 
@@ -532,8 +595,47 @@ export class KubernetesPageManager {
             return;
         }
 
+        const target = activeTargetContext.get();
+        if (!target) {
+            window.showNotification?.('没有已确认的活动 SSH 目标', 'error');
+            return;
+        }
+        const beforeReplicas = this.renderer.getData().deployments
+            .find(item => item.name === name && item.namespace === namespace)?.replicas;
+        const confirmed = await showConfirm({
+            title: '确认缩放部署',
+            message: `目标：${target.username}@${target.host}:${target.port}\n指纹：${target.hostKeyFingerprint}\nDeployment：${namespace}/${name}\n副本：${String(beforeReplicas ?? '未知')} → ${num}`,
+            confirmText: '确认缩放',
+            dangerous: num === 0 || (beforeReplicas !== undefined && num < beforeReplicas),
+            defaultFocus: 'cancel',
+        });
+        if (!confirmed) return;
+        if (!activeTargetContext.matches(target)) {
+            window.showNotification?.('确认后活动目标已变化，已阻止缩放', 'error');
+            return;
+        }
+
         try {
             const result = await this.manager.scaleDeployment(name, namespace, num);
+            const restoreCommand = result.success && beforeReplicas !== undefined
+                ? `kubectl scale deployment ${shq(name)} -n ${shq(namespace)} --replicas=${beforeReplicas}`
+                : undefined;
+            operationJournal.record({
+                source: 'kubernetes', server: target.host, target,
+                title: `缩放 Kubernetes Deployment ${namespace}/${name}`,
+                command: result.command,
+                beforeValue: beforeReplicas === undefined ? 'unknown' : String(beforeReplicas),
+                afterValue: String(num), output: result.output,
+                exitCode: result.exitCode, timedOut: result.timedOut,
+                verifyCommand: result.verifyCommand, verifyOutput: result.verifyOutput,
+                verified: result.verified,
+                restoreCommand,
+                restoreVerifyCommand: restoreCommand
+                    ? `[ "$(kubectl get deployment ${shq(name)} -n ${shq(namespace)} -o jsonpath='{.spec.replicas}')" = ${shq(beforeReplicas!)} ] && echo restored`
+                    : undefined,
+                restoreVerifyExpected: beforeReplicas === undefined ? undefined : 'restored',
+                success: result.success,
+            });
             if (result.success) {
                 window.showNotification?.(`${name} 已缩放到 ${num} 副��`, 'success');
                 await this.refresh();
@@ -541,13 +643,12 @@ export class KubernetesPageManager {
                 window.showNotification?.(`缩放失败: ${result.output}`, 'error');
             }
         } catch (e) {
-            window.showNotification?.(`缩放失败: ${e}`, 'error');
+            reportError(e, { module: 'KubernetesPageManager', action: '缩放部署' });
         }
     }
 
     private async scaleToZero(name: string, namespace: string): Promise<void> {
-        const confirmed = await showConfirm({ title: '缩容至零', message: `确定要将 Deployment "${name}" 缩容至 0 副本吗？\n这将停止所有关联的 Pod。`, dangerous: true });
-        if (!confirmed) return;
+        if (!(await this.confirmK8sMutation('缩容至零', `Deployment：${namespace}/${name}\n将停止所有关联 Pod。`))) return;
 
         try {
             const action = await this.emergencyManager.scaleToZero(name, namespace);
@@ -581,8 +682,7 @@ export class KubernetesPageManager {
             return;
         }
 
-        const confirmed = await showConfirm({ title: '隔离 Pod', message: `确定要隔离 Pod "${name}" (${ns})？\n这将创建 deny-all NetworkPolicy 阻断所有网络流量。`, dangerous: true });
-        if (!confirmed) return;
+        if (!(await this.confirmK8sMutation('隔离 Pod', `Pod：${ns}/${name}\n将创建 deny-all NetworkPolicy 阻断所有网络流量。`))) return;
 
         try {
             window.showNotification?.('正在隔离 Pod...', 'warning');
@@ -617,8 +717,7 @@ export class KubernetesPageManager {
         const selected = await showPrompt({ title: '封锁节点', message: `选择要封锁的节点:\n${names.join('\n')}\n\n请输入节点名称:` });
         if (!selected) return;
 
-        const confirmed = await showConfirm({ title: '封锁节点', message: `确定要封锁节点 "${selected}"？\n新的 Pod 将不会被调度到此节点。`, dangerous: true });
-        if (!confirmed) return;
+        if (!(await this.confirmK8sMutation('封锁节点', `节点：${selected}\n新的 Pod 将不会被调度到此节点。`))) return;
 
         try {
             const action = await this.emergencyManager.cordonNode(selected);
@@ -641,8 +740,7 @@ export class KubernetesPageManager {
         const selected = await showPrompt({ title: '排空节点', message: `选择要排空的节点:\n${names.join('\n')}\n\n请输入节点名称:` });
         if (!selected) return;
 
-        const confirmed = await showConfirm({ title: '排空节点', message: `确定要排空节点 "${selected}"？\n这将驱逐节点上所有 Pod（DaemonSet 除外）。\n\n此操作可能需要较长时间。`, dangerous: true });
-        if (!confirmed) return;
+        if (!(await this.confirmK8sMutation('排空节点', `节点：${selected}\n将驱逐节点上所有 Pod（DaemonSet 除外），并可能删除 emptyDir 数据。`))) return;
 
         try {
             window.showNotification?.('正在排空节点...', 'warning');
@@ -747,8 +845,7 @@ export class KubernetesPageManager {
     private async removeIsolation(podKey: string): Promise<void> {
         const [ns, name] = podKey.includes('/') ? podKey.split('/') : ['', podKey];
 
-        const confirmed = await showConfirm({ title: '解除隔离', message: `确定要解除 Pod "${name || podKey}" 的隔离？\n这将删除对应的 NetworkPolicy。`, dangerous: true });
-        if (!confirmed) return;
+        if (!(await this.confirmK8sMutation('解除隔离', `Pod：${ns}/${name || podKey}\n将删除对应的 NetworkPolicy。`))) return;
 
         try {
             const action = await this.emergencyManager.removeIsolation(name || podKey, ns);
@@ -765,8 +862,7 @@ export class KubernetesPageManager {
     }
 
     private async rollbackAction(actionId: string): Promise<void> {
-        const confirmed = await showConfirm({ title: '回滚操作', message: '确定要回滚此操作？', dangerous: true });
-        if (!confirmed) return;
+        if (!(await this.confirmK8sMutation('回滚操作', '将执行该应急动作记录中的回滚命令，并进行目标一致性检查。'))) return;
 
         try {
             const result = await this.emergencyManager.executeRollback(actionId);

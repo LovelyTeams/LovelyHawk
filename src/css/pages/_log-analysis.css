@@ -42,7 +42,7 @@
   align-items: center;
   justify-content: center;
   border-radius: var(--border-radius);
-  background: rgba(59, 130, 246, 0.1);
+  background: color-mix(in srgb, var(--primary-color) 13%, transparent);
   color: var(--primary-color);
   flex-shrink: 0;
 }
@@ -94,7 +94,7 @@
 
 .la-toggle-btn.active {
   background: var(--primary-color);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 /* Source select */
@@ -412,7 +412,7 @@
   padding: 0 4px;
   border-radius: 3px;
   background: var(--primary-color);
-  color: #fff;
+  color: var(--accent-contrast);
   font-size: 9px;
   font-weight: 600;
   white-space: nowrap;
@@ -423,7 +423,7 @@
   padding: 0 3px;
   border-radius: 2px;
   background: var(--warning-color);
-  color: #fff;
+  color: var(--accent-contrast);
   font-size: 9px;
   font-weight: 700;
   margin-right: 4px;
@@ -533,7 +533,7 @@
   border-radius: 10px;
   font-size: 10px;
   font-weight: 600;
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 .threat-panel-body {

@@ -53,7 +53,7 @@ export type AppEvents = {
   'settings:changed': { key: string; value: any };
 
   // 主题
-  'theme:changed': { theme: 'light' | 'dark' | 'sakura' | 'midnight' | 'ocean' };
+  'theme:changed': { theme: 'light' | 'dark' | 'sakura' };
 
   // 服务器
   'server:listRefresh': void;

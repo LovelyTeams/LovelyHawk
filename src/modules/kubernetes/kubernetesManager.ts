@@ -7,6 +7,19 @@ import {
     K8sLogOptions
 } from './types';
 import { sshConnectionManager } from '../remote/sshConnectionManager';
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH';
+import { shq } from '../core/shellEscape';
+
+export interface K8sMutationResult {
+    success: boolean;
+    output: string;
+    command: string;
+    exitCode: number | null;
+    timedOut: boolean;
+    verifyCommand?: string;
+    verifyOutput?: string;
+    verified?: boolean;
+}
 
 // ============================================================
 // Kubectl JSON Output Interfaces
@@ -150,7 +163,7 @@ export class KubernetesManager {
         }
 
         try {
-            const result = await (window as any).__TAURI__.core.invoke('ssh_execute_dashboard_command_direct', {
+            const result: any = await invokeTargetBoundSSH('ssh_execute_dashboard_command_direct', {
                 command: `${command} -o json`
             });
 
@@ -166,13 +179,17 @@ export class KubernetesManager {
         }
     }
 
-    private async executeKubectlRaw(command: string): Promise<{ output: string; exit_code: number } | null> {
+    private async executeKubectlRaw(command: string): Promise<{
+        output: string;
+        exit_code: number | null;
+        timed_out?: boolean;
+    } | null> {
         if (!sshConnectionManager.isConnected()) {
             return null;
         }
 
         try {
-            const result = await (window as any).__TAURI__.core.invoke('ssh_execute_dashboard_command_direct', {
+            const result: any = await invokeTargetBoundSSH('ssh_execute_dashboard_command_direct', {
                 command
             });
             return result;
@@ -204,7 +221,7 @@ export class KubernetesManager {
 
     public async getPods(namespace?: string): Promise<K8sPod[]> {
         const cmd = namespace
-            ? `kubectl get pods -n ${namespace}`
+            ? `kubectl get pods -n ${shq(namespace)}`
             : `kubectl get pods --all-namespaces`;
 
         const data = await this.executeKubectl(cmd) as KubectlList<KubectlPod>;
@@ -255,7 +272,7 @@ export class KubernetesManager {
 
     public async getDeployments(namespace?: string): Promise<K8sDeployment[]> {
         const cmd = namespace
-            ? `kubectl get deployments -n ${namespace}`
+            ? `kubectl get deployments -n ${shq(namespace)}`
             : `kubectl get deployments --all-namespaces`;
 
         const data = await this.executeKubectl(cmd) as KubectlList<KubectlDeployment>;
@@ -286,7 +303,7 @@ export class KubernetesManager {
 
     public async getDaemonSets(namespace?: string): Promise<K8sDaemonSet[]> {
         const cmd = namespace
-            ? `kubectl get daemonsets -n ${namespace}`
+            ? `kubectl get daemonsets -n ${shq(namespace)}`
             : `kubectl get daemonsets --all-namespaces`;
 
         const data = await this.executeKubectl(cmd);
@@ -307,7 +324,7 @@ export class KubernetesManager {
 
     public async getStatefulSets(namespace?: string): Promise<K8sStatefulSet[]> {
         const cmd = namespace
-            ? `kubectl get statefulsets -n ${namespace}`
+            ? `kubectl get statefulsets -n ${shq(namespace)}`
             : `kubectl get statefulsets --all-namespaces`;
 
         const data = await this.executeKubectl(cmd);
@@ -328,7 +345,7 @@ export class KubernetesManager {
 
     public async getCronJobs(namespace?: string): Promise<K8sCronJob[]> {
         const cmd = namespace
-            ? `kubectl get cronjobs -n ${namespace}`
+            ? `kubectl get cronjobs -n ${shq(namespace)}`
             : `kubectl get cronjobs --all-namespaces`;
 
         const data = await this.executeKubectl(cmd);
@@ -349,7 +366,7 @@ export class KubernetesManager {
 
     public async getJobs(namespace?: string): Promise<K8sJob[]> {
         const cmd = namespace
-            ? `kubectl get jobs -n ${namespace}`
+            ? `kubectl get jobs -n ${shq(namespace)}`
             : `kubectl get jobs --all-namespaces`;
 
         const data = await this.executeKubectl(cmd);
@@ -382,7 +399,7 @@ export class KubernetesManager {
 
     public async getHPAs(namespace?: string): Promise<K8sHPA[]> {
         const cmd = namespace
-            ? `kubectl get hpa -n ${namespace}`
+            ? `kubectl get hpa -n ${shq(namespace)}`
             : `kubectl get hpa --all-namespaces`;
 
         const data = await this.executeKubectl(cmd);
@@ -412,7 +429,7 @@ export class KubernetesManager {
 
     public async getServices(namespace?: string): Promise<K8sService[]> {
         const cmd = namespace
-            ? `kubectl get services -n ${namespace}`
+            ? `kubectl get services -n ${shq(namespace)}`
             : `kubectl get services --all-namespaces`;
 
         const data = await this.executeKubectl(cmd) as KubectlList<KubectlService>;
@@ -439,7 +456,7 @@ export class KubernetesManager {
 
     public async getIngresses(namespace?: string): Promise<K8sIngress[]> {
         const cmd = namespace
-            ? `kubectl get ingress -n ${namespace}`
+            ? `kubectl get ingress -n ${shq(namespace)}`
             : `kubectl get ingress --all-namespaces`;
 
         const data = await this.executeKubectl(cmd);
@@ -471,7 +488,7 @@ export class KubernetesManager {
 
     public async getNetworkPolicies(namespace?: string): Promise<K8sNetworkPolicy[]> {
         const cmd = namespace
-            ? `kubectl get networkpolicies -n ${namespace}`
+            ? `kubectl get networkpolicies -n ${shq(namespace)}`
             : `kubectl get networkpolicies --all-namespaces`;
 
         const data = await this.executeKubectl(cmd);
@@ -497,7 +514,7 @@ export class KubernetesManager {
 
     public async getConfigMaps(namespace?: string): Promise<K8sConfigMap[]> {
         const cmd = namespace
-            ? `kubectl get configmaps -n ${namespace}`
+            ? `kubectl get configmaps -n ${shq(namespace)}`
             : `kubectl get configmaps --all-namespaces`;
 
         const data = await this.executeKubectl(cmd);
@@ -516,7 +533,7 @@ export class KubernetesManager {
 
     public async getSecrets(namespace?: string): Promise<K8sSecret[]> {
         const cmd = namespace
-            ? `kubectl get secrets -n ${namespace}`
+            ? `kubectl get secrets -n ${shq(namespace)}`
             : `kubectl get secrets --all-namespaces`;
 
         const data = await this.executeKubectl(cmd);
@@ -551,7 +568,7 @@ export class KubernetesManager {
 
     public async getPersistentVolumeClaims(namespace?: string): Promise<K8sPersistentVolumeClaim[]> {
         const cmd = namespace
-            ? `kubectl get pvc -n ${namespace}`
+            ? `kubectl get pvc -n ${shq(namespace)}`
             : `kubectl get pvc --all-namespaces`;
 
         const data = await this.executeKubectl(cmd);
@@ -577,7 +594,7 @@ export class KubernetesManager {
 
     public async getRoles(namespace?: string): Promise<K8sRole[]> {
         const cmd = namespace
-            ? `kubectl get roles -n ${namespace}`
+            ? `kubectl get roles -n ${shq(namespace)}`
             : `kubectl get roles --all-namespaces`;
 
         const data = await this.executeKubectl(cmd);
@@ -618,7 +635,7 @@ export class KubernetesManager {
 
     public async getRoleBindings(namespace?: string): Promise<K8sRoleBinding[]> {
         const cmd = namespace
-            ? `kubectl get rolebindings -n ${namespace}`
+            ? `kubectl get rolebindings -n ${shq(namespace)}`
             : `kubectl get rolebindings --all-namespaces`;
 
         const data = await this.executeKubectl(cmd);
@@ -670,7 +687,7 @@ export class KubernetesManager {
 
     public async getEvents(namespace?: string): Promise<K8sEvent[]> {
         const cmd = namespace
-            ? `kubectl get events -n ${namespace} --sort-by=.lastTimestamp`
+            ? `kubectl get events -n ${shq(namespace)} --sort-by=.lastTimestamp`
             : `kubectl get events --all-namespaces --sort-by=.lastTimestamp`;
 
         const data = await this.executeKubectl(cmd);
@@ -807,8 +824,8 @@ export class KubernetesManager {
     // ============================================================
 
     public async getPodLogs(options: K8sLogOptions): Promise<string> {
-        let cmd = `kubectl logs ${options.pod} -n ${options.namespace}`;
-        if (options.container) cmd += ` -c ${options.container}`;
+        let cmd = `kubectl logs ${shq(options.pod)} -n ${shq(options.namespace)}`;
+        if (options.container) cmd += ` -c ${shq(options.container)}`;
         if (options.tailLines) cmd += ` --tail=${options.tailLines}`;
         if (options.sinceSeconds) cmd += ` --since=${options.sinceSeconds}s`;
         if (options.previous) cmd += ` --previous`;
@@ -818,8 +835,8 @@ export class KubernetesManager {
     }
 
     public async execInPod(pod: string, namespace: string, container: string, command: string): Promise<string> {
-        let cmd = `kubectl exec ${pod} -n ${namespace}`;
-        if (container) cmd += ` -c ${container}`;
+        let cmd = `kubectl exec ${shq(pod)} -n ${shq(namespace)}`;
+        if (container) cmd += ` -c ${shq(container)}`;
         cmd += ` -- ${command}`;
 
         const result = await this.executeKubectlRaw(cmd);
@@ -827,75 +844,142 @@ export class KubernetesManager {
     }
 
     public async describeResource(kind: string, name: string, namespace?: string): Promise<string> {
-        let cmd = `kubectl describe ${kind} ${name}`;
-        if (namespace) cmd += ` -n ${namespace}`;
+        let cmd = `kubectl describe ${shq(kind)} ${shq(name)}`;
+        if (namespace) cmd += ` -n ${shq(namespace)}`;
 
         const result = await this.executeKubectlRaw(cmd);
         return result?.output || '';
     }
 
     public async getResourceYaml(kind: string, name: string, namespace?: string): Promise<string> {
-        let cmd = `kubectl get ${kind} ${name} -o yaml`;
-        if (namespace) cmd += ` -n ${namespace}`;
+        let cmd = `kubectl get ${shq(kind)} ${shq(name)} -o yaml`;
+        if (namespace) cmd += ` -n ${shq(namespace)}`;
 
         const result = await this.executeKubectlRaw(cmd);
         return result?.output || '';
     }
 
-    public async applyYaml(yamlContent: string): Promise<{ success: boolean; output: string }> {
-        // Write YAML to temp file then apply
-        const escapedYaml = yamlContent.replace(/'/g, "'\\''");
-        const cmd = `echo '${escapedYaml}' | kubectl apply -f -`;
+    public async applyYaml(yamlContent: string): Promise<K8sMutationResult> {
+        const cmd = `printf '%s' ${shq(yamlContent)} | kubectl apply -f -`;
 
         const result = await this.executeKubectlRaw(cmd);
         return {
-            success: result?.exit_code === 0,
-            output: result?.output || ''
+            success: result?.timed_out !== true && result?.exit_code === 0,
+            output: result?.output || '',
+            command: cmd,
+            exitCode: result?.exit_code ?? null,
+            timedOut: result?.timed_out === true,
         };
     }
 
-    public async deleteResource(kind: string, name: string, namespace?: string): Promise<{ success: boolean; output: string }> {
-        let cmd = `kubectl delete ${kind} ${name}`;
-        if (namespace) cmd += ` -n ${namespace}`;
+    public async deleteResource(kind: string, name: string, namespace?: string): Promise<K8sMutationResult> {
+        let cmd = `kubectl delete ${shq(kind)} ${shq(name)}`;
+        if (namespace) cmd += ` -n ${shq(namespace)}`;
 
         const result = await this.executeKubectlRaw(cmd);
+        let verifyCommand = `kubectl get ${shq(kind)} ${shq(name)} --ignore-not-found -o name`;
+        if (namespace) verifyCommand += ` -n ${shq(namespace)}`;
+        const verify = result?.timed_out !== true && result?.exit_code === 0
+            ? await this.executeKubectlRaw(verifyCommand)
+            : null;
+        const verified = !!verify && verify.timed_out !== true && verify.exit_code === 0 && !verify.output.trim();
         return {
-            success: result?.exit_code === 0,
-            output: result?.output || ''
+            success: result?.timed_out !== true && result?.exit_code === 0 && verified,
+            output: result?.output || '',
+            command: cmd,
+            exitCode: result?.exit_code ?? null,
+            timedOut: result?.timed_out === true,
+            verifyCommand,
+            verifyOutput: verify?.output || '',
+            verified,
         };
     }
 
-    public async scaleDeployment(name: string, namespace: string, replicas: number): Promise<{ success: boolean; output: string }> {
-        const cmd = `kubectl scale deployment ${name} -n ${namespace} --replicas=${replicas}`;
+    public async deletePod(name: string, namespace: string, force = false): Promise<K8sMutationResult> {
+        if (!force) return this.deleteResource('pod', name, namespace);
+        const command = `kubectl delete pod ${shq(name)} -n ${shq(namespace)} --force --grace-period=0`;
+        const result = await this.executeKubectlRaw(command);
+        const verifyCommand = `kubectl get pod ${shq(name)} -n ${shq(namespace)} --ignore-not-found -o name`;
+        const verify = result?.timed_out !== true && result?.exit_code === 0
+            ? await this.executeKubectlRaw(verifyCommand)
+            : null;
+        const verified = !!verify && verify.timed_out !== true && verify.exit_code === 0 && !verify.output.trim();
+        return {
+            success: result?.timed_out !== true && result?.exit_code === 0 && verified,
+            output: result?.output || '', command,
+            exitCode: result?.exit_code ?? null, timedOut: result?.timed_out === true,
+            verifyCommand, verifyOutput: verify?.output || '', verified,
+        };
+    }
+
+    public async scaleDeployment(name: string, namespace: string, replicas: number): Promise<K8sMutationResult> {
+        if (!Number.isSafeInteger(replicas) || replicas < 0 || replicas > 100_000) {
+            throw new Error('副本数必须是 0 到 100000 的整数');
+        }
+        const cmd = `kubectl scale deployment ${shq(name)} -n ${shq(namespace)} --replicas=${replicas}`;
         const result = await this.executeKubectlRaw(cmd);
+        const verifyCommand = `kubectl get deployment ${shq(name)} -n ${shq(namespace)} -o jsonpath='{.spec.replicas}'`;
+        const verify = result?.timed_out !== true && result?.exit_code === 0
+            ? await this.executeKubectlRaw(verifyCommand)
+            : null;
+        const verified = !!verify && verify.timed_out !== true && verify.exit_code === 0 && verify.output.trim() === String(replicas);
         return {
-            success: result?.exit_code === 0,
-            output: result?.output || ''
+            success: result?.timed_out !== true && result?.exit_code === 0 && verified,
+            output: result?.output || '',
+            command: cmd,
+            exitCode: result?.exit_code ?? null,
+            timedOut: result?.timed_out === true,
+            verifyCommand,
+            verifyOutput: verify?.output || '',
+            verified,
         };
     }
 
-    public async cordonNode(nodeName: string): Promise<{ success: boolean; output: string }> {
-        const result = await this.executeKubectlRaw(`kubectl cordon ${nodeName}`);
+    public async cordonNode(nodeName: string): Promise<K8sMutationResult> {
+        const command = `kubectl cordon ${shq(nodeName)}`;
+        const result = await this.executeKubectlRaw(command);
+        const verifyCommand = `kubectl get node ${shq(nodeName)} -o jsonpath='{.spec.unschedulable}'`;
+        const verify = result?.timed_out !== true && result?.exit_code === 0
+            ? await this.executeKubectlRaw(verifyCommand)
+            : null;
+        const verified = !!verify && verify.timed_out !== true && verify.exit_code === 0 && verify.output.trim() === 'true';
         return {
-            success: result?.exit_code === 0,
-            output: result?.output || ''
+            success: result?.timed_out !== true && result?.exit_code === 0 && verified,
+            output: result?.output || '', command,
+            exitCode: result?.exit_code ?? null, timedOut: result?.timed_out === true,
+            verifyCommand, verifyOutput: verify?.output || '', verified,
         };
     }
 
-    public async uncordonNode(nodeName: string): Promise<{ success: boolean; output: string }> {
-        const result = await this.executeKubectlRaw(`kubectl uncordon ${nodeName}`);
+    public async uncordonNode(nodeName: string): Promise<K8sMutationResult> {
+        const command = `kubectl uncordon ${shq(nodeName)}`;
+        const result = await this.executeKubectlRaw(command);
+        const verifyCommand = `kubectl get node ${shq(nodeName)} -o jsonpath='{.spec.unschedulable}'`;
+        const verify = result?.timed_out !== true && result?.exit_code === 0
+            ? await this.executeKubectlRaw(verifyCommand)
+            : null;
+        const verified = !!verify && verify.timed_out !== true && verify.exit_code === 0 && verify.output.trim() !== 'true';
         return {
-            success: result?.exit_code === 0,
-            output: result?.output || ''
+            success: result?.timed_out !== true && result?.exit_code === 0 && verified,
+            output: result?.output || '', command,
+            exitCode: result?.exit_code ?? null, timedOut: result?.timed_out === true,
+            verifyCommand, verifyOutput: verify?.output || '', verified,
         };
     }
 
-    public async drainNode(nodeName: string): Promise<{ success: boolean; output: string }> {
-        const cmd = `kubectl drain ${nodeName} --ignore-daemonsets --delete-emptydir-data --force --timeout=120s`;
+    public async drainNode(nodeName: string): Promise<K8sMutationResult> {
+        const cmd = `kubectl drain ${shq(nodeName)} --ignore-daemonsets --delete-emptydir-data --force --timeout=120s`;
         const result = await this.executeKubectlRaw(cmd);
+        const verifyCommand = `kubectl get node ${shq(nodeName)} -o jsonpath='{.spec.unschedulable}'`;
+        const verify = result?.timed_out !== true && result?.exit_code === 0
+            ? await this.executeKubectlRaw(verifyCommand)
+            : null;
+        const verified = !!verify && verify.timed_out !== true && verify.exit_code === 0 && verify.output.trim() === 'true';
         return {
-            success: result?.exit_code === 0,
-            output: result?.output || ''
+            success: result?.timed_out !== true && result?.exit_code === 0 && verified,
+            output: result?.output || '', command: cmd,
+            exitCode: result?.exit_code ?? null, timedOut: result?.timed_out === true,
+            verifyCommand, verifyOutput: verify?.output || '', verified,
         };
     }
 
@@ -905,7 +989,7 @@ export class KubernetesManager {
 
     public async getRawPodSpecs(namespace?: string): Promise<KubectlPod[]> {
         const cmd = namespace
-            ? `kubectl get pods -n ${namespace}`
+            ? `kubectl get pods -n ${shq(namespace)}`
             : `kubectl get pods --all-namespaces`;
 
         const data = await this.executeKubectl(cmd) as KubectlList<KubectlPod>;
@@ -915,29 +999,36 @@ export class KubernetesManager {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     public async getRawCronJobSpecs(namespace?: string): Promise<any[]> {
         const cmd = namespace
-            ? `kubectl get cronjobs -n ${namespace}`
+            ? `kubectl get cronjobs -n ${shq(namespace)}`
             : `kubectl get cronjobs --all-namespaces`;
 
         const data = await this.executeKubectl(cmd);
         return data?.items || [];
     }
 
-    public async deleteServiceAccount(name: string, namespace: string): Promise<{ success: boolean; output: string }> {
+    public async deleteServiceAccount(name: string, namespace: string): Promise<K8sMutationResult> {
         return this.deleteResource('serviceaccount', name, namespace);
     }
 
-    public async suspendCronJob(name: string, namespace: string): Promise<{ success: boolean; output: string }> {
-        const cmd = `kubectl patch cronjob ${name} -n ${namespace} -p '{"spec":{"suspend":true}}'`;
+    public async suspendCronJob(name: string, namespace: string): Promise<K8sMutationResult> {
+        const cmd = `kubectl patch cronjob ${shq(name)} -n ${shq(namespace)} -p '{"spec":{"suspend":true}}'`;
         const result = await this.executeKubectlRaw(cmd);
+        const verifyCommand = `kubectl get cronjob ${shq(name)} -n ${shq(namespace)} -o jsonpath='{.spec.suspend}'`;
+        const verify = result?.timed_out !== true && result?.exit_code === 0
+            ? await this.executeKubectlRaw(verifyCommand)
+            : null;
+        const verified = !!verify && verify.timed_out !== true && verify.exit_code === 0 && verify.output.trim() === 'true';
         return {
-            success: result?.exit_code === 0,
-            output: result?.output || ''
+            success: result?.timed_out !== true && result?.exit_code === 0 && verified,
+            output: result?.output || '', command: cmd,
+            exitCode: result?.exit_code ?? null, timedOut: result?.timed_out === true,
+            verifyCommand, verifyOutput: verify?.output || '', verified,
         };
     }
 
     public async getServiceAccounts(namespace?: string): Promise<any[]> {
         const cmd = namespace
-            ? `kubectl get serviceaccounts -n ${namespace}`
+            ? `kubectl get serviceaccounts -n ${shq(namespace)}`
             : `kubectl get serviceaccounts --all-namespaces`;
 
         const data = await this.executeKubectl(cmd);
@@ -952,12 +1043,12 @@ export class KubernetesManager {
         }));
     }
 
-    public async isolateNamespace(namespace: string): Promise<{ success: boolean; output: string }> {
+    public async isolateNamespace(namespace: string): Promise<K8sMutationResult> {
         const policyYaml = `apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: lovelyres-deny-all
-  namespace: ${namespace}
+  namespace: ${JSON.stringify(namespace)}
   labels:
     lovelyres-emergency: "true"
 spec:
@@ -968,14 +1059,10 @@ spec:
         return this.applyYaml(policyYaml);
     }
 
-    public async etcdDeletePod(_podName: string, namespace: string): Promise<{ success: boolean; output: string }> {
-        // This requires etcdctl access inside the control plane node
-        // Used when a pod's etcd key has been tampered with and kubectl delete doesn't work
-        const cmd = `docker exec minikube /bin/sh -c 'ETCDCTL_API=3 etcdctl --endpoints=https://127.0.0.1:2379 --cacert=/var/lib/minikube/certs/etcd/ca.crt --cert=/var/lib/minikube/certs/etcd/healthcheck-client.crt --key=/var/lib/minikube/certs/etcd/healthcheck-client.key del /registry/pods/${namespace}/ --prefix --keys-only 2>&1' | while read key; do echo "Found key: $key"; done`;
-        const result = await this.executeKubectlRaw(cmd);
+    public async etcdDeletePod(_podName: string, _namespace: string): Promise<{ success: boolean; output: string }> {
         return {
-            success: result?.exit_code === 0,
-            output: result?.output || ''
+            success: false,
+            output: '安全门禁已阻止直接删除 etcd /registry/pods 命名前缀；旧实现会删除整个命名空间的 Pod 键且无法回滚。请使用受审计的 Kubernetes API 处置。',
         };
     }
 }

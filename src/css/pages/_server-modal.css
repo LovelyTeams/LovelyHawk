@@ -188,13 +188,13 @@
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: #94a3b8;
-  box-shadow: 0 0 0 3px color-mix(in srgb, #94a3b8 18%, transparent);
+  background: var(--sev-neutral-fg);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sev-neutral-fg) 18%, transparent);
 }
 
 .sc-hist-dot.connected {
-  background: #22c55e;
-  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.2);
+  background: var(--status-running);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-running) 20%, transparent);
 }
 
 .sc-hist-main {
@@ -647,7 +647,7 @@
   transform: translateY(-2px);
 }
 
-.sc-card.connected { border-color: #22c55e; box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.2); }
+.sc-card.connected { border-color: var(--status-running); box-shadow: 0 0 0 1px color-mix(in srgb, var(--status-running) 20%, transparent); }
 .sc-card.connecting { border-color: var(--primary-color); animation: scPulse 1.5s ease-in-out infinite; }
 
 @keyframes scPulse {
@@ -662,10 +662,10 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #94a3b8;
+  background: var(--sev-neutral-fg);
 }
 
-.sc-card.connected .sc-card-status { background: #22c55e; }
+.sc-card.connected .sc-card-status { background: var(--status-running); }
 
 .sc-card-icon {
   width: 36px;
@@ -679,7 +679,7 @@
   color: var(--primary-color);
 }
 
-.sc-card.connected .sc-card-icon { background: rgba(34, 197, 94, 0.12); color: #22c55e; }
+.sc-card.connected .sc-card-icon { background: var(--sev-success-bg); color: var(--sev-success-fg); }
 
 .sc-card-name {
   margin-bottom: 2px;

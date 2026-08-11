@@ -3,7 +3,7 @@
  * Header + 5 Tabs 布局，匹配 Docker 页面风格
  */
 
-import { Data, Refresh, Plus, Play, Delete, Search, Export, Config, User as UserIcon, Shield } from '@icon-park/svg';
+import { Data, DatabaseSearch, Refresh, Plus, Play, Delete, Search, Export, Config, User as UserIcon, Shield } from '@icon-park/svg';
 import type { DatabaseManager, DbTab, ColumnInfo, DbUser, SqlResult } from './databaseManager';
 import { escapeHtml } from '../core/htmlEscape';
 
@@ -57,7 +57,7 @@ export class DatabaseRenderer {
     return `
       <div class="db-header">
         <div class="db-header-left">
-          <div class="db-header-icon">${icon(Data, '22', 'filled')}</div>
+          <div class="db-header-icon">${icon(DatabaseSearch, '22')}</div>
           <div>
             <h2 class="db-header-title">数据库管理</h2>
             <div class="db-header-subtitle">SQL 控制台 · 数据浏览 · 用户权限 · 运维工具</div>

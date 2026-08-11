@@ -61,7 +61,9 @@ export class ReportExporter {
 
     const completedItems = report.items.filter(i => i.status === 'completed');
     const failedItems = report.items.filter(i => i.status === 'failed');
+    const notApplicableItems = report.items.filter(i => i.status === 'not-applicable');
     const securityItems = completedItems.filter(i => i.category === 'security');
+    const competitionItems = completedItems.filter(i => i.category === 'competition');
     const performanceItems = completedItems.filter(i => i.category === 'performance');
 
     const allFindings: (Finding & { source: string })[] = [];
@@ -100,6 +102,7 @@ export class ReportExporter {
   .score-card { background: #fff; border-radius: 12px; padding: 24px; flex: 1; min-width: 200px; border: 1px solid #e2e8f0; text-align: center; }
   .score-big { font-size: 56px; font-weight: 800; }
   .score-grade { display: inline-block; padding: 4px 14px; border-radius: 20px; font-size: 14px; font-weight: 600; color: #fff; margin-top: 8px; }
+  .report-state { margin-bottom: 20px; padding: 12px 16px; border-radius: 8px; background: #fff7ed; border: 1px solid #fdba74; color: #9a3412; font-size: 13px; }
   .summary-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
   .summary-item { text-align: center; padding: 12px 8px; border-radius: 8px; }
   .summary-count { font-size: 28px; font-weight: 700; }
@@ -143,8 +146,11 @@ export class ReportExporter {
       <span class="meta-item">${createIconHTML('🖥️', { size: 14 })} ${this.escapeHtml(report.server || '未知服务器')}</span>
       <span class="meta-item">${createIconHTML('⚡', { size: 14 })} 耗时 ${(report.totalDuration / 1000).toFixed(1)}s</span>
       <span class="meta-item">${createIconHTML('📋', { size: 14 })} 共 ${report.items.length} 项检测</span>
+      ${report.completeness ? `<span class="meta-item">完整度 ${report.completeness.processedPercent}% · 有效 ${report.completeness.completed} · 错误 ${report.completeness.failed} · N/A ${report.completeness.notApplicable}</span>` : ''}
     </div>
   </div>
+
+  ${report.status && report.status !== 'completed' ? `<div class="report-state">本报告状态：${report.status === 'cancelled' ? '扫描已取消' : '部分完成'}。评分只统计成功完成且适用的检测项，不能视为全量安全结论。</div>` : ''}
 
   <!-- Score -->
   <div class="score-section">
@@ -202,6 +208,14 @@ export class ReportExporter {
       ${performanceItems.map(item => this.renderItemRow(item)).join('')}
       </tbody>
     </table>` : ''}
+    ${competitionItems.length > 0 ? `
+    <table class="items-table">
+      <thead><tr><th colspan="4" style="font-size:14px;font-weight:600;padding-top:14px">${createIconHTML('🏁', { size: 14 })} 竞赛摸底</th></tr>
+      <tr><th>项目</th><th>状态</th><th>严重度</th><th>耗时</th></tr></thead>
+      <tbody>
+      ${competitionItems.map(item => this.renderItemRow(item)).join('')}
+      </tbody>
+    </table>` : ''}
     ${failedItems.length > 0 ? `
     <table class="items-table">
       <thead><tr><th colspan="4" style="font-size:14px;font-weight:600;padding-top:14px;color:#dc2626">${statusIcon('error', { size: 14 })} 检测失败</th></tr>
@@ -211,6 +225,17 @@ export class ReportExporter {
         <td>${this.escapeHtml(item.name)}</td>
         <td class="status-fail">失败</td>
         <td colspan="2">${this.escapeHtml(item.description)}</td>
+      </tr>`).join('')}
+      </tbody>
+    </table>` : ''}
+    ${notApplicableItems.length > 0 ? `
+    <table class="items-table">
+      <thead><tr><th colspan="4" style="font-size:14px;font-weight:600;padding-top:14px;color:#64748b">不适用（N/A）</th></tr>
+      <tr><th>项目</th><th>状态</th><th colspan="2">原因</th></tr></thead>
+      <tbody>
+      ${notApplicableItems.map(item => `<tr>
+        <td>${this.escapeHtml(item.name)}</td><td>N/A</td>
+        <td colspan="2">${this.escapeHtml(item.result?.findings[0]?.description || item.description)}</td>
       </tr>`).join('')}
       </tbody>
     </table>` : ''}

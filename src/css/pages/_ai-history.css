@@ -10,8 +10,8 @@
 .aih-count { font-size:11px;color:var(--text-secondary);white-space:nowrap; }
 .aih-btn { padding:5px 12px;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-primary);color:var(--text-primary);font-size:11px;cursor:pointer;white-space:nowrap; }
 .aih-btn:hover { background:var(--hover-bg); }
-.aih-btn.danger { color:#ef4444; }
-.aih-btn.danger:hover { background:rgba(239,68,68,.1); }
+.aih-btn.danger { color:var(--sev-critical-fg); }
+.aih-btn.danger:hover { background:var(--sev-critical-bg); }
 
 .aih-list { padding:8px 16px; }
 .aih-card { border:1px solid var(--border-color);border-radius:8px;margin-bottom:6px;overflow:hidden;transition:border-color .2s; }
@@ -25,7 +25,7 @@
 .aih-time { font-size:10px;color:var(--text-secondary);white-space:nowrap; }
 .aih-icon-btn { background:none;border:none;cursor:pointer;font-size:11px;color:var(--text-secondary);padding:2px 4px;border-radius:3px; }
 .aih-icon-btn:hover { background:var(--hover-bg);color:var(--text-primary); }
-.aih-icon-btn.danger:hover { color:#ef4444;background:rgba(239,68,68,.1); }
+.aih-icon-btn.danger:hover { color:var(--sev-critical-fg);background:var(--sev-critical-bg); }
 
 .aih-detail { padding:0 14px 12px;border-top:1px solid var(--border-subtle); }
 .aih-detail-q { font-size:12px;color:var(--text-secondary);margin:8px 0 6px;line-height:1.5;white-space:pre-wrap;word-break:break-all; }

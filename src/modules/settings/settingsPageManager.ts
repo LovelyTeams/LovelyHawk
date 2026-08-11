@@ -4,18 +4,17 @@
  */
 
 import { SettingsManager } from './settingsManager';
-import { aiService, AIProvider } from '../ai/aiService';
+import { aiService } from '../ai/aiService';
+import { PROVIDER_PRESETS, invalidateAIConfigCache } from '../ai/aiConfig';
 import { busyboxManager } from '../core/busyboxManager';
 import { showConfirm } from '../ui/confirmDialog';
 import {
   logger,
-  readSavedLogLevel,
-  LOG_LEVEL_STORAGE_KEY,
-  type LogLevelName,
 } from '../core/logger';
 import { reportError } from '../utils/errorHandler';
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH';
 
-/** 正式包 drop 掉 console，诊断信息只有进 logger 才留得下来（本页「工具」标签可导出） */
+/** 正式包 drop 掉 console，诊断信息只有进 logger 才留得下来（状态栏「日志」按钮可导出） */
 const log = logger.module('SettingsPage');
 
 export class SettingsPageManager {
@@ -23,8 +22,8 @@ export class SettingsPageManager {
   private systemFonts: string[] = [];
   private eventsBound = false;
 
-  // 预设提供商（不可删除）
-  private readonly presetProviders = ['openai', 'deepseek', 'claude', 'custom'];
+  // 预设提供商（不可删除），与 aiConfig.PROVIDER_PRESETS 保持同源
+  private readonly presetProviders = Object.keys(PROVIDER_PRESETS);
 
   constructor(settingsManager: SettingsManager) {
     this.settingsManager = settingsManager;
@@ -37,11 +36,9 @@ export class SettingsPageManager {
     const overlayRoot = document.getElementById('settings-overlay-container');
     if (!overlayRoot) return;
 
-    // 诊断日志面板必须最先绑定，且不放在下面的 try 里。
-    // 它依赖的东西全在前端，而后面的字体/设置加载都要走 Tauri invoke——
-    // 那些一旦抛错就会跳到 catch，面板再也不会绑定。而「后端出问题」恰恰是
-    // 最需要看日志的时刻，把它排在失败链路后面等于让它在关键时刻缺席。
-    this.bindDiagnosticLog();
+    // 连接诊断不依赖 Tauri invoke，必须在下面的 try 之前绑定——
+    // 后面的字体/设置加载一旦抛错就会跳到 catch，再也不会绑定到这里。
+    // （诊断日志面板已挪到状态栏「日志」按钮，见 ui/logViewerModal.ts）
     this.bindConnectionDiagnostics();
 
     try {
@@ -227,6 +224,14 @@ export class SettingsPageManager {
       });
     }
 
+    // 拉取模型列表按钮
+    const fetchModelsButton = document.getElementById('ai-fetch-models');
+    if (fetchModelsButton) {
+      fetchModelsButton.addEventListener('click', () => {
+        this.fetchModelList();
+      });
+    }
+
     // 新增AI提供商按钮
     const addProviderButton = document.getElementById('add-ai-provider');
     if (addProviderButton) {
@@ -335,7 +340,7 @@ export class SettingsPageManager {
     // AI设置
     // 确保 ai 和 providers 存在
     if (!settings.ai) {
-      settings.ai = { providers: {}, currentProvider: 'openai' };
+      settings.ai = { providers: {}, currentProvider: 'openai', useProxy: false, proxyType: 'http', proxyUrl: '' };
     }
     if (!settings.ai.providers) {
       settings.ai.providers = {};
@@ -395,8 +400,8 @@ export class SettingsPageManager {
         saveButton.textContent = '保存中...';
       }
 
-      // 收集表单数据
-      const formData = this.collectFormData();
+      // 收集表单数据（apiKey 为异步加密落盘，见 collectFormData）
+      const formData = await this.collectFormData();
 
       // 更新设置
       this.settingsManager.updateSettings(formData);
@@ -404,20 +409,8 @@ export class SettingsPageManager {
       // 保存设置
       await this.settingsManager.saveSettings();
 
-      // 同时保存到 AI 服务
-      const currentProvider = formData.ai?.currentProvider || 'openai';
-      const providerConfig = formData.ai?.providers?.[currentProvider];
-      if (providerConfig && providerConfig.apiKey) {
-        // 将提供商key映射到有效的AIProvider类型
-        const mappedProvider = this.mapProviderKeyToType(currentProvider);
-        aiService.saveConfig({
-          provider: mappedProvider,
-          apiKey: providerConfig.apiKey,
-          baseUrl: providerConfig.baseUrl || undefined,
-          model: providerConfig.model || undefined,
-        });
-        log.debug('AI 配置已同步到 AI 服务');
-      }
+      // 配置唯一来源是后端 settings 文件；强制 aiConfig 下次重新读取
+      invalidateAIConfigCache();
 
       // 显示成功消息
       this.showMessage('设置保存成功！', 'success');
@@ -443,9 +436,9 @@ export class SettingsPageManager {
   }
 
   /**
-   * 收集表单数据
+   * 收集表单数据（异步：新输入的明文 apiKey 需经后端 encrypt_ai_key 加密）
    */
-  private collectFormData(): any {
+  private async collectFormData(): Promise<any> {
     const globalFontSelect = document.getElementById('global-font') as HTMLSelectElement;
     const globalFontSizeSlider = document.getElementById('global-font-size') as HTMLInputElement;
     const aiProviderSelect = document.getElementById('ai-provider') as HTMLSelectElement;
@@ -461,23 +454,21 @@ export class SettingsPageManager {
 
     // 确保 ai 和 providers 存在
     if (!settings.ai) {
-      settings.ai = { providers: {}, currentProvider: 'openai' };
+      settings.ai = { providers: {}, currentProvider: 'openai', useProxy: false, proxyType: 'http', proxyUrl: '' };
     }
     if (!settings.ai.providers) {
       settings.ai.providers = {};
     }
 
-    // 更新当前提供商的配置
+    // 更新当前提供商的配置（原地编辑：保留 name 等未在表单上的字段）
     const updatedProviders = { ...settings.ai.providers };
     if (updatedProviders[currentProvider]) {
+      const storedKey = updatedProviders[currentProvider].apiKey || '';
       updatedProviders[currentProvider] = {
         ...updatedProviders[currentProvider],
-        apiKey: apiKeyInput?.value || '',
+        apiKey: await this.resolveApiKeyForSave(apiKeyInput?.value?.trim() || '', storedKey),
         model: modelInput?.value || '',
-        baseUrl: baseUrlInput?.value || '',
-        useProxy: useProxyCheckbox?.checked || false,
-        proxyType: (proxyTypeSelect?.value as 'http' | 'https' | 'socks5') || 'http',
-        proxyUrl: proxyUrlInput?.value || ''
+        baseUrl: baseUrlInput?.value || ''
       };
     }
 
@@ -488,9 +479,26 @@ export class SettingsPageManager {
       },
       ai: {
         currentProvider: currentProvider,
+        // 代理是全局设置，后端 ai_proxy_* 读取 ai.useProxy/proxyType/proxyUrl
+        useProxy: useProxyCheckbox?.checked || false,
+        proxyType: (proxyTypeSelect?.value as 'http' | 'https' | 'socks5') || 'http',
+        proxyUrl: proxyUrlInput?.value || '',
         providers: updatedProviders
       }
     };
+  }
+
+  /**
+   * 保存时的 apiKey 处理：
+   *  - 输入框留空 → 保留已存值（含 enc:v1: 密文；无 Key 的 ollama/本地 custom 即存空串）
+   *  - 输入新值且已是 enc:v1: 密文 → 原样保留（防御性；UI 正常不会回显密文）
+   *  - 输入新明文 → 经后端 encrypt_ai_key 加密后落盘，前端不持久化明文
+   */
+  private async resolveApiKeyForSave(typedKey: string, storedKey: string): Promise<string> {
+    if (!typedKey) return storedKey;
+    if (typedKey.startsWith('enc:v1:')) return typedKey;
+    const { invoke } = await import('@tauri-apps/api/core');
+    return await invoke<string>('encrypt_ai_key', { plaintext: typedKey });
   }
 
   /**
@@ -503,9 +511,10 @@ export class SettingsPageManager {
 
         // 重置到默认值
         this.settingsManager.resetToDefaults();
-        
+
         // 保存设置
         await this.settingsManager.saveSettings();
+        invalidateAIConfigCache();
         
         // 重新加载表单
         this.loadSettingsToForm();
@@ -537,7 +546,7 @@ export class SettingsPageManager {
 
     // 确保 ai 和 providers 存在
     if (!settings.ai) {
-      settings.ai = { providers: {}, currentProvider: 'openai' };
+      settings.ai = { providers: {}, currentProvider: 'openai', useProxy: false, proxyType: 'http', proxyUrl: '' };
     }
     if (!settings.ai.providers) {
       settings.ai.providers = {};
@@ -551,42 +560,35 @@ export class SettingsPageManager {
       const apiKeyInput = document.getElementById('ai-api-key') as HTMLInputElement;
       const modelInput = document.getElementById('ai-model') as HTMLInputElement;
       const baseUrlInput = document.getElementById('ai-base-url') as HTMLInputElement;
-      const useProxyCheckbox = document.getElementById('ai-use-proxy') as HTMLInputElement;
-      const proxyTypeSelect = document.getElementById('ai-proxy-type') as HTMLSelectElement;
-      const proxyUrlInput = document.getElementById('ai-proxy-url') as HTMLInputElement;
 
-      if (apiKeyInput) apiKeyInput.value = providerConfig.apiKey;
       if (modelInput) modelInput.value = providerConfig.model;
       if (baseUrlInput) baseUrlInput.value = providerConfig.baseUrl;
 
-      // 加载代理设置
-      if (useProxyCheckbox) useProxyCheckbox.checked = providerConfig.useProxy || false;
-      if (proxyTypeSelect) proxyTypeSelect.value = providerConfig.proxyType || 'http';
-      if (proxyUrlInput) proxyUrlInput.value = providerConfig.proxyUrl || '';
-
-      // 更新代理设置显示状态
-      this.toggleProxySettings();
-
-      // 更新API Key输入框的占位符
+      // API Key：enc:v1: 密文绝不回显——输入框留空并用占位符提示，
+      // 保存时留空即保留原值（见 collectFormData/resolveApiKeyForSave）
       if (apiKeyInput) {
-        switch (currentProvider) {
-          case 'openai':
-            apiKeyInput.placeholder = '输入您的OpenAI API Key (sk-...)';
-            break;
-          case 'deepseek':
-            apiKeyInput.placeholder = '输入您的DeepSeek API Key';
-            break;
-          case 'claude':
-            apiKeyInput.placeholder = '输入您的Claude API Key (sk-ant-...)';
-            break;
-          case 'custom':
-            apiKeyInput.placeholder = '输入您的自定义 API Key';
-            break;
-          default:
-            apiKeyInput.placeholder = '输入您的AI API Key';
+        const storedKey = providerConfig.apiKey || '';
+        if (storedKey.startsWith('enc:v1:')) {
+          apiKeyInput.value = '';
+          apiKeyInput.placeholder = '已保存，输入新值以更换';
+        } else {
+          apiKeyInput.value = storedKey;
+          const presetName = PROVIDER_PRESETS[currentProvider]?.name;
+          apiKeyInput.placeholder = presetName ? `输入您的${presetName} API Key` : '输入您的AI API Key';
         }
       }
     }
+
+    // 代理是全局设置（settings.ai 一级），与当前选中的 provider 无关
+    const useProxyCheckbox = document.getElementById('ai-use-proxy') as HTMLInputElement;
+    const proxyTypeSelect = document.getElementById('ai-proxy-type') as HTMLSelectElement;
+    const proxyUrlInput = document.getElementById('ai-proxy-url') as HTMLInputElement;
+    if (useProxyCheckbox) useProxyCheckbox.checked = settings.ai.useProxy || false;
+    if (proxyTypeSelect) proxyTypeSelect.value = settings.ai.proxyType || 'http';
+    if (proxyUrlInput) proxyUrlInput.value = settings.ai.proxyUrl || '';
+
+    // 更新代理设置显示状态
+    this.toggleProxySettings();
   }
 
   /**
@@ -631,15 +633,20 @@ export class SettingsPageManager {
       const baseUrlInput = document.getElementById('ai-base-url') as HTMLInputElement;
 
       const provider = aiProviderSelect?.value || 'openai';
-      const apiKey = apiKeyInput?.value || '';
       const model = modelInput?.value || '';
       const baseUrl = baseUrlInput?.value || '';
 
-      if (!apiKey && provider !== 'ollama') {
+      // 输入框留空时复用已保存的 Key（enc:v1: 密文原样传给后端，由后端解密），
+      // 这样测试已保存的 provider 不必重新输入 Key
+      const typedKey = apiKeyInput?.value?.trim() || '';
+      const storedKey = this.settingsManager.getSettings().ai?.providers?.[provider]?.apiKey || '';
+      const apiKey = typedKey || storedKey;
+
+      if (!apiKey && this.resolveProviderType(provider) !== 'ollama') {
         throw new Error('请先输入API Key');
       }
 
-      // 模拟AI连接测试（发送hello消息）
+      // 无状态测试：直接用表单值发请求，不触碰已保存配置
       const testResult = await this.performAITest(provider, apiKey, model, baseUrl);
 
       // 显示成功结果
@@ -669,30 +676,78 @@ export class SettingsPageManager {
   }
 
   /**
-   * 执行AI连接测试
+   * 执行AI连接测试（无状态：不读写任何已保存配置，直接用传入的值发请求）
    */
   private async performAITest(provider: string, apiKey: string, model: string, baseUrl: string): Promise<string> {
     try {
-      // 临时保存配置到 AI 服务进行测试
-      // 将提供商key映射到有效的AIProvider类型
-      const mappedProvider = this.mapProviderKeyToType(provider);
-      aiService.saveConfig({
-        provider: mappedProvider,
-        apiKey: apiKey,
+      return await aiService.testConnection({
+        providerType: this.resolveProviderType(provider),
+        apiKey,
         baseUrl: baseUrl || undefined,
         model: model || undefined,
       });
-
-      // 执行简单的AI测试
-      const result = await aiService.generateSolution(
-        '测试连接',
-        '这是一个连接测试，请简短回复"连接成功"',
-        'low'
-      );
-
-      return result.solution.substring(0, 100) + '...'; // 返回前100字符
     } catch (error: any) {
       throw new Error(error.message || 'AI API 连接失败');
+    }
+  }
+
+  /**
+   * 拉取提供商的模型列表，填充模型输入框的 datalist。
+   * 与测试连接同样的无状态风格：用表单当前值发请求；Key 输入框留空时
+   * 复用已保存的密文（后端自行解密），不必重新输入。
+   */
+  private async fetchModelList(): Promise<void> {
+    const fetchButton = document.getElementById('ai-fetch-models') as HTMLButtonElement;
+    const statusDiv = document.getElementById('ai-models-status') as HTMLDivElement;
+    const datalist = document.getElementById('ai-model-list') as HTMLDataListElement;
+    if (!fetchButton || !statusDiv || !datalist) return;
+
+    const setStatus = (text: string, color: string) => {
+      statusDiv.textContent = text;
+      statusDiv.style.color = color;
+      statusDiv.style.display = text ? 'block' : 'none';
+    };
+
+    try {
+      fetchButton.disabled = true;
+      fetchButton.textContent = '拉取中...';
+      setStatus('正在拉取模型列表...', 'var(--text-secondary)');
+
+      const aiProviderSelect = document.getElementById('ai-provider') as HTMLSelectElement;
+      const apiKeyInput = document.getElementById('ai-api-key') as HTMLInputElement;
+      const baseUrlInput = document.getElementById('ai-base-url') as HTMLInputElement;
+
+      const provider = aiProviderSelect?.value || 'openai';
+      const typedKey = apiKeyInput?.value?.trim() || '';
+      const storedKey = this.settingsManager.getSettings().ai?.providers?.[provider]?.apiKey || '';
+      const apiKey = typedKey || storedKey;
+      const providerType = this.resolveProviderType(provider);
+
+      if (!apiKey && providerType !== 'ollama') {
+        throw new Error('请先输入API Key');
+      }
+
+      const models = await aiService.listModels({
+        providerType,
+        apiKey,
+        baseUrl: baseUrlInput?.value?.trim() || undefined,
+      });
+
+      // 用拉取到的列表整体替换 datalist 选项（DOM API 赋值，provider 返回的
+      // 模型名不会经过 innerHTML）
+      datalist.replaceChildren(...models.map((m) => {
+        const option = document.createElement('option');
+        option.value = m;
+        return option;
+      }));
+
+      setStatus(`已拉取 ${models.length} 个模型，点击模型输入框选择`, '#22c55e');
+    } catch (error) {
+      setStatus(`拉取失败: ${(error as Error)?.message ?? error}`, '#ef4444');
+      log.warn('拉取模型列表失败:', error);
+    } finally {
+      fetchButton.disabled = false;
+      fetchButton.textContent = '拉取模型';
     }
   }
 
@@ -785,7 +840,7 @@ export class SettingsPageManager {
 
     // 确保 ai 和 providers 存在
     if (!settings.ai) {
-      settings.ai = { currentProvider: '', providers: {} };
+      settings.ai = { currentProvider: '', providers: {}, useProxy: false, proxyType: 'http', proxyUrl: '' };
     }
     if (!settings.ai.providers) {
       settings.ai.providers = {};
@@ -874,12 +929,20 @@ export class SettingsPageManager {
       // 生成唯一的key
       const key = this.generateProviderKey(name);
 
+      // 新输入的明文 Key 先经后端加密再落盘（空 Key 的本地 provider 保持空串）
+      const encryptedKey = await this.resolveApiKeyForSave(apiKey, '');
+
+      // 「API 格式」radio：决定走 OpenAI 兼容端点还是 Claude /messages 端点
+      const formatRadio = document.querySelector<HTMLInputElement>('input[name="new-provider-format"]:checked');
+      const apiFormat = formatRadio?.value === 'claude' ? 'claude' as const : 'openai' as const;
+
       // 添加新提供商
       const newProvider = {
         name: name,
-        apiKey: apiKey,
+        apiKey: encryptedKey,
         model: model,
         baseUrl: baseUrl,
+        type: apiFormat,
         useProxy: false,
         proxyType: 'http' as 'http' | 'https' | 'socks5',
         proxyUrl: ''
@@ -891,6 +954,7 @@ export class SettingsPageManager {
       // 保存设置
       this.settingsManager.updateSettings(settings);
       await this.settingsManager.saveSettings();
+      invalidateAIConfigCache();
 
       // 更新UI
       this.updateProviderSelector();
@@ -929,15 +993,11 @@ export class SettingsPageManager {
   }
 
   /**
-   * 将提供商key映射到有效的AIProvider类型
-   * 自定义提供商映射到'custom'，预设提供商映射到自身
+   * 提供商 key → 归一化类型：预设键（openai/deepseek/claude/ollama/custom）即类型，
+   * 其余用户自定义 key 按 custom 处理
    */
-  private mapProviderKeyToType(key: string): AIProvider {
-    if (this.isPresetProvider(key)) {
-      return key as AIProvider;
-    }
-    // 所有自定义提供商都映射到'custom'类型
-    return 'custom';
+  private resolveProviderType(key: string): string {
+    return key in PROVIDER_PRESETS ? key : 'custom';
   }
 
   /**
@@ -992,6 +1052,7 @@ export class SettingsPageManager {
       // 保存设置
       this.settingsManager.updateSettings(settings);
       await this.settingsManager.saveSettings();
+      invalidateAIConfigCache();
 
       // 更新UI
       this.updateProviderSelector();
@@ -1101,8 +1162,7 @@ export class SettingsPageManager {
     const run = async (command: 'test_ssh_performance' | 'diagnose_shell_performance', label: string) => {
       show(`${label} 执行中…`);
       try {
-        const { invoke } = await import('@tauri-apps/api/core');
-        const out = await invoke(command) as string;
+        const out = await invokeTargetBoundSSH<string>(command);
         show(out || '(无输出)');
       } catch (e) {
         show(`${label}失败：${e}`);
@@ -1112,82 +1172,5 @@ export class SettingsPageManager {
 
     (window as any).__diagSshPerf = () => void run('test_ssh_performance', '命令往返耗时测试');
     (window as any).__diagShellPerf = () => void run('diagnose_shell_performance', 'Shell 启动诊断');
-  }
-
-  /**
-   * 诊断日志面板。
-   *
-   * 存在的理由：vite.config.ts 对正式包设了 esbuild.drop: ['console']，混淆器又设了
-   * disableConsoleOutput，所以 release 版里所有 console 输出都不存在。logger 的
-   * 500 条环形缓冲是运行时错误唯一的落点，此前没有任何出口——等于白记。
-   */
-  private bindDiagnosticLog(): void {
-    const viewEl = () => document.getElementById('diag-log-view');
-    const countEl = () => document.getElementById('diag-log-count');
-
-    const render = () => {
-      const view = viewEl();
-      const count = countEl();
-      if (!view) return;
-      const text = logger.exportAsText();
-      view.textContent = text || '(暂无日志)';
-      if (count) count.textContent = `${logger.getBuffer().length} 条`;
-      view.scrollTop = view.scrollHeight;
-    };
-
-    (window as any).__diagLogRefresh = render;
-
-    // 记录级别：logger 默认 minLevel 是 info，所有 log.debug 会被直接丢弃，
-    // 排查问题时需要能调到 debug。实际的读取与应用在 main.ts 启动时完成
-    // （见 applySavedLogLevel），这里只负责回显当前值并处理切换。
-    const levelSel = document.getElementById('diag-log-level') as HTMLSelectElement | null;
-    if (levelSel) levelSel.value = readSavedLogLevel();
-
-    (window as any).__diagLogSetLevel = (level: LogLevelName) => {
-      logger.setLevel(level);
-      try { localStorage.setItem(LOG_LEVEL_STORAGE_KEY, level); } catch { /* 隐私模式忽略 */ }
-      log.info(`日志记录级别已切换为 ${level}`);
-      render();
-    };
-
-    (window as any).__diagLogCopy = async () => {
-      const text = logger.exportAsText();
-      if (!text) { window.showNotification?.('暂无日志可复制', 'info'); return; }
-      try {
-        await navigator.clipboard.writeText(text);
-        window.showNotification?.('日志已复制到剪贴板', 'success');
-      } catch (e) {
-        reportError(e, { module: 'Settings', action: '复制日志' });
-      }
-    };
-
-    (window as any).__diagLogExport = () => {
-      const text = logger.exportAsText();
-      if (!text) { window.showNotification?.('暂无日志可导出', 'info'); return; }
-      try {
-        const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `LovelyRes-诊断日志-${stamp}.log`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        window.showNotification?.('日志已导出', 'success');
-      } catch (e) {
-        reportError(e, { module: 'Settings', action: '导出日志' });
-      }
-    };
-
-    (window as any).__diagLogClear = () => {
-      logger.clear();
-      render();
-      window.showNotification?.('日志已清空', 'info');
-    };
-
-    // 打开设置页时先渲染一次，省得用户还要点刷新
-    render();
   }
 }

@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
-import { longestCommonPrefix } from './terminalManager';
+import { activeTargetContext } from '../core/targetContext';
+import { longestCommonPrefix, TerminalManager, type TerminalOutput } from './terminalManager';
+
+afterEach(() => activeTargetContext.clear());
 
 /**
  * Tab 补全在多候选时补到最长公共前缀，这是 bash 的行为。
@@ -34,5 +37,25 @@ describe('longestCommonPrefix', () => {
 
   it('候选完全相同时原样返回', () => {
     expect(longestCommonPrefix(['pwd', 'pwd'])).toBe('pwd');
+  });
+});
+
+describe('TerminalManager target state', () => {
+  it('drops command and input history when the SSH session changes', () => {
+    const manager = new TerminalManager();
+    const target = {
+      sessionId: 'session-a', hostKeyFingerprint: 'SHA256:a', host: '10.0.0.1', port: 22, username: 'root',
+    };
+    activeTargetContext.activate(target);
+    manager.getCommandHistory();
+    (manager as unknown as { commandHistory: TerminalOutput[] }).commandHistory = [{
+      command: 'id', output: 'uid=0', exit_code: 0, timestamp: new Date(),
+    }];
+    (manager as unknown as { currentWorkingDirectory: string }).currentWorkingDirectory = '/var/www';
+
+    activeTargetContext.activate({ ...target, sessionId: 'session-b' });
+
+    expect(manager.getCommandHistory()).toEqual([]);
+    expect(manager.getCurrentWorkingDirectory()).toBe('~');
   });
 });

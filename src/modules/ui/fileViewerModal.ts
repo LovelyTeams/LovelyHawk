@@ -1,6 +1,8 @@
 // LovelyRes - 文件查看/编辑模态组件
 // 支持语法高亮的文件查看和编辑功能
 
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH';
+
 export class FileViewerModal {
   private modal: HTMLElement | null = null;
   private isVisible: boolean = false;
@@ -289,7 +291,7 @@ export class FileViewerModal {
 
     try {
       // 调用后端API读取文件
-      const content = await (window as any).__TAURI__.core.invoke('sftp_read_file', {
+      const content = await invokeTargetBoundSSH<string>('sftp_read_file', {
         path: this.currentFilePath,
         maxBytes: 1024 * 1024 // 1MB限制
       });
@@ -420,7 +422,7 @@ export class FileViewerModal {
 
     try {
       // 调用后端API保存文件
-      await (window as any).__TAURI__.core.invoke('sftp_write_file', {
+      await invokeTargetBoundSSH('sftp_write_file', {
         path: this.currentFilePath,
         content: newContent
       });

@@ -238,7 +238,7 @@ function updateNetworkTable(networkDetails: any[]): void {
     const isEstablished = conn.state === 'ESTABLISHED' || conn.state === 'ESTAB';
     const standardPorts = [':22', ':80', ':443', ':3306', ':5432', ':6379', ':53', ':8080', ':8443'];
     const isSuspiciousConn = isEstablished && !standardPorts.some(p => (conn.foreignAddress || '').endsWith(p)) && conn.foreignAddress && conn.foreignAddress !== '*:*' && conn.foreignAddress !== '0.0.0.0:*';
-    const rowBg = isSuspiciousConn ? 'background: #faad1408; border-left: 2px solid #faad14;' : '';
+    const rowBg = isSuspiciousConn ? 'background: var(--sev-warn-bg); border-left: 2px solid var(--sev-warn-border);' : '';
     return `
     <tr class="network-row" data-protocol="${conn.protocol}" data-local="${conn.localAddress}" data-foreign="${conn.foreignAddress}" data-state="${conn.state}" data-pid="${conn.pid || '-'}" data-process="${conn.process}" style="border-bottom: 1px solid var(--border-color); cursor: context-menu; ${rowBg}">
       <td class="st-cell st-sep">${conn.protocol}</td>
@@ -320,12 +320,12 @@ function updateUsersTable(users: any[]): void {
   tbody.innerHTML = users.map((user) => {
     const isRoot = user.uid === '0' && user.username !== 'root';
     const hasLoginShell = ['/bin/bash', '/bin/sh', '/usr/bin/zsh', '/bin/zsh', '/bin/dash'].includes(user.shell);
-    const rowStyle = isRoot ? 'background: #ff4d4f08; border-left: 3px solid #ff4d4f;' : '';
-    const uidColor = isRoot ? '#ff4d4f; font-weight: 600' : 'var(--text-primary)';
+    const rowStyle = isRoot ? 'background: var(--sev-critical-bg); border-left: 3px solid var(--sev-critical-border);' : '';
+    const uidColor = isRoot ? 'var(--sev-critical-fg); font-weight: 600' : 'var(--text-primary)';
     const shellColor = hasLoginShell ? 'var(--text-primary); font-weight: 500' : 'var(--text-secondary)';
     return `
     <tr data-username="${user.username}" style="border-bottom: 1px solid var(--border-color); cursor: context-menu; ${rowStyle}">
-      <td class="st-cell st-sep">${user.username}${isRoot ? ` <span style="color:#ff4d4f;font-size:10px;">${statusIcon('warning', { size: 12 })}UID=0</span>` : ''}</td>
+      <td class="st-cell st-sep">${user.username}${isRoot ? ` <span style="color:var(--sev-critical-fg);font-size:10px;">${statusIcon('warning', { size: 12 })}UID=0</span>` : ''}</td>
       <td style="padding: var(--spacing-sm); font-size: 12px; color: ${uidColor}; border-right: 1px solid var(--border-color-light);">${user.uid}</td>
       <td class="st-cell st-sep">${user.gid}</td>
       <td class="st-cell st-sep">${user.home}</td>
@@ -383,7 +383,7 @@ function updateCronTable(cronJobs: any[]): void {
   tbody.innerHTML = cronJobs.map((job) => {
     const suspiciousPatterns = ['wget', 'curl', 'nc ', '/dev/tcp', 'base64', 'python -c', 'perl -e', 'bash -i'];
     const isSuspicious = suspiciousPatterns.some(p => (job.command || '').toLowerCase().includes(p));
-    const rowStyle = isSuspicious ? 'background: #ff4d4f08; border-left: 3px solid #ff4d4f;' : '';
+    const rowStyle = isSuspicious ? 'background: var(--sev-critical-bg); border-left: 3px solid var(--sev-critical-border);' : '';
     return `
     <tr data-cron-user="${job.user}" data-cron-schedule="${job.schedule}" data-cron-command="${job.command}" data-cron-source="${job.source || ''}" style="border-bottom: 1px solid var(--border-color); cursor: context-menu; ${rowStyle}">
       <td class="st-cell st-sep">${job.user}</td>
@@ -447,9 +447,9 @@ function updateFirewallTable(firewallRules: any[]): void {
 /** 风险标签渲染辅助 */
 function renderRiskBadge(risk: string): string {
   const styles: Record<string, { bg: string; color: string; label: string }> = {
-    high: { bg: '#ff4d4f22', color: '#ff4d4f', label: `${statusIcon('error', { size: 12 })} 高危` },
-    warning: { bg: '#faad1422', color: '#faad14', label: `${statusIcon('warning', { size: 12 })} 可疑` },
-    normal: { bg: '#52c41a22', color: '#52c41a', label: `${statusIcon('success', { size: 12 })} 正常` }
+    high: { bg: 'var(--sev-critical-bg)', color: 'var(--sev-critical-fg)', label: `${statusIcon('error', { size: 12 })} 高危` },
+    warning: { bg: 'var(--sev-warn-bg)', color: 'var(--sev-warn-fg)', label: `${statusIcon('warning', { size: 12 })} 可疑` },
+    normal: { bg: 'var(--sev-success-bg)', color: 'var(--sev-success-fg)', label: `${statusIcon('success', { size: 12 })} 正常` }
   };
   const s = styles[risk] || styles.normal;
   return `<span style="padding: 2px 8px; border-radius: 4px; font-size: 11px; background: ${s.bg}; color: ${s.color}; font-weight: 500;">${s.label}</span>`;
@@ -457,8 +457,8 @@ function renderRiskBadge(risk: string): string {
 
 /** 高危行背景样式 */
 function riskRowStyle(risk: string): string {
-  if (risk === 'high') return 'background: #ff4d4f08; border-left: 3px solid #ff4d4f;';
-  if (risk === 'warning') return 'background: #faad1408; border-left: 3px solid #faad14;';
+  if (risk === 'high') return 'background: var(--sev-critical-bg); border-left: 3px solid var(--sev-critical-border);';
+  if (risk === 'warning') return 'background: var(--sev-warn-bg); border-left: 3px solid var(--sev-warn-border);';
   return '';
 }
 
@@ -500,9 +500,9 @@ function updateLoginHistoryTable(loginHistory: any[]): void {
     return;
   }
   tbody.innerHTML = loginHistory.map((entry) => {
-    const statusColor = entry.status === 'failed' ? '#ff4d4f' : entry.status === 'active' ? '#52c41a' : 'var(--text-primary)';
+    const statusColor = entry.status === 'failed' ? 'var(--sev-critical-fg)' : entry.status === 'active' ? 'var(--sev-success-fg)' : 'var(--text-primary)';
     const statusLabel = entry.status === 'failed' ? `${statusIcon('error', { size: 14 })} 失败` : entry.status === 'active' ? `${statusIcon('success', { size: 14 })} 在线` : '登录';
-    const rowBg = entry.status === 'failed' ? 'background: #ff4d4f08;' : '';
+    const rowBg = entry.status === 'failed' ? 'background: var(--sev-critical-bg);' : '';
     return `
     <tr data-login-user="${entry.user}" data-login-terminal="${entry.terminal}" data-login-source="${entry.source}" data-login-time="${entry.loginTime}" data-login-status="${entry.status}" style="border-bottom: 1px solid var(--border-color); ${rowBg} cursor: context-menu;">
       <td class="st-cell st-sep st-b6">${entry.user}</td>
@@ -790,7 +790,7 @@ function updateSudoersTable(sudoersConfig: any[]): void {
       <td class="st-cell st-sep st-b6">${entry.user}</td>
       <td class="st-cell st-sep">${entry.host}</td>
       <td class="st-cell st-sep st-mono st-trunc st-w300" title="${entry.command}">${entry.command}</td>
-      <td style="padding: var(--spacing-sm); font-size: 12px; color: ${isNopasswd ? '#ff4d4f' : 'var(--text-primary)'}; font-weight: ${isNopasswd ? '600' : '400'}; border-right: 1px solid var(--border-color-light);">${isNopasswd ? '免密' : '需要密码'}</td>
+      <td style="padding: var(--spacing-sm); font-size: 12px; color: ${isNopasswd ? 'var(--sev-critical-fg)' : 'var(--text-primary)'}; font-weight: ${isNopasswd ? '600' : '400'}; border-right: 1px solid var(--border-color-light);">${isNopasswd ? '免密' : '需要密码'}</td>
       <td class="st-cell st-dim st-mono">${entry.source}</td>
     </tr>`;
   }).join('');
@@ -1082,7 +1082,7 @@ export function initTableUpdateManager(): void {
         // 高亮可疑项
         const isSus = /suspicious|backdoor|hack/i.test(s);
         const isClean = s === 'clean' || s === 'enabled';
-        const cls = isSus ? ' style="color:#ef4444;font-weight:500;"' : isClean ? ' style="color:#22c55e;"' : '';
+        const cls = isSus ? ' style="color:var(--sev-critical-fg);font-weight:500;"' : isClean ? ' style="color:var(--sev-success-fg);"' : '';
         return `<td${cls}>${htmlEsc(s)}</td>`;
       }).join('')}</tr>`;
     }).join('');

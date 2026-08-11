@@ -3,6 +3,8 @@
  */
 
 import * as IconPark from '@icon-park/svg'
+import { validateEditableRemotePath } from '../baseline/baselineFileEditor'
+import { shq } from '../core/shellEscape'
 import { BaseContextMenu, type MenuAction } from './contextMenu/baseContextMenu'
 
 export class SUIDFileContextMenu extends BaseContextMenu {
@@ -130,7 +132,10 @@ export class SUIDFileContextMenu extends BaseContextMenu {
   }
 
   protected resolveAction(action: string): MenuAction | null {
-    const filePath = this.currentFile.path || ''
+    let filePath: string
+    try { filePath = validateEditableRemotePath(this.currentFile.path || '') } catch { return null }
+    const quotedPath = shq(filePath)
+    const quarantinePath = `/tmp/lovelyres_suid_quarantine_${Date.now()}`
 
     const actions: Record<string, MenuAction> = {
       'file-details': {
@@ -174,14 +179,20 @@ export class SUIDFileContextMenu extends BaseContextMenu {
         actionName: '查找硬链接'
       },
       'remove-suid': {
-        command: `chmod u-s ${filePath} && echo '✓ 已移除SUID位' && ls -la ${filePath}`,
+        command: `chmod u-s -- ${quotedPath}`,
         title: `移除SUID - ${filePath}`,
-        actionName: '移除SUID位'
+        actionName: '移除SUID位', mutating: true, dangerous: true,
+        verifyCommand: `test ! -u ${quotedPath}`,
+        restoreCommand: `chmod u+s -- ${quotedPath}`,
+        restoreVerifyCommand: `test -u ${quotedPath}`,
       },
       'quarantine': {
-        command: `mkdir -p /tmp/quarantine && cp -a ${filePath} /tmp/quarantine/ && chmod 000 ${filePath} && echo '✓ 文件已隔离到 /tmp/quarantine/ 并移除所有权限'`,
+        command: `cp -a -- ${quotedPath} ${shq(quarantinePath)} && chmod 000 -- ${quotedPath}`,
         title: `隔离文件 - ${filePath}`,
-        actionName: '隔离文件'
+        actionName: '隔离文件', mutating: true, dangerous: true,
+        verifyCommand: `test "$(stat -c '%a' -- ${quotedPath})" = 0`,
+        restoreCommand: `cp -a -- ${shq(quarantinePath)} ${quotedPath}`,
+        restoreVerifyCommand: `cmp -s -- ${shq(quarantinePath)} ${quotedPath}`,
       }
     }
 

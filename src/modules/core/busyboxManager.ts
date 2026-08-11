@@ -6,8 +6,8 @@
  * 都会自动用 busybox sh -c 包裹执行，绕过被篡改的系统命令和 LD_PRELOAD
  */
 
-import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
+import { invokeTargetBoundSSH } from './targetBoundSSH';
 
 export type BusyboxStatus = 'unknown' | 'not-installed' | 'installed' | 'enabled';
 
@@ -19,7 +19,7 @@ class BusyboxManager {
   /** 检测远端 busybox 状态 */
   async detect(): Promise<{ status: BusyboxStatus; path: string }> {
     try {
-      const enabledPath = await invoke('busybox_status') as string | null;
+      const enabledPath = await invokeTargetBoundSSH<string | null>('busybox_status');
       if (enabledPath) {
         this.status = 'enabled';
         this.path = enabledPath;
@@ -27,7 +27,7 @@ class BusyboxManager {
         return { status: this.status, path: this.path };
       }
 
-      const detected = await invoke('busybox_detect') as string;
+      const detected = await invokeTargetBoundSSH<string>('busybox_detect');
       if (detected && detected.trim()) {
         this.status = 'installed';
         this.path = detected.trim();
@@ -68,7 +68,7 @@ class BusyboxManager {
     }
 
     // 通过 SFTP 上传到远端
-    const output = await invoke('busybox_install', { localPath }) as string;
+    const output = await invokeTargetBoundSSH<string>('busybox_install', { localPath });
     if (output.includes('INSTALL_OK')) {
       this.path = '/tmp/busybox';
       this.status = 'installed';
@@ -81,7 +81,7 @@ class BusyboxManager {
 
   /** 直接指定本地路径上传 (不弹文件选择器) */
   async uploadFromPath(localPath: string): Promise<string> {
-    const output = await invoke('busybox_install', { localPath }) as string;
+    const output = await invokeTargetBoundSSH<string>('busybox_install', { localPath });
     if (output.includes('INSTALL_OK')) {
       this.path = '/tmp/busybox';
       this.status = 'installed';
@@ -95,7 +95,7 @@ class BusyboxManager {
   /** 启用 busybox 模式 */
   async enable(path?: string): Promise<void> {
     const p = path || this.path || '/tmp/busybox';
-    await invoke('busybox_enable', { path: p });
+    await invokeTargetBoundSSH('busybox_enable', { path: p });
     this.status = 'enabled';
     this.path = p;
     this.notify();
@@ -103,7 +103,7 @@ class BusyboxManager {
 
   /** 禁用 busybox 模式 */
   async disable(): Promise<void> {
-    await invoke('busybox_disable');
+    await invokeTargetBoundSSH('busybox_disable');
     this.status = this.path ? 'installed' : 'not-installed';
     this.notify();
   }

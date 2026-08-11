@@ -3,9 +3,15 @@
  * 管理：日志加载、威胁分析、IOC搜索、多日志关联、自定义规则、导出
  */
 
-import { invoke } from "@tauri-apps/api/core";
 import { renderThreatPanel, renderIocResults } from './logThreatAnalyzer';
 import { escapeHtml } from '../core/htmlEscape';
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH';
+import { incidentCaseManager } from '../case/incidentCaseManager';
+import {
+  mergeWithActiveCaseIOCs,
+  persistIOCsToActiveCase,
+} from '../case/iocWorkspace';
+import { reportError } from '../utils/errorHandler';
 
 // ==================== 类型 ====================
 
@@ -127,7 +133,7 @@ async function refreshLogAnalysis(): Promise<void> {
     let result: LogAnalysisResult;
 
     if (useJournalctl) {
-      result = await invoke('read_journalctl_log', {
+      result = await invokeTargetBoundSSH('read_journalctl_log', {
         page, pageSize,
         unit: journalUnit || null,
         filter: filter || null,
@@ -139,7 +145,7 @@ async function refreshLogAnalysis(): Promise<void> {
       if (el) el.textContent = `journalctl${journalUnit ? ` -u ${journalUnit}` : ''}`;
     } else if (logPath.startsWith('docker:')) {
       const containerId = logPath.replace('docker:', '');
-      const logs = await invoke('docker_container_logs', {
+      const logs = await invokeTargetBoundSSH<string>('docker_container_logs', {
         containerId, tail: pageSize.toString()
       }) as string;
 
@@ -152,7 +158,7 @@ async function refreshLogAnalysis(): Promise<void> {
       const el = document.getElementById('current-source');
       if (el) el.textContent = `Container ${containerId.substring(0, 8)}`;
     } else {
-      result = await invoke('read_system_log', {
+      result = await invokeTargetBoundSSH('read_system_log', {
         logPath, page, pageSize,
         filter: filter || null,
         dateFilter: dateFilter || null,
@@ -210,7 +216,7 @@ async function runThreatAnalysis(): Promise<void> {
 
     let result: LogAnalysisResult;
     if (useJournalctl) {
-      result = await invoke('read_journalctl_log', {
+      result = await invokeTargetBoundSSH('read_journalctl_log', {
         page: 1, pageSize: 2000,
         unit: state.journalUnit || null,
         filter: null, since: null, until: null,
@@ -222,7 +228,7 @@ async function runThreatAnalysis(): Promise<void> {
       window.showNotification?.('Docker 容器日志暂不支持威胁分析', 'info');
       return;
     } else {
-      result = await invoke('read_system_log', {
+      result = await invokeTargetBoundSSH('read_system_log', {
         logPath, page: 1, pageSize: 2000,
         filter: null, dateFilter: null,
         withAnalysis: true,
@@ -249,7 +255,7 @@ async function runMultiLogAnalysis(): Promise<void> {
 
   try {
     const logPaths = ['/var/log/auth.log', '/var/log/syslog', '/var/log/secure', '/var/log/messages'];
-    const result: any = await invoke('analyze_multi_log', { logPaths, lineLimit: 500 });
+    const result: any = await invokeTargetBoundSSH('analyze_multi_log', { logPaths, lineLimit: 500 });
 
     // 更新威胁面板
     if (result.threat_summary) {
@@ -277,12 +283,17 @@ async function runMultiLogAnalysis(): Promise<void> {
 
 // ==================== IOC 搜索 ====================
 
-function showIocSearch(): void {
-  // 切换到 IOC tab
-  const app = (window as any).app;
-  if (app) {
-    const renderer = app.getStateManager?.().getUIRenderer?.()?.['logAnalysisRenderer'];
-    if (renderer) renderer.setTab('ioc');
+function loadCaseIocsIntoSearch(notify = true): void {
+  const textarea = document.getElementById('ioc-input') as HTMLTextAreaElement | null;
+  if (!textarea) return;
+  const existing = textarea.value.split(/[,\n]/);
+  const merged = mergeWithActiveCaseIOCs(existing);
+  textarea.value = merged.join('\n');
+  if (notify) {
+    window.showNotification?.(
+      merged.length > 0 ? `已载入 ${merged.length} 个案件 IOC` : '当前案件暂无 IOC',
+      merged.length > 0 ? 'success' : 'info',
+    );
   }
 }
 
@@ -298,13 +309,31 @@ async function executeIocSearch(): Promise<void> {
   window.showNotification?.(`正在搜索 ${indicators.length} 个 IOC...`, 'info');
 
   try {
-    const result: any = await invoke('search_ioc_in_logs', { indicators, logPaths });
+    persistIOCsToActiveCase(indicators, 'log-analysis');
+  } catch (error) {
+    reportError(error, { module: 'LogAnalysis', action: '保存 IOC 到案件' });
+  }
+
+  try {
+    const result: any = await invokeTargetBoundSSH('search_ioc_in_logs', { indicators, logPaths });
     const container = document.getElementById('ioc-results-container');
     if (container) container.innerHTML = renderIocResults(result);
     window.showNotification?.(`IOC 搜索完成: ${result.total_matches} 处匹配`, result.total_matches > 0 ? 'warning' : 'success');
+    if (result.total_matches > 0) {
+      try {
+        await incidentCaseManager.addEvidence({
+          kind: 'log',
+          label: `日志 IOC 命中 · ${result.total_matches} 处`,
+          source: 'log-analysis',
+          preview: JSON.stringify({ indicators, result }, null, 2),
+        });
+        window.showNotification?.('IOC 命中结果已加入当前案件', 'success');
+      } catch (error) {
+        reportError(error, { module: 'LogAnalysis', action: '登记 IOC 命中证据' });
+      }
+    }
   } catch (error) {
-    console.error('IOC 搜索失败:', error);
-    window.showNotification?.(`IOC 搜索失败: ${error}`, 'error');
+    reportError(error, { module: 'LogAnalysis', action: 'IOC 搜索' });
   }
 }
 
@@ -421,8 +450,8 @@ async function loadLogFileList(): Promise<void> {
   if (!select) return;
   try {
     const [logFiles, containers] = await Promise.all([
-      invoke('list_log_files') as Promise<any[]>,
-      invoke('docker_list_containers').catch(() => []) as Promise<any[]>,
+      invokeTargetBoundSSH<any[]>('list_log_files'),
+      invokeTargetBoundSSH<any[]>('docker_list_containers').catch(() => []),
     ]);
 
     const currentValue = select.value;
@@ -468,8 +497,6 @@ export function initLogAnalysisManager(): void {
   (window as any).refreshLogAnalysis = refreshLogAnalysis;
   (window as any).runThreatAnalysis = runThreatAnalysis;
   (window as any).runMultiLogAnalysis = runMultiLogAnalysis;
-  (window as any).showIocSearch = showIocSearch;
-  (window as any).executeIocSearch = executeIocSearch;
   (window as any).showCustomRules = showCustomRules;
   (window as any).addCustomRule = addCustomRule;
   (window as any).removeCustomRule = removeCustomRule;
@@ -477,19 +504,27 @@ export function initLogAnalysisManager(): void {
 
   // Tab 切换 — 事件委托
   document.addEventListener('click', (e) => {
-    const target = (e.target as HTMLElement).closest('[data-la-action="switch-tab"]') as HTMLElement;
+    const target = (e.target as HTMLElement).closest<HTMLElement>('[data-la-action]');
     if (!target) return;
-    const tab = target.getAttribute('data-tab');
+    const action = target.dataset.laAction;
+    if (action === 'execute-ioc-search') {
+      void executeIocSearch();
+      return;
+    }
+    if (action === 'sync-case-ioc') {
+      loadCaseIocsIntoSearch();
+      return;
+    }
+    if (action !== 'switch-tab') return;
+    const tab = target.dataset.tab;
     if (!tab) return;
     const app = (window as any).app;
-    if (app) {
-      const renderer = app.getStateManager?.().getUIRenderer?.()?.['logAnalysisRenderer'];
-      if (renderer) {
-        renderer.setTab(tab);
-        if (tab === 'viewer') setTimeout(() => refreshLogAnalysis(), 50);
-        if (tab === 'rules') setTimeout(() => renderRulesList(), 50);
-      }
-    }
+    const renderer = app?.getStateManager?.()?.getUIRenderer?.()?.['logAnalysisRenderer'];
+    if (!renderer) return;
+    renderer.setTab(tab);
+    if (tab === 'viewer') setTimeout(() => refreshLogAnalysis(), 50);
+    if (tab === 'rules') setTimeout(() => renderRulesList(), 50);
+    if (tab === 'ioc') setTimeout(() => loadCaseIocsIntoSearch(false), 50);
   });
 
   (window as any).toggleThreatPanel = () => {

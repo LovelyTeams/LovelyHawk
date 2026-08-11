@@ -5,6 +5,8 @@
 
 import * as IconPark from '@icon-park/svg'
 import { aiService } from '../ai/aiService'
+import { renderAIMarkdown } from '../ai/aiOutput'
+import { escapeHtml } from '../core/htmlEscape'
 import { BaseContextMenu, type MenuAction } from './contextMenu/baseContextMenu'
 
 export class LogContextMenu extends BaseContextMenu {
@@ -92,12 +94,12 @@ export class LogContextMenu extends BaseContextMenu {
           }
           explanationContentEl.textContent += chunk
         },
-        () => {
-          console.log('AI 分析完成')
+        (fullText: string) => {
+          renderAIMarkdown(explanationContentEl, fullText)
         }
       )
     } catch (error) {
-      explanationContentEl.innerHTML = `<span style="color: var(--error-color)">分析失败: ${error instanceof Error ? error.message : String(error)}</span><br><br><small>请检查 设置 -> AI 配置 是否正确。</small>`
+      explanationContentEl.innerHTML = `<span style="color: var(--error-color)">分析失败: ${escapeHtml(error instanceof Error ? error.message : String(error))}</span><br><br><small>请检查 设置 -> AI 配置 是否正确。</small>`
     }
   }
 }

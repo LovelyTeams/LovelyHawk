@@ -19,8 +19,8 @@
 .docker-header-icon {
     width: 40px; height: 40px;
     border-radius: var(--border-radius);
-    background: rgba(59, 130, 246, 0.1);
-    color: #3b82f6;
+    background: color-mix(in srgb, var(--primary-color) 13%, transparent);
+    color: var(--primary-color);
     display: flex; align-items: center; justify-content: center;
 }
 .docker-header-title { margin: 0; font-size: 18px; font-weight: 600; color: var(--text-primary); }
@@ -56,10 +56,10 @@
 
 /* Stats */
 .docker-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--spacing-md); margin-bottom: var(--spacing-md); }
-.docker-stat-card { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--border-radius-lg); padding: var(--spacing-md); display: flex; flex-direction: column; gap: 4px; box-shadow: var(--shadow-sm); transition: var(--transition); }
-.docker-stat-card:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
-.docker-stat-title { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
-.docker-stat-value { font-size: 20px; font-weight: 700; color: var(--text-primary); }
+.docker-stat-card { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; box-shadow: var(--card-shadow); transition: border-color var(--transition-fast), box-shadow var(--transition-fast); }
+.docker-stat-card:hover { border-color: var(--border-color-hover); box-shadow: var(--card-shadow-hover); }
+.docker-stat-title { font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+.docker-stat-value { font-size: 22px; font-weight: 700; line-height: 1.15; color: var(--text-primary); font-variant-numeric: tabular-nums; }
 .docker-stat-sub { font-size: 11px; color: var(--text-secondary); }
 
 /* Card */
@@ -92,10 +92,11 @@
 
 /* Card Body */
 .docker-card-body { padding: var(--spacing-md) var(--spacing-lg); display: flex; flex-direction: column; gap: var(--spacing-md); flex: 1; }
-.docker-metrics-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--spacing-sm); background: var(--bg-primary); padding: 8px; border-radius: var(--border-radius); border: 1px solid var(--border-color); }
-.docker-metrics-row .metric-box { display: flex; flex-direction: column; align-items: center; gap: 2px; overflow: hidden; }
-.docker-metrics-row .metric-label { font-size: 10px; color: var(--text-secondary); text-transform: uppercase; white-space: nowrap; }
-.docker-metrics-row .metric-value { font-size: 12px; font-weight: 600; color: var(--text-primary); font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; line-height: 1.4; }
+.docker-metrics-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--spacing-sm); }
+.docker-metrics-row .metric-box { display: flex; flex-direction: column; align-items: center; gap: 2px; overflow: hidden; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 10px; padding: 12px 14px; box-shadow: var(--card-shadow); transition: border-color var(--transition-fast), box-shadow var(--transition-fast); }
+.docker-metrics-row .metric-box:hover { border-color: var(--border-color-hover); box-shadow: var(--card-shadow-hover); }
+.docker-metrics-row .metric-label { font-size: 12px; color: var(--text-secondary); text-transform: uppercase; white-space: nowrap; }
+.docker-metrics-row .metric-value { font-size: 15px; font-weight: 700; line-height: 1.3; color: var(--text-primary); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .docker-info-row { display: flex; flex-direction: column; gap: 8px; }
 .info-label { font-size: 12px; color: var(--text-secondary); font-family: var(--font-mono); }
 .docker-chip-group { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -115,7 +116,7 @@
 .docker-icon-btn.stop:hover { background: color-mix(in srgb, var(--status-stopped) 10%, transparent); color: var(--status-stopped); border-color: color-mix(in srgb, var(--status-stopped) 20%, transparent); }
 .docker-icon-btn.restart:hover { background: color-mix(in srgb, var(--status-paused) 10%, transparent); color: var(--status-paused); border-color: color-mix(in srgb, var(--status-paused) 20%, transparent); }
 .docker-icon-btn.terminal:hover { background: color-mix(in srgb, var(--accent-blue) 10%, transparent); color: var(--accent-blue); border-color: color-mix(in srgb, var(--accent-blue) 20%, transparent); }
-.docker-icon-btn.danger:hover { background: rgba(239, 68, 68, 0.1); color: var(--error-color); border-color: rgba(239, 68, 68, 0.2); }
+.docker-icon-btn.danger:hover { background: var(--sev-critical-bg); color: var(--error-color); border-color: var(--sev-critical-border); }
 
 /* Tables (for images/networks/volumes tabs) */
 .docker-table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -131,17 +132,17 @@
 
 /* Status Badges */
 .docker-status-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
-.docker-status-badge.running { background: rgba(16, 185, 129, 0.1); color: var(--success-color); }
-.docker-status-badge.exited { background: rgba(239, 68, 68, 0.1); color: var(--error-color); }
-.docker-status-badge.paused { background: rgba(245, 158, 11, 0.1); color: var(--warning-color); }
-.docker-status-badge.created { background: rgba(156, 163, 175, 0.1); color: var(--text-secondary); }
+.docker-status-badge.running { background: var(--sev-success-bg); color: var(--success-color); }
+.docker-status-badge.exited { background: var(--sev-critical-bg); color: var(--error-color); }
+.docker-status-badge.paused { background: var(--sev-warn-bg); color: var(--warning-color); }
+.docker-status-badge.created { background: var(--sev-neutral-bg); color: var(--sev-neutral-fg); }
 
 /* Severity Badges */
 .docker-severity-badge { display: inline-flex; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
-.docker-severity-critical { background: rgba(220, 38, 38, 0.15); color: #dc2626; }
-.docker-severity-high { background: rgba(239, 68, 68, 0.12); color: #ef4444; }
-.docker-severity-medium { background: rgba(245, 158, 11, 0.12); color: #f59e0b; }
-.docker-severity-low { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
+.docker-severity-critical { background: var(--sev-critical-bg); color: var(--sev-critical-fg); }
+.docker-severity-high { background: var(--sev-high-bg); color: var(--sev-high-fg); }
+.docker-severity-medium { background: var(--sev-warn-bg); color: var(--sev-warn-fg); }
+.docker-severity-low { background: var(--sev-info-bg); color: var(--sev-info-fg); }
 
 /* Score Gauge */
 .docker-score-gauge {
@@ -149,9 +150,9 @@
     display: flex; align-items: center; justify-content: center;
     font-size: 22px; font-weight: 700;
 }
-.docker-score-gauge.good { background: rgba(16, 185, 129, 0.1); color: var(--success-color); border: 3px solid var(--success-color); }
-.docker-score-gauge.warning { background: rgba(245, 158, 11, 0.1); color: var(--warning-color); border: 3px solid var(--warning-color); }
-.docker-score-gauge.danger { background: rgba(239, 68, 68, 0.1); color: var(--error-color); border: 3px solid var(--error-color); }
+.docker-score-gauge.good { background: var(--sev-success-bg); color: var(--success-color); border: 3px solid var(--success-color); }
+.docker-score-gauge.warning { background: var(--sev-warn-bg); color: var(--warning-color); border: 3px solid var(--warning-color); }
+.docker-score-gauge.danger { background: var(--sev-critical-bg); color: var(--error-color); border: 3px solid var(--error-color); }
 
 /* Audit Finding */
 .docker-audit-finding {
@@ -180,8 +181,8 @@
     background: var(--bg-secondary); cursor: pointer; transition: all 0.2s; text-align: center;
 }
 .docker-emergency-action-btn:hover { border-color: var(--primary-color); box-shadow: var(--shadow-md); transform: translateY(-2px); }
-.docker-emergency-action-btn.danger { border-color: rgba(239, 68, 68, 0.3); }
-.docker-emergency-action-btn.danger:hover { border-color: var(--error-color); background: rgba(239, 68, 68, 0.05); }
+.docker-emergency-action-btn.danger { border-color: var(--sev-critical-border); }
+.docker-emergency-action-btn.danger:hover { border-color: var(--error-color); background: var(--sev-critical-bg); }
 .docker-emergency-action-icon { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
 .docker-emergency-action-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
 .docker-emergency-action-desc { font-size: 11px; color: var(--text-secondary); }
@@ -236,7 +237,7 @@
     height: 36px;
     border-width: 3px;
     border-style: solid;
-    border-color: rgba(148,163,184,0.2) rgba(148,163,184,0.2) rgba(148,163,184,0.2) #3b82f6;
+    border-color: var(--border-color) var(--border-color) var(--border-color) var(--primary-color);
     border-radius: 50%;
     display: inline-block;
     box-sizing: border-box;

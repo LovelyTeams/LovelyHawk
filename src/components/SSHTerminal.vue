@@ -237,6 +237,19 @@
             <div class="ai-right-controls">
               <span class="ai-counter">{{ aiInputText.length }}/300</span>
               <button
+                v-if="aiLoading"
+                class="ai-send-btn ai-cancel-btn"
+                @click="cancelAIRequest"
+                title="取消生成"
+              >
+                <icon-close
+                  theme="multi-color"
+                  size="12"
+                  :fill="['#FFFFFF', '#2F88FF', '#FFF', '#43CCF8']"
+                  strokeLinejoin="bevel"
+                />
+              </button>
+              <button
                 class="ai-send-btn"
                 @click="sendAIRequest"
                 :disabled="!aiInputText.trim() || aiLoading"
@@ -398,11 +411,13 @@ import { WebLinksAddon } from 'xterm-addon-web-links'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { commandHintsManager, type CommandHint } from '../modules/ssh/commandHints'
+import { aiService } from '../modules/ai/aiService'
+import { terminalCommandPrompt } from '../modules/ai/aiPrompts'
 
 /**
  * 正式包 drop 掉 console，诊断信息只有进 logger 才留得下来。
  * 注意：终端是独立窗口（index.html?window=ssh-terminal），有自己的模块实例，
- * 这份缓冲区与主窗口的相互独立，不会出现在主窗口的「设置→工具→诊断日志」里。
+ * 这份缓冲区与主窗口的相互独立，不会出现在主窗口状态栏的「日志」面板里。
  */
 const log = logger.module('SSHTerminalUI')
 
@@ -414,6 +429,7 @@ interface TerminalInstance {
   searchAddon: SearchAddon
   isConnected: boolean
   connectionInfo?: {
+    sessionId: string
     host: string
     port: number
     username: string
@@ -460,10 +476,8 @@ const searchQuery = ref<string>('')
 const inputBuffers = new Map<string, { buf: string; timer: number | null }>()
 const reconnecting = ref<boolean>(false)
 
-// AI 配置缓存（5 分钟后自动失效，避免设置更新后不生效）
-let cachedAIConfig: any = null
-let cachedAIConfigTime = 0
-const AI_CACHE_TTL = 5 * 60 * 1000 // 5 minutes
+// AI 流式请求的取消句柄（由 aiService onStart 注入）
+let aiCancelFn: (() => void) | null = null
 
 // 命令提示相关
 const showCommandHint = ref<boolean>(false)
@@ -898,19 +912,28 @@ const connectToSSH = async (terminalInstance: TerminalInstance) => {
       connectionInfo = sshConnectionManager.getConnectionStatus()
     }
     if (connectionInfo) {
+      const sessionId = connectionInfo.sessionId || connectionInfo.session_id
+      if (!sessionId) {
+        throw new Error('SSH 状态缺少会话身份，已阻止创建终端')
+      }
       terminalInstance.connectionInfo = {
+        sessionId,
         host: connectionInfo.host,
         port: connectionInfo.port,
         username: connectionInfo.username
       }
       updateTerminalTitle(terminalInstance)
     }
+    if (!terminalInstance.connectionInfo?.sessionId) {
+      throw new Error('无法锁定 SSH 会话身份，已阻止创建终端')
+    }
 
     // 创建终端会话
     await invoke('ssh_create_terminal_session', {
       terminalId: terminalInstance.id,
       cols: terminalInstance.terminal.cols,
-      rows: terminalInstance.terminal.rows
+      rows: terminalInstance.terminal.rows,
+      sessionId: terminalInstance.connectionInfo.sessionId
     })
 
     terminalInstance.isConnected = true
@@ -926,49 +949,7 @@ const connectToSSH = async (terminalInstance: TerminalInstance) => {
 
     // 检查是否是通道创建失败，可能需要重新连接SSH
     if (/创建通道失败|channel.*open|Session.*-7|Unable to send/i.test(errorMsg)) {
-      terminalInstance.terminal.writeln('\x1b[31m✗ SSH会话异常，尝试重新连接...\x1b[0m')
-
-      try {
-        // 尝试重新建立SSH连接
-        const sshConnectionManager = (window as any).sshConnectionManager
-        if (sshConnectionManager) {
-          // 先断开再重连（因为没有直接的reconnect方法）
-          try {
-            await sshConnectionManager.disconnect()
-          } catch (e) {
-            // 忽略断开失败的错误
-          }
-
-          // 获取当前连接信息并重新连接
-          const connectionInfo = sshConnectionManager.getConnectionStatus()
-          if (connectionInfo) {
-            await sshConnectionManager.connect(
-              connectionInfo.host,
-              connectionInfo.port,
-              connectionInfo.username,
-              '' // 密码需要重新输入，这里先用空字符串
-            )
-          }
-
-          terminalInstance.terminal.writeln('\x1b[33m正在重试创建终端会话...\x1b[0m')
-
-          // 重试创建终端会话
-          await invoke('ssh_create_terminal_session', {
-            terminalId: terminalInstance.id,
-            cols: terminalInstance.terminal.cols,
-            rows: terminalInstance.terminal.rows
-          })
-
-          terminalInstance.isConnected = true
-          connectionStatus.value = 'connected'
-
-          startReceivingOutput(terminalInstance)
-          return
-        }
-      } catch (retryError) {
-        log.error('重连失败:', retryError)
-        terminalInstance.terminal.writeln(`\x1b[31m重连失败: ${retryError}\x1b[0m`)
-      }
+      terminalInstance.terminal.writeln('\x1b[31m✗ SSH 会话异常，已停止自动空密码重连。请在主窗口重新认证后再打开终端。\x1b[0m')
     }
 
     terminalInstance.terminal.writeln(`\x1b[31m连接失败: ${errorMsg}\x1b[0m`)
@@ -1565,67 +1546,13 @@ const toggleAIInput = () => {
 }
 
 const loadAIProviderInfo = async () => {
-  // 使用缓存避免重复 invoke（5 分钟 TTL）
-  if (cachedAIConfig && Date.now() - cachedAIConfigTime < AI_CACHE_TTL) {
-    currentAIProvider.value = cachedAIConfig.providerName || 'OpenAI'
-    return
-  }
-  cachedAIConfig = null
-
+  // 仅取提供商显示名用于面板标题；请求配置由 aiConfig.loadAIConfig 统一解析
   try {
     const settingsContent = await invoke('read_settings_file') as string
-
-    let settings: any = {}
-
-    if (settingsContent) {
-      settings = JSON.parse(settingsContent)
-    }
-
-    // 如果后端设置文件没有AI配置，使用默认AI配置
-    if (!settings.ai) {
-      log.debug('后端设置文件缺少AI配置，使用默认配置')
-      settings.ai = {
-        currentProvider: 'openai',
-        providers: {
-          openai: {
-            name: 'OpenAI',
-            apiKey: '',
-            model: 'gpt-3.5-turbo',
-            baseUrl: 'https://api.openai.com/v1'
-          },
-          qwen: {
-            name: 'Qwen',
-            apiKey: '',
-            model: 'qwen-turbo',
-            baseUrl: 'https://dashscope.aliyuncs.com/api/v1'
-          },
-          ollama: {
-            name: 'Ollama',
-            apiKey: '',
-            model: 'llama2',
-            baseUrl: 'http://localhost:11434/api'
-          }
-        }
-      }
-    }
-
-    if (settings.ai && settings.ai.currentProvider) {
-      const currentProviderKey = settings.ai.currentProvider
-      const provider = settings.ai.providers[currentProviderKey]
-      log.debug('当前AI提供商', { key: currentProviderKey, provider })
-
-      if (provider && provider.name) {
-        currentAIProvider.value = provider.name
-        cachedAIConfig = { providerName: provider.name, settings: settings.ai }
-        cachedAIConfigTime = Date.now()
-      } else {
-        currentAIProvider.value = currentProviderKey || 'AI助手'
-        cachedAIConfig = { providerName: currentProviderKey || 'AI助手', settings: settings.ai }
-        cachedAIConfigTime = Date.now()
-      }
-    } else {
-      currentAIProvider.value = 'AI助手'
-    }
+    const settings: any = settingsContent ? JSON.parse(settingsContent) : {}
+    const key: string = settings?.ai?.currentProvider || ''
+    const provider = key ? settings.ai.providers?.[key] : null
+    currentAIProvider.value = provider?.name || key || 'AI助手'
   } catch (error) {
     log.error('SSH终端加载AI提供商信息失败:', error)
     currentAIProvider.value = 'AI助手'
@@ -1650,181 +1577,53 @@ const sendAIRequest = async () => {
 
   aiLoading.value = true
   aiResponse.value = ''
+  aiCancelFn = null
 
   try {
-    // 获取AI设置
-    const settingsContent = await invoke('read_settings_file') as string
-    log.debug('发送AI请求时读取设置:', settingsContent)
+    // 构建提示词：如果有选中内容，带上终端输出；否则只带用户输入
+    const selectedContent = (selectedContentPrompt.value && selectedContentHint.value)
+      ? selectedContentPrompt.value.replace('请分析这段终端输出内容并提供相关的Linux命令建议：\n\n', '')
+      : undefined
+    const systemPrompt = terminalCommandPrompt(aiInputText.value.trim(), selectedContent)
 
-    let settings: any = {}
+    const { text } = await aiService.streamOpenAICompatible(
+      systemPrompt,
+      (chunk: string) => {
+        aiResponse.value += chunk
+      },
+      { onStart: (cancel) => { aiCancelFn = cancel } },
+    )
 
-    if (settingsContent) {
-      settings = JSON.parse(settingsContent)
-      log.debug('解析后的设置:', settings)
-    }
-
-    // 如果后端设置文件没有AI配置，使用默认AI配置
-    if (!settings.ai) {
-      log.debug('后端设置文件缺少AI配置，使用默认配置进行AI请求')
-      settings.ai = {
-        currentProvider: 'openai',
-        providers: {
-          openai: {
-            name: 'OpenAI',
-            apiKey: '',
-            model: 'gpt-3.5-turbo',
-            baseUrl: 'https://api.openai.com/v1'
-          }
-        }
-      }
-    }
-
-    if (!settings.ai || !settings.ai.currentProvider) {
-      throw new Error('AI配置异常，请检查设置')
-    }
-
-    const currentProvider = settings.ai.currentProvider
-    const providerConfig = settings.ai.providers[currentProvider]
-    log.debug('AI提供商配置', { provider: currentProvider, config: providerConfig })
-
-    if (!providerConfig) {
-      throw new Error('AI提供商配置不存在')
-    }
-
-    // 构建提示词：如果有选中内容，使用选中内容的提示词；否则使用用户输入
-    let systemPrompt = ''
-
-    const baseRules = `【严格格式要求 — 违反则回答无效】
-- 直接输出可执行的 shell 命令，不要包含任何其他内容
-- 绝对禁止使用 markdown 格式，禁止 \`\`\`、\`\`\`bash、\`\`\`sh 等代码块标记
-- 禁止添加注释、解释、说明、编号、标题
-- 禁止输出 "以下是命令" 之类的引导语
-- 多个命令用 && 或 ; 连接在一行
-- 只输出命令本身，用户会直接复制粘贴到终端执行`
-
-    if (selectedContentPrompt.value && selectedContentHint.value) {
-      const content = selectedContentPrompt.value.replace('请分析这段终端输出内容并提供相关的Linux命令建议：\n\n', '')
-      systemPrompt = `${baseRules}
-
-分析以下终端输出，给出相关的排查/处理命令：
-${content}
-
-用户补充：${aiInputText.value.trim() || '给出排查命令'}`
-    } else {
-      systemPrompt = `${baseRules}
-
-任务：${aiInputText.value.trim()}`
-    }
-
-    // 调用真实的AI API，使用流式输出
-    const response = await callAIAPI(systemPrompt, providerConfig, (chunk: string) => {
-      aiResponse.value += chunk
-    })
-
-    // 清洗 AI 返回中可能残留的 markdown 格式
-    const cleaned = cleanAIResponse(aiResponse.value || response)
-    aiResponse.value = cleaned
-
-    // 确保最终响应是完整的
-    if (!aiResponse.value) {
-      aiResponse.value = response
-    }
+    // 机器解析场景：输出会被直接插入终端执行，只剥掉最外层一层
+    // 代码围栏/反引号（严格格式提示词已禁止 markdown，其余内容原样保留）
+    aiResponse.value = stripOuterCodeFence(aiResponse.value || text)
   } catch (error) {
-    log.error('AI请求失败:', error)
-    aiResponse.value = `错误: ${error}`
+    if ((error as Error)?.name === 'AbortError') {
+      // 用户主动取消：保留已生成的部分内容，不当作错误
+      log.debug('AI请求已取消')
+    } else {
+      log.error('AI请求失败:', error)
+      aiResponse.value = `错误: ${error}`
+    }
   } finally {
     aiLoading.value = false
+    aiCancelFn = null
   }
+}
+
+const cancelAIRequest = () => {
+  aiCancelFn?.()
 }
 
 /**
- * 清洗 AI 返回内容：移除 markdown 代码块标记和多余格式
+ * 剥掉 AI 返回最外层的一对代码围栏/反引号（提示词已禁止 markdown，
+ * 这里只兜底偶发的单层包裹；历史版本的多层清洗见 git 历史）
  */
-const cleanAIResponse = (text: string): string => {
-  let cleaned = text.trim()
-  // 移除 ```bash ... ``` 或 ```sh ... ``` 或 ``` ... ``` 代码块包裹
-  cleaned = cleaned.replace(/^```(?:bash|sh|shell|zsh)?\s*\n?/gm, '')
-  cleaned = cleaned.replace(/\n?```\s*$/gm, '')
-  // 移除行内 ` 包裹
-  cleaned = cleaned.replace(/^`+|`+$/g, '')
-  // 移除开头的 $ 或 # 提示符
-  cleaned = cleaned.replace(/^\s*[$#]\s+/gm, '')
-  // 移除 "以下是命令" 等引导语
-  cleaned = cleaned.replace(/^.*(?:以下是|命令如下|你可以|可以使用|请执行|运行以下).*[:：]\s*\n?/gm, '')
-  return cleaned.trim()
-}
-
-const callAIAPI = async (prompt: string, config: any, onChunk?: (chunk: string) => void): Promise<string> => {
-  try {
-    // 自动补全 URL 路径
-    let apiUrl = (config.baseUrl || '').replace(/\/+$/, '')
-    if (!apiUrl.endsWith('/chat/completions') && !apiUrl.endsWith('/messages')) {
-      if (apiUrl.endsWith('/v1')) {
-        apiUrl += '/chat/completions'
-      } else if (!apiUrl.includes('/v1/')) {
-        apiUrl += '/v1/chat/completions'
-      }
-    }
-
-    log.debug('调用AI API (Tauri代理)', { provider: config.name, apiUrl })
-
-    const requestBody = JSON.stringify({
-      model: config.model,
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.1,
-      max_tokens: 200,
-      stream: true,
-    })
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${config.apiKey}`,
-    }
-
-    let fullContent = ''
-    let sseBuffer = ''
-
-    const consumeSseLine = (line: string) => {
-      const normalized = line.endsWith('\r') ? line.slice(0, -1) : line
-      if (!normalized.trimStart().startsWith('data:')) return
-      const data = normalized.trimStart().replace(/^data:\s?/, '').trim()
-      if (data === '[DONE]') return
-      try {
-        const parsed = JSON.parse(data)
-        const text = parsed.choices?.[0]?.delta?.content || parsed.delta?.text || ''
-        if (text) {
-          fullContent += text
-          if (onChunk) onChunk(text)
-        }
-      } catch { /* wait only for complete SSE lines; malformed provider events are ignored */ }
-    }
-
-    // 注册流式事件监听
-    const unlistenChunk = await listen('ai_stream_chunk', (event: any) => {
-      sseBuffer += event.payload as string
-      const lines = sseBuffer.split('\n')
-      sseBuffer = lines.pop() ?? ''
-      lines.forEach(consumeSseLine)
-    })
-
-    const unlistenDone = await listen('ai_stream_done', () => {})
-    const unlistenError = await listen('ai_stream_error', () => {})
-
-    try {
-      await invoke('ai_proxy_stream', { url: apiUrl, headers, body: requestBody })
-      if (sseBuffer) consumeSseLine(sseBuffer)
-    } finally {
-      unlistenChunk()
-      unlistenDone()
-      unlistenError()
-    }
-
-    log.debug('AI生成的命令:', fullContent)
-    return fullContent.trim()
-  } catch (error) {
-    log.error('AI API调用失败:', error)
-    throw error
-  }
+const stripOuterCodeFence = (text: string): string => {
+  const trimmed = text.trim()
+  const fenced = trimmed.match(/^```[a-zA-Z]*\s*\n?([\s\S]*?)\n?```$/)
+  if (fenced) return fenced[1].trim()
+  return trimmed.replace(/^`+|`+$/g, '').trim()
 }
 
 const insertAIResponse = async () => {
@@ -2702,6 +2501,11 @@ onUnmounted(() => {
 .ai-send-btn:hover:not(:disabled) {
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(109, 179, 255, 0.4);
+}
+
+.ai-cancel-btn {
+  background: linear-gradient(135deg, #f87171, #ef4444);
+  padding: 6px 10px;
 }
 
 .ai-response {

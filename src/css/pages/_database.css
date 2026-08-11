@@ -19,8 +19,8 @@
 .db-header-icon {
     width: 40px; height: 40px;
     border-radius: var(--border-radius);
-    background: rgba(139, 92, 246, 0.1);
-    color: #8b5cf6;
+    background: color-mix(in srgb, var(--accent-purple) 10%, transparent);
+    color: var(--accent-purple);
     display: flex; align-items: center; justify-content: center;
 }
 .db-header-title { margin: 0; font-size: 18px; font-weight: 600; color: var(--text-primary); }

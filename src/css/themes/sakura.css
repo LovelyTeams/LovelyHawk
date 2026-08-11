@@ -54,6 +54,10 @@
   --glass-border: rgba(243, 220, 230, 0.5);
   --glass-blur: 16px;
 
+  /* Brand logo gradient (sakura: pink) */
+  --brand-logo-a: #f9a8d4;
+  --brand-logo-b: #f0a8bc;
+
   /* Brand sparkle palette (sakura variant) */
   --brand-glow-amber: #fff1d6;
   --brand-spark-soft: #fde68a;
@@ -109,7 +113,8 @@
   --sidebar-hover-bg: rgba(232, 132, 159, 0.08);
   --sidebar-active-bg: rgba(232, 132, 159, 0.12);
 
-  /* Severity (sakura: keep light theme darker-fg pattern, info in pink family) */
+  /* Severity (sakura: same five-level scale; darker fg on pink-cream surfaces)
+     高危 critical / 较高 high / 中危 warn / 低 info / 信息 neutral */
   --sev-critical-fg: #b91c1c;
   --sev-critical-bg: rgba(239, 68, 68, 0.10);
   --sev-critical-bg-hover: rgba(239, 68, 68, 0.18);
@@ -117,6 +122,13 @@
   --sev-critical-border-strong: #dc2626;
   --sev-critical-tag-fg: #991b1b;
   --sev-critical-tag-bg: rgba(239, 68, 68, 0.18);
+
+  --sev-high-fg: #c2410c;
+  --sev-high-bg: rgba(249, 115, 22, 0.10);
+  --sev-high-bg-hover: rgba(249, 115, 22, 0.18);
+  --sev-high-border: rgba(249, 115, 22, 0.45);
+  --sev-high-tag-fg: #9a3412;
+  --sev-high-tag-bg: rgba(249, 115, 22, 0.18);
 
   --sev-warn-fg: #b45309;
   --sev-warn-bg: rgba(245, 158, 11, 0.10);
@@ -132,13 +144,20 @@
   --sev-success-tag-fg: #14532d;
   --sev-success-tag-bg: rgba(34, 197, 94, 0.18);
 
-  --sev-info-fg: #be185d;
-  --sev-info-bg: rgba(232, 132, 159, 0.10);
-  --sev-info-bg-hover: rgba(232, 132, 159, 0.20);
-  --sev-info-border: rgba(232, 132, 159, 0.50);
-  --sev-info-selected-bg: rgba(232, 132, 159, 0.25);
-  --sev-info-selected-fg: #831843;
-  --sev-info-selected-border: #db2777;
+  --sev-info-fg: #1d4ed8;
+  --sev-info-bg: rgba(59, 130, 246, 0.10);
+  --sev-info-bg-hover: rgba(59, 130, 246, 0.16);
+  --sev-info-border: rgba(59, 130, 246, 0.45);
+  --sev-info-selected-bg: rgba(59, 130, 246, 0.20);
+  --sev-info-selected-fg: #1e3a8a;
+  --sev-info-selected-border: #2563eb;
+
+  --sev-neutral-fg: #8a6a7c;
+  --sev-neutral-bg: rgba(157, 112, 136, 0.10);
+  --sev-neutral-bg-hover: rgba(157, 112, 136, 0.18);
+  --sev-neutral-border: rgba(157, 112, 136, 0.40);
+  --sev-neutral-tag-fg: #6d4c5e;
+  --sev-neutral-tag-bg: rgba(157, 112, 136, 0.16);
 
   --chip-count-bg: rgba(74, 32, 57, 0.10);
 }

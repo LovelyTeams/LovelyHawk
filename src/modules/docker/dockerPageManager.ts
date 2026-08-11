@@ -1,5 +1,10 @@
-import { dockerManager } from './dockerManager';
+import { dockerManager, type DockerShellResult } from './dockerManager';
 import { showConfirm } from '../ui/confirmDialog';
+import { operationJournal } from '../core/operationJournal';
+import { activeTargetContext, type TargetIdentity } from '../core/targetContext';
+import { shq } from '../core/shellEscape';
+import { reportError } from '../utils/errorHandler';
+import { buildContainerRollback, isDockerActionVerified } from './dockerOperationContract';
 import type {
   DockerContainerSummary,
   DockerCopyDirection,
@@ -19,12 +24,16 @@ import { DockerLogsModal, DockerFileModal } from '../ui/dockerModals';
 import {
   Whale, Refresh, Shield, Fire,
   Delete, SettingConfig, Cube, Config,
-  NetworkTree, Data
+  NetworkTree, Data, Monitor
 } from '@icon-park/svg';
 import { createIconHTML } from '../ui/iconMapping';
 
 import { logger } from '../core/logger';
-/** 正式包 drop 掉 console，诊断信息只有进 logger 才留得下来（设置→工具→诊断日志 可导出） */
+
+function dockerTargetLabel(target: TargetIdentity): string {
+  return `${target.username}@${target.host}:${target.port}\n指纹：${target.hostKeyFingerprint}`;
+}
+/** 正式包 drop 掉 console，诊断信息只有进 logger 才留得下来（状态栏「日志」按钮可导出） */
 const log = logger.module('DockerPage');
 
 
@@ -57,6 +66,7 @@ export class DockerPageManager {
   private auditResult: DockerSecurityAuditResult | null = null;
   private diskUsage: DockerDiskUsage | null = null;
   private systemInfo: DockerSystemInfo | null = null;
+  private targetSessionId = '';
   private currentTab: DockerMainTab = 'overview';
   private searchTerm = '';
   private initialized = false;
@@ -75,18 +85,26 @@ export class DockerPageManager {
   // ============================================================
 
   initialize(): void {
-    if (this.initialized) return;
+    this.synchronizeTargetState();
     this.bindEvents();
-    this.initialized = true;
-    (window as any).dockerPageManager = this;
+    if (!this.initialized) {
+      this.initialized = true;
+      (window as any).dockerPageManager = this;
+    }
   }
 
   async refresh(showNotification = false): Promise<void> {
+    this.synchronizeTargetState();
     if (!sshConnectionManager.isConnected()) {
       this.renderDisconnected();
       return;
     }
     if (this.loading) return; // 防止并发刷新
+    const target = activeTargetContext.get();
+    if (!target) {
+      this.renderDisconnected();
+      return;
+    }
 
     try {
       this.loading = true;
@@ -94,10 +112,12 @@ export class DockerPageManager {
 
       // Always fetch containers
       this.containers = await dockerManager.listContainers();
+      if (!activeTargetContext.matches(target)) throw new Error('Docker 刷新期间活动目标已变化');
       this.applyFilter();
 
       // Fetch tab-specific data
       await this.fetchTabData();
+      if (!activeTargetContext.matches(target)) throw new Error('Docker 刷新期间活动目标已变化');
 
       if (showNotification) {
         window.showNotification?.('Docker 数据已刷新', 'success');
@@ -106,9 +126,28 @@ export class DockerPageManager {
       log.error('刷新 Docker 数据失败', error);
       window.showNotification?.(`刷新失败: ${error}`, 'error');
     } finally {
+      this.synchronizeTargetState();
       this.loading = false;
       this.renderFullPage();
     }
+  }
+
+  private synchronizeTargetState(): boolean {
+    const nextSessionId = activeTargetContext.get()?.sessionId || '';
+    if (nextSessionId === this.targetSessionId) return false;
+    this.targetSessionId = nextSessionId;
+    this.containers = [];
+    this.filtered = [];
+    this.images = [];
+    this.networks = [];
+    this.volumes = [];
+    this.composeProjects = [];
+    this.overviewStats = null;
+    this.auditResult = null;
+    this.diskUsage = null;
+    this.systemInfo = null;
+    this.searchTerm = '';
+    return true;
   }
 
   deactivate(): void {
@@ -167,7 +206,7 @@ export class DockerPageManager {
     return `
     <div class="docker-header">
       <div class="docker-header-left">
-        <div class="docker-header-icon">${icon(Whale, '24', 'filled')}</div>
+        <div class="docker-header-icon">${icon(Monitor, '22')}</div>
         <div>
           <h2 class="docker-header-title">Docker 管理</h2>
           <div class="docker-header-subtitle">容器编排与应急响应</div>
@@ -780,25 +819,113 @@ export class DockerPageManager {
   // Container Actions
   // ============================================================
 
+  private async confirmDockerMutation(title: string, message: string): Promise<TargetIdentity | null> {
+    const target = activeTargetContext.get();
+    if (!target) {
+      window.showNotification?.('没有已确认的活动 SSH 目标', 'error');
+      return null;
+    }
+    const confirmed = await showConfirm({
+      title,
+      message: `目标：${dockerTargetLabel(target)}\n\n${message}`,
+      dangerous: true,
+      defaultFocus: 'cancel',
+    });
+    if (!confirmed) return null;
+    if (!activeTargetContext.matches(target)) {
+      window.showNotification?.('确认后活动目标已变化，已阻止 Docker 操作', 'error');
+      return null;
+    }
+    return target;
+  }
+
+  private recordDockerShellMutation(
+    target: TargetIdentity,
+    title: string,
+    command: string,
+    result: DockerShellResult,
+  ): void {
+    operationJournal.record({
+      source: 'docker',
+      server: target.host,
+      target,
+      title,
+      command,
+      output: result.output,
+      exitCode: result.exitCode,
+      timedOut: result.timedOut,
+      success: result.success,
+    });
+  }
+
   private async performContainerAction(action: string, containerName: string): Promise<void> {
-    // 会中断服务的动作二次确认;start/unpause/pause 等恢复/可逆操作放行,不打扰
+    const capturedTarget = activeTargetContext.get();
+    if (!capturedTarget) {
+      window.showNotification?.('没有已确认的活动 SSH 目标', 'error');
+      return;
+    }
+    const beforeState = this.containers.find(container => container.name === containerName)?.state;
     const destructiveLabel: Record<string, string> = {
       kill: '强制杀死(kill)',
       stop: '停止',
       restart: '重启',
+      pause: '暂停',
     };
     if (destructiveLabel[action]) {
       const confirmed = await showConfirm({
         title: `${destructiveLabel[action]}容器`,
-        message: `确定要${destructiveLabel[action]}容器 "${containerName}"？\n\n会中断该容器当前提供的服务。`,
+        message: `目标：${dockerTargetLabel(capturedTarget)}\n容器：${containerName}\n动作：${destructiveLabel[action]}\n\n会中断该容器当前提供的服务。`,
         dangerous: true,
+        defaultFocus: 'cancel',
       });
       if (!confirmed) return;
     }
+    if (!activeTargetContext.matches(capturedTarget)) {
+      window.showNotification?.('活动目标已变化，已阻止容器操作', 'error');
+      return;
+    }
 
-    const result = await dockerManager.performAction(containerName, action as any);
-    window.showNotification?.(result.message, result.success ? 'success' : 'error');
-    await this.refresh(false);
+    try {
+      const result = await dockerManager.performAction(containerName, action as any);
+      const afterState = result.updatedState || result.updatedStatus;
+      const verified = result.success && isDockerActionVerified(action, afterState);
+      const rollback = buildContainerRollback(action, containerName, beforeState);
+      operationJournal.record({
+        source: 'docker',
+        server: capturedTarget.host,
+        target: capturedTarget,
+        title: `${action} 容器 ${containerName}`,
+        command: `docker ${shq(action)} ${shq(containerName)}`,
+        beforeValue: beforeState,
+        afterValue: afterState || 'unknown',
+        output: result.message,
+        exitCode: result.success ? 0 : null,
+        verifyCommand: `docker inspect --format '{{.State.Status}}' ${shq(containerName)}`,
+        verifyOutput: afterState || 'unknown',
+        verified,
+        restoreCommand: verified ? rollback?.command : undefined,
+        restoreVerifyCommand: verified ? rollback?.verifyCommand : undefined,
+        restoreVerifyExpected: verified ? rollback?.verifyExpected : undefined,
+        success: verified,
+      });
+      window.showNotification?.(
+        verified ? result.message : `${result.message}；容器状态读回未通过（${afterState || 'unknown'}）`,
+        verified ? 'success' : 'error',
+      );
+      await this.refresh(false);
+    } catch (error) {
+      operationJournal.record({
+        source: 'docker',
+        server: capturedTarget.host,
+        target: capturedTarget,
+        title: `${action} 容器 ${containerName} 失败`,
+        command: `docker ${shq(action)} ${shq(containerName)}`,
+        beforeValue: beforeState,
+        output: String(error),
+        success: false,
+      });
+      reportError(error, { module: 'DockerPageManager', action: `${action} 容器` });
+    }
   }
 
   private async showLogs(name: string): Promise<void> {
@@ -812,10 +939,66 @@ export class DockerPageManager {
   }
 
   private showEditModal(name: string): void {
+    let loadedPath = '';
+    let loadedContent = '';
+    let loadedTarget: TargetIdentity | null = null;
     this.fileModal.showEdit({
       containerName: name,
-      loadContent: (path) => dockerManager.readFile(name, path),
-      saveContent: (path, content) => dockerManager.writeFile(name, path, content).then(() => undefined),
+      loadContent: async (path) => {
+        const target = activeTargetContext.get();
+        if (!target) throw new Error('没有已确认的活动 SSH 目标');
+        const content = await dockerManager.readFile(name, path);
+        loadedPath = path;
+        loadedContent = content;
+        loadedTarget = target;
+        return content;
+      },
+      saveContent: async (path, content) => {
+        if (!loadedTarget || loadedPath !== path || !activeTargetContext.matches(loadedTarget)) {
+          throw new Error('目标、容器或文件路径已变化，请重新加载文件后再保存');
+        }
+        const confirmed = await showConfirm({
+          title: '保存容器文件',
+          message: `目标：${dockerTargetLabel(loadedTarget)}\n容器：${name}\n文件：${path}\n变更：${loadedContent.length} → ${content.length} 字节\n\n将创建容器内备份并进行精确内容读回验证。`,
+          confirmText: '确认保存',
+          dangerous: true,
+          defaultFocus: 'cancel',
+        });
+        if (!confirmed) throw new DOMException('用户取消保存', 'AbortError');
+        if (!activeTargetContext.matches(loadedTarget)) {
+          throw new Error('确认后活动目标已变化，已阻止保存');
+        }
+
+        try {
+          const result = await dockerManager.writeFile(name, path, content);
+          operationJournal.record({
+            source: 'docker',
+            server: loadedTarget.host,
+            target: loadedTarget,
+            title: `保存容器文件 ${name}:${path}`,
+            command: result.command || `docker cp <temporary-file> ${shq(`${name}:${path}`)}`,
+            beforeValue: `${loadedContent.length} bytes`,
+            afterValue: `${content.length} bytes`,
+            backupInfo: result.backupInfo,
+            restoreCommand: result.restoreCommand,
+            output: result.message,
+            exitCode: result.success ? 0 : null,
+            verifyCommand: result.verifyCommand,
+            verifyOutput: result.verifyOutput,
+            verified: result.verified,
+            restoreVerifyCommand: result.restoreVerifyCommand,
+            restoreVerifyExpected: result.restoreVerifyExpected,
+            success: result.success && result.verified === true,
+          });
+          if (!result.success || result.verified !== true) {
+            throw new Error(result.message || '容器文件保存未通过读回验证');
+          }
+          loadedContent = content;
+        } catch (error) {
+          reportError(error, { module: 'DockerPageManager', action: '保存容器文件', silent: true });
+          throw error;
+        }
+      },
     });
   }
 
@@ -828,8 +1011,37 @@ export class DockerPageManager {
           source: request.source.trim(),
           target: request.target.trim(),
         };
-        const result = await dockerManager.copy(name, normalized);
-        window.showNotification?.(result.message, 'success');
+        const capturedTarget = activeTargetContext.get();
+        if (!capturedTarget) throw new Error('没有已确认的活动 SSH 目标');
+        const confirmed = await showConfirm({
+          title: '执行容器文件复制',
+          message: `目标：${dockerTargetLabel(capturedTarget)}\n容器：${name}\n方向：${normalized.direction}\n源：${normalized.source}\n目标：${normalized.target}\n\n目标路径若已存在可能被覆盖。`,
+          confirmText: '确认复制',
+          dangerous: true,
+          defaultFocus: 'cancel',
+        });
+        if (!confirmed) throw new DOMException('用户取消复制', 'AbortError');
+        if (!activeTargetContext.matches(capturedTarget)) {
+          throw new Error('确认后活动目标已变化，已阻止复制');
+        }
+        try {
+          const result = await dockerManager.copy(name, normalized);
+          operationJournal.record({
+            source: 'docker',
+            server: capturedTarget.host,
+            target: capturedTarget,
+            title: `Docker 文件复制 ${normalized.direction}`,
+            command: result.command || `docker cp ${shq(normalized.source)} ${shq(normalized.target)}`,
+            afterValue: `${name}: ${normalized.target}`,
+            output: result.message,
+            exitCode: result.success ? 0 : null,
+            success: result.success,
+          });
+          if (!result.success) throw new Error(result.message);
+        } catch (error) {
+          reportError(error, { module: 'DockerPageManager', action: '复制容器文件', silent: true });
+          throw error;
+        }
       },
     });
   }
@@ -846,27 +1058,12 @@ export class DockerPageManager {
   // ============================================================
 
   private async removePrivileged(containerName: string): Promise<void> {
-    const confirmed = await showConfirm({
-      title: '取消特权模式',
-      message: `确定要将容器 "${containerName}" 从特权模式重建为非特权模式？\n\n操作过程：停止容器 → 删除 → 以相同配置(去除 --privileged)重建\n\n容器将短暂中断服务`,
-      dangerous: true
-    });
-    if (!confirmed) return;
-
-    window.showNotification?.(`正在重建容器 ${containerName}...`, 'warning');
-
     const result = await dockerManager.removePrivileged(containerName);
-    if (result.success) {
-      window.showNotification?.(`容器 ${containerName} 已重建为非特权模式`, 'success');
-    } else {
-      window.showNotification?.(`取消特权失败: ${result.output.split('\n').pop()}`, 'error');
-    }
-
-    // 显示详细日志
-    this.logsModal.show(`取消特权 — ${containerName}`, result.output);
-
-    // 刷新数据
-    await this.refresh(false);
+    window.showNotification?.(
+      result.success ? `容器 ${containerName} 已重建为非特权模式` : '已阻止高风险的非等价自动重建，请按处置建议修改编排定义',
+      result.success ? 'success' : 'warning',
+    );
+    this.logsModal.show(`特权容器处置建议 — ${containerName}`, result.output);
   }
 
   // ============================================================
@@ -874,15 +1071,19 @@ export class DockerPageManager {
   // ============================================================
 
   private async removeImage(ref: string): Promise<void> {
-    if (!(await showConfirm({ title: '删除镜像', message: `确定要删除镜像 ${ref}？`, dangerous: true }))) return;
+    const target = await this.confirmDockerMutation('删除镜像', `镜像：${ref}\n此操作不可自动恢复。`);
+    if (!target) return;
     const r = await dockerManager.removeImage(ref);
+    this.recordDockerShellMutation(target, `删除 Docker 镜像 ${ref}`, `docker rmi ${shq(ref)}`, r);
     window.showNotification?.(r.success ? '镜像已删除' : `删除失败: ${r.output}`, r.success ? 'success' : 'error');
     if (r.success) { this.images = await dockerManager.listImages(); this.renderFullPage(); }
   }
 
   private async pruneImages(): Promise<void> {
-    if (!(await showConfirm({ title: '清理镜像', message: '确定要清理所有悬空（dangling）镜像？', dangerous: true }))) return;
+    const target = await this.confirmDockerMutation('清理镜像', '将清理所有悬空（dangling）镜像，此操作不可自动恢复。');
+    if (!target) return;
     const r = await dockerManager.pruneImages();
+    this.recordDockerShellMutation(target, '清理 Docker 悬空镜像', 'docker image prune -f', r);
     window.showNotification?.(r.success ? '清理完成' : `清理失败: ${r.output}`, r.success ? 'success' : 'error');
     if (r.success) await this.refresh(false);
   }
@@ -893,37 +1094,48 @@ export class DockerPageManager {
   }
 
   private async removeNetwork(name: string): Promise<void> {
-    if (!(await showConfirm({ title: '删除网络', message: `确定要删除网络 ${name}？`, dangerous: true }))) return;
+    const target = await this.confirmDockerMutation('删除网络', `网络：${name}\n此操作不可自动恢复。`);
+    if (!target) return;
     const r = await dockerManager.removeNetwork(name);
+    this.recordDockerShellMutation(target, `删除 Docker 网络 ${name}`, `docker network rm ${shq(name)}`, r);
     window.showNotification?.(r.success ? '网络已删除' : `删除失败: ${r.output}`, r.success ? 'success' : 'error');
     if (r.success) { this.networks = await dockerManager.listNetworks(); this.renderFullPage(); }
   }
 
   private async pruneNetworks(): Promise<void> {
-    if (!(await showConfirm({ title: '清理网络', message: '确定要清理所有未使用的网络？', dangerous: true }))) return;
+    const target = await this.confirmDockerMutation('清理网络', '将清理所有未使用的网络，此操作不可自动恢复。');
+    if (!target) return;
     const r = await dockerManager.pruneNetworks();
+    this.recordDockerShellMutation(target, '清理未使用的 Docker 网络', 'docker network prune -f', r);
     window.showNotification?.(r.success ? '清理完成' : `清理失败`, r.success ? 'success' : 'error');
     if (r.success) await this.refresh(false);
   }
 
   private async removeVolume(name: string): Promise<void> {
-    if (!(await showConfirm({ title: '删除卷', message: `确定要删除卷 ${name}？此操作不可恢复！`, dangerous: true }))) return;
+    const target = await this.confirmDockerMutation('删除卷', `卷：${name}\n卷数据将被永久删除，且不可恢复。`);
+    if (!target) return;
     const r = await dockerManager.removeVolume(name);
+    this.recordDockerShellMutation(target, `删除 Docker 卷 ${name}`, `docker volume rm ${shq(name)}`, r);
     window.showNotification?.(r.success ? '卷已删除' : `删除失败: ${r.output}`, r.success ? 'success' : 'error');
     if (r.success) { this.volumes = await dockerManager.listVolumes(); this.renderFullPage(); }
   }
 
   private async pruneVolumes(): Promise<void> {
-    if (!(await showConfirm({ title: '清理卷', message: '确定要清理所有未使用的卷？此操作不可恢复！', dangerous: true }))) return;
+    const target = await this.confirmDockerMutation('清理卷', '将永久删除所有未使用卷及其数据，且不可恢复。');
+    if (!target) return;
     const r = await dockerManager.pruneVolumes();
+    this.recordDockerShellMutation(target, '清理未使用的 Docker 卷', 'docker volume prune -f', r);
     window.showNotification?.(r.success ? '清理完成' : `清理失败`, r.success ? 'success' : 'error');
     if (r.success) await this.refresh(false);
   }
 
   private async pruneSystem(all: boolean): Promise<void> {
-    const msg = all ? '确定要深度清理？将删除所有未使用的镜像、容器、网络和卷！' : '确定要清理未使用的资源？';
-    if (!(await showConfirm({ title: '系统清理', message: msg, dangerous: true }))) return;
+    const msg = all ? '深度清理会删除所有未使用的镜像、容器和网络，此操作不可自动恢复。' : '将清理未使用的容器、网络和悬空镜像，此操作不可自动恢复。';
+    const target = await this.confirmDockerMutation('系统清理', msg);
+    if (!target) return;
     const r = await dockerManager.systemPrune(all);
+    const command = all ? 'docker system prune -af' : 'docker system prune -f';
+    this.recordDockerShellMutation(target, all ? 'Docker 深度清理' : 'Docker 系统清理', command, r);
     window.showNotification?.(r.success ? '系统清理完成' : `清理失败: ${r.output}`, r.success ? 'success' : 'error');
     if (r.success) await this.refresh(false);
   }

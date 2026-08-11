@@ -57,12 +57,12 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #94a3b8;
+  background: var(--sev-neutral-fg);
   flex-shrink: 0;
 }
 
-.status-dot.connected { background: #22c55e; }
-.status-dot.disconnected { background: #ef4444; }
+.status-dot.connected { background: var(--status-running); }
+.status-dot.disconnected { background: var(--status-stopped); }
 
 /* Terminal button in status bar */
 .status-terminal-btn {

@@ -1,18 +1,19 @@
 
 
 import { logger } from '../core/logger';
-/** 正式包 drop 掉 console，诊断信息只有进 logger 才留得下来（设置→工具→诊断日志 可导出） */
+/** 正式包 drop 掉 console，诊断信息只有进 logger 才留得下来（状态栏「日志」按钮可导出） */
 const log = logger.module('FileCtxMenu');
 /**
  * 文件右键菜单和安全分析
  */
 
-import { invoke } from '@tauri-apps/api/core'
-import { marked } from 'marked'
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH'
 import * as IconPark from '@icon-park/svg'
 import { BaseContextMenu, type MenuAction } from './contextMenu/baseContextMenu'
 import { createIconHTML } from './iconMapping'
 import { aiService } from '../ai/aiService'
+import { fileAnalysisPrompt } from '../ai/aiPrompts'
+import { renderAIMarkdown } from '../ai/aiOutput'
 
 interface CommandHistory {
   timestamp: string
@@ -360,65 +361,14 @@ export class FileContextMenu extends BaseContextMenu {
     explanationContentEl.innerHTML = `${createIconHTML('🤖', { size: 16 })} 正在分析...`
 
     try {
-      const settingsContent = await invoke('read_settings_file') as string
-      let settings: any = {}
-
-      if (settingsContent) {
-        settings = JSON.parse(settingsContent)
-      }
-
-      if (!settings.ai) {
-        settings.ai = {
-          currentProvider: 'openai',
-          providers: {
-            openai: { name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'gpt-3.5-turbo', apiKey: '' },
-            deepseek: { name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat', apiKey: '' }
-          }
-        }
-      }
-
-      if (!settings.ai || !settings.ai.currentProvider) {
-        throw new Error('AI配置异常，请在设置中配置AI')
-      }
-
-      const currentProvider = settings.ai.currentProvider
-      const providerConfig = settings.ai.providers[currentProvider]
-
-      if (!providerConfig) {
-        throw new Error('AI提供商配置不存在')
-      }
-
-      if (!providerConfig.apiKey && currentProvider !== 'ollama') {
-        throw new Error('AI API Key 未配置')
-      }
-
-      const systemPrompt = `你是一个 Linux 安全专家和应急响应专家。
-
-# 任务
-分析以下文件安全分析结果，并提供专业的解释和建议。
-
-# 文件信息
-- 文件路径：${this.currentFilePath}
-- 分析类型：${this.currentAnalysisTitle}
-
-# 分析结果
-${this.currentAnalysisContent}
-
-# 输出要求
-请按照以下顺序提供分析：
-1. **结果概要**：简要总结分析结果
-2. **关键发现**：列出重要的发现和特征
-3. **安全评估**：评估潜在的安全风险（如果适用）
-4. **建议操作**：提供具体的操作建议（如果适用）
-
-请使用清晰的 Markdown 格式，确保内容结构化、易读。`
+      const systemPrompt = fileAnalysisPrompt(this.currentFilePath, this.currentAnalysisTitle, this.currentAnalysisContent)
 
       explanationContentEl.innerHTML = ''
 
       let accumulatedContent = ''
       let updateTimer: number | null = null
 
-      await this.callFileAIAPI(systemPrompt, providerConfig, (chunk: string) => {
+      const { text } = await aiService.streamOpenAICompatible(systemPrompt, (chunk: string) => {
         accumulatedContent += chunk
 
         if (updateTimer) {
@@ -426,14 +376,14 @@ ${this.currentAnalysisContent}
         }
 
         updateTimer = window.setTimeout(() => {
-          explanationContentEl.innerHTML = this.renderMarkdown(accumulatedContent)
+          renderAIMarkdown(explanationContentEl, accumulatedContent)
         }, 100)
       })
 
       if (updateTimer) {
         clearTimeout(updateTimer)
       }
-      explanationContentEl.innerHTML = this.renderMarkdown(accumulatedContent)
+      renderAIMarkdown(explanationContentEl, text)
     } catch (error) {
       explanationContentEl.textContent = `AI解释失败: ${error}\n\n提示：请在设置中配置AI，或者检查AI服务是否可用。`
     }
@@ -442,11 +392,11 @@ ${this.currentAnalysisContent}
   // ===== 文件分析专用方法 =====
 
   /**
-   * 执行文件分析命令（使用独立 session）
+   * 执行文件分析命令（绑定当前已确认 session）
    */
   private async executeAnalysis(action: string, filePath: string) {
     try {
-      const result = await invoke('sftp_file_analysis_independent', {
+      const result = await invokeTargetBoundSSH('sftp_file_analysis_independent', {
         action,
         filePath
       }) as any
@@ -695,65 +645,5 @@ ${this.currentAnalysisContent}
     const div = document.createElement('div')
     div.textContent = text
     return div.innerHTML
-  }
-
-  /**
-   * 调用 AI API（流式输出）- 文件分析专用
-   *
-   * 传输统一走 aiService → ai_proxy_stream（Rust 侧发出），webview 内不再有
-   * fetch()。配置来源仍是本模块自己读的 settings.ai.providers[...]。
-   */
-  private async callFileAIAPI(prompt: string, config: any, onChunk?: (chunk: string) => void): Promise<string> {
-    try {
-      log.debug('调用AI API (流式模式)', { provider: config.name, baseUrl: config.baseUrl })
-      const fullContent = await aiService.streamOpenAICompatible(config, prompt, onChunk)
-      log.debug('AI生成的解释:', fullContent)
-      return fullContent
-    } catch (error) {
-      log.error('AI API调用失败:', error)
-      throw error
-    }
-  }
-
-  /**
-   * Markdown 渲染器（使用 marked.js）
-   */
-  private renderMarkdown(markdown: string): string {
-    try {
-      marked.setOptions({
-        breaks: true,
-        gfm: true,
-      })
-
-      const rawHtml = marked.parse(markdown) as string
-
-      const styledHtml = rawHtml
-        .replace(/<h1>/g, '<h1 style="margin: 18px 0 14px 0; color: var(--primary-color); font-size: 18px; font-weight: 700; line-height: 1.4;">')
-        .replace(/<h2>/g, '<h2 style="margin: 16px 0 12px 0; color: var(--primary-color); font-size: 16px; font-weight: 600; line-height: 1.4;">')
-        .replace(/<h3>/g, '<h3 style="margin: 14px 0 10px 0; color: var(--text-primary); font-size: 15px; font-weight: 600; line-height: 1.4;">')
-        .replace(/<h4>/g, '<h4 style="margin: 12px 0 8px 0; color: var(--text-primary); font-size: 14px; font-weight: 600; line-height: 1.4;">')
-        .replace(/<h5>/g, '<h5 style="margin: 10px 0 6px 0; color: var(--text-primary); font-size: 13px; font-weight: 600; line-height: 1.4;">')
-        .replace(/<h6>/g, '<h6 style="margin: 8px 0 4px 0; color: var(--text-primary); font-size: 12px; font-weight: 600; line-height: 1.4;">')
-        .replace(/<p>/g, '<p style="margin: 8px 0; color: var(--text-primary); line-height: 1.6; font-size: 13px;">')
-        .replace(/<ul>/g, '<ul style="margin: 8px 0; padding-left: 24px; list-style-type: disc;">')
-        .replace(/<ol>/g, '<ol style="margin: 8px 0; padding-left: 24px;">')
-        .replace(/<li>/g, '<li style="margin: 4px 0; color: var(--text-primary); line-height: 1.5;">')
-        .replace(/<code>/g, '<code style="background: var(--bg-tertiary); padding: 2px 6px; border-radius: 3px; font-family: \'Consolas\', \'Monaco\', monospace; font-size: 12px; color: var(--primary-color);">')
-        .replace(/<pre><code/g, '<pre style="background: var(--bg-tertiary); padding: 12px; border-radius: 6px; overflow-x: auto; margin: 12px 0;"><code style="font-family: \'Consolas\', \'Monaco\', monospace; font-size: 12px; color: var(--text-primary); background: transparent; padding: 0;"')
-        .replace(/<a /g, '<a style="color: var(--primary-color); text-decoration: underline;" target="_blank" ')
-        .replace(/<hr>/g, '<hr style="border: none; border-top: 1px solid var(--border-color); margin: 16px 0;">')
-        .replace(/<hr \/>/g, '<hr style="border: none; border-top: 1px solid var(--border-color); margin: 16px 0;" />')
-        .replace(/<blockquote>/g, '<blockquote style="margin: 12px 0; padding: 8px 16px; border-left: 4px solid var(--primary-color); background: var(--bg-secondary); color: var(--text-secondary); font-style: italic;">')
-        .replace(/<table>/g, '<table style="border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13px;">')
-        .replace(/<th>/g, '<th style="border: 1px solid var(--border-color); padding: 8px; background: var(--bg-secondary); color: var(--text-primary); font-weight: 600; text-align: left;">')
-        .replace(/<td>/g, '<td style="border: 1px solid var(--border-color); padding: 8px; color: var(--text-primary);">')
-        .replace(/<strong>/g, '<strong style="color: var(--text-primary); font-weight: 600;">')
-        .replace(/<em>/g, '<em style="color: var(--text-secondary);">')
-
-      return styledHtml
-    } catch (error) {
-      log.error('Markdown 渲染失败:', error)
-      return markdown
-    }
   }
 }

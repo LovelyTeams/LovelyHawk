@@ -41,6 +41,34 @@
   -webkit-app-region: no-drag;
 }
 
+/* 标题栏右侧的独立窗口入口按钮（SFTP / 终端） */
+.title-bar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 11px;
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+  -webkit-app-region: no-drag;
+}
+
+.title-bar-btn:hover {
+  color: var(--primary-color);
+  background: var(--sidebar-active-bg, var(--hover-bg));
+  border-color: color-mix(in srgb, var(--primary-color) 40%, var(--border-color));
+}
+
+.title-bar-btn svg { flex-shrink: 0; }
+
 .app-logo {
   display: flex;
   align-items: center;
@@ -101,7 +129,7 @@
 
 .control-button.close:hover {
   background: var(--error-color);
-  color: #ffffff;
+  color: var(--accent-contrast);
 }
 
 /* SSH Terminal Floating Button */

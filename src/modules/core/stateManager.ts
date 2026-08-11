@@ -29,10 +29,10 @@ export class StateManager {
     try {
       // 从本地存储加载状态
       await this.loadStateFromStorage();
-      
+
       // 从后端加载状态
       await this.loadStateFromBackend();
-      
+
       console.log('状态管理器初始化完成');
     } catch (error) {
       console.error('状态管理器初始化失败:', error);
@@ -47,10 +47,14 @@ export class StateManager {
   private async loadStateFromStorage(): Promise<void> {
     try {
       const savedTheme = localStorage.getItem('lovelyres-theme');
-      if (savedTheme && ['light', 'dark', 'sakura', 'midnight', 'ocean'].includes(savedTheme)) {
-        this.state.theme = savedTheme as 'light' | 'dark' | 'sakura' | 'midnight' | 'ocean';
+      if (savedTheme && ['light', 'dark', 'sakura'].includes(savedTheme)) {
+        this.state.theme = savedTheme as 'light' | 'dark' | 'sakura';
         // 立即应用到 DOM，避免白屏闪烁
         this.applyTheme(this.state.theme);
+      } else if (savedTheme) {
+        // 历史已移除主题（midnight/ocean 等）回落为深色
+        this.state.theme = 'dark';
+        this.applyTheme('dark');
       }
     } catch (error) {
       console.error('从本地存储加载状态失败:', error);
@@ -85,20 +89,20 @@ export class StateManager {
   setState(newState: Partial<AppState>): void {
     const oldState = { ...this.state };
     this.state = { ...this.state, ...newState };
-    
+
     // 保存到本地存储
     this.saveStateToStorage();
-    
+
     // 通知监听器
     this.notifyListeners();
-    
+
     console.log('状态已更新:', { oldState, newState: this.state });
   }
 
   /**
    * 设置主题
    */
-  setTheme(theme: 'light' | 'dark' | 'sakura' | 'midnight' | 'ocean'): void {
+  setTheme(theme: 'light' | 'dark' | 'sakura'): void {
     this.setState({ theme });
 
     // 应用主题到DOM
@@ -115,12 +119,12 @@ export class StateManager {
   /**
    * 切换主题
    */
-  toggleTheme(): 'light' | 'dark' | 'sakura' | 'midnight' | 'ocean' {
-    const themes: ('light' | 'dark' | 'sakura' | 'midnight' | 'ocean')[] = ['light', 'dark', 'sakura', 'midnight', 'ocean'];
+  toggleTheme(): 'light' | 'dark' | 'sakura' {
+    const themes: ('light' | 'dark' | 'sakura')[] = ['light', 'dark', 'sakura'];
     const currentIndex = themes.indexOf(this.state.theme);
     const nextIndex = (currentIndex + 1) % themes.length;
     const newTheme = themes[nextIndex];
-    
+
     this.setTheme(newTheme);
     return newTheme;
   }
@@ -128,10 +132,10 @@ export class StateManager {
   /**
    * 应用主题到DOM
    */
-  private applyTheme(theme: 'light' | 'dark' | 'sakura' | 'midnight' | 'ocean'): void {
+  private applyTheme(theme: 'light' | 'dark' | 'sakura'): void {
     if (typeof document !== 'undefined') {
       document.documentElement.setAttribute('data-theme', theme);
-      document.body.classList.remove('light-theme', 'dark-theme', 'sakura-theme', 'midnight-theme', 'ocean-theme');
+      document.body.classList.remove('light-theme', 'dark-theme', 'sakura-theme');
       document.body.classList.add(`${theme}-theme`);
     }
   }
@@ -214,7 +218,7 @@ export class StateManager {
       loading: false,
       currentPage: 'system-info',
     };
-    
+
     // 清除本地存储
     try {
       localStorage.removeItem('lovelyres-theme');
@@ -222,7 +226,7 @@ export class StateManager {
     } catch (error) {
       console.error('清除本地存储失败:', error);
     }
-    
+
     // 通知监听器
     this.notifyListeners();
   }
@@ -243,19 +247,9 @@ export class StateManager {
         description: '护眼舒适的深色主题'
       },
       sakura: {
-        name: '樱花粉',
+        name: '粉色',
         icon: createIconHTML('🌸', { size: 16 }),
-        description: '温柔浪漫的樱花主题'
-      },
-      midnight: {
-        name: '暗夜',
-        icon: createIconHTML('🔮', { size: 16 }),
-        description: '高对比霓虹暗黑主题'
-      },
-      ocean: {
-        name: '深海',
-        icon: createIconHTML('🌊', { size: 16 }),
-        description: '沉浸专注的蓝绿主题'
+        description: '温柔浪漫的粉色主题'
       }
     };
 
@@ -266,7 +260,7 @@ export class StateManager {
    * 获取下一个主题配置
    */
   getNextThemeConfig() {
-    const themes: ('light' | 'dark' | 'sakura' | 'midnight' | 'ocean')[] = ['light', 'dark', 'sakura', 'midnight', 'ocean'];
+    const themes: ('light' | 'dark' | 'sakura')[] = ['light', 'dark', 'sakura'];
     const currentIndex = themes.indexOf(this.state.theme);
     const nextIndex = (currentIndex + 1) % themes.length;
     const nextTheme = themes[nextIndex];
@@ -274,9 +268,7 @@ export class StateManager {
     const themeConfigs: Record<string, { name: string; icon: string }> = {
       light: { name: '浅色', icon: createIconHTML('☀️', { size: 16 }) },
       dark: { name: '深色', icon: createIconHTML('🌙', { size: 16 }) },
-      sakura: { name: '樱花粉', icon: createIconHTML('🌸', { size: 16 }) },
-      midnight: { name: '暗夜', icon: createIconHTML('🔮', { size: 16 }) },
-      ocean: { name: '深海', icon: createIconHTML('🌊', { size: 16 }) }
+      sakura: { name: '粉色', icon: createIconHTML('🌸', { size: 16 }) }
     };
 
     return themeConfigs[nextTheme];
@@ -297,7 +289,7 @@ export class StateManager {
   }
 
   /**
-   * 检查是否为樱花主题
+   * 检查是否为粉色主题
    */
   isSakuraTheme(): boolean {
     return this.state.theme === 'sakura';

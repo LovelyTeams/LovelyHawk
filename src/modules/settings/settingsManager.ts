@@ -1,7 +1,8 @@
 
 
 import { logger } from '../core/logger';
-/** 正式包 drop 掉 console，诊断信息只有进 logger 才留得下来（设置→工具→诊断日志 可导出） */
+import { PROVIDER_PRESETS } from '../ai/aiConfig';
+/** 正式包 drop 掉 console，诊断信息只有进 logger 才留得下来（状态栏「日志」按钮可导出） */
 const log = logger.module('Settings');
 /**
  * 设置管理器
@@ -9,7 +10,7 @@ const log = logger.module('Settings');
  */
 
 export interface AppSettings {
-  theme: 'light' | 'dark' | 'sakura' | 'midnight' | 'ocean';
+  theme: 'light' | 'dark' | 'sakura';
   language: 'zh-CN' | 'en-US';
   autoConnect: boolean;
   defaultSSHPort: number;
@@ -49,13 +50,20 @@ export interface AppSettings {
   // 新增：AI设置
   ai: {
     currentProvider: string; // 当前选择的AI提供商
+    // 代理设置（全局，后端 ai_proxy_* 读取 ai.useProxy/proxyType/proxyUrl，仅对 AI 请求生效）
+    useProxy: boolean;
+    proxyType: 'http' | 'https' | 'socks5';
+    proxyUrl: string;
     providers: {
       [key: string]: {
         name: string;
         apiKey: string;
         model: string;
         baseUrl: string;
-        // 代理设置
+        // 新增 provider 弹窗的「API 格式」选择；aiConfig.resolveProviderType 中显式 type 优先于名称嗅探
+        type?: 'openai' | 'claude';
+        // 代理设置（旧版按 provider 存储的遗留字段，保留以兼容存量 settings.json；
+        // 生效的全局代理配置在 ai.useProxy/proxyType/proxyUrl）
         useProxy: boolean;
         proxyType: 'http' | 'https' | 'socks5';
         proxyUrl: string;
@@ -118,38 +126,24 @@ export class SettingsManager {
         connectionTimeout: 0, // 0 = 禁用超时，避免长时间操作被中断
         maxRetries: 3
       },
-      // 新增：AI设置默认值
+      // 新增：AI设置默认值（预设与设置页共用 aiConfig.PROVIDER_PRESETS，避免两处漂移；
+      // 用户已有的自定义 provider 在 loadSettings 深度合并时保留）
       ai: {
         currentProvider: 'openai',
-        providers: {
-          openai: {
-            name: 'OpenAI',
+        useProxy: false,
+        proxyType: 'http',
+        proxyUrl: '',
+        providers: Object.fromEntries(
+          Object.entries(PROVIDER_PRESETS).map(([key, preset]) => [key, {
+            name: preset.name,
             apiKey: '',
-            model: 'gpt-3.5-turbo',
-            baseUrl: 'https://api.openai.com/v1',
+            model: preset.defaultModel,
+            baseUrl: preset.defaultBaseUrl,
             useProxy: false,
-            proxyType: 'http',
+            proxyType: 'http' as const,
             proxyUrl: ''
-          },
-          qwen: {
-            name: 'Qwen',
-            apiKey: '',
-            model: 'qwen-turbo',
-            baseUrl: 'https://dashscope.aliyuncs.com/api/v1',
-            useProxy: false,
-            proxyType: 'http',
-            proxyUrl: ''
-          },
-          ollama: {
-            name: 'Ollama',
-            apiKey: '',
-            model: 'llama2',
-            baseUrl: 'http://localhost:11434/api',
-            useProxy: false,
-            proxyType: 'http',
-            proxyUrl: ''
-          }
-        }
+          }])
+        )
       }
     };
   }

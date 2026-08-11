@@ -79,6 +79,10 @@
   --modal-backdrop: rgba(15, 23, 42, 0.45);
   --modal-shadow: 0 20px 60px rgba(15, 23, 42, 0.18);
 
+  /* Brand logo gradient (title-bar star mark) */
+  --brand-logo-a: #f9a8d4;
+  --brand-logo-b: #c4b5fd;
+
   /* Brand sparkle palette — used for decorative accents on welcome / loading */
   --brand-glow-amber: #fef0cf;
   --brand-spark-soft: #fde68a;
@@ -90,9 +94,12 @@
   --brand-dot-color: #f59e0b;
 
   /* ── Severity tokens (theme-aware foregrounds) ──
-     Per-severity foreground / background / border triplet, used by
+     Five-level risk scale, aligned with the SOC console design:
+       高危 critical (red) / 较高 high (orange) / 中危 warn (amber)
+       低 info (blue) / 信息 neutral (gray)
+     Per-level foreground / background / border triplet, used by
      status chips, badges, alert tags. Light/sakura themes use darker
-     saturated foregrounds; dark themes override with pastel set. */
+     saturated foregrounds; the dark theme overrides with pastel set. */
   --sev-critical-fg: #b91c1c;
   --sev-critical-bg: rgba(239, 68, 68, 0.10);
   --sev-critical-bg-hover: rgba(239, 68, 68, 0.18);
@@ -100,6 +107,13 @@
   --sev-critical-border-strong: #dc2626;
   --sev-critical-tag-fg: #991b1b;
   --sev-critical-tag-bg: rgba(239, 68, 68, 0.18);
+
+  --sev-high-fg: #c2410c;
+  --sev-high-bg: rgba(249, 115, 22, 0.10);
+  --sev-high-bg-hover: rgba(249, 115, 22, 0.18);
+  --sev-high-border: rgba(249, 115, 22, 0.45);
+  --sev-high-tag-fg: #9a3412;
+  --sev-high-tag-bg: rgba(249, 115, 22, 0.18);
 
   --sev-warn-fg: #b45309;
   --sev-warn-bg: rgba(245, 158, 11, 0.10);
@@ -115,13 +129,20 @@
   --sev-success-tag-fg: #14532d;
   --sev-success-tag-bg: rgba(34, 197, 94, 0.18);
 
-  --sev-info-fg: #4338ca;
-  --sev-info-bg: rgba(99, 102, 241, 0.08);
-  --sev-info-bg-hover: rgba(99, 102, 241, 0.16);
-  --sev-info-border: rgba(99, 102, 241, 0.45);
-  --sev-info-selected-bg: rgba(99, 102, 241, 0.20);
-  --sev-info-selected-fg: #312e81;
-  --sev-info-selected-border: #4f46e5;
+  --sev-info-fg: #1d4ed8;
+  --sev-info-bg: rgba(59, 130, 246, 0.10);
+  --sev-info-bg-hover: rgba(59, 130, 246, 0.16);
+  --sev-info-border: rgba(59, 130, 246, 0.45);
+  --sev-info-selected-bg: rgba(59, 130, 246, 0.20);
+  --sev-info-selected-fg: #1e3a8a;
+  --sev-info-selected-border: #2563eb;
+
+  --sev-neutral-fg: #64748b;
+  --sev-neutral-bg: rgba(100, 116, 139, 0.10);
+  --sev-neutral-bg-hover: rgba(100, 116, 139, 0.18);
+  --sev-neutral-border: rgba(100, 116, 139, 0.40);
+  --sev-neutral-tag-fg: #475569;
+  --sev-neutral-tag-bg: rgba(100, 116, 139, 0.16);
 
   /* Chip count badge background — subtle tint on light surfaces */
   --chip-count-bg: rgba(15, 23, 42, 0.08);

@@ -37,12 +37,12 @@
 .pc-header-icon {
     width: 40px;
     height: 40px;
-    background: rgba(59, 130, 246, 0.1);
+    background: color-mix(in srgb, var(--primary-color) 13%, transparent);
     border-radius: var(--border-radius);
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #3b82f6;
+    color: var(--primary-color);
     font-size: 18px;
 }
 
@@ -131,7 +131,7 @@
 
 .pc-preset-btn.active {
     background: var(--primary-color);
-    color: #fff;
+    color: var(--accent-contrast);
     border-color: var(--primary-color);
 }
 
@@ -228,7 +228,7 @@
     font-family: var(--font-mono);
     color: var(--text-primary);
     cursor: pointer;
-    border-bottom: 1px solid rgba(128, 128, 128, 0.08);
+    border-bottom: 1px solid color-mix(in srgb, var(--border-color) 40%, transparent);
     transition: background 0.15s ease;
 }
 
@@ -237,38 +237,38 @@
 }
 
 .pc-packet-row.selected {
-    background: rgba(59, 130, 246, 0.12);
+    background: color-mix(in srgb, var(--primary-color) 12%, transparent);
 }
 
 .pc-packet-row.ioc-hit {
-    background: rgba(239, 68, 68, 0.08);
+    background: var(--sev-critical-bg);
     border-left: 3px solid var(--error-color);
 }
 
 /* Protocol Colors */
 .pc-proto-TCP {
-    color: #4a9eff;
+    color: var(--sev-info-fg);
 }
 
 .pc-proto-UDP {
-    color: #ff9e4a;
+    color: var(--sev-high-fg);
 }
 
 .pc-proto-ICMP {
-    color: #ff4a9e;
+    color: var(--sev-critical-fg);
 }
 
 .pc-proto-HTTP,
 .pc-proto-HTTPS {
-    color: #4aff9e;
+    color: var(--sev-success-fg);
 }
 
 .pc-proto-DNS {
-    color: #8b5cf6;
+    color: var(--accent-purple);
 }
 
 .pc-proto-SSH {
-    color: #f59e0b;
+    color: var(--sev-warn-fg);
 }
 
 .pc-proto-ARP {
@@ -329,10 +329,10 @@
 }
 
 .pc-stat-card {
-    background: var(--bg-tertiary);
+    background: var(--bg-secondary);
     border: 1px solid var(--border-color);
-    border-radius: var(--border-radius-lg);
-    padding: 12px;
+    border-radius: 10px;
+    padding: 14px 16px;
 }
 
 .pc-stat-card-title {
@@ -510,7 +510,7 @@
     border-radius: 8px;
     font-size: 9px;
     font-weight: 600;
-    color: #fff;
+    color: var(--accent-contrast);
     white-space: nowrap;
 }
 
@@ -523,7 +523,8 @@
 }
 
 .pc-alert-severity.medium {
-    background: #eab308;
+    background: var(--sev-warn-bg);
+    color: var(--sev-warn-fg);
 }
 
 /* Bandwidth Timeline */

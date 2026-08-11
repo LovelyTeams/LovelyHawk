@@ -66,7 +66,10 @@ pub fn ensure_safe_download_target(local_path: &str) -> Result<(), String> {
         return Err("下载目标路径不能为空".to_string());
     }
     // 目标文件通常还不存在，所以校验它的父目录
-    if path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+    if path
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
         return Err(format!("下载目标路径不允许包含 ..: {}", local_path));
     }
 

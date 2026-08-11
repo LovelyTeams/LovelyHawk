@@ -323,6 +323,16 @@ export interface K8sEmergencyAction {
     rollbackCommand: string;
     result?: string;
     error?: string;
+    targetIdentity?: import('../core/targetContext').TargetIdentity;
+    command?: string;
+    exitCode?: number | null;
+    timedOut?: boolean;
+    verifyCommand?: string;
+    verifyOutput?: string;
+    verified?: boolean;
+    operationId?: string;
+    restoreVerifyCommand?: string;
+    restoreVerifyExpected?: string;
 }
 
 export interface K8sSecurityAuditResult {

@@ -2,10 +2,15 @@
  * 用户列表右键菜单管理器
  */
 
-import { invoke } from '@tauri-apps/api/core'
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH'
+import { operationJournal } from '../core/operationJournal'
+import { shq, isValidUsername } from '../core/shellEscape'
+import { activeTargetContext } from '../core/targetContext'
 import * as IconPark from '@icon-park/svg'
 import { BaseContextMenu, type MenuAction } from './contextMenu/baseContextMenu'
 import { createIconHTML, statusIcon } from './iconMapping'
+import { showConfirm } from './confirmDialog'
+import { reportError } from '../utils/errorHandler'
 
 export class UserContextMenu extends BaseContextMenu {
   private currentUser: string = ''
@@ -258,6 +263,10 @@ export class UserContextMenu extends BaseContextMenu {
     }
 
     if (action === 'delete-user') {
+      if (!isValidUsername(user)) {
+        this.showModal('错误', '用户名格式异常，已阻止删除')
+        return true
+      }
       // Safety checks for critical users
       if (user === 'root' || user === '0') {
         this.showModal('错误', '不能删除root用户！')
@@ -322,8 +331,8 @@ export class UserContextMenu extends BaseContextMenu {
     // 查询用户真实主目录（多方法兜底）
     let homeDir = `/home/${username}`;
     try {
-      const result = await invoke('ssh_execute_command_direct', {
-        command: `getent passwd ${username} 2>/dev/null | cut -d: -f6 | grep -v '^$' || awk -F: -v u="${username}" '$1==u{print $6}' /etc/passwd 2>/dev/null`
+      const result = await invokeTargetBoundSSH('ssh_execute_command_direct', {
+        command: `getent passwd ${shq(username)} 2>/dev/null | cut -d: -f6 | grep -v '^$' || awk -F: -v u=${shq(username)} '$1==u{print $6}' /etc/passwd 2>/dev/null`
       }) as { output: string; exit_code: number };
       const parsed = (result.output || '').split('\n').map(l => l.trim()).filter(l => l.startsWith('/'))[0];
       if (parsed) {
@@ -348,8 +357,8 @@ export class UserContextMenu extends BaseContextMenu {
     `
 
     const homeDirWarning = homeDir !== `/home/${username}`
-      ? `<div style="margin-bottom: var(--spacing-sm); padding: var(--spacing-sm); background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: var(--border-radius-sm);">
-           <strong style="color: #f59e0b;">${statusIcon('warning', { size: 16 })} 注意：该用户主目录不在默认位置！</strong>
+      ? `<div style="margin-bottom: var(--spacing-sm); padding: var(--spacing-sm); background: var(--sev-warn-bg); border: 1px solid var(--sev-warn-border); border-radius: var(--border-radius-sm);">
+           <strong style="color: var(--sev-warn-fg);">${statusIcon('warning', { size: 16 })} 注意：该用户主目录不在默认位置！</strong>
          </div>`
       : '';
 
@@ -370,14 +379,14 @@ export class UserContextMenu extends BaseContextMenu {
           gap: var(--spacing-md);
         ">
           ${IconPark.Delete({ theme: 'filled', size: '24', fill: '#ef4444' })}
-          <h3 style="margin: 0; color: #ef4444; font-size: 18px;">删除用户确认</h3>
+          <h3 style="margin: 0; color: var(--sev-critical-fg); font-size: 18px;">删除用户确认</h3>
         </div>
         <div class="modal-body" style="
           padding: var(--spacing-md);
           color: var(--text-primary);
         ">
           <div style="margin-bottom: var(--spacing-md);">
-            <strong style="color: #ef4444;">${statusIcon('warning', { size: 16 })} 危险操作：即将删除用户 <code style="background: var(--bg-secondary); padding: 2px 6px; border-radius: 4px;">${username}</code></strong>
+            <strong style="color: var(--sev-critical-fg);">${statusIcon('warning', { size: 16 })} 危险操作：即将删除用户 <code style="background: var(--bg-secondary); padding: 2px 6px; border-radius: 4px;">${username}</code></strong>
           </div>
 
           ${homeDirWarning}
@@ -392,8 +401,8 @@ export class UserContextMenu extends BaseContextMenu {
             </ul>
           </div>
 
-          <div style="margin-bottom: var(--spacing-md); padding: var(--spacing-sm); background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: var(--border-radius-sm);">
-            <strong style="color: #ef4444;">${statusIcon('warning', { size: 16 })} 此操作不可撤销！</strong>
+          <div style="margin-bottom: var(--spacing-md); padding: var(--spacing-sm); background: var(--sev-critical-bg); border: 1px solid var(--sev-critical-border); border-radius: var(--border-radius-sm);">
+            <strong style="color: var(--sev-critical-fg);">${statusIcon('warning', { size: 16 })} 此操作不可撤销！</strong>
           </div>
 
           <div style="margin-bottom: var(--spacing-md);">
@@ -426,8 +435,8 @@ export class UserContextMenu extends BaseContextMenu {
           <button id="delete-user-confirm" class="modern-btn danger" style="
             padding: 8px 16px;
             font-size: 14px;
-            background: #ef4444;
-            border-color: #ef4444;
+            background: var(--sev-critical-border-strong);
+            border-color: var(--sev-critical-border-strong);
           ">确认删除</button>
         </div>
       </div>
@@ -467,6 +476,31 @@ export class UserContextMenu extends BaseContextMenu {
    */
   private async executeDeleteUser(username: string) {
     const title = `删除用户 - ${username}`
+    if (!isValidUsername(username)) {
+      this.showModal(title, '用户名格式异常，已阻止删除')
+      return
+    }
+    const capturedTarget = activeTargetContext.get()
+    if (!capturedTarget) {
+      this.showModal(title, '没有已确认的活动 SSH 目标，已阻止删除')
+      return
+    }
+    const confirmed = await showConfirm({
+      title: '最终确认：永久删除用户',
+      message: `目标：${capturedTarget.username}@${capturedTarget.host}:${capturedTarget.port}\n指纹：${capturedTarget.hostKeyFingerprint}\n\n用户：${username}\n将终止其进程并永久删除账户、主目录和邮件池。此操作不可回滚。`,
+      confirmText: '永久删除',
+      dangerous: true,
+      defaultFocus: 'cancel',
+    })
+    if (!confirmed) return
+    if (!activeTargetContext.matches(capturedTarget)) {
+      this.showModal(title, '确认后活动目标已变化，已阻止删除')
+      return
+    }
+    const quotedUsername = shq(username)
+    const killCommand = `sudo pkill -9 -u ${quotedUsername}`
+    const deleteCommand = `sudo userdel -rf -- ${quotedUsername}`
+    const verifyCommand = `id ${quotedUsername}`
 
     try {
       const accountInfo = this.selectedUsername ? ` (账号: ${this.selectedUsername})` : ''
@@ -479,42 +513,68 @@ export class UserContextMenu extends BaseContextMenu {
       }
 
       // Step 1: 查询该用户的运行中进程
-      const psResult = await invoke('ssh_execute_command_direct', makeParams(
-        `ps -u ${username} -o pid,comm --no-headers 2>/dev/null`
-      )) as { output: string; exit_code: number }
+      const psResult = await invokeTargetBoundSSH('ssh_execute_command_direct', makeParams(
+        `ps -u ${quotedUsername} -o pid,comm --no-headers 2>/dev/null`
+      )) as { output: string; exit_code: number; timed_out?: boolean }
 
       const hasProcesses = psResult.exit_code === 0 && psResult.output.trim().length > 0
 
       // Step 2: 如果有进程，先强制终止
       if (hasProcesses) {
         this.showModal(title, `正在终止用户 ${username} 的所有进程...\n\n运行中进程:\n${psResult.output.trim()}`)
-        await invoke('ssh_execute_command_direct', makeParams(
-          `sudo pkill -9 -u ${username} 2>/dev/null; sleep 1`
-        ))
+        const killResult = await invokeTargetBoundSSH('ssh_execute_command_direct', makeParams(killCommand)) as { output: string; exit_code: number; timed_out?: boolean }
+        if (killResult.timed_out || killResult.exit_code !== 0) {
+          throw new Error(`终止用户进程失败（exit=${String(killResult.exit_code)}）：${killResult.output || '无输出'}`)
+        }
       }
 
       // Step 3: 执行 userdel -rf 强制删除
-      await invoke('ssh_execute_command_direct', makeParams(
-        `sudo userdel -rf ${username} 2>&1`
-      ))
+      const deleteResult = await invokeTargetBoundSSH('ssh_execute_command_direct', makeParams(deleteCommand)) as { output: string; exit_code: number; timed_out?: boolean }
 
       // Step 4: 验证用户是否真的被删除（不依赖 userdel 的 exit_code）
-      const verifyResult = await invoke('ssh_execute_command_direct', makeParams(
-        `id ${username} 2>&1`
-      )) as { output: string; exit_code: number }
+      const verifyResult = await invokeTargetBoundSSH('ssh_execute_command_direct', makeParams(
+        verifyCommand
+      )) as { output: string; exit_code: number; timed_out?: boolean }
+      const verified = verifyResult.timed_out !== true && verifyResult.exit_code !== 0
+      const success = deleteResult.timed_out !== true && deleteResult.exit_code === 0 && verified
+      operationJournal.record({
+        source: 'user',
+        server: capturedTarget.host,
+        target: capturedTarget,
+        title: `永久删除用户 ${username}`,
+        command: `${hasProcesses ? `${killCommand}; ` : ''}${deleteCommand}`,
+        output: deleteResult.output || '',
+        exitCode: deleteResult.exit_code,
+        timedOut: deleteResult.timed_out,
+        verifyCommand,
+        verifyOutput: verifyResult.output || '',
+        verified,
+        success,
+      })
 
-      if (verifyResult.exit_code !== 0) {
+      if (success) {
         // id 命令返回非0 = 用户已不存在 = 删除成功
         const killInfo = hasProcesses ? '\n(已自动终止该用户的所有进程)' : ''
         this.showModal(title, `用户 ${username} 删除成功！${killInfo}`)
         window.showNotification?.(`用户 ${username} 删除成功`, 'success')
       } else {
-        this.showModal(title, `删除用户失败，用户仍然存在\n\n${verifyResult.output}\n\n提示: 可在终端中手动执行:\nsudo pkill -9 -u ${username} && sudo userdel -rf ${username}`)
-        window.showNotification?.(`删除用户 ${username} 失败，用户仍然存在`, 'error')
+        const reason = deleteResult.timed_out
+          ? '删除命令执行超时'
+          : deleteResult.exit_code !== 0
+            ? `删除命令退出码为 ${deleteResult.exit_code}`
+            : '删除后独立验证未通过'
+        this.showModal(title, `删除用户失败：${reason}\n\n执行输出：\n${deleteResult.output || '无'}\n\n验证输出：\n${verifyResult.output || '无'}`)
+        window.showNotification?.(`删除用户 ${username} 失败`, 'error')
       }
     } catch (error) {
+      operationJournal.record({
+        source: 'user', server: capturedTarget.host, target: capturedTarget,
+        title: `永久删除用户 ${username} 失败`, command: `${killCommand}; ${deleteCommand}`,
+        output: String(error), verifyCommand, success: false,
+      })
       this.showModal(title, `删除用户失败: ${error}`)
       window.showNotification?.(`删除用户 ${username} 失败: ${error}`, 'error')
+      reportError(error, { module: 'UserContextMenu', action: 'delete-user' })
     }
   }
 }

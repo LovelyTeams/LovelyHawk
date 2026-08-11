@@ -4,30 +4,40 @@
  * 与ssh/connectionManager.ts协同工作
  */
 
-import { SSHConfigManager as ConfigManager } from '../ssh/connectionManager';
-
+import {
+  connectSSHAdvancedWithHostKeyConfirmation,
+  type SSHAuthType,
+  type SSHJumpHostArgs,
+} from '../ssh/hostKeyConfirmation';
+import { activeTargetContext, targetIdentityFromBackend, type BackendSSHConnectionStatus } from '../core/targetContext';
 import { logger } from '../core/logger';
-/** 正式包 drop 掉 console，诊断信息只有进 logger 才留得下来（设置→工具→诊断日志 可导出） */
+import { targetCapabilityStore, type TargetCapabilities } from '../core/targetCapabilities';
+/** 正式包 drop 掉 console，诊断信息只有进 logger 才留得下来（状态栏「日志」按钮可导出） */
 const log = logger.module('SSHConn');
 
 
 export interface SSHConnectionInfo {
   id?: string; // 连接配置ID
+  sessionId?: string; // 后端会话ID，每次重连都会变化
+  hostKeyFingerprint?: string;
   host: string;
   port: number;
   username: string;
   connected: boolean;
   lastActivity?: Date;
+  capabilities?: TargetCapabilities;
+}
+
+export interface SSHConnectAdvancedOptions {
+  certificatePath?: string;
+  keyboardInteractiveResponses?: string[];
+  agentIdentityFingerprint?: string;
+  jumpHost?: SSHJumpHostArgs | null;
 }
 
 export class SSHSessionManager {
   private connectionStatus: SSHConnectionInfo | null = null;
   private listeners: Array<(status: SSHConnectionInfo | null) => void> = [];
-  private configManager: ConfigManager;
-
-  constructor() {
-    this.configManager = new ConfigManager();
-  }
 
   /**
    * 获取当前连接状态
@@ -55,6 +65,17 @@ export class SSHSessionManager {
    */
   setConnectionStatus(status: SSHConnectionInfo | null): void {
     this.connectionStatus = status;
+    if (status?.connected && status.sessionId) {
+      activeTargetContext.activate({
+        sessionId: status.sessionId,
+        hostKeyFingerprint: status.hostKeyFingerprint || '',
+        host: status.host,
+        port: status.port,
+        username: status.username,
+      });
+    } else if (!status) {
+      activeTargetContext.clear();
+    }
     this.notifyListeners();
   }
 
@@ -68,7 +89,8 @@ export class SSHSessionManager {
     password: string,
     authType: string = 'password',
     keyPath?: string,
-    keyPassphrase?: string
+    keyPassphrase?: string,
+    advanced: SSHConnectAdvancedOptions = {},
   ): Promise<void> {
     try {
       log.debug('[sshConnectionManager] connect 方法被调用');
@@ -80,29 +102,54 @@ export class SSHSessionManager {
       }
 
       log.debug('调用 Tauri invoke: ssh_connect_direct, authType:', authType);
-      await (window as any).__TAURI__.core.invoke('ssh_connect_direct', {
+      const supportedAuthTypes: SSHAuthType[] = [
+        'password', 'key', 'certificate', 'keyboard-interactive', 'agent',
+      ];
+      if (!supportedAuthTypes.includes(authType as SSHAuthType)) {
+        throw new Error(`不支持的 SSH 认证方式: ${authType}`);
+      }
+      const typedAuthType = authType as SSHAuthType;
+      const connected = await connectSSHAdvancedWithHostKeyConfirmation({
         host,
         port: portNumber,
         username,
-        password: authType === 'password' ? password : undefined,
-        authType,
-        keyPath: authType === 'key' ? keyPath : undefined,
-        keyPassphrase: authType === 'key' ? keyPassphrase : undefined,
+        authentication: {
+          authType: typedAuthType,
+          password: typedAuthType === 'password' ? password : undefined,
+          keyPath: typedAuthType === 'key' || typedAuthType === 'certificate' ? keyPath : undefined,
+          keyPassphrase: typedAuthType === 'key' || typedAuthType === 'certificate'
+            ? keyPassphrase
+            : undefined,
+          certificatePath: typedAuthType === 'certificate' ? advanced.certificatePath : undefined,
+          keyboardInteractiveResponses: typedAuthType === 'keyboard-interactive'
+            ? advanced.keyboardInteractiveResponses
+            : undefined,
+          agentIdentityFingerprint: typedAuthType === 'agent'
+            ? advanced.agentIdentityFingerprint
+            : undefined,
+        },
+        jumpHost: advanced.jumpHost,
       });
-      
+
       log.debug('[sshConnectionManager] Tauri invoke 返回成功');
 
       // 更新连接状态
       this.connectionStatus = {
+        sessionId: connected.session_id,
+        hostKeyFingerprint: connected.host_key_fingerprint,
         host,
-        port,
+        port: portNumber,
         username,
         connected: true,
         lastActivity: new Date()
       };
+      activeTargetContext.activate(targetIdentityFromBackend(connected));
 
-      // 保存连接配置（如果不存在的话）
-      await this.saveConnectionConfig(host, port, username);
+      try {
+        this.connectionStatus.capabilities = await targetCapabilityStore.probeActiveTarget();
+      } catch (error) {
+        log.warn('SSH 已连接，但目标能力预检失败', error);
+      }
 
       // 通知监听器
       this.notifyListeners();
@@ -144,9 +191,11 @@ export class SSHSessionManager {
   async disconnect(): Promise<void> {
     try {
       if (this.connectionStatus?.connected) {
+        const sessionId = this.connectionStatus.sessionId;
         await (window as any).__TAURI__.core.invoke('ssh_disconnect_direct');
 
         this.connectionStatus = null;
+        activeTargetContext.clear(sessionId);
         this.notifyListeners();
       }
     } catch (error) {
@@ -182,41 +231,6 @@ export class SSHSessionManager {
   }
 
   /**
-   * 保存连接配置
-   */
-  private async saveConnectionConfig(host: string, port: number, username: string): Promise<void> {
-    try {
-      // 检查是否已存在相同的连接配置
-      const existingConnections = this.configManager.getConnections();
-      const exists = existingConnections.some(conn =>
-        conn.host === host && conn.port === port && conn.username === username
-      );
-
-      if (!exists) {
-        // 创建新的连接配置
-        const connectionName = `${username}@${host}:${port}`;
-        await this.configManager.addConnection({
-          name: connectionName,
-          host,
-          port,
-          username,
-          authType: 'password' as const,
-          tags: ['auto-saved'],
-          accounts: [{
-            username,
-            authType: 'password' as const,
-            isDefault: true
-          }]
-        });
-        log.debug('连接配置已自动保存:', connectionName);
-      }
-    } catch (error) {
-      log.error('保存连接配置失败:', error);
-      // 不抛出错误，因为这不应该影响连接本身
-    }
-  }
-
-  /**
    * 通知所有监听器
    */
   private notifyListeners(): void {
@@ -234,18 +248,24 @@ export class SSHSessionManager {
    */
   async checkConnectionStatus(): Promise<SSHConnectionInfo | null> {
     try {
-      const status = await (window as any).__TAURI__.core.invoke('ssh_get_connection_status');
+      const status = await (window as any).__TAURI__.core.invoke('ssh_get_connection_status') as BackendSSHConnectionStatus | null;
       if (status) {
         this.connectionStatus = {
+          sessionId: status.session_id,
+          hostKeyFingerprint: status.host_key_fingerprint,
           host: status.host,
           port: status.port,
           username: status.username,
           connected: status.connected,
           lastActivity: new Date(status.last_activity)
         };
+        if (status.session_id) {
+          activeTargetContext.activate(targetIdentityFromBackend(status));
+        }
         this.notifyListeners();
       } else {
         this.connectionStatus = null;
+        activeTargetContext.clear();
         this.notifyListeners();
       }
       return this.connectionStatus;

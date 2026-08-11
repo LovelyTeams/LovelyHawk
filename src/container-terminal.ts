@@ -2,13 +2,14 @@ import { invoke } from '@tauri-apps/api/core';
 import { formatOutput } from './modules/core/outputFormatter';
 
 import { logger } from './modules/core/logger';
-/** 正式包 drop 掉 console，诊断信息只有进 logger 才留得下来（设置→工具→诊断日志 可导出） */
+/** 正式包 drop 掉 console，诊断信息只有进 logger 才留得下来（状态栏「日志」按钮可导出） */
 const log = logger.module('ContainerTerminal');
 
 
 interface ContainerInfo {
   name: string;
   id: string;
+  sessionId: string;
 }
 
 interface TerminalOutput {
@@ -184,6 +185,7 @@ class ContainerTerminalManager {
         containerId: this.containerInfo.name,
         command,
         shell: this.currentShell,
+        sessionId: this.containerInfo.sessionId,
       });
 
       // 移除加载状态

@@ -3,12 +3,15 @@
  * 处理SSH终端操作和命令执行
  */
 
-import { invoke } from '@tauri-apps/api/core';
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH';
+import { activeTargetContext } from '../core/targetContext';
+import { escapeHtml } from '../core/htmlEscape';
+import { shq } from '../core/shellEscape';
 import { sshConnectionManager } from './sshConnectionManager';
 import { reportError } from '../utils/errorHandler';
 
 import { logger } from '../core/logger';
-/** 正式包 drop 掉 console，诊断信息只有进 logger 才留得下来（设置→工具→诊断日志 可导出） */
+/** 正式包 drop 掉 console，诊断信息只有进 logger 才留得下来（状态栏「日志」按钮可导出） */
 const log = logger.module('Terminal');
 
 /** Tab 补全用：多个候选时补到最长公共前缀，行为对齐 bash */
@@ -38,11 +41,13 @@ export class TerminalManager {
   private bashEnvironmentInfo: any = null;
   private inputHistory: string[] = [];
   private historyIndex: number = -1;
+  private targetSessionId = '';
 
   /**
    * 获取命令历史
    */
   getCommandHistory(): TerminalOutput[] {
+    this.synchronizeTarget();
     return this.commandHistory;
   }
 
@@ -50,6 +55,7 @@ export class TerminalManager {
    * 获取当前工作目录
    */
   getCurrentWorkingDirectory(): string {
+    this.synchronizeTarget();
     return this.currentWorkingDirectory;
   }
 
@@ -99,6 +105,7 @@ export class TerminalManager {
    * 获取上一个历史命令
    */
   getPreviousCommand(): string | null {
+    this.synchronizeTarget();
     if (this.inputHistory.length === 0) return null;
 
     if (this.historyIndex === -1) {
@@ -114,6 +121,7 @@ export class TerminalManager {
    * 获取下一个历史命令
    */
   getNextCommand(): string | null {
+    this.synchronizeTarget();
     if (this.inputHistory.length === 0 || this.historyIndex === -1) return null;
 
     if (this.historyIndex < this.inputHistory.length - 1) {
@@ -129,6 +137,7 @@ export class TerminalManager {
    * 初始化当前工作目录
    */
   async initializeWorkingDirectory(): Promise<void> {
+    this.synchronizeTarget();
     if (sshConnectionManager.isConnected()) {
       const connectionStatus = sshConnectionManager.getConnectionStatus();
       if (connectionStatus?.username === 'root') {
@@ -147,9 +156,10 @@ export class TerminalManager {
    * 初始化 Bash 环境信息
    */
   async initializeBashEnvironment(): Promise<void> {
+    this.synchronizeTarget();
     if (sshConnectionManager.isConnected()) {
       try {
-        const envInfo = await (window as any).__TAURI__.core.invoke('get_bash_environment_info');
+        const envInfo = await invokeTargetBoundSSH<any>('get_bash_environment_info');
         this.bashEnvironmentInfo = envInfo;
         log.debug('Bash 环境信息:', envInfo);
 
@@ -161,6 +171,7 @@ export class TerminalManager {
         // 更新显示
         this.updateTerminalDisplay();
       } catch (error) {
+        this.synchronizeTarget();
         log.error('获取 Bash 环境信息失败:', error);
       }
     }
@@ -176,6 +187,7 @@ export class TerminalManager {
    * 执行命令
    */
   async executeCommand(command: string): Promise<void> {
+    this.synchronizeTarget();
     if (!sshConnectionManager.isConnected()) {
       log.error('SSH未连接，无法执行命令');
       return;
@@ -245,10 +257,10 @@ export class TerminalManager {
 
     // 非 cd 命令：在当前工作目录下执行
     const cwd = (this.currentWorkingDirectory || '').replace(/["']/g, '');
-    const prefixed = cwd ? `cd "${cwd}" && ${trimmed}` : trimmed;
+    const prefixed = cwd ? `cd ${shq(cwd)} && ${trimmed}` : trimmed;
 
     try {
-      const result = await (window as any).__TAURI__.core.invoke('ssh_execute_command_direct', {
+      const result = await invokeTargetBoundSSH<TerminalOutput>('ssh_execute_command_direct', {
         command: prefixed
       });
 
@@ -272,6 +284,7 @@ export class TerminalManager {
       sshConnectionManager.updateLastActivity();
 
     } catch (error) {
+      if (this.synchronizeTarget()) return;
       log.error('执行命令失败:', error);
       (window as any).showConnectionStatus(`命令执行失败: ${error}`, 'error');
 
@@ -289,6 +302,7 @@ export class TerminalManager {
    * 使用指定账号执行命令
    */
   async executeCommandAsUser(command: string, username: string): Promise<void> {
+    this.synchronizeTarget();
     if (!sshConnectionManager.isConnected()) {
       log.error('SSH未连接，无法执行命令');
       return;
@@ -303,10 +317,10 @@ export class TerminalManager {
 
     // 在当前工作目录下执行（账号切换会影响权限，但不影响路径）
     const cwd = (this.currentWorkingDirectory || '').replace(/["']/g, '');
-    const prefixed = cwd ? `cd "${cwd}" && ${trimmed}` : trimmed;
+    const prefixed = cwd ? `cd ${shq(cwd)} && ${trimmed}` : trimmed;
 
     try {
-      const result = await (window as any).__TAURI__.core.invoke('ssh_execute_command_direct', {
+      const result = await invokeTargetBoundSSH<TerminalOutput>('ssh_execute_command_direct', {
         command: prefixed,
         username: username
       });
@@ -331,6 +345,7 @@ export class TerminalManager {
       sshConnectionManager.updateLastActivity();
 
     } catch (error) {
+      if (this.synchronizeTarget()) return;
       log.error(`使用账号 ${username} 执行命令失败:`, error);
       (window as any).showConnectionStatus(`使用账号 ${username} 执行命令失败: ${error}`, 'error');
 
@@ -352,6 +367,19 @@ export class TerminalManager {
     this.notifyListeners();
   }
 
+  private synchronizeTarget(): boolean {
+    const nextSessionId = activeTargetContext.get()?.sessionId || '';
+    if (nextSessionId === this.targetSessionId) return false;
+    this.targetSessionId = nextSessionId;
+    this.commandHistory = [];
+    this.currentWorkingDirectory = '~';
+    this.bashEnvironmentInfo = null;
+    this.inputHistory = [];
+    this.historyIndex = -1;
+    this.notifyListeners();
+    return true;
+  }
+
   /**
    * 加载账号列表
    */
@@ -370,8 +398,18 @@ export class TerminalManager {
         return;
       }
 
-      // 假设使用第一个连接的账号列表（在实际应用中，应该获取当前活动连接）
-      const connection = connections[0];
+      const active = sshConnectionManager.getConnectionStatus();
+      const connection = active
+        ? connections.find(connection =>
+            connection.host === active.host
+            && Number(connection.port) === Number(active.port)
+            && connection.username === active.username,
+          )
+        : undefined;
+      if (!connection) {
+        log.warn('找不到与当前目标完全匹配的账号配置，已阻止加载其他主机账号');
+        return;
+      }
       const accounts = connection.accounts || [];
 
       // 更新账号下拉列表
@@ -402,6 +440,7 @@ export class TerminalManager {
    * 渲染终端内容HTML
    */
   renderTerminalHTML(): string {
+    this.synchronizeTarget();
     const connectionStatus = sshConnectionManager.getConnectionStatus();
     
     if (!connectionStatus?.connected) {
@@ -409,11 +448,11 @@ export class TerminalManager {
         <div style="
           text-align: center;
           padding: var(--spacing-lg);
-          color: #888;
+          color: var(--text-tertiary);
           font-size: 12px;
         ">
           <div style="margin-bottom: var(--spacing-sm);">
-            <svg width="24" height="24" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style="color: #888;">
+            <svg width="24" height="24" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style="color: var(--text-tertiary);">
               <rect x="6" y="8" width="36" height="24" rx="2" ry="2" stroke="currentColor" stroke-width="2" fill="none"/>
               <rect x="6" y="32" width="36" height="8" rx="2" ry="2" stroke="currentColor" stroke-width="2" fill="none"/>
               <circle cx="24" cy="20" r="3" fill="currentColor"/>
@@ -429,18 +468,18 @@ export class TerminalManager {
 
     // 显示连接信息和 shell 类型
     const shellInfo = this.bashEnvironmentInfo ?
-      `${this.bashEnvironmentInfo.shell_type} ${this.bashEnvironmentInfo.bash_version}` :
+      `${escapeHtml(String(this.bashEnvironmentInfo.shell_type))} ${escapeHtml(String(this.bashEnvironmentInfo.bash_version))}` :
       'shell';
 
     let html = `
-      <div style="color: #00ff00; margin-bottom: 8px;">
-        SSH连接已建立: ${connectionStatus.username}@${connectionStatus.host}:${connectionStatus.port} (${shellInfo})
+      <div style="color: var(--sev-success-fg); margin-bottom: 8px;">
+        SSH连接已建立: ${escapeHtml(connectionStatus.username)}@${escapeHtml(connectionStatus.host)}:${connectionStatus.port} (${shellInfo})
       </div>
     `;
 
     if (this.commandHistory.length === 0) {
       html += `
-        <div style="color: #888; font-size: 12px; margin-bottom: 16px;">
+        <div style="color: var(--text-tertiary); font-size: 12px; margin-bottom: 16px;">
           ${this.bashEnvironmentInfo?.shell_type === 'bash' ? 'Bash' : 'Shell'} 终端已就绪，可以执行命令
         </div>
       `;
@@ -450,10 +489,10 @@ export class TerminalManager {
         const promptPath = this.getPromptPath();
         html += `
           <div style="margin-bottom: 8px;">
-            <div style="color: #00ff00; margin-bottom: 4px;">
-              <span style="color: #00ff00;">${connectionStatus.username}</span><span style="color: #ffffff;">@</span><span style="color: #00ff00;">${connectionStatus.host}</span><span style="color: #ffffff;">:</span><span style="color: #0080ff;">${promptPath}</span><span style="color: #ffffff;">$ </span><span style="color: #ffffff;">${entry.command}</span>
+            <div style="color: var(--sev-success-fg); margin-bottom: 4px;">
+              <span style="color: var(--sev-success-fg);">${escapeHtml(connectionStatus.username)}</span><span style="color: var(--text-primary);">@</span><span style="color: var(--sev-success-fg);">${escapeHtml(connectionStatus.host)}</span><span style="color: var(--text-primary);">:</span><span style="color: var(--sev-info-fg);">${escapeHtml(promptPath)}</span><span style="color: var(--text-primary);">$ </span><span style="color: var(--text-primary);">${escapeHtml(entry.command)}</span>
             </div>
-            <div style="color: #cccccc; margin-bottom: 8px; white-space: pre-wrap;">${entry.output}</div>
+            <div style="color: var(--text-secondary); margin-bottom: 8px; white-space: pre-wrap;">${escapeHtml(entry.output)}</div>
           </div>
         `;
       });
@@ -466,6 +505,7 @@ export class TerminalManager {
    * 渲染终端输入区HTML
    */
   renderTerminalInputHTML(): string {
+    this.synchronizeTarget();
     const connectionStatus = sshConnectionManager.getConnectionStatus();
     const isConnected = connectionStatus?.connected || false;
 
@@ -496,14 +536,14 @@ export class TerminalManager {
 
     return `
       <div style="
-        background: #2a2a2a;
+        background: var(--bg-tertiary);
         padding: var(--spacing-sm) var(--spacing-md);
         display: flex;
         align-items: center;
         gap: var(--spacing-sm);
       ">
         <span
-          style="color: #00ff00; font-size: 12px; cursor: help;"
+          style="color: var(--sev-success-fg); font-size: 12px; cursor: help;"
           id="terminal-prompt"
           title="当前工作目录: ${isConnected ? this.currentWorkingDirectory : '未连接'}&#10;Shell: ${shellType}${this.bashEnvironmentInfo?.bash_version ? ' ' + this.bashEnvironmentInfo.bash_version : ''}"
         >${promptText}</span>
@@ -516,7 +556,7 @@ export class TerminalManager {
             flex: 1;
             background: transparent;
             border: none;
-            color: #ffffff;
+            color: var(--text-primary);
             font-family: 'Courier New', monospace;
             font-size: 14px;
             outline: none;
@@ -529,7 +569,7 @@ export class TerminalManager {
           style="
             background: rgba(255, 255, 255, 0.1);
             border: 1px solid rgba(255, 255, 255, 0.2);
-            color: #ffffff;
+            color: var(--text-primary);
             padding: 4px 8px;
             font-size: 11px;
             border-radius: 4px;
@@ -671,18 +711,20 @@ export class TerminalManager {
    * 与 bash 的行为一致。
    */
   private async handleTabCompletion(input: HTMLInputElement): Promise<void> {
+    this.synchronizeTarget();
     const value = input.value;
     const cursor = input.selectionStart ?? value.length;
     if (!value.trim()) return;
 
     let completions: string[] = [];
     try {
-      const res = await invoke('ssh_get_completion', {
+      const res = await invokeTargetBoundSSH<{ completions?: string[] } | string[] | null>('ssh_get_completion', {
         input: value,
         cursorPosition: cursor,
       }) as { completions?: string[] } | string[] | null;
       completions = Array.isArray(res) ? res : (res?.completions ?? []);
     } catch (e) {
+      this.synchronizeTarget();
       // 补全失败不该打断输入，静默记日志即可
       reportError(e, { module: 'Terminal', action: 'Tab 补全', silent: true });
       return;
@@ -757,4 +799,3 @@ export class TerminalManager {
 
 // 全局终端管理器实例
 export const terminalManager = new TerminalManager();
-

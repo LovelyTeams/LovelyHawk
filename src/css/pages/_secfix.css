@@ -3,7 +3,7 @@
 .sf-header { display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border-color);background:var(--bg-primary);flex-shrink:0; }
 .sf-header-left { display:flex;align-items:center;gap:10px; }
 .sf-header h2 { font-size:16px;font-weight:600;color:var(--text-primary);margin:0; }
-.sf-header .sf-badge { font-size:11px;padding:2px 8px;border-radius:10px;background:#ef4444;color:#fff; }
+.sf-header .sf-badge { font-size:11px;padding:2px 8px;border-radius:10px;background:var(--sev-critical-border-strong);color:var(--accent-contrast); }
 .sf-content { flex:1;overflow-y:auto;padding:0; }
 
 /* Toolbar */
@@ -11,7 +11,7 @@
 .sf-lang-bar { display:flex;gap:4px;flex-wrap:wrap; }
 .sf-lang-btn { padding:5px 12px;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-primary);color:var(--text-secondary);font-size:11px;cursor:pointer;transition:all .2s;white-space:nowrap; }
 .sf-lang-btn:hover { background:var(--hover-bg);color:var(--text-primary); }
-.sf-lang-btn.active { background:var(--accent-color);color:#fff;border-color:var(--accent-color); }
+.sf-lang-btn.active { background:var(--accent-color);color:var(--accent-contrast);border-color:var(--accent-color); }
 .sf-search { flex:1;min-width:160px;padding:6px 10px;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-primary);color:var(--text-primary);font-size:12px; }
 .sf-search:focus { outline:none;border-color:var(--accent-color); }
 
@@ -36,8 +36,8 @@
 /* Copy buttons */
 .sf-copy-btn { padding:3px 10px;border-radius:4px;border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--text-secondary);font-size:11px;cursor:pointer;transition:all .15s;white-space:nowrap; }
 .sf-copy-btn:hover { background:var(--hover-bg);color:var(--text-primary);border-color:var(--text-secondary); }
-.sf-copy-btn.highlight { background:rgba(239,68,68,.1);border-color:rgba(239,68,68,.3);color:#ef4444; }
-.sf-copy-btn.highlight:hover { background:rgba(239,68,68,.2); }
+.sf-copy-btn.highlight { background:var(--sev-critical-bg);border-color:var(--sev-critical-border);color:var(--sev-critical-fg); }
+.sf-copy-btn.highlight:hover { background:var(--sev-critical-bg-hover); }
 .sf-copy-btn.small { padding:2px 8px;font-size:10px; }
 
 /* Expanded */
@@ -46,10 +46,10 @@
 .sf-code-section { margin-bottom:10px; }
 .sf-code-label { display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;font-size:11px;font-weight:500;color:var(--text-primary); }
 .sf-code { margin:0;padding:10px 12px;border-radius:6px;font-family:'JetBrains Mono',monospace;font-size:11px;line-height:1.6;white-space:pre-wrap;word-break:break-all;overflow-x:auto; }
-.sf-code.bad { background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);color:var(--text-primary); }
-.sf-code.fix { background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.2);color:var(--text-primary); }
-.sf-code.oneliner { background:rgba(234,179,8,.08);border:1px solid rgba(234,179,8,.2);color:var(--text-primary); }
-.sf-code.verify { background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.2);color:var(--text-primary); }
+.sf-code.bad { background:var(--sev-critical-bg);border:1px solid var(--sev-critical-border);color:var(--text-primary); }
+.sf-code.fix { background:var(--sev-success-bg);border:1px solid var(--sev-success-border);color:var(--text-primary); }
+.sf-code.oneliner { background:var(--sev-warn-bg);border:1px solid var(--sev-warn-border);color:var(--text-primary); }
+.sf-code.verify { background:var(--sev-info-bg);border:1px solid var(--sev-info-border);color:var(--text-primary); }
 .sf-tags { display:flex;gap:4px;flex-wrap:wrap;margin-top:8px; }
 .sf-tag { padding:2px 8px;border-radius:8px;background:var(--bg-tertiary);font-size:10px;color:var(--text-secondary); }
 .sf-empty { text-align:center;padding:60px 20px;color:var(--text-secondary);font-size:13px; }
@@ -60,13 +60,13 @@
 
 /* 收藏按钮 & 置顶态 */
 .sf-fav-btn { border:none;background:transparent;color:var(--text-secondary);cursor:pointer;font-size:16px;line-height:1;padding:0 2px;transition:color .15s,transform .15s; }
-.sf-fav-btn:hover { color:#eab308;transform:scale(1.15); }
-.sf-fav-btn.on { color:#eab308; }
-.sf-card.favorited { border-color:rgba(234,179,8,.4);background:rgba(234,179,8,.03); }
-.sf-card.favorited .sf-card-lang { background:rgba(234,179,8,.15);color:#eab308; }
+.sf-fav-btn:hover { color:var(--sev-warn-fg);transform:scale(1.15); }
+.sf-fav-btn.on { color:var(--sev-warn-fg); }
+.sf-card.favorited { border-color:var(--sev-warn-border);background:color-mix(in srgb, var(--sev-warn-fg) 4%, transparent); }
+.sf-card.favorited .sf-card-lang { background:var(--sev-warn-tag-bg);color:var(--sev-warn-tag-fg); }
 
 /* CVE 标签 */
-.sf-cve-chip { padding:1px 6px;border-radius:4px;background:rgba(239,68,68,.1);color:#ef4444;font-size:10px;font-weight:600;font-family:'JetBrains Mono',monospace;white-space:nowrap; }
+.sf-cve-chip { padding:1px 6px;border-radius:4px;background:var(--sev-critical-bg);color:var(--sev-critical-fg);font-size:10px;font-weight:600;font-family:'JetBrains Mono',monospace;white-space:nowrap; }
 
 /* Meta 信息区 (CVE / 受影响版本) */
 .sf-meta { display:flex;flex-direction:column;gap:4px;padding:8px 10px;margin-bottom:10px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:6px; }

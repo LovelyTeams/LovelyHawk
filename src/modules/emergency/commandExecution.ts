@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH';
 
 export interface CommandExecutionOptions {
   command: string;
@@ -80,6 +80,10 @@ export function classifyCommandResult(raw: RawCommandExecutionResult, fallbackCo
     kind = 'nonZero';
     success = false;
     message = `命令返回非 0 退出码: ${exitCode}`;
+  } else if (exitCode === null) {
+    kind = 'error';
+    success = false;
+    message = '命令未返回退出状态，结果不可判定';
   } else if (!output.trim()) {
     kind = 'empty';
     message = '执行成功，无匹配结果';
@@ -99,7 +103,7 @@ export function classifyCommandResult(raw: RawCommandExecutionResult, fallbackCo
 }
 
 export async function executeEmergencyCommand(options: CommandExecutionOptions): Promise<CommandExecutionResult> {
-  const raw = await invoke<RawCommandExecutionResult>('ssh_execute_emergency_command_direct', {
+  const raw = await invokeTargetBoundSSH<RawCommandExecutionResult>('ssh_execute_emergency_command_direct', {
     command: options.command,
     username: options.username,
     cwd: options.cwd,

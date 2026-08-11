@@ -13,7 +13,8 @@
  * getFileByIndex()（错的），于是面板显示 A、删除的却是 B。
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { activeTargetContext } from '../core/targetContext';
 import { SftpManager, type SftpFileInfo } from './sftpManager';
 
 type SortMode = 'name-asc' | 'name-desc' | 'size-asc' | 'size-desc' | 'modified-asc' | 'modified-desc';
@@ -50,11 +51,14 @@ describe('SftpManager 索引一致性', () => {
   let mgr: SftpManager;
 
   beforeEach(() => {
+    activeTargetContext.clear();
     mgr = new SftpManager();
     // fileList 是私有的：直接注入以避开 Tauri invoke
     (mgr as unknown as { fileList: SftpFileInfo[] }).fileList = [...REMOTE_ORDER];
     (mgr as unknown as { sortedCache: unknown }).sortedCache = null;
   });
+
+  afterEach(() => activeTargetContext.clear());
 
   it('默认排序下，右键菜单取到的文件与表格渲染的行一致', () => {
     const shown = mgr.getCurrentFiles();
@@ -104,5 +108,24 @@ describe('SftpManager 索引一致性', () => {
     expect(mgr.getFileByIndex(-1)).toBeNull();
     expect(mgr.getFileByIndex(REMOTE_ORDER.length)).toBeNull();
     expect(mgr.getFileByIndex(9999)).toBeNull();
+  });
+
+  it('SSH 会话变化时清空上一目标的路径、列表和 UID 缓存', () => {
+    const target = {
+      sessionId: 'session-a', hostKeyFingerprint: 'SHA256:a', host: '10.0.0.1', port: 22, username: 'root',
+    };
+    activeTargetContext.activate(target);
+    expect(mgr.getCurrentFiles()).toEqual([]);
+
+    (mgr as unknown as { currentPath: string }).currentPath = '/var/www';
+    (mgr as unknown as { fileList: SftpFileInfo[] }).fileList = [...REMOTE_ORDER];
+    (mgr as unknown as { uidNameCache: Record<string, string> }).uidNameCache = { '1000': 'alice' };
+    (mgr as unknown as { uidCacheLoaded: boolean }).uidCacheLoaded = true;
+
+    activeTargetContext.activate({ ...target, sessionId: 'session-b' });
+
+    expect(mgr.getCurrentPath()).toBe('/');
+    expect(mgr.getCurrentFiles()).toEqual([]);
+    expect(mgr.resolveOwnerName('1000')).toBe('user');
   });
 });

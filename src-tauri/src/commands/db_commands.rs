@@ -1,20 +1,23 @@
+use crate::db_manager;
+use crate::db_manager::DbConnection;
+use crate::AppState;
 /**
  * 数据库命令处理器模块
  * 通过 SSH 远程管理 MySQL/PostgreSQL/Redis/MongoDB 等数据库
  */
-
 use tauri::State;
-use crate::AppState;
-use crate::db_manager;
-use crate::db_manager::DbConnection;
 
 // ==================== 数据库检测 ====================
 
 /// 检测远程服务器上安装的数据库
 #[tauri::command]
-pub async fn db_detect(state: State<'_, AppState>) -> Result<Vec<db_manager::DatabaseInfo>, String> {
+pub async fn db_detect(
+    session_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<db_manager::DatabaseInfo>, String> {
     let ssh = &state.ssh_manager;
-    db_manager::detect_databases(ssh)
+    let runner = db_manager::SessionDbRunner::new(ssh, &session_id);
+    db_manager::detect_databases(&runner)
 }
 
 // ==================== SQL 执行 ====================
@@ -30,8 +33,10 @@ pub async fn db_execute_sql(
     password: String,
     database: Option<String>,
     sql: String,
+    session_id: String,
 ) -> Result<db_manager::SqlResult, String> {
     let ssh = &state.ssh_manager;
+    let runner = db_manager::SessionDbRunner::new(ssh, &session_id);
     let conn = DbConnection {
         db_type: db_type.clone(),
         host,
@@ -40,7 +45,7 @@ pub async fn db_execute_sql(
         password,
         database,
     };
-    db_manager::execute_sql(ssh, &db_type, &conn, &sql)
+    db_manager::execute_sql(&runner, &db_type, &conn, &sql)
 }
 
 // ==================== 列出数据库 ====================
@@ -54,8 +59,10 @@ pub async fn db_list_databases(
     port: u16,
     username: String,
     password: String,
+    session_id: String,
 ) -> Result<Vec<String>, String> {
     let ssh = &state.ssh_manager;
+    let runner = db_manager::SessionDbRunner::new(ssh, &session_id);
     let conn = DbConnection {
         db_type: db_type.clone(),
         host,
@@ -64,7 +71,7 @@ pub async fn db_list_databases(
         password,
         database: None,
     };
-    db_manager::list_databases(ssh, &db_type, &conn)
+    db_manager::list_databases(&runner, &db_type, &conn)
 }
 
 // ==================== 列出表 ====================
@@ -79,8 +86,10 @@ pub async fn db_list_tables(
     username: String,
     password: String,
     database: String,
+    session_id: String,
 ) -> Result<Vec<db_manager::TableInfo>, String> {
     let ssh = &state.ssh_manager;
+    let runner = db_manager::SessionDbRunner::new(ssh, &session_id);
     let conn = DbConnection {
         db_type: db_type.clone(),
         host,
@@ -89,7 +98,7 @@ pub async fn db_list_tables(
         password,
         database: Some(database.clone()),
     };
-    db_manager::list_tables(ssh, &db_type, &conn, &database)
+    db_manager::list_tables(&runner, &db_type, &conn, &database)
 }
 
 // ==================== 列出列 ====================
@@ -105,8 +114,10 @@ pub async fn db_list_columns(
     password: String,
     database: String,
     table: String,
+    session_id: String,
 ) -> Result<Vec<db_manager::ColumnInfo>, String> {
     let ssh = &state.ssh_manager;
+    let runner = db_manager::SessionDbRunner::new(ssh, &session_id);
     let conn = DbConnection {
         db_type: db_type.clone(),
         host,
@@ -115,7 +126,7 @@ pub async fn db_list_columns(
         password,
         database: Some(database.clone()),
     };
-    db_manager::list_columns(ssh, &db_type, &conn, &database, &table)
+    db_manager::list_columns(&runner, &db_type, &conn, &database, &table)
 }
 
 // ==================== 列出用户 ====================
@@ -129,8 +140,10 @@ pub async fn db_list_users(
     port: u16,
     username: String,
     password: String,
+    session_id: String,
 ) -> Result<Vec<db_manager::DbUser>, String> {
     let ssh = &state.ssh_manager;
+    let runner = db_manager::SessionDbRunner::new(ssh, &session_id);
     let conn = DbConnection {
         db_type: db_type.clone(),
         host,
@@ -139,7 +152,7 @@ pub async fn db_list_users(
         password,
         database: None,
     };
-    db_manager::list_users(ssh, &db_type, &conn)
+    db_manager::list_users(&runner, &db_type, &conn)
 }
 
 // ==================== 服务控制 ====================
@@ -150,9 +163,11 @@ pub async fn db_service_control(
     state: State<'_, AppState>,
     db_type: String,
     action: String,
-) -> Result<String, String> {
+    session_id: String,
+) -> Result<db_manager::DbServiceControlResult, String> {
     let ssh = &state.ssh_manager;
-    db_manager::service_control(ssh, &db_type, &action)
+    let runner = db_manager::SessionDbRunner::new(ssh, &session_id);
+    db_manager::service_control(&runner, &db_type, &action)
 }
 
 // ==================== 数据库备份 ====================
@@ -167,8 +182,10 @@ pub async fn db_backup(
     username: String,
     password: String,
     database: String,
+    session_id: String,
 ) -> Result<String, String> {
     let ssh = &state.ssh_manager;
+    let runner = db_manager::SessionDbRunner::new(ssh, &session_id);
     let conn = DbConnection {
         db_type: db_type.clone(),
         host,
@@ -177,7 +194,7 @@ pub async fn db_backup(
         password,
         database: Some(database.clone()),
     };
-    db_manager::backup_database(ssh, &db_type, &conn, &database)
+    db_manager::backup_database(&runner, &db_type, &conn, &database)
 }
 
 // ==================== 数据库统计 ====================
@@ -191,8 +208,10 @@ pub async fn db_get_stats(
     port: u16,
     username: String,
     password: String,
+    session_id: String,
 ) -> Result<db_manager::DbStats, String> {
     let ssh = &state.ssh_manager;
+    let runner = db_manager::SessionDbRunner::new(ssh, &session_id);
     let conn = DbConnection {
         db_type: db_type.clone(),
         host,
@@ -201,5 +220,5 @@ pub async fn db_get_stats(
         password,
         database: None,
     };
-    db_manager::get_db_stats(ssh, &db_type, &conn)
+    db_manager::get_db_stats(&runner, &db_type, &conn)
 }

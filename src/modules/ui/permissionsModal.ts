@@ -1,6 +1,8 @@
 // LovelyRes - 权限编辑模态组件
 // 提供用户友好的权限编辑界面
 
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH';
+
 export class PermissionsModal {
   private modal: HTMLElement | null = null;
   private isVisible: boolean = false;
@@ -427,7 +429,7 @@ export class PermissionsModal {
     const newMode = this.getPermissionsFromCheckboxes();
     
     try {
-      await (window as any).__TAURI__.core.invoke('sftp_chmod', {
+      await invokeTargetBoundSSH('sftp_chmod', {
         path: this.currentFilePath,
         mode: newMode
       });

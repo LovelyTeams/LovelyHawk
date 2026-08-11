@@ -2,6 +2,8 @@
  * 新建文件夹模态对话框
  */
 
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH';
+
 export class CreateFolderModal {
   private modal: HTMLElement | null = null;
   private isVisible: boolean = false;
@@ -352,7 +354,7 @@ export class CreateFolderModal {
       const fullPath = `${this.currentParentDir}/${folderName}`;
       
       // 调用后端API创建文件夹
-      await (window as any).__TAURI__.core.invoke('sftp_create_directory', {
+      await invokeTargetBoundSSH('sftp_create_directory', {
         remotePath: fullPath
       });
 

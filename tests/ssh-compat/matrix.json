@@ -1,0 +1,24 @@
+{
+  "schema": "lovelyres-ssh-compatibility-matrix/v1",
+  "openssh": [
+    { "label": "OpenSSH 7.x", "image": "alpine:3.8", "expectedVersion": "OpenSSH_7\\." },
+    { "label": "OpenSSH 8.x", "image": "alpine:3.15", "expectedVersion": "OpenSSH_8\\." },
+    { "label": "OpenSSH 9.x", "image": "alpine:3.20", "expectedVersion": "OpenSSH_9\\." },
+    { "label": "OpenSSH 10.x", "image": "alpine:edge", "expectedVersion": "OpenSSH_10\\." }
+  ],
+  "dropbear": [
+    { "label": "Dropbear current", "image": "alpine:3.20" }
+  ],
+  "distros": [
+    { "label": "Ubuntu 20.04", "image": "ubuntu:20.04", "expectedOs": "ubuntu" },
+    { "label": "Ubuntu 24.04", "image": "ubuntu:24.04", "expectedOs": "ubuntu" },
+    { "label": "Debian 12", "image": "debian:12", "expectedOs": "debian" },
+    { "label": "Rocky Linux 9", "image": "rockylinux:9", "expectedOs": "rocky" },
+    { "label": "Alpine 3.20", "image": "alpine:3.20", "expectedOs": "alpine" },
+    { "label": "openEuler 22.03 LTS SP4", "image": "openeuler/openeuler:22.03-lts-sp4", "expectedOs": "openEuler" },
+    { "label": "Anolis OS 8.9", "image": "openanolis/anolisos:8.9", "expectedOs": "anolis" },
+    { "label": "openSUSE Leap 15.6", "image": "opensuse/leap:15.6", "expectedOs": "opensuse" }
+  ],
+  "auth": ["password", "key", "ecdsa-key", "certificate", "keyboard-interactive", "agent", "rsa-agent", "jump-host", "rsa-private-key-rejected"],
+  "faults": ["ipv6", "high-latency", "disconnect", "no-sftp", "no-pty", "host-key-change", "restricted-account"]
+}

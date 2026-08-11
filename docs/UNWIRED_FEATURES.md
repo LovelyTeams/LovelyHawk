@@ -19,7 +19,6 @@
 | `src/modules/detection/complianceRules.ts` | 217 行 | 等保 2.0 / CIS Benchmark 合规检查框架，把检测项 ID 映射到合规条款 | 已有 `detectionItemId` 字段对接 `quickDetectionManager`。缺一个合规视图（按标准分组展示达标情况）与导出。快速检测已于本轮恢复，可以接了 |
 | `src/modules/ui/kubernetesContextMenu.ts` | 375 行 | K8s 资源右键菜单，已 `extends BaseContextMenu` 并导出单例 | K8s 页面当前完全没有右键菜单。参照 `tableUpdateManager` 里其他表格的 `addContextMenuListener` 用法接入 `kubernetesRenderer` 的 Pod/Deployment 表格 |
 | `src/modules/sftp/sftpEnhanced.ts` | 249 行 | 远程文件搜索、批量操作进度追踪 | 与现有 `remote/sftpManager.ts` 的职责边界需要先厘清（是增强还是重复实现），再决定合并还是接独立入口 |
-| `src/modules/ai/commandExplainer.ts` | 146 行 | 对应急命令给 AI 自然语言解释，带本地缓存 | 缺调用点。适合接在命令执行页/右键菜单的「解释这条命令」。注意赛场离线时 AI 不可用，需要降级（参考 `aiService.toFriendlyError`） |
 | `src/modules/monitoring/liveMonitor.ts` | 206 行 | CPU/内存/磁盘/网络定时轮询 + 数据缓存，通过 eventBus 广播 | 原本唯一的消费方 `composables/useManagers.ts` 已随本轮清理删除（Vue composable，但本项目不是 Vue 架构）。**接线前先确认**它与系统信息页现有的「实时状态」Tab 是否重复 |
 | `src/modules/utils/listenerManager.ts` | 155 行 | `ListenerScope`：统一管理 addEventListener / setInterval 的生命周期 | 全项目 198 处 addEventListener 对 19 处 removeEventListener。目前靠各页面管理器的 `eventsBound` 标志 + `outerHTML` 整体替换兜底，尚未出现实际泄漏。要推广的话建议从模态框和右键菜单开始 |
 
@@ -28,7 +27,6 @@
 | 命令 | 说明 |
 |---|---|
 | `get_app_settings` / `save_app_settings` | 结构化的设置读写 API。前端目前走 `read_settings_file` / `write_settings_file` + localStorage，绕过了这对命令 |
-| `get_rsa_public_key` | `crypto_keys.rs` 整个模块闲置。而 AI 的 API Key 目前是明文存 localStorage，这是可以配上的 |
 | `db_get_stats` | `db_manager.rs:850` 已实现，数据库页没有入口 |
 | `get_log_file_info` | 日志页未使用 |
 | `sftp_file_analysis` | 前端只用 `sftp_file_analysis_independent` 变体，此命令冗余，可考虑删除 |

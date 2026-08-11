@@ -3,6 +3,7 @@
  */
 
 import * as IconPark from '@icon-park/svg'
+import { shq } from '../core/shellEscape'
 import { BaseContextMenu, type MenuAction } from './contextMenu/baseContextMenu'
 
 export class TimerContextMenu extends BaseContextMenu {
@@ -126,6 +127,10 @@ export class TimerContextMenu extends BaseContextMenu {
   protected resolveAction(action: string): MenuAction | null {
     const timer = this.currentTimer.timer || ''
     const activates = this.currentTimer.activates || timer.replace('.timer', '.service')
+    if (!/^[A-Za-z0-9_.@:-]{1,256}$/.test(timer) || !/^[A-Za-z0-9_.@:-]{1,256}$/.test(activates)) return null
+    const quotedTimer = shq(timer)
+    const activeState = `if systemctl is-active --quiet ${quotedTimer}; then echo active; else echo inactive; fi`
+    const enabledState = `if systemctl is-enabled --quiet ${quotedTimer}; then echo enabled; else echo disabled; fi`
 
     const actions: Record<string, MenuAction> = {
       'timer-status': {
@@ -159,19 +164,22 @@ export class TimerContextMenu extends BaseContextMenu {
         actionName: '查看触发单元日志'
       },
       'stop-timer': {
-        command: `systemctl stop ${timer} && echo '✓ 定时器已停止' && systemctl status ${timer} --no-pager`,
+        command: `systemctl stop ${quotedTimer}`,
         title: `停止 - ${timer}`,
-        actionName: '停止定时器'
+        actionName: '停止定时器', mutating: true, dangerous: true,
+        verifyCommand: activeState, verifyExpected: 'inactive',
       },
       'disable-timer': {
-        command: `systemctl disable ${timer} && echo '✓ 定时器已禁用' && systemctl status ${timer} --no-pager`,
+        command: `systemctl disable ${quotedTimer}`,
         title: `禁用 - ${timer}`,
-        actionName: '禁用定时器'
+        actionName: '禁用定时器', mutating: true, dangerous: true,
+        verifyCommand: enabledState, verifyExpected: 'disabled',
       },
       'mask-timer': {
-        command: `systemctl mask ${timer} && echo '✓ 定时器已屏蔽' && systemctl status ${timer} --no-pager`,
+        command: `systemctl mask ${quotedTimer}`,
         title: `屏蔽 - ${timer}`,
-        actionName: '屏蔽定时器'
+        actionName: '屏蔽定时器', mutating: true, dangerous: true,
+        verifyCommand: `systemctl is-enabled ${quotedTimer}`, verifyExpected: 'masked',
       }
     }
 

@@ -102,7 +102,7 @@ impl Default for SecuritySettings {
     fn default() -> Self {
         Self {
             save_passwords: false,
-            session_timeout: 86400000, // 24小时 - 大幅增加避免频繁超时
+            session_timeout: 86400000,   // 24小时 - 大幅增加避免频繁超时
             require_confirmation: false, // 关闭确认要求，减少操作限制
         }
     }
@@ -140,7 +140,7 @@ impl Default for SSHSettings {
     fn default() -> Self {
         Self {
             keep_alive_interval: 30000, // 30秒
-            connection_timeout: 0, // 0 = 禁用超时，避免长时间操作被中断
+            connection_timeout: 0,      // 0 = 禁用超时，避免长时间操作被中断
             max_retries: 3,
         }
     }
@@ -171,7 +171,7 @@ pub fn load_settings() -> Result<AppSettings, String> {
     let settings_file = get_settings_file_path()?;
 
     if !settings_file.exists() {
-        println!("🔍 设置文件不存在，返回默认设置");
+        crate::alog_info!("设置文件不存在，返回默认设置");
         return Ok(AppSettings::default());
     }
 
@@ -181,7 +181,7 @@ pub fn load_settings() -> Result<AppSettings, String> {
     let settings: AppSettings =
         serde_json::from_str(&settings_content).map_err(|e| format!("解析设置文件失败: {}", e))?;
 
-    println!("✅ 成功加载应用设置");
+    crate::alog_info!("成功加载应用设置");
     Ok(settings)
 }
 
@@ -194,7 +194,7 @@ pub fn save_settings(settings: &AppSettings) -> Result<(), String> {
 
     fs::write(&settings_file, settings_content).map_err(|e| format!("写入设置文件失败: {}", e))?;
 
-    println!("✅ 成功保存应用设置");
+    crate::alog_info!("成功保存应用设置");
     Ok(())
 }
 
@@ -217,7 +217,7 @@ pub fn backup_settings() -> Result<PathBuf, String> {
 
     fs::write(&backup_file, settings_content).map_err(|e| format!("写入备份文件失败: {}", e))?;
 
-    println!("✅ 设置已备份到: {:?}", backup_file);
+    crate::alog_info!("设置已备份到: {:?}", backup_file);
     Ok(backup_file)
 }
 
@@ -235,7 +235,7 @@ pub fn restore_settings(backup_file: PathBuf) -> Result<(), String> {
 
     save_settings(&settings)?;
 
-    println!("✅ 设置已从备份恢复: {:?}", backup_file);
+    crate::alog_info!("设置已从备份恢复: {:?}", backup_file);
     Ok(())
 }
 

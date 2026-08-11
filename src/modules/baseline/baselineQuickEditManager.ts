@@ -10,6 +10,7 @@ import {
   type BaselineConfigItem,
 } from './baselineConfigs';
 import { SystemDetector, type SystemInfo } from '../utils/systemDetector';
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH';
 import { statusIcon } from '../ui/iconMapping';
 import { showAlert, showConfirm } from '../ui/confirmDialog';
 import {
@@ -17,6 +18,19 @@ import {
   buildQuickActionCommand,
   QUICK_ACTIONS_NEEDING_PARAM,
 } from './quickActionCommands';
+import { operationJournal } from '../core/operationJournal';
+import { activeTargetContext, type TargetIdentity } from '../core/targetContext';
+import { shq } from '../core/shellEscape';
+import { reportError } from '../utils/errorHandler';
+import { buildEditorBackupPath, contentSha256, validateEditableRemotePath } from './baselineFileEditor';
+import { escapeHtml } from '../core/htmlEscape';
+
+interface BaselineCommandReceipt {
+  output: string;
+  exitCode: number | null;
+  timedOut: boolean;
+  success: boolean;
+}
 
 interface ChangeHistoryEntry {
   timestamp: string;
@@ -37,6 +51,7 @@ export class BaselineQuickEditManager {
   private editorFilePath: string = '';
   private editorOriginalContent: string = '';
   private editorModified: boolean = false;
+  private targetSessionId: string | null = null;
 
   async initialize(): Promise<void> {
     if (!this.eventsBound) {
@@ -44,28 +59,66 @@ export class BaselineQuickEditManager {
       this.eventsBound = true;
     }
 
-    // 检测系统类型
-    this.detectSystem();
+    const target = activeTargetContext.get();
+    if (!target) {
+      window.showNotification?.('没有已确认的活动 SSH 目标，请先连接服务器', 'warning');
+      return;
+    }
+    if (this.targetSessionId !== target.sessionId) {
+      const discardedUnsaved = this.resetTargetState();
+      this.targetSessionId = target.sessionId;
+      if (discardedUnsaved) {
+        window.showNotification?.('目标会话已变化，已丢弃上一会话未应用的基线修改', 'warning');
+      }
+    }
+
+    try {
+      await this.detectSystem(target);
+    } catch (error) {
+      reportError(error, { module: 'BaselineQuickEdit', action: '初始化目标环境' });
+    }
+  }
+
+  private resetTargetState(): boolean {
+    const discardedUnsaved = this.pendingChanges.size > 0 || this.editorModified;
+    this.selectedCategoryId = null;
+    this.currentValues.clear();
+    this.pendingChanges.clear();
+    this.systemInfo = '';
+    this.detectedDistro = 'generic';
+    this.detectedSystemInfo = null;
+    this.editorFilePath = '';
+    this.editorOriginalContent = '';
+    this.editorModified = false;
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+    return discardedUnsaved;
   }
 
   // ─── 系统检测 ───
 
-  private async detectSystem(): Promise<void> {
+  private async detectSystem(target: TargetIdentity): Promise<void> {
     const badge = document.getElementById('bl-sys-name');
     try {
       const info = await SystemDetector.detectSystem();
+      if (!activeTargetContext.matches(target)) throw new Error('系统检测期间活动目标已变化');
       this.detectedSystemInfo = info;
       this.detectedDistro = info.type;
       this.systemInfo = info.prettyName || info.name || 'Linux';
-    } catch {
+    } catch (error) {
+      if (!activeTargetContext.matches(target)) throw error;
       // 回退到手动解析
       try {
         const output = await this.executeCommand('cat /etc/os-release 2>/dev/null | grep -E "^(PRETTY_NAME|ID)=" | head -2');
+        if (!activeTargetContext.matches(target)) throw new Error('系统检测期间活动目标已变化');
         const nameMatch = output.match(/PRETTY_NAME="?([^"\n]+)"?/);
         const idMatch = output.match(/\nID="?([^"\n]+)"?/) || output.match(/^ID="?([^"\n]+)"?/);
         this.systemInfo = nameMatch ? nameMatch[1] : 'Linux';
         this.detectedDistro = idMatch ? idMatch[1].toLowerCase() : 'generic';
-      } catch {
+      } catch (fallbackError) {
+        if (!activeTargetContext.matches(target)) throw fallbackError;
         this.systemInfo = 'Linux';
         this.detectedDistro = 'generic';
       }
@@ -82,6 +135,19 @@ export class BaselineQuickEditManager {
   private bindEvents(): void {
     document.addEventListener('click', (e) => {
       const target = e.target as HTMLElement;
+      if (target.closest('#bl-btn-refresh')) {
+        if (this.selectedCategoryId) this.loadCategoryValues(this.selectedCategoryId);
+        return;
+      }
+      if (target.closest('#bl-btn-recommend-all')) {
+        this.applyAllRecommended();
+        return;
+      }
+      if (target.closest('#bl-btn-history')) {
+        this.showHistory();
+        return;
+      }
+
       const actionEl = target.closest('[data-bl-action]') as HTMLElement;
       if (!actionEl) return;
 
@@ -142,6 +208,10 @@ export class BaselineQuickEditManager {
 
     document.addEventListener('input', (e) => {
       const target = e.target as HTMLElement;
+      if (target.id === 'bl-search-input' && target instanceof HTMLInputElement) {
+        this.filterItems(target.value.trim().toLowerCase());
+        return;
+      }
       if (target.getAttribute('data-bl-action') !== 'change-value') return;
       if (target instanceof HTMLInputElement && (target.type === 'number' || target.type === 'text')) {
         const itemId = target.getAttribute('data-bl-item-id') || '';
@@ -152,29 +222,6 @@ export class BaselineQuickEditManager {
       }
     });
 
-    // 搜索
-    const searchInput = document.getElementById('bl-search-input');
-    if (searchInput) {
-      searchInput.addEventListener('input', () => {
-        const query = (searchInput as HTMLInputElement).value.trim().toLowerCase();
-        this.filterItems(query);
-      });
-    }
-
-    // 工具栏按钮
-    document.getElementById('bl-btn-refresh')?.addEventListener('click', () => {
-      if (this.selectedCategoryId) {
-        this.loadCategoryValues(this.selectedCategoryId);
-      }
-    });
-
-    document.getElementById('bl-btn-recommend-all')?.addEventListener('click', () => {
-      this.applyAllRecommended();
-    });
-
-    document.getElementById('bl-btn-history')?.addEventListener('click', () => {
-      this.showHistory();
-    });
   }
 
   // ─── 分类选择 ───
@@ -195,6 +242,11 @@ export class BaselineQuickEditManager {
   private async loadCategoryValues(categoryId: string): Promise<void> {
     const category = baselineCategories.find(c => c.id === categoryId);
     if (!category) return;
+    const capturedTarget = activeTargetContext.get();
+    if (!capturedTarget) {
+      window.showNotification?.('没有已确认的活动 SSH 目标', 'warning');
+      return;
+    }
 
     const mainEl = document.getElementById('bl-main');
     if (!mainEl) return;
@@ -210,7 +262,8 @@ export class BaselineQuickEditManager {
     try {
       // 批量读取所有配置项的当前值（使用发行版感知的命令）
       const commands = category.items.map(item => resolveForDistro(item, this.detectedDistro).readCommand);
-      const results = await this.executeBatchCommands(commands);
+      const results = await this.executeBatchCommands(commands, capturedTarget);
+      if (!activeTargetContext.matches(capturedTarget)) throw new Error('读取配置期间活动目标已变化');
 
       // 解析结果
       for (let i = 0; i < category.items.length; i++) {
@@ -231,8 +284,8 @@ export class BaselineQuickEditManager {
     } catch (err) {
       mainEl.innerHTML = `
         <div class="bl-empty-state">
-          <div class="bl-empty-title" style="color: #ef4444;">读取配置失败</div>
-          <div class="bl-empty-desc">${String(err)}</div>
+          <div class="bl-empty-title" style="color: var(--sev-critical-fg);">读取配置失败</div>
+          <div class="bl-empty-desc">${escapeHtml(String(err))}</div>
         </div>
       `;
     }
@@ -372,6 +425,12 @@ export class BaselineQuickEditManager {
       return;
     }
 
+    const capturedTarget = activeTargetContext.get();
+    if (!capturedTarget) {
+      window.showNotification?.('请先连接并确认目标主机', 'error');
+      return;
+    }
+
     // SSH 防锁定检查
     const sshPortChange = changeList.find(c => c.item.id === 'ssh-port');
     const sshPasswordChange = changeList.find(c => c.item.id === 'ssh-password-auth' && c.newValue === 'no');
@@ -382,6 +441,7 @@ export class BaselineQuickEditManager {
         confirmText: '我已确认',
         cancelText: '取消',
         dangerous: true,
+        defaultFocus: 'cancel',
       });
       if (!confirmed) return;
     }
@@ -393,6 +453,7 @@ export class BaselineQuickEditManager {
         confirmText: '已配置密钥',
         cancelText: '取消',
         dangerous: true,
+        defaultFocus: 'cancel',
       });
       if (!confirmed) return;
     }
@@ -401,9 +462,11 @@ export class BaselineQuickEditManager {
     const summary = changeList.map(c => `  ${c.item.name}: ${c.oldValue} → ${c.newValue}`).join('\n');
     const confirmed = await showConfirm({
       title: '确认应用变更',
-      message: `即将修改以下 ${changeList.length} 项配置：\n\n${summary}\n\n将在修改前自动备份原文件。`,
+      message: `目标：${capturedTarget.username}@${capturedTarget.host}:${capturedTarget.port}\n指纹：${capturedTarget.hostKeyFingerprint}\n\n即将修改以下 ${changeList.length} 项配置：\n\n${summary}\n\n将在修改前自动备份原文件。`,
       confirmText: '应用变更',
       cancelText: '取消',
+      dangerous: true,
+      defaultFocus: 'cancel',
     });
     if (!confirmed) return;
 
@@ -415,34 +478,88 @@ export class BaselineQuickEditManager {
     }
 
     try {
-      // 按文件分组备份
-      const backupCommands = new Set<string>();
-      for (const c of changeList) {
-        backupCommands.add(resolveForDistro(c.item, this.detectedDistro).backupCommand);
-      }
+      if (!activeTargetContext.matches(capturedTarget)) throw new Error('确认后活动目标已变化，已停止应用');
+      const fileBackups = new Map<string, { backupPath: string; beforeHash: string }>();
+      const newlyCreatedFiles = new Set<string>();
+      const batchTimestamp = Date.now();
+      const resolvedItems = changeList.map(change => ({
+        change,
+        resolved: resolveForDistro(change.item, this.detectedDistro),
+      }));
 
-      // 执行备份
-      if (backupCommands.size > 0) {
-        await this.executeBatchCommands(Array.from(backupCommands));
-      }
-
-      // 执行写入
-      const writeCommands = changeList.map(c => resolveForDistro(c.item, this.detectedDistro).writeCommand(c.newValue));
-      const results = await this.executeBatchCommands(writeCommands);
-
-      // 检查结果
-      let failCount = 0;
-      for (let i = 0; i < results.length; i++) {
-        if (results[i] === null) {
-          failCount++;
-          window.showNotification?.(`${changeList[i].item.name} 写入失败`, 'error');
+      const candidateFiles = new Set(resolvedItems.map(item => item.resolved.filePath));
+      for (const candidate of candidateFiles) {
+        if (!/^\/(etc|boot|home|opt|var\/opt)(\/|$)/.test(candidate) || /[*?\[\]{}$~]/.test(candidate)) continue;
+        let path: string;
+        try { path = validateEditableRemotePath(candidate); } catch { continue; }
+        const kind = await this.executeCommand(`if [ -f ${shq(path)} ]; then echo FILE; elif [ -e ${shq(path)} ]; then echo OTHER; else echo MISSING; fi`);
+        if (kind.trim() === 'MISSING') {
+          newlyCreatedFiles.add(path);
+          continue;
         }
+        if (kind.trim() !== 'FILE') continue;
+        const hashCommand = `(sha256sum -- ${shq(path)} 2>/dev/null || busybox sha256sum ${shq(path)} 2>/dev/null) | awk '{print $1}'`;
+        const beforeHash = (await this.executeCommand(hashCommand)).trim();
+        if (!/^[a-f0-9]{64}$/i.test(beforeHash)) throw new Error(`无法计算 ${path} 的备份前哈希`);
+        const backupPath = `${path}.lovelyres.batch.${batchTimestamp}`;
+        await this.executeCommand(`cp -p -- ${shq(path)} ${shq(backupPath)}`);
+        const backupHash = (await this.executeCommand(`(sha256sum -- ${shq(backupPath)} 2>/dev/null || busybox sha256sum ${shq(backupPath)} 2>/dev/null) | awk '{print $1}'`)).trim();
+        if (backupHash !== beforeHash) throw new Error(`${path} 的备份读回校验失败`);
+        fileBackups.set(path, { backupPath, beforeHash });
       }
+
+      const writeReceipts: BaselineCommandReceipt[] = [];
+      const verifyReceipts: BaselineCommandReceipt[] = [];
+      const verifiedItemIds = new Set<string>();
+      for (const { change, resolved } of resolvedItems) {
+        if (!activeTargetContext.matches(capturedTarget)) throw new Error('应用期间活动目标已变化，已停止后续变更');
+        const writeReceipt = await this.executeCommandResult(resolved.writeCommand(change.newValue));
+        writeReceipts.push(writeReceipt);
+        if (!writeReceipt.success) {
+          verifyReceipts.push({ output: '写入失败，未验证', exitCode: null, timedOut: false, success: false });
+          continue;
+        }
+        const verifyReceipt = await this.executeCommandResult(resolved.readCommand);
+        verifyReceipts.push(verifyReceipt);
+        if (!verifyReceipt.success) continue;
+        const match = verifyReceipt.output.match(new RegExp(change.item.parseRegex, 'i'));
+        if (match?.[1]?.trim() === change.newValue) verifiedItemIds.add(change.item.id);
+      }
+
+      const failCount = changeList.length - verifiedItemIds.size;
+      const fullyRestorable = resolvedItems.every(item =>
+        fileBackups.has(item.resolved.filePath) || newlyCreatedFiles.has(item.resolved.filePath));
+      const restoreCommands = [
+        ...[...fileBackups.entries()].map(([path, backup]) => `cp -p -- ${shq(backup.backupPath)} ${shq(path)}`),
+        ...[...newlyCreatedFiles].map(path => `rm -f -- ${shq(path)}`),
+      ];
+      const restoreChecks = [
+        ...[...fileBackups.entries()].map(([path, backup]) =>
+          `[ "$(sha256sum -- ${shq(path)} 2>/dev/null | awk '{print $1}')" = ${shq(backup.beforeHash)} ]`),
+        ...[...newlyCreatedFiles].map(path => `[ ! -e ${shq(path)} ]`),
+      ];
+      const firstFailed = writeReceipts.find(receipt => !receipt.success);
+      operationJournal.record({
+        source: 'baseline', server: capturedTarget.host, target: capturedTarget,
+        title: `批量应用 ${changeList.length} 项基线配置`,
+        command: resolvedItems.map(item => item.resolved.writeCommand(item.change.newValue)).join('\n'),
+        restoreCommand: fullyRestorable && restoreCommands.length ? restoreCommands.join(' && ') : undefined,
+        restoreVerifyCommand: fullyRestorable && restoreChecks.length ? `${restoreChecks.join(' && ')} && echo RESTORE_OK` : undefined,
+        restoreVerifyExpected: fullyRestorable && restoreChecks.length ? 'RESTORE_OK' : undefined,
+        beforeValue: changeList.map(change => `${change.item.name}=${change.oldValue}`).join('; '),
+        afterValue: changeList.map(change => `${change.item.name}=${change.newValue}`).join('; '),
+        backupInfo: `${fullyRestorable ? '完整可回滚' : '仅部分文件有备份，整批不可一键回滚'}：${[...fileBackups.values()].map(item => `${item.backupPath} (${item.beforeHash})`).join('; ') || '无常规文件备份'}`,
+        output: writeReceipts.map((receipt, index) => `${changeList[index].item.name}: ${receipt.output}`).join('\n'),
+        exitCode: firstFailed?.exitCode ?? 0, timedOut: Boolean(firstFailed?.timedOut),
+        verifyCommand: resolvedItems.map(item => item.resolved.readCommand).join('\n'),
+        verifyOutput: verifyReceipts.map((receipt, index) => `${changeList[index].item.name}: ${receipt.output}`).join('\n'),
+        verified: failCount === 0, success: failCount === 0,
+      });
 
       if (failCount === 0) {
-        window.showNotification?.(`${changeList.length} 项配置已成功应用`, 'success');
+        window.showNotification?.(`${changeList.length} 项配置已应用并读回验证`, 'success');
       } else {
-        window.showNotification?.(`${changeList.length - failCount}/${changeList.length} 项配置已应用，${failCount} 项失败`, 'warning');
+        window.showNotification?.(`${changeList.length - failCount}/${changeList.length} 项已验证，${failCount} 项失败或不一致`, 'warning');
       }
 
       // 检查是否需要重启服务
@@ -456,30 +573,42 @@ export class BaselineQuickEditManager {
         }
       }
 
-      if (services.size > 0) {
+      if (services.size > 0 && failCount === 0) {
         const serviceNames = Array.from(services).join(', ');
         const restartConfirmed = await showConfirm({
           title: '重启服务',
           message: `以下服务需要重启才能使配置生效：\n\n${serviceNames}\n\n是否立即重启？`,
           confirmText: '重启服务',
           cancelText: '稍后手动重启',
+          dangerous: true,
+          defaultFocus: 'cancel',
         });
 
         if (restartConfirmed) {
           const cmds = Array.from(restartCommands.values());
-          await this.executeBatchCommands(cmds);
-          window.showNotification?.(`服务 ${serviceNames} 已重启`, 'success');
+          const restartReceipts: BaselineCommandReceipt[] = [];
+          for (const command of cmds) restartReceipts.push(await this.executeCommandResult(command));
+          const restarted = restartReceipts.every(receipt => receipt.success);
+          operationJournal.record({
+            source: 'baseline', server: capturedTarget.host, target: capturedTarget,
+            title: `重启基线相关服务：${serviceNames}`, command: cmds.join('\n'),
+            output: restartReceipts.map(receipt => receipt.output).join('\n'),
+            exitCode: restartReceipts.find(receipt => !receipt.success)?.exitCode ?? 0,
+            timedOut: restartReceipts.some(receipt => receipt.timedOut), success: restarted,
+          });
+          window.showNotification?.(restarted ? `服务 ${serviceNames} 已重启` : `服务 ${serviceNames} 重启未全部成功`, restarted ? 'success' : 'error');
         }
       }
 
       // 保存历史
-      this.saveHistory(changeList);
+      const appliedChanges = changeList.filter(change => verifiedItemIds.has(change.item.id));
+      if (appliedChanges.length) this.saveHistory(appliedChanges);
 
-      // 更新 currentValues 并清除 pendingChanges
-      for (const c of changeList) {
+      // 只提交读回验证通过的状态，失败项保留待处理。
+      for (const c of appliedChanges) {
         this.currentValues.set(c.item.id, c.newValue);
+        this.pendingChanges.delete(c.item.id);
       }
-      this.pendingChanges.clear();
 
       // 刷新编辑器
       if (this.selectedCategoryId) {
@@ -492,6 +621,7 @@ export class BaselineQuickEditManager {
       this.updateDiffBar();
 
     } catch (err) {
+      reportError(err, { module: 'Baseline', action: '应用基线变更', silent: true });
       window.showNotification?.(`应用变更失败: ${err}`, 'error');
     } finally {
       if (applyBtn) {
@@ -561,9 +691,9 @@ export class BaselineQuickEditManager {
     }
 
     if (nonCompliantCount > 0) {
-      statusEl.innerHTML = `<span style="color: #f97316; font-weight: 600;">${nonCompliantCount}</span>`;
+      statusEl.innerHTML = `<span style="color: var(--sev-high-fg); font-weight: 600;">${nonCompliantCount}</span>`;
     } else {
-      statusEl.innerHTML = `<span style="color: #22c55e;">${statusIcon('success', { size: 16 })}</span>`;
+      statusEl.innerHTML = `<span style="color: var(--sev-success-fg);">${statusIcon('success', { size: 16 })}</span>`;
     }
   }
 
@@ -658,9 +788,14 @@ export class BaselineQuickEditManager {
   // ─── SSH 命令执行 ───
 
   private async executeCommand(command: string): Promise<string> {
-    const tauriInvoke = (window as any).__TAURI__?.core?.invoke;
-    const sshManager = (window as any).app?.sshManager;
+    const result = await this.executeCommandResult(command);
+    if (!result.success) {
+      throw new Error(`${result.timedOut ? '命令执行超时' : `命令退出码 ${result.exitCode ?? '未知'}`}${result.output ? `: ${result.output}` : ''}`);
+    }
+    return result.output;
+  }
 
+  private async executeCommandResult(command: string): Promise<BaselineCommandReceipt> {
     const withTimeout = <T>(p: Promise<T>, ms = 30000): Promise<T> => {
       return new Promise<T>((resolve, reject) => {
         const t = setTimeout(() => reject(new Error('执行超时')), ms);
@@ -668,59 +803,32 @@ export class BaselineQuickEditManager {
       });
     };
 
-    if (tauriInvoke) {
-      try {
-        const result: any = await withTimeout(tauriInvoke('ssh_execute_command_direct', { command }));
-        if (result && typeof result === 'object') {
-          return typeof result.output === 'string' ? result.output : typeof result.stdout === 'string' ? result.stdout : JSON.stringify(result);
-        }
-        return String(result ?? '');
-      } catch (e: any) {
-        if (sshManager?.executeCommand) {
-          return await withTimeout(sshManager.executeCommand(command), 20000);
-        }
-        throw e;
-      }
-    } else if (sshManager?.executeCommand) {
-      return await withTimeout(sshManager.executeCommand(command));
-    }
-
-    throw new Error('未连接到服务器');
+    const result: any = await withTimeout(
+      invokeTargetBoundSSH('ssh_execute_command_direct', { command }),
+    );
+    const output = typeof result?.output === 'string'
+      ? result.output
+      : typeof result?.stdout === 'string' ? result.stdout : '';
+    const exitCode = typeof result?.exit_code === 'number' ? result.exit_code : null;
+    const timedOut = result?.timed_out === true;
+    return { output, exitCode, timedOut, success: !timedOut && exitCode === 0 };
   }
 
-  private async executeBatchCommands(commands: string[]): Promise<string[]> {
-    const tauriInvoke = (window as any).__TAURI__?.core?.invoke;
-
-    if (tauriInvoke) {
-      try {
-        const results: any[] = await tauriInvoke('ssh_execute_batch_commands', { commands });
-        return results.map((r: any) => {
-          if (r.success && r.output) {
-            return typeof r.output === 'object' ? (r.output.output || r.output.stdout || '') : String(r.output);
-          }
-          return r.error || '';
-        });
-      } catch {
-        // 回退到逐条执行
-        const results: string[] = [];
-        for (const cmd of commands) {
-          try {
-            results.push(await this.executeCommand(cmd));
-          } catch {
-            results.push('');
-          }
-        }
-        return results;
-      }
-    }
-
-    // 逐条执行
-    const results: string[] = [];
+  private async executeBatchCommands(
+    commands: string[],
+    capturedTarget: TargetIdentity,
+  ): Promise<Array<string | null>> {
+    const results: Array<string | null> = [];
     for (const cmd of commands) {
+      if (!activeTargetContext.matches(capturedTarget)) {
+        throw new Error('批量读取期间活动目标已变化');
+      }
       try {
         results.push(await this.executeCommand(cmd));
-      } catch {
-        results.push('');
+      } catch (error) {
+        if (!activeTargetContext.matches(capturedTarget)) throw error;
+        reportError(error, { module: 'Baseline', action: '批量执行命令', silent: true });
+        results.push(null);
       }
     }
     return results;
@@ -788,6 +896,18 @@ export class BaselineQuickEditManager {
     const mainEl = document.getElementById('bl-main');
     const renderer = (window as any).app?.modernUIRenderer?.baselineRenderer;
     if (!mainEl || !renderer) return;
+    const capturedTarget = activeTargetContext.get();
+    if (!capturedTarget) {
+      window.showNotification?.('没有已确认的活动 SSH 目标', 'warning');
+      return;
+    }
+
+    try {
+      filePath = validateEditableRemotePath(filePath);
+    } catch (error) {
+      window.showNotification?.(`无法打开文件：${error}`, 'error');
+      return;
+    }
 
     // 更新自定义路径输入
     const pathInput = document.getElementById('bl-custom-path') as HTMLInputElement;
@@ -803,18 +923,12 @@ export class BaselineQuickEditManager {
     });
 
     try {
-      // 优先 SFTP 读取
-      const tauriInvoke = (window as any).__TAURI__?.core?.invoke;
-      let content: string;
-      if (tauriInvoke) {
-        try {
-          content = await tauriInvoke('sftp_read_file', { path: filePath, maxBytes: 1024 * 1024 });
-        } catch {
-          content = await this.executeCommand(`cat ${filePath} 2>/dev/null`);
-        }
-      } else {
-        content = await this.executeCommand(`cat ${filePath} 2>/dev/null`);
-      }
+      const details = await invokeTargetBoundSSH<{ file_type: string; size: number }>('sftp_get_file_details', { path: filePath });
+      if (!activeTargetContext.matches(capturedTarget)) throw new Error('读取文件期间活动目标已变化');
+      if (details.file_type !== 'file') throw new Error(`仅允许编辑常规文件，当前类型：${details.file_type}`);
+      if (details.size > 2 * 1024 * 1024) throw new Error('文件超过 2 MiB，为避免截断覆盖已阻止打开');
+      const content = await invokeTargetBoundSSH<string>('sftp_read_file', { path: filePath, maxBytes: 2 * 1024 * 1024 });
+      if (!activeTargetContext.matches(capturedTarget)) throw new Error('读取文件期间活动目标已变化');
 
       this.editorOriginalContent = content;
       this.editorModified = false;
@@ -822,6 +936,13 @@ export class BaselineQuickEditManager {
       this.setupEditorLineNumbers();
 
     } catch (err) {
+      if (!activeTargetContext.matches(capturedTarget)) {
+        this.editorFilePath = '';
+        this.editorOriginalContent = '';
+        this.editorModified = false;
+        window.showNotification?.('读取文件期间目标已变化，已丢弃结果', 'error');
+        return;
+      }
       mainEl.innerHTML = renderer.renderFileEditorPanel(filePath, `读取文件失败: ${err}`, false, false);
     }
   }
@@ -874,32 +995,65 @@ export class BaselineQuickEditManager {
     const textarea = document.getElementById('bl-file-textarea') as HTMLTextAreaElement;
     if (!textarea || !this.editorFilePath) return;
 
+    let path: string;
+    try { path = validateEditableRemotePath(this.editorFilePath); }
+    catch (error) {
+      window.showNotification?.(`保存失败：${error}`, 'error');
+      return;
+    }
     const newContent = textarea.value;
+    const target = activeTargetContext.get();
+    if (!target) {
+      window.showNotification?.('请先连接并确认目标主机', 'error');
+      return;
+    }
+    const confirmed = await showConfirm({
+      title: '备份并保存配置文件',
+      message: `目标：${target.username}@${target.host}:${target.port}\n指纹：${target.hostKeyFingerprint}\n\n文件：${path}\n\n将原子写入并读回校验，原文件保留为独立备份。`,
+      confirmText: '保存并验证', cancelText: '取消', dangerous: true, defaultFocus: 'cancel',
+    });
+    if (!confirmed) return;
     const saveBtn = document.getElementById('bl-file-save-btn') as HTMLButtonElement;
     if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '保存中...'; }
 
     try {
-      // 备份
-      await this.executeCommand(`cp -n ${this.editorFilePath} ${this.editorFilePath}_bak_$(date +%Y%m%d%H%M%S) 2>/dev/null; true`);
-
-      // 写入
-      const tauriInvoke = (window as any).__TAURI__?.core?.invoke;
-      if (tauriInvoke) {
-        try {
-          await tauriInvoke('sftp_write_file', { path: this.editorFilePath, content: newContent });
-        } catch {
-          // 回退到 SSH tee
-          await this.executeCommand(`cat << 'BLEOF' | tee ${this.editorFilePath} > /dev/null\n${newContent}\nBLEOF`);
-        }
-      } else {
-        await this.executeCommand(`cat << 'BLEOF' | tee ${this.editorFilePath} > /dev/null\n${newContent}\nBLEOF`);
+      const backupPath = buildEditorBackupPath(path);
+      const beforeHash = await contentSha256(this.editorOriginalContent);
+      const afterHash = await contentSha256(newContent);
+      const receipt = await invokeTargetBoundSSH<{
+        backup_path: string; bytes_written: number; preserved_permissions?: number;
+      }>('sftp_atomic_write_file', { path, backupPath, content: newContent });
+      let readBackHash = '';
+      let verified = false;
+      let verifyError = '';
+      try {
+        const readBack = await invokeTargetBoundSSH<string>('sftp_read_file', { path, maxBytes: 2 * 1024 * 1024 });
+        readBackHash = await contentSha256(readBack);
+        verified = readBack === newContent && readBackHash === afterHash;
+      } catch (error) {
+        verifyError = String(error);
       }
+      operationJournal.record({
+        source: 'baseline', server: target.host, target,
+        title: `编辑配置文件 ${path}`,
+        command: `SFTP atomic write ${path}`,
+        restoreCommand: `cp -p -- ${shq(receipt.backup_path)} ${shq(path)}`,
+        restoreVerifyCommand: `sha256sum -- ${shq(path)} | awk '{print $1}'`,
+        restoreVerifyExpected: beforeHash,
+        beforeValue: beforeHash, afterValue: afterHash,
+        backupInfo: `${receipt.backup_path} · 保留权限 ${receipt.preserved_permissions ?? 'unknown'}`,
+        output: `后端事务写入并逐字节验证 ${receipt.bytes_written} bytes`, exitCode: 0, timedOut: false,
+        verifyCommand: `SFTP independent read-back ${path}`, verifyOutput: readBackHash || verifyError,
+        verified, success: true,
+      });
+      if (!verified) throw new Error(`独立读回验证未通过，后端事务验证已通过且原文件备份仍保留${verifyError ? `：${verifyError}` : ''}`);
 
       this.editorOriginalContent = newContent;
       this.editorModified = false;
       window.showNotification?.(`${this.editorFilePath} 已保存（已备份原文件）`, 'success');
 
     } catch (err) {
+      reportError(err, { module: 'Baseline', action: '保存配置文件', silent: true });
       window.showNotification?.(`保存失败: ${err}`, 'error');
     } finally {
       if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '备份并保存'; }
@@ -924,15 +1078,26 @@ export class BaselineQuickEditManager {
     const built = buildQuickActionCommand(actionId, param, this.detectedDistro);
     if (!built) { window.showNotification?.('未知操作', 'error'); return; }
     const { cmd, desc, dangerous } = built;
+    const readOnlyActions = new Set([
+      'who-online', 'query-user-chage', 'query-ssh-version', 'query-kernel', 'query-login-defs',
+      'query-user-sudo-log', 'query-malicious-ports', 'query-suspicious-users', 'query-all-listening',
+    ]);
+    const mutating = !readOnlyActions.has(actionId);
+    const capturedTarget = activeTargetContext.get();
+    if (!capturedTarget) {
+      window.showNotification?.('请先连接并确认目标主机', 'error');
+      return;
+    }
 
-    // 危险操作确认
-    if (dangerous) {
+    // 所有状态变更都确认；破坏性动作使用危险样式并默认聚焦取消。
+    if (mutating) {
       const ok = await showConfirm({
         title: '确认执行',
-        message: `${desc}\n\n命令: ${cmd}`,
+        message: `目标：${capturedTarget.username}@${capturedTarget.host}:${capturedTarget.port}\n指纹：${capturedTarget.hostKeyFingerprint}\n\n${desc}\n\n命令: ${cmd}`,
         confirmText: '执行',
         cancelText: '取消',
-        dangerous: true,
+        dangerous: Boolean(dangerous),
+        defaultFocus: 'cancel',
       });
       if (!ok) return;
     }
@@ -942,7 +1107,17 @@ export class BaselineQuickEditManager {
     if (execBtn) { execBtn.disabled = true; execBtn.textContent = '执行中...'; }
 
     try {
-      const output = await this.executeCommand(cmd);
+      if (!activeTargetContext.matches(capturedTarget)) throw new Error('确认后活动目标已变化，已停止执行');
+      const receipt = await this.executeCommandResult(cmd);
+      if (mutating) {
+        operationJournal.record({
+          source: 'baseline', server: capturedTarget.host, target: capturedTarget,
+          title: desc, command: cmd, output: receipt.output,
+          exitCode: receipt.exitCode, timedOut: receipt.timedOut, success: receipt.success,
+        });
+      }
+      if (!receipt.success) throw new Error(`${receipt.timedOut ? '执行超时' : `退出码 ${receipt.exitCode ?? '未知'}`}: ${receipt.output}`);
+      const output = receipt.output;
       window.showNotification?.(`${desc} — 完成`, 'success');
 
       // 对于有输出的命令（如 who-online），显示结果
@@ -953,6 +1128,7 @@ export class BaselineQuickEditManager {
         await showAlert({ title: desc, message: output.substring(0, 2000), type: 'info' });
       }
     } catch (err) {
+      reportError(err, { module: 'Baseline', action: `快捷操作 ${actionId}`, silent: true });
       window.showNotification?.(`${desc} — 失败: ${err}`, 'error');
     } finally {
       if (execBtn) {

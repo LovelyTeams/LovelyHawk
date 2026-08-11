@@ -1,0 +1,464 @@
+/* Incident Canvas shell
+ * Evidence-first navigation, persistent trusted-target context and restrained
+ * semantic icon containers. This file intentionally overrides only the app shell.
+ */
+
+:root {
+  --sidebar-width: 250px;
+  --sidebar-width-collapsed: 58px;
+}
+
+.modern-title-bar {
+  height: 42px;
+  padding: 0 10px 0 12px;
+  border-bottom-color: var(--titlebar-border);
+}
+
+.modern-title-bar::after {
+  left: 12px;
+  right: 12px;
+  bottom: 0;
+  background: linear-gradient(90deg, transparent, var(--primary-color), transparent);
+  opacity: 0.42;
+}
+
+.app-logo { gap: 8px; }
+
+.logo-icon {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--primary-color) 55%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--primary-color) 18%, transparent);
+  color: var(--primary-color);
+}
+
+.app-name {
+  color: var(--titlebar-text);
+  background: none;
+  -webkit-text-fill-color: currentColor;
+  animation: none;
+  letter-spacing: -0.02em;
+}
+
+.app-edition {
+  padding-left: 8px;
+  border-left: 1px solid var(--titlebar-border);
+  color: color-mix(in srgb, var(--titlebar-text) 58%, transparent);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.title-bar-btn {
+  height: 28px;
+  border-color: var(--titlebar-border);
+  background: var(--titlebar-subtle-bg);
+  color: color-mix(in srgb, var(--titlebar-text) 72%, transparent);
+  border-radius: 7px;
+}
+
+.title-bar-btn:hover {
+  border-color: color-mix(in srgb, var(--primary-color) 62%, transparent);
+  background: color-mix(in srgb, var(--primary-color) 16%, transparent);
+  color: var(--primary-color);
+}
+
+.control-button { color: color-mix(in srgb, var(--titlebar-text) 65%, transparent); }
+.control-button:hover { background: color-mix(in srgb, var(--titlebar-text) 8%, transparent); color: var(--titlebar-text); }
+
+.sidebar-nav {
+  border-right-color: color-mix(in srgb, var(--border-color) 85%, transparent);
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.02);
+}
+
+.sidebar-search {
+  height: 34px;
+  border-color: color-mix(in srgb, var(--border-color) 82%, transparent);
+  background: color-mix(in srgb, var(--incident-paper) 68%, transparent);
+  border-radius: 9px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+
+.sidebar-tree { padding: 2px 10px 12px; }
+.sidebar-group { margin-top: 9px; }
+.sidebar-group:first-child { margin-top: 2px; }
+
+.sidebar-group-row {
+  height: 34px;
+  padding: 0 7px;
+  gap: 9px;
+  border-radius: 9px;
+}
+
+.sidebar-group-row.active {
+  background: color-mix(in srgb, var(--incident-accent-soft) 58%, transparent);
+}
+
+.sidebar-gicon {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  border: 1px solid color-mix(in srgb, var(--accent, var(--primary-color)) 20%, var(--border-color));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent, var(--primary-color)) 8%, var(--incident-paper));
+  color: var(--accent, var(--text-secondary));
+}
+
+.sidebar-gicon svg { width: 14px; height: 14px; }
+
+.sidebar-glabel {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.075em;
+  text-transform: uppercase;
+}
+
+.sidebar-items-inner { gap: 2px; padding: 3px 0 1px 6px; }
+
+.sidebar-item {
+  height: 36px;
+  padding: 0 8px;
+  gap: 9px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+}
+
+.sidebar-item::before,
+.sidebar-item::after { display: none; }
+
+.sidebar-item:hover {
+  border-color: color-mix(in srgb, var(--border-color) 68%, transparent);
+  background: color-mix(in srgb, var(--incident-paper) 58%, transparent);
+}
+
+.sidebar-item.active {
+  border-color: var(--incident-accent-border);
+  background: var(--incident-accent-soft);
+  color: var(--incident-ink);
+  box-shadow: none;
+}
+
+.sidebar-item-icon {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--text-tertiary) 8%, transparent);
+  color: var(--text-secondary);
+  opacity: 1;
+}
+
+.sidebar-item-icon svg { width: 14px; height: 14px; }
+
+.sidebar-item.active .sidebar-item-icon {
+  background: var(--primary-color);
+  color: var(--accent-contrast);
+}
+
+.sidebar-item-label { font-size: 12.5px; }
+
+.sidebar-foot {
+  min-height: 96px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 7px;
+  padding: 9px 10px;
+  background: color-mix(in srgb, var(--incident-paper-muted) 72%, transparent);
+}
+
+.sidebar-bottom-search { width: 100%; flex-shrink: 0; }
+
+.sidebar-foot-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sidebar-foot-row .connection-card-wrapper { flex: 1; min-width: 0; }
+
+.user-panel {
+  min-height: 38px;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
+  background: color-mix(in srgb, var(--incident-paper) 58%, transparent);
+}
+
+.user-panel-avatar-mark {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 28px;
+  border: 1px solid var(--incident-accent-border);
+  border-radius: 8px;
+  background: var(--incident-accent-soft);
+  color: var(--primary-color);
+}
+.user-panel-name { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
+.user-panel-status { font-family: var(--font-mono); font-size: 9.5px; }
+
+.sidebar-nav.collapsed .sidebar-gicon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+}
+
+.sidebar-nav.collapsed .user-panel-avatar-mark { width: 30px; height: 30px; }
+
+.sidebar-nav.collapsed .sidebar-group-row { height: 42px; }
+
+.sidebar-nav.collapsed .sidebar-bottom-search { display: none; }
+.sidebar-nav.collapsed .sidebar-foot { min-height: 0; }
+.sidebar-nav.collapsed .sidebar-foot-row { flex-direction: column; }
+
+/* Target, response stage and case context live inside the title bar so the
+ * workspace can use the full vertical canvas. */
+.incident-title-bar {
+  height: 52px;
+  gap: 10px;
+}
+
+.incident-title-bar .title-bar-left {
+  flex: 0 0 auto;
+}
+
+.incident-context-bar {
+  min-width: 0;
+  height: 100%;
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(230px, 0.9fr) minmax(320px, 1.35fr) minmax(210px, 0.85fr);
+  align-items: stretch;
+  border-right: 1px solid var(--titlebar-border);
+  border-left: 1px solid var(--titlebar-border);
+  background: transparent;
+}
+
+.incident-target-block,
+.incident-case-summary {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 9px;
+}
+
+.incident-target-block { border-right: 1px solid var(--titlebar-border); }
+
+.incident-context-icon,
+.incident-case-icon {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 28px;
+  border: 1px solid var(--titlebar-border);
+  border-radius: 8px;
+  background: var(--titlebar-subtle-bg);
+  color: color-mix(in srgb, var(--titlebar-text) 64%, transparent);
+}
+
+.incident-context-icon.connected {
+  border-color: color-mix(in srgb, var(--primary-color) 55%, transparent);
+  background: color-mix(in srgb, var(--primary-color) 16%, transparent);
+  color: var(--primary-color);
+}
+
+.incident-context-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+}
+
+.incident-eyebrow {
+  color: color-mix(in srgb, var(--titlebar-text) 48%, transparent);
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+}
+
+.incident-context-copy strong,
+.incident-context-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.incident-context-copy strong {
+  color: var(--titlebar-text);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.incident-context-copy small {
+  color: color-mix(in srgb, var(--titlebar-text) 46%, transparent);
+  font-size: 7.5px;
+}
+
+.incident-trust-state {
+  margin-left: auto;
+  padding: 2px 5px;
+  border: 1px solid var(--titlebar-border);
+  border-radius: 999px;
+  color: color-mix(in srgb, var(--titlebar-text) 52%, transparent);
+  font-size: 7px;
+  white-space: nowrap;
+}
+
+.incident-trust-state.trusted {
+  border-color: color-mix(in srgb, var(--success-color) 48%, transparent);
+  background: color-mix(in srgb, var(--success-color) 12%, transparent);
+  color: var(--success-color);
+}
+
+.incident-stage-track {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 10px;
+  border-right: 1px solid var(--titlebar-border);
+}
+
+.incident-stage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: color-mix(in srgb, var(--titlebar-text) 42%, transparent);
+  font-size: 8px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.incident-stage:not(:last-child) { flex: 1; }
+
+.incident-stage:not(:last-child)::after {
+  content: '';
+  height: 1px;
+  min-width: 12px;
+  flex: 1;
+  margin: 0 8px;
+  background: var(--titlebar-border);
+}
+
+.incident-stage.complete:not(:last-child)::after {
+  background: color-mix(in srgb, var(--primary-color) 45%, var(--border-color));
+}
+
+.incident-stage-index {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--titlebar-border);
+  border-radius: 50%;
+  background: var(--titlebar-subtle-bg);
+  font-family: var(--font-mono);
+  font-size: 7px;
+}
+
+.incident-stage.complete { color: color-mix(in srgb, var(--titlebar-text) 64%, transparent); }
+.incident-stage.complete .incident-stage-index { border-color: var(--incident-accent-border); color: var(--primary-color); }
+
+.incident-stage.active { color: var(--primary-color); }
+.incident-stage.active .incident-stage-index {
+  border-color: var(--primary-color);
+  background: var(--primary-color);
+  color: var(--accent-contrast);
+  box-shadow: 0 0 0 3px var(--incident-accent-soft);
+}
+
+.incident-case-summary {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: color-mix(in srgb, var(--titlebar-text) 62%, transparent);
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s ease;
+  -webkit-app-region: no-drag;
+}
+
+.incident-case-summary:hover { background: var(--incident-accent-soft); }
+.incident-case-summary:hover .incident-case-icon { border-color: var(--incident-accent-border); color: var(--primary-color); }
+.incident-case-summary > svg { flex: 0 0 auto; margin-left: auto; }
+
+.workspace-content {
+  padding: 14px 16px 18px;
+  background-color: var(--bg-primary);
+  background-image: radial-gradient(color-mix(in srgb, var(--text-tertiary) 12%, transparent) 0.65px, transparent 0.65px);
+  background-size: 12px 12px;
+}
+
+/* Case workspace is the visual centrepiece of direction B. */
+.case-modal-overlay {
+  background: color-mix(in srgb, var(--bg-dark) 72%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.case-modal {
+  width: min(1240px, 96vw);
+  color: var(--incident-ink);
+  background: var(--incident-paper-muted);
+  border-color: color-mix(in srgb, var(--primary-color) 22%, var(--border-color));
+  border-radius: 12px;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.34);
+}
+
+.case-modal-header {
+  padding: 17px 20px;
+  background: var(--incident-paper);
+}
+
+.case-modal-header h3 { letter-spacing: -0.02em; }
+.case-modal-body { padding: 16px 20px 20px; }
+
+.case-stats,
+.case-capture-card,
+.case-columns section {
+  background: var(--incident-paper);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+
+.case-stats {
+  border: 1px solid var(--border-color);
+  border-radius: 9px;
+}
+
+.case-kind {
+  border: 1px solid var(--incident-accent-border);
+  background: var(--incident-accent-soft);
+}
+
+.status-bar { height: 26px; padding: 0 10px; }
+.status-item { height: 26px; }
+
+@media (max-width: 1320px) {
+  .incident-context-bar { grid-template-columns: minmax(220px, 0.9fr) minmax(310px, 1.25fr); }
+  .incident-case-summary { display: none; }
+  .incident-stage-track { border-right: 0; }
+  .app-edition { display: none; }
+}
+
+@media (max-width: 960px) {
+  .incident-context-bar { grid-template-columns: 1fr; }
+  .incident-stage-track { display: none; }
+  .incident-target-block { border-right: 0; }
+  .incident-trust-state { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .incident-case-summary { transition-duration: 0.01ms; }
+}

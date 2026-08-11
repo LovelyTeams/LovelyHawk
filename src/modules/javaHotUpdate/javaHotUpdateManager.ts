@@ -3,10 +3,21 @@
  * 通过 SSH 管理远程服务器上的 Java 应用，支持进程管理、热更新、JVM 诊断、服务管理和部署管理
  */
 
-import { invoke } from '@tauri-apps/api/core';
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH';
 import { sshConnectionManager } from '../remote/sshConnectionManager';
 import { showConfirm } from '../ui/confirmDialog';
 import { createIconHTML } from '../ui/iconMapping';
+import { activeTargetContext, type TargetIdentity } from '../core/targetContext';
+import { operationJournal } from '../core/operationJournal';
+import { isValidPid, shq } from '../core/shellEscape';
+import { reportError } from '../utils/errorHandler';
+import { buildJarUpdatePlan } from './javaOperationContract';
+
+interface JavaCommandResult {
+  output: string;
+  exit_code: number | null;
+  timed_out?: boolean;
+}
 
 // ────── 类型定义 ──────
 
@@ -66,10 +77,12 @@ class JavaHotUpdateManager {
   private loading = false;
   private eventsBound = false;
   private selectedPid: number | null = null;
+  private targetSessionId = '';
 
   // ──── 生命周期 ────
 
   initialize(): void {
+    this.synchronizeTargetState();
     if (!this.initialized) {
       this.bindEvents();
       this.initialized = true;
@@ -264,12 +277,16 @@ class JavaHotUpdateManager {
   // ──── 数据加载 ────
 
   async refresh(): Promise<void> {
+    this.synchronizeTargetState();
     if (!sshConnectionManager.isConnected() || this.loading) return;
+    const target = activeTargetContext.get();
+    if (!target) return;
     this.loading = true;
     this.renderContent();
 
     try {
       await this.loadProcesses();
+      if (!activeTargetContext.matches(target)) throw new Error('Java 数据刷新期间活动目标已变化');
       if (this.currentTab === 'services') {
         await this.detectServices();
       } else if (this.currentTab === 'deploy') {
@@ -277,8 +294,10 @@ class JavaHotUpdateManager {
       } else if (this.currentTab === 'docker') {
         await this.scanDockerJava();
       }
+      if (!activeTargetContext.matches(target)) throw new Error('Java 数据刷新期间活动目标已变化');
     } catch (e) {
-      console.error('加载 Java 数据失败:', e);
+      this.synchronizeTargetState();
+      reportError(e, { module: 'JavaHotUpdateManager', action: '刷新 Java 数据', silent: true });
     } finally {
       this.loading = false;
       this.renderContent();
@@ -286,13 +305,54 @@ class JavaHotUpdateManager {
   }
 
   private async execSSH(command: string): Promise<string> {
+    const target = activeTargetContext.get();
+    if (!target) throw new Error('当前 SSH 目标尚未完成可信身份确认');
     try {
-      const result = await invoke('ssh_execute_command_direct', { command }) as any;
+      const result = await invokeTargetBoundSSH('ssh_execute_command_direct', { command }) as any;
       return result?.output || '';
     } catch (e) {
-      console.warn('SSH命令执行失败:', command, e);
+      if (!activeTargetContext.matches(target)) throw e;
+      reportError(e, { module: 'JavaHotUpdateManager', action: '执行只读 SSH 命令', silent: true });
       return '';
     }
+  }
+
+  private synchronizeTargetState(): boolean {
+    const nextSessionId = activeTargetContext.get()?.sessionId || '';
+    if (nextSessionId === this.targetSessionId) return false;
+    this.targetSessionId = nextSessionId;
+    this.processes = [];
+    this.services = [];
+    this.deployTargets = [];
+    this.dockerContainers = [];
+    this.selectedContainer = null;
+    this.selectedPid = null;
+    this.loading = false;
+    return true;
+  }
+
+  private async execSSHResult(command: string): Promise<JavaCommandResult> {
+    return invokeTargetBoundSSH<JavaCommandResult>('ssh_execute_command_direct', { command });
+  }
+
+  private async confirmMutation(title: string, detail: string): Promise<TargetIdentity | null> {
+    const target = activeTargetContext.get();
+    if (!target) {
+      window.showNotification?.('没有已确认的活动 SSH 目标', 'error');
+      return null;
+    }
+    const confirmed = await showConfirm({
+      title,
+      message: `目标：${target.username}@${target.host}:${target.port}\n指纹：${target.hostKeyFingerprint}\n\n${detail}`,
+      dangerous: true,
+      defaultFocus: 'cancel',
+    });
+    if (!confirmed) return null;
+    if (!activeTargetContext.matches(target)) {
+      window.showNotification?.('确认后活动目标已变化，已阻止 Java 操作', 'error');
+      return null;
+    }
+    return target;
   }
 
   // ──── Java 进程列表 ────
@@ -397,31 +457,55 @@ class JavaHotUpdateManager {
   }
 
   async killProcess(pid: number): Promise<void> {
-    const confirmed = await showConfirm({
-      title: '强制杀死 Java 进程',
-      message: `确定要对 PID ${pid} 执行 kill -9(强制终止)？\n\n强杀不给应用任何清理机会,可能丢失内存中未落盘的数据,且不可撤销。若只想优雅停止请改用"优雅停止"。`,
-      dangerous: true,
-    });
-    if (!confirmed) return;
-
-    const output = await this.execSSH(`kill -9 ${pid} 2>&1 && echo "进程 ${pid} 已终止"`);
-    this.showOutput(output);
-    window.showNotification?.(`进程 ${pid} 已终止`, 'success');
-    setTimeout(() => this.refresh(), 1000);
+    if (!isValidPid(pid)) return;
+    const target = await this.confirmMutation('强制杀死 Java 进程', `PID：${pid}\n强杀不给应用清理机会，可能丢失未落盘数据，且不可撤销。`);
+    if (!target) return;
+    const command = `kill -9 ${pid}`;
+    const verifyCommand = `if kill -0 ${pid} 2>/dev/null; then echo alive; exit 1; else echo stopped; fi`;
+    try {
+      const result = await this.execSSHResult(command);
+      const verify = result.timed_out !== true && result.exit_code === 0
+        ? await this.execSSHResult(verifyCommand)
+        : null;
+      const success = !!verify && verify.timed_out !== true && verify.exit_code === 0 && verify.output.includes('stopped');
+      operationJournal.record({
+        source: 'java', server: target.host, target,
+        title: `强制终止 Java 进程 ${pid}`, command,
+        output: result.output, exitCode: result.exit_code, timedOut: result.timed_out,
+        verifyCommand, verifyOutput: verify?.output, verified: success, success,
+      });
+      this.showOutput(`${result.output}\n${verify?.output || ''}`.trim());
+      window.showNotification?.(success ? `进程 ${pid} 已终止并验证` : `进程 ${pid} 终止后验证失败`, success ? 'success' : 'error');
+      setTimeout(() => this.refresh(), 1000);
+    } catch (error) {
+      reportError(error, { module: 'JavaHotUpdate', action: '强制终止进程' });
+    }
   }
 
   async gracefulStop(pid: number): Promise<void> {
-    const confirmed = await showConfirm({
-      title: '优雅停止 Java 进程',
-      message: `确定要对 PID ${pid} 发送 SIGTERM(kill -15)优雅停止？\n\n将中断该 Java 应用当前提供的服务。`,
-      dangerous: true,
-    });
-    if (!confirmed) return;
-
-    const output = await this.execSSH(`kill -15 ${pid} 2>&1 && echo "已发送 SIGTERM 到进程 ${pid}"`);
-    this.showOutput(output);
-    window.showNotification?.(`已发送停止信号`, 'success');
-    setTimeout(() => this.refresh(), 2000);
+    if (!isValidPid(pid)) return;
+    const target = await this.confirmMutation('优雅停止 Java 进程', `PID：${pid}\n将发送 SIGTERM 并等待最多 10 秒确认退出。`);
+    if (!target) return;
+    const command = `kill -15 ${pid}`;
+    const verifyCommand = `i=0; while kill -0 ${pid} 2>/dev/null && [ "$i" -lt 10 ]; do sleep 1; i=$((i+1)); done; if kill -0 ${pid} 2>/dev/null; then echo alive; exit 1; else echo stopped; fi`;
+    try {
+      const result = await this.execSSHResult(command);
+      const verify = result.timed_out !== true && result.exit_code === 0
+        ? await this.execSSHResult(verifyCommand)
+        : null;
+      const success = !!verify && verify.timed_out !== true && verify.exit_code === 0 && verify.output.includes('stopped');
+      operationJournal.record({
+        source: 'java', server: target.host, target,
+        title: `优雅停止 Java 进程 ${pid}`, command,
+        output: result.output, exitCode: result.exit_code, timedOut: result.timed_out,
+        verifyCommand, verifyOutput: verify?.output, verified: success, success,
+      });
+      this.showOutput(`${result.output}\n${verify?.output || ''}`.trim());
+      window.showNotification?.(success ? 'Java 进程已停止并验证' : 'SIGTERM 已发送，但进程仍存活或验证失败', success ? 'success' : 'warning');
+      setTimeout(() => this.refresh(), 2000);
+    } catch (error) {
+      reportError(error, { module: 'JavaHotUpdate', action: '优雅停止进程' });
+    }
   }
 
   // ──── 热更新 ────
@@ -434,9 +518,9 @@ class JavaHotUpdateManager {
         <h4>${createIconHTML('🔥', { size: 16 })} 热更新 — PID ${pid}</h4>
         <div class="jhu-dialog-section">
           <h5>方式一：使用 Arthas 热更新</h5>
-          <p class="jhu-hint">Arthas 是阿里巴巴开源的 Java 诊断工具，支持在线热替换 class 文件。</p>
+          <p class="jhu-hint">Arthas 支持热替换 class；比赛前请把可信 arthas-boot.jar 随离线工具包准备好。</p>
           <div class="jhu-cmd-box">
-            <code>curl -O https://arthas.aliyun.com/arthas-boot.jar && java -jar arthas-boot.jar ${pid}</code>
+            <code>java -jar /tmp/arthas-boot.jar ${pid}</code>
           </div>
           <p class="jhu-hint">进入 Arthas 后，使用 <code>redefine /path/to/MyClass.class</code> 替换类文件。</p>
         </div>
@@ -455,7 +539,7 @@ class JavaHotUpdateManager {
           </div>
         </div>
         <div class="jhu-dialog-actions">
-          <button class="jhu-btn primary" data-jhu-action="arthas-attach" data-jhu-param="${pid}">一键安装 Arthas</button>
+          <button class="jhu-btn primary" data-jhu-action="arthas-attach" data-jhu-param="${pid}">检查离线 Arthas</button>
           <button class="jhu-btn secondary" data-jhu-action="class-decompile" data-jhu-param="${pid}">查看已加载类</button>
         </div>
       </div>
@@ -463,14 +547,8 @@ class JavaHotUpdateManager {
   }
 
   async arthasAttach(pid: number): Promise<void> {
-    this.showOutput('正在检查 Arthas(优先使用本地 /tmp/arthas-boot.jar，断网也可用)...');
-    // 离线优先:先校验本地 jar(用 PK 魔数确认是有效 jar,而非下载失败留下的 HTML 错误页);
-    // 仅在缺失时才尝试联网下载,并带 5s 连接超时避免断网干等;失败则清理残留并明确返回 MISSING。
-    const check =
-      'if [ -s /tmp/arthas-boot.jar ] && head -c2 /tmp/arthas-boot.jar | grep -q PK; then echo ARTHAS_READY; ' +
-      'else curl -sL --connect-timeout 5 -o /tmp/arthas-boot.jar https://arthas.aliyun.com/arthas-boot.jar 2>/dev/null; ' +
-      'if [ -s /tmp/arthas-boot.jar ] && head -c2 /tmp/arthas-boot.jar | grep -q PK; then echo ARTHAS_READY; ' +
-      'else rm -f /tmp/arthas-boot.jar; echo ARTHAS_MISSING; fi; fi';
+    this.showOutput('正在检查离线 Arthas (/tmp/arthas-boot.jar)...');
+    const check = 'if [ -s /tmp/arthas-boot.jar ] && head -c2 /tmp/arthas-boot.jar | grep -q PK; then echo ARTHAS_READY; else echo ARTHAS_MISSING; fi';
     const output = await this.execSSH(check);
 
     if (output.includes('ARTHAS_READY')) {
@@ -478,12 +556,11 @@ class JavaHotUpdateManager {
       window.showNotification?.('Arthas 已就绪', 'success');
     } else {
       this.showOutput(
-        '未找到可用的 Arthas，且无法自动下载(赛场多为断网)。\n\n' +
+        '未找到可用的 Arthas；安全策略禁止运行时联网下载。\n\n' +
         '离线用法:\n' +
         '  1) 用本工具「SFTP 文件」把 arthas-boot.jar 上传到目标机 /tmp/ 目录;\n' +
         '  2) 回到本页重新点击「一键安装 Arthas」即可自动识别;\n' +
-        `  3) 或在终端手动执行: java -jar /tmp/arthas-boot.jar ${pid}\n\n` +
-        '官网下载(需在联网机器上):https://arthas.aliyun.com/arthas-boot.jar'
+        `  3) 或在终端手动执行: java -jar /tmp/arthas-boot.jar ${pid}`
       );
       window.showNotification?.('Arthas 不可用，请离线上传 arthas-boot.jar 到 /tmp', 'warning');
     }
@@ -531,16 +608,78 @@ class JavaHotUpdateManager {
     const jarPath = (document.getElementById('jhu-jar-path') as HTMLInputElement)?.value?.trim() || '';
     const classPath = (document.getElementById('jhu-class-name') as HTMLInputElement)?.value?.trim() || '';
     const classFilePath = (document.getElementById('jhu-class-file') as HTMLInputElement)?.value?.trim() || '';
-    if (!jarPath || !classPath) {
-      window.showNotification?.('请填写 JAR 路径和类路径', 'warning');
+    if (!jarPath || !classPath || !classFilePath) {
+      window.showNotification?.('请填写 JAR 路径、JAR 内 Class 路径和新 Class 文件绝对路径', 'warning');
       return;
     }
-    const srcFile = classFilePath || classPath;
-    this.showOutput(`正在执行 jar uf 更新...\nJAR: ${jarPath}\n类: ${classPath}\n源文件: ${srcFile}`);
-    const output = await this.execSSH(
-      `# 备份原始 JAR\ncp "${jarPath}" "${jarPath}.bak.$(date +%Y%m%d%H%M%S)" 2>&1 && echo "已备份原始 JAR" && \\\n# 执行 jar uf 更新\ncd /tmp && jar uf "${jarPath}" "${classPath}" 2>&1 && echo "jar uf 更新成功: ${classPath}" || echo "jar uf 更新失败"`
+    await this.executeVerifiedJarUpdate(jarPath, classPath, classFilePath);
+  }
+
+  private async executeVerifiedJarUpdate(jarPath: string, classPath: string, classFilePath: string): Promise<void> {
+    let plan;
+    try {
+      plan = buildJarUpdatePlan(jarPath, classPath, classFilePath);
+    } catch (error) {
+      reportError(error, { module: 'JavaHotUpdate', action: '校验 JAR 更新参数' });
+      return;
+    }
+    const target = await this.confirmMutation(
+      '更新 JAR Class',
+      `JAR：${plan.jarPath}\n条目：${plan.entryPath}\n源文件：${plan.sourcePath}\n备份：${plan.backupPath}\n\n将备份原 JAR，更新条目并比较源文件与归档内 Class 的 SHA-256。`,
     );
-    this.showOutput(output);
+    if (!target) return;
+    this.showOutput(`正在执行可回滚 JAR 更新...\nJAR: ${plan.jarPath}\n类: ${plan.entryPath}`);
+    try {
+      const [sourceHashResult, beforeHashResult] = await Promise.all([
+        this.execSSHResult(plan.sourceHashCommand),
+        this.execSSHResult(`sha256sum ${shq(plan.jarPath)} | awk '{print $1}'`),
+      ]);
+      const sourceHash = sourceHashResult.output.trim();
+      const beforeHash = beforeHashResult.output.trim();
+      if (sourceHashResult.exit_code !== 0 || beforeHashResult.exit_code !== 0 || !sourceHash || !beforeHash) {
+        throw new Error('无法读取更新前 SHA-256，已停止修改');
+      }
+      const result = await this.execSSHResult(plan.command);
+      const verify = result.timed_out !== true && result.exit_code === 0
+        ? await this.execSSHResult(plan.archiveHashCommand)
+        : null;
+      const verified = !!verify
+        && verify.timed_out !== true
+        && verify.exit_code === 0
+        && verify.output.trim() === sourceHash;
+      let autoRestoreOutput = '';
+      if (!verified) {
+        try {
+          const restored = await this.execSSHResult(plan.restoreCommand);
+          autoRestoreOutput = restored.output || `自动恢复退出码：${String(restored.exit_code)}`;
+        } catch (restoreError) {
+          autoRestoreOutput = `自动恢复失败：${String(restoreError)}`;
+        }
+      }
+      const restoreVerifyCommand = `[ "$(sha256sum ${shq(plan.jarPath)} | awk '{print $1}')" = ${shq(beforeHash)} ] && echo restored`;
+      operationJournal.record({
+        source: 'java', server: target.host, target,
+        title: `更新 JAR 条目 ${plan.entryPath}`,
+        command: plan.command,
+        beforeValue: beforeHash,
+        afterValue: sourceHash,
+        backupInfo: plan.backupPath,
+        restoreCommand: verified ? plan.restoreCommand : undefined,
+        output: `${result.output}${autoRestoreOutput ? `\n${autoRestoreOutput}` : ''}`,
+        exitCode: result.exit_code,
+        timedOut: result.timed_out,
+        verifyCommand: plan.archiveHashCommand,
+        verifyOutput: verify?.output,
+        verified,
+        restoreVerifyCommand: verified ? restoreVerifyCommand : undefined,
+        restoreVerifyExpected: verified ? 'restored' : undefined,
+        success: verified,
+      });
+      this.showOutput(`${result.output}\nSHA-256：${verify?.output || '验证失败'}`.trim());
+      window.showNotification?.(verified ? 'JAR 更新完成并通过哈希验证' : 'JAR 更新未通过验证，已尝试恢复原 JAR', verified ? 'success' : 'error');
+    } catch (error) {
+      reportError(error, { module: 'JavaHotUpdate', action: '更新 JAR' });
+    }
   }
 
   showJarUpdateGuide(jarPath: string): void {
@@ -697,12 +836,8 @@ diff <(jar tf ${this.escapeHtml(jarPath)}.bak | sort) <(jar tf ${this.escapeHtml
   }
 
   async installCfr(): Promise<void> {
-    this.showOutput('正在下载 CFR 反编译器...');
-    const output = await this.execSSH(
-      `curl -sL -o /tmp/cfr.jar "https://github.com/leibnitz27/cfr/releases/download/0.152/cfr-0.152.jar" 2>&1 && java -jar /tmp/cfr.jar --version 2>&1 && echo "\\nCFR 反编译器安装完成 (/tmp/cfr.jar)"`
-    );
-    this.showOutput(output);
-    window.showNotification?.('CFR 安装完成', 'success');
+    this.showOutput('离线安全门禁：正式包禁止从互联网下载并执行 CFR。请先将经过校验的 CFR JAR 作为离线工具资产随 LovelyRes 发布。');
+    window.showNotification?.('未发现随包校验的 CFR 离线资产', 'warning');
   }
 
   async decompileProcyon(): Promise<void> {
@@ -732,12 +867,8 @@ diff <(jar tf ${this.escapeHtml(jarPath)}.bak | sort) <(jar tf ${this.escapeHtml
   }
 
   async installProcyon(): Promise<void> {
-    this.showOutput('正在下载 Procyon 反编译器...');
-    const output = await this.execSSH(
-      `curl -sL -o /tmp/procyon.jar "https://github.com/mstrobel/procyon/releases/download/v0.6.0/procyon-decompiler-0.6.0.jar" 2>&1 && echo "\\nProcyon 反编译器安装完成 (/tmp/procyon.jar)"`
-    );
-    this.showOutput(output);
-    window.showNotification?.('Procyon 安装完成', 'success');
+    this.showOutput('离线安全门禁：正式包禁止从互联网下载并执行 Procyon。请先将经过校验的 Procyon JAR 作为离线工具资产随 LovelyRes 发布。');
+    window.showNotification?.('未发现随包校验的 Procyon 离线资产', 'warning');
   }
 
   showCompileGuide(): void {
@@ -853,23 +984,73 @@ nohup java -jar ${this.escapeHtml(jarPath)} &</code></div>
   }
 
   async restartService(name: string): Promise<void> {
-    this.showOutput(`正在重启服务 ${name}...`);
-    const output = await this.execSSH(`sudo systemctl restart ${name} 2>&1 && systemctl status ${name} --no-pager 2>&1 | head -15`);
-    this.showOutput(output);
-    window.showNotification?.(`服务 ${name} 已重启`, 'success');
-    setTimeout(() => this.detectServices(), 1500);
+    await this.controlService(name, 'restart');
   }
 
   async stopService(name: string): Promise<void> {
-    const output = await this.execSSH(`sudo systemctl stop ${name} 2>&1 && echo "服务 ${name} 已停止"`);
-    this.showOutput(output);
-    setTimeout(() => this.detectServices(), 1000);
+    await this.controlService(name, 'stop');
   }
 
   async startService(name: string): Promise<void> {
-    const output = await this.execSSH(`sudo systemctl start ${name} 2>&1 && echo "服务 ${name} 已启动"`);
-    this.showOutput(output);
-    setTimeout(() => this.detectServices(), 1000);
+    await this.controlService(name, 'start');
+  }
+
+  private async controlService(name: string, action: 'start' | 'stop' | 'restart'): Promise<void> {
+    if (!name.trim()) return;
+    const target = activeTargetContext.get();
+    if (!target) {
+      window.showNotification?.('没有已确认的活动 SSH 目标', 'error');
+      return;
+    }
+    const statusCommand = `if systemctl is-active --quiet ${shq(name)}; then echo active; else echo inactive; fi`;
+    let before = 'unknown';
+    try {
+      const status = await this.execSSHResult(statusCommand);
+      before = status.output.trim() || 'unknown';
+    } catch (error) {
+      reportError(error, { module: 'JavaHotUpdate', action: '读取服务状态', silent: true });
+    }
+    const targetAfterRead = activeTargetContext.get();
+    if (!targetAfterRead || targetAfterRead.sessionId !== target.sessionId) {
+      window.showNotification?.('读取状态期间活动目标已变化，已阻止服务操作', 'error');
+      return;
+    }
+    const confirmed = await this.confirmMutation(
+      `${action === 'start' ? '启动' : action === 'stop' ? '停止' : '重启'} Java 服务`,
+      `服务：${name}\n当前状态：${before}\n动作：${action}`,
+    );
+    if (!confirmed || !activeTargetContext.matches(target)) return;
+
+    const command = `sudo systemctl ${shq(action)} ${shq(name)}`;
+    const expected = action === 'stop' ? 'inactive' : 'active';
+    try {
+      const result = await this.execSSHResult(command);
+      const verify = result.timed_out !== true && result.exit_code === 0
+        ? await this.execSSHResult(statusCommand)
+        : null;
+      const success = !!verify && verify.timed_out !== true && verify.exit_code === 0 && verify.output.trim() === expected;
+      const restoreAction = action === 'start' && before !== 'active'
+        ? 'stop'
+        : action === 'stop' && before === 'active' ? 'start' : undefined;
+      const restoreCommand = restoreAction ? `sudo systemctl ${shq(restoreAction)} ${shq(name)}` : undefined;
+      const restoreExpected = restoreAction === 'start' ? 'active' : restoreAction === 'stop' ? 'inactive' : undefined;
+      operationJournal.record({
+        source: 'java', server: target.host, target,
+        title: `${action} Java 服务 ${name}`, command,
+        beforeValue: before, afterValue: verify?.output.trim() || 'unknown',
+        output: result.output, exitCode: result.exit_code, timedOut: result.timed_out,
+        verifyCommand: statusCommand, verifyOutput: verify?.output, verified: success,
+        restoreCommand: success ? restoreCommand : undefined,
+        restoreVerifyCommand: success && restoreCommand ? statusCommand : undefined,
+        restoreVerifyExpected: success ? restoreExpected : undefined,
+        success,
+      });
+      this.showOutput(`${result.output}\n状态读回：${verify?.output || 'unknown'}`.trim());
+      window.showNotification?.(success ? `服务 ${name} ${action} 成功并验证` : `服务 ${name} ${action} 未通过状态验证`, success ? 'success' : 'error');
+      setTimeout(() => this.detectServices(), 1500);
+    } catch (error) {
+      reportError(error, { module: 'JavaHotUpdate', action: `${action} 服务` });
+    }
   }
 
   // ──── 部署管理 ────
@@ -1313,7 +1494,7 @@ nohup java -jar /opt/myapp/app.jar > /opt/myapp/app.log 2>&1 &</code>
   // ════════════════════════════════════════════════════
 
   private async dockerExec(containerId: string, cmd: string): Promise<string> {
-    return this.execSSH(`docker exec ${containerId} sh -c '${cmd.replace(/'/g, "'\\''")}'`);
+    return this.execSSH(`docker exec ${shq(containerId)} sh -c ${shq(cmd)}`);
   }
 
   private getSelectedContainerId(): string {
@@ -1441,23 +1622,9 @@ nohup java -jar /opt/myapp/app.jar > /opt/myapp/app.log 2>&1 &</code>
     const cid = this.getSelectedContainerId();
     const jar = this.getDockerJarPath();
     const cls = this.getDockerClassName();
-    const hostFile = (document.getElementById('jhu-docker-host-file') as HTMLInputElement)?.value?.trim() || '';
     if (!cid || !jar || !cls) { window.showNotification?.('请填写容器、JAR路径、Class路径', 'warning'); return; }
-    const ts = Date.now();
-
-    this.showOutput('正在执行 Docker 内 jar uf 更新...');
-    let cmd: string;
-
-    if (hostFile) {
-      // 宿主机上有编译好的 class，先 docker cp 进容器，再 jar uf
-      cmd = `echo "1. 备份容器内原始 JAR..." && docker exec ${cid} cp "${jar}" "${jar}.bak.${ts}" 2>&1 && echo "2. 复制新 class 到容器..." && docker cp ${hostFile} ${cid}:/tmp/jhu_patch_${ts}.class 2>&1 && echo "3. 在容器内执行 jar uf..." && docker exec ${cid} sh -c 'mkdir -p /tmp/jhu_work_${ts} && cd /tmp/jhu_work_${ts} && mkdir -p $(dirname "${cls}") && cp /tmp/jhu_patch_${ts}.class "${cls}" && jar uf "${jar}" "${cls}" 2>&1' && echo "=== jar uf 完成 ==="`;
-    } else {
-      // 直接在容器内操作（class 已经在容器内）
-      cmd = `echo "1. 备份容器内原始 JAR..." && docker exec ${cid} cp "${jar}" "${jar}.bak.${ts}" 2>&1 && echo "2. 在容器内执行 jar uf..." && docker exec ${cid} sh -c 'cd /tmp && jar uf "${jar}" "${cls}" 2>&1' && echo "=== jar uf 完成 ==="`;
-    }
-
-    const output = await this.execSSH(cmd);
-    this.showOutput(output);
+    this.showOutput('安全门禁已阻止容器内自动 JAR 更新：当前流程无法保证完整保留容器编排语义与失败后的原子恢复。请先将文件提取到宿主机，使用上方“JAR 热更新”的备份+哈希验证流程，再通过受审计的镜像/编排发布。');
+    window.showNotification?.('已阻止未验证的容器内 JAR 更新', 'warning');
   }
 
   async dockerJarBackup(): Promise<void> {
@@ -1510,11 +1677,9 @@ nohup java -jar /opt/myapp/app.jar > /opt/myapp/app.log 2>&1 &</code>
   async dockerCpIn(): Promise<void> {
     const cid = this.getSelectedContainerId();
     const hostPath = (document.getElementById('jhu-docker-host-file') as HTMLInputElement)?.value?.trim() || '';
-    const containerPath = (document.getElementById('jhu-docker-container-path') as HTMLInputElement)?.value?.trim() || '/tmp/';
     if (!cid || !hostPath) { window.showNotification?.('请填写容器ID和宿主机文件路径', 'warning'); return; }
-    this.showOutput(`正在复制 ${hostPath} -> 容器 ${cid}:${containerPath}...`);
-    const output = await this.execSSH(`docker cp "${hostPath}" ${cid}:${containerPath} 2>&1 && echo "复制完成"`);
-    this.showOutput(output);
+    this.showOutput('安全门禁已阻止该入口直接覆盖容器文件。请使用 Docker 页面“编辑/复制文件”，该入口会显示精确目标确认并写入操作回执。');
+    window.showNotification?.('已阻止未跟踪的容器文件覆盖', 'warning');
   }
 
   async dockerCpOut(): Promise<void> {
@@ -1530,11 +1695,29 @@ nohup java -jar /opt/myapp/app.jar > /opt/myapp/app.log 2>&1 &</code>
   async dockerRestartContainer(cid: string): Promise<void> {
     if (!cid) cid = this.getSelectedContainerId();
     if (!cid) return;
+    const target = await this.confirmMutation('重启 Java 容器', `容器：${cid}\n将中断容器当前提供的服务，并在执行后读回容器状态。`);
+    if (!target) return;
     this.showOutput(`正在重启容器 ${cid}...`);
-    const output = await this.execSSH(`docker restart ${cid} 2>&1 && docker ps --filter id=${cid} --format '{{.Names}} {{.Status}}'`);
-    this.showOutput(output);
-    window.showNotification?.('容器已重启', 'success');
-    setTimeout(() => this.scanDockerJava(), 2000);
+    const command = `docker restart ${shq(cid)}`;
+    const verifyCommand = `docker inspect --format '{{.State.Status}}' ${shq(cid)}`;
+    try {
+      const result = await this.execSSHResult(command);
+      const verify = result.timed_out !== true && result.exit_code === 0
+        ? await this.execSSHResult(verifyCommand)
+        : null;
+      const verified = !!verify && verify.timed_out !== true && verify.exit_code === 0 && verify.output.trim() === 'running';
+      operationJournal.record({
+        source: 'java', server: target.host, target,
+        title: `重启 Java 容器 ${cid}`, command,
+        output: result.output, exitCode: result.exit_code, timedOut: result.timed_out,
+        verifyCommand, verifyOutput: verify?.output, verified, success: verified,
+      });
+      this.showOutput(`${result.output}\n状态读回：${verify?.output || 'unknown'}`.trim());
+      window.showNotification?.(verified ? '容器已重启并验证运行状态' : '容器重启未通过运行状态验证', verified ? 'success' : 'error');
+      setTimeout(() => this.scanDockerJava(), 2000);
+    } catch (error) {
+      reportError(error, { module: 'JavaHotUpdate', action: '重启 Java 容器' });
+    }
   }
 
   async dockerShowExecGuide(cid: string): Promise<void> {
@@ -1589,7 +1772,7 @@ nohup java -jar /opt/myapp/app.jar > /opt/myapp/app.log 2>&1 &</code>
       </div>
       <div class="jhu-dialog-section">
         <h5>步骤 5: 重启容器使更新生效</h5>
-        <div class="jhu-cmd-box"><code># 方法1: 重启整个容器\ndocker restart ${this.escapeHtml(cid)}\n\n# 方法2: 只重启容器内的 Java 进程\ndocker exec ${this.escapeHtml(cid)} sh -c 'kill -15 $(pgrep -f java) && sleep 2 && java -jar ${this.escapeHtml(jar)} &'\n\n# 方法3: 用 Arthas 热替换(不重启)\ndocker exec -it ${this.escapeHtml(cid)} sh -c 'cd /tmp && curl -sO https://arthas.aliyun.com/arthas-boot.jar && java -jar arthas-boot.jar'\n# 然后在 Arthas 中: redefine /tmp/com/example/MyClass.class</code></div>
+        <div class="jhu-cmd-box"><code># 方法1: 重启整个容器\ndocker restart ${this.escapeHtml(cid)}\n\n# 方法2: 只重启容器内的 Java 进程\ndocker exec ${this.escapeHtml(cid)} sh -c 'kill -15 $(pgrep -f java) && sleep 2 && java -jar ${this.escapeHtml(jar)} &'\n\n# 方法3: 预先离线上传 Arthas 后热替换\ndocker exec -it ${this.escapeHtml(cid)} java -jar /tmp/arthas-boot.jar\n# 然后在 Arthas 中: redefine /tmp/com/example/MyClass.class</code></div>
       </div>
       <div class="jhu-dialog-section">
         <h5>步骤 6: 验证</h5>

@@ -18,12 +18,14 @@
 
 import { escapeHtml } from '../core/htmlEscape';
 import { opSourceLabel, type OperationEntry } from '../core/operationJournal';
+import type { IncidentCase } from '../case/incidentCaseManager';
 
 /** 报告输入。刻意不直接依赖 operationJournal / quickDetectionManager 单例，方便测试与复用 */
 export interface DisposalReportInput {
   server: string;
   generatedAt: Date;
   entries: OperationEntry[];
+  incident?: IncidentCase;
   detection?: {
     timestamp: Date;
     overallScore: number;
@@ -64,7 +66,7 @@ export function summarizeEntries(entries: OperationEntry[]) {
 // ──────────────── Markdown ────────────────
 
 export function buildDisposalMarkdown(input: DisposalReportInput): string {
-  const { server, generatedAt, entries, detection } = input;
+  const { server, generatedAt, entries, detection, incident } = input;
   const s = summarizeEntries(entries);
   const L: string[] = [];
 
@@ -74,10 +76,13 @@ export function buildDisposalMarkdown(input: DisposalReportInput): string {
   L.push(`- 生成时间：${formatTimestamp(generatedAt)}`);
   L.push(`- 处置条目：${s.total} 条（成功 ${s.succeeded}，失败 ${s.failed}，已回滚 ${s.rolledBack}）`);
   L.push(`- 仍可一键回滚：${s.revertible} 条`);
+  if (incident) L.push(`- 活动案件：${mdCell(incident.title)}（IOC ${incident.iocs.length}，证据 ${incident.evidence.length}）`);
   L.push('');
 
+  let chapter = 1;
+
   if (detection) {
-    L.push(`## 一、检测结果`);
+    L.push(`## ${chapterLabel(chapter++)}、检测结果`);
     L.push('');
     L.push(`检测时间：${formatTimestamp(detection.timestamp)}　总体评分：**${detection.overallScore}**`);
     L.push('');
@@ -97,7 +102,42 @@ export function buildDisposalMarkdown(input: DisposalReportInput): string {
     }
   }
 
-  L.push(`## ${detection ? '二' : '一'}、处置记录`);
+  if (incident) {
+    L.push(`## ${chapterLabel(chapter++)}、案件与证据链`);
+    L.push('');
+    L.push(`- 案件编号：${mdCell(incident.id)}`);
+    L.push(`- 案件名称：${mdCell(incident.title)}`);
+    L.push(`- 可信目标：${mdCell(`${incident.lastTarget.username}@${incident.lastTarget.host}:${incident.lastTarget.port} · ${incident.lastTarget.hostKeyFingerprint}`)}`);
+    L.push('');
+    L.push('### IOC');
+    L.push('');
+    if (!incident.iocs.length) {
+      L.push('暂无 IOC。');
+    } else {
+      L.push('| 类型 | 值 | 来源 | 加入时间 |');
+      L.push('| --- | --- | --- | --- |');
+      incident.iocs.forEach(ioc => L.push(`| ${mdCell(ioc.type)} | ${mdCell(ioc.value)} | ${mdCell(ioc.source)} | ${formatTimestamp(new Date(ioc.addedAt))} |`));
+    }
+    L.push('');
+    L.push('### 证据清单');
+    L.push('');
+    if (!incident.evidence.length) {
+      L.push('暂无证据。');
+    } else {
+      L.push('| 类型 | 证据 | 来源 | SHA-256 | 哈希范围 |');
+      L.push('| --- | --- | --- | --- | --- |');
+      incident.evidence.forEach(item => L.push(`| ${mdCell(item.kind)} | ${mdCell(item.label)} | ${mdCell(item.source)} | \`${item.sha256}\` | ${mdCell(item.hashScope)} |`));
+    }
+    L.push('');
+    L.push('### 调查时间线');
+    L.push('');
+    incident.timeline.slice().reverse().forEach(event => {
+      L.push(`- ${formatTimestamp(new Date(event.timestamp))} · ${mdCell(event.title)} · ${mdCell(event.source)} · 会话 ${mdCell(event.target.sessionId)}`);
+    });
+    L.push('');
+  }
+
+  L.push(`## ${chapterLabel(chapter)}、处置记录`);
   L.push('');
 
   if (!entries.length) {
@@ -116,6 +156,8 @@ export function buildDisposalMarkdown(input: DisposalReportInput): string {
         L.push(`- 变更：\`${e.beforeValue || '(空)'}\` → \`${e.afterValue || '(空)'}\``);
       }
       if (e.backupInfo) L.push(`- 备份：${e.backupInfo}`);
+      if (e.exitCode !== undefined) L.push(`- 退出码：${e.exitCode ?? '未知'}${e.timedOut ? '（超时）' : ''}`);
+      if (e.verified !== undefined) L.push(`- 独立验证：${e.verified ? '通过' : '未通过'}`);
       L.push('');
       L.push('执行命令：');
       L.push('');
@@ -134,6 +176,14 @@ export function buildDisposalMarkdown(input: DisposalReportInput): string {
         L.push('> 该操作未登记回滚命令，无法一键撤销。');
         L.push('');
       }
+      if (e.verifyCommand) {
+        L.push('验证命令：');
+        L.push('');
+        L.push('```bash');
+        L.push(e.verifyCommand);
+        L.push('```');
+        L.push('');
+      }
     });
   }
 
@@ -142,7 +192,13 @@ export function buildDisposalMarkdown(input: DisposalReportInput): string {
 
 /** Markdown 表格单元格：竖线会截断列，换行会截断整行 */
 function mdCell(text: string): string {
-  return String(text ?? '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ').trim() || '-';
+  return String(text ?? '')
+    .replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\|/g, '\\|').replace(/\r?\n/g, ' ').trim() || '-';
+}
+
+function chapterLabel(chapter: number): string {
+  return ['一', '二', '三', '四'][chapter - 1] || String(chapter);
 }
 
 // ──────────────── HTML ────────────────
@@ -155,7 +211,7 @@ const SEVERITY_BG: Record<string, string> = {
 };
 
 export function buildDisposalHtml(input: DisposalReportInput): string {
-  const { server, generatedAt, entries, detection } = input;
+  const { server, generatedAt, entries, detection, incident } = input;
   const s = summarizeEntries(entries);
   const ordered = [...entries].sort((a, b) => a.timestamp - b.timestamp);
 
@@ -197,13 +253,35 @@ export function buildDisposalHtml(input: DisposalReportInput): string {
             ? `<p class="diff"><code>${escapeHtml(e.beforeValue || '(空)')}</code> → <code>${escapeHtml(e.afterValue || '(空)')}</code></p>`
             : ''}
           ${e.backupInfo ? `<p class="meta">备份：${escapeHtml(e.backupInfo)}</p>` : ''}
+          ${e.exitCode !== undefined ? `<p class="meta">退出码：${escapeHtml(String(e.exitCode ?? '未知'))}${e.timedOut ? '（超时）' : ''}</p>` : ''}
+          ${e.verified !== undefined ? `<p class="meta">独立验证：<strong>${e.verified ? '通过' : '未通过'}</strong></p>` : ''}
           <p class="label">执行命令</p>
           <pre>${escapeHtml(e.command)}</pre>
           ${e.restoreCommand
             ? `<p class="label">回滚命令</p><pre class="restore">${escapeHtml(e.restoreCommand)}</pre>`
             : '<p class="warn">该操作未登记回滚命令，无法一键撤销。</p>'}
+          ${e.verifyCommand ? `<p class="label">验证命令</p><pre>${escapeHtml(e.verifyCommand)}</pre>` : ''}
         </article>`;
       }).join('');
+
+  const incidentHtml = !incident ? '' : `
+    <section class="card">
+      <h2>案件与证据链</h2>
+      <p class="meta">${escapeHtml(incident.title)} · ${escapeHtml(incident.id)} · ${escapeHtml(`${incident.lastTarget.username}@${incident.lastTarget.host}:${incident.lastTarget.port}`)}</p>
+      <h3>IOC（${incident.iocs.length}）</h3>
+      ${incident.iocs.length ? `<table>
+        <thead><tr><th>类型</th><th>值</th><th>来源</th><th>加入时间</th></tr></thead>
+        <tbody>${incident.iocs.map(ioc => `<tr><td>${escapeHtml(ioc.type)}</td><td>${escapeHtml(ioc.value)}</td><td>${escapeHtml(ioc.source)}</td><td>${escapeHtml(formatTimestamp(new Date(ioc.addedAt)))}</td></tr>`).join('')}</tbody>
+      </table>` : '<p class="empty">暂无 IOC。</p>'}
+      <h3>证据清单（${incident.evidence.length}）</h3>
+      ${incident.evidence.length ? `<table>
+        <thead><tr><th>类型</th><th>证据</th><th>来源</th><th>SHA-256 / 范围</th></tr></thead>
+        <tbody>${incident.evidence.map(item => `<tr><td>${escapeHtml(item.kind)}</td><td>${escapeHtml(item.label)}</td><td>${escapeHtml(item.source)}</td><td><code>${escapeHtml(item.sha256)}</code><br><span class="meta">${escapeHtml(item.hashScope)}</span></td></tr>`).join('')}</tbody>
+      </table>` : '<p class="empty">暂无证据。</p>'}
+      <h3>调查时间线（${incident.timeline.length}）</h3>
+      ${incident.timeline.length ? `<ol class="timeline">${incident.timeline.slice().reverse().map(event => `<li><strong>${escapeHtml(event.title)}</strong><span>${escapeHtml(formatTimestamp(new Date(event.timestamp)))} · ${escapeHtml(event.source)} · 会话 ${escapeHtml(event.target.sessionId)}</span></li>`).join('')}</ol>` : '<p class="empty">暂无时间线事件。</p>'}
+      <p class="warn">stored-preview 仅校验案件中保存的预览；external-artifact 才代表原始文件哈希。</p>
+    </section>`;
 
   const sourceChips = [...s.bySource.entries()]
     .map(([src, n]) => `<span class="chip">${escapeHtml(opSourceLabel(src as OperationEntry['source']))} ${n}</span>`)
@@ -246,6 +324,7 @@ export function buildDisposalHtml(input: DisposalReportInput): string {
   pre.restore{background:#052e16}
   .warn{font-size:12px;color:#b45309;background:#fffbeb;border-radius:6px;padding:6px 10px;margin-top:8px}
   .empty{font-size:13px;color:#64748b;padding:12px 0}
+  .timeline{margin:8px 0 0 18px}.timeline li{padding:4px 0}.timeline li span{display:block;color:#64748b;font-size:11px}
   @media print{
     body{background:#fff}
     .wrap{max-width:none;padding:0}
@@ -265,11 +344,13 @@ export function buildDisposalHtml(input: DisposalReportInput): string {
       <span class="stat">失败 ${s.failed}</span>
       <span class="stat">已回滚 ${s.rolledBack}</span>
       <span class="stat">仍可回滚 ${s.revertible}</span>
+      ${incident ? `<span class="stat">IOC ${incident.iocs.length}</span><span class="stat">证据 ${incident.evidence.length}</span>` : ''}
     </div>
   </header>
 
   ${sourceChips ? `<section class="card"><h2>处置来源分布</h2>${sourceChips}</section>` : ''}
   ${findingsHtml}
+  ${incidentHtml}
 
   <section class="card">
     <h2>处置记录</h2>

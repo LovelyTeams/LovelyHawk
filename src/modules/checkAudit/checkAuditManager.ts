@@ -3,9 +3,14 @@
  * 劫持系统命令记录 check 脚本行为，逆向分析 check 逻辑
  */
 
-import { invoke } from '@tauri-apps/api/core';
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH';
 import { sshConnectionManager } from '../remote/sshConnectionManager';
 import { showConfirm } from '../ui/confirmDialog';
+import { operationJournal } from '../core/operationJournal';
+import { activeTargetContext, type TargetIdentity } from '../core/targetContext';
+import { shq } from '../core/shellEscape';
+import { logger } from '../core/logger';
+import { reportError } from '../utils/errorHandler';
 
 // ──── 类型 ────
 
@@ -18,6 +23,7 @@ export interface HijackCommand {
   status: HijackStatus;
   origPath: string;
   custom: boolean;
+  journalEntryId?: string;
 }
 
 export interface AuditLogEntry {
@@ -66,6 +72,69 @@ const SUSPICIOUS_RE = [
   /secret/i, /token/i, /password/i, /key[_.]?file/i,
 ];
 const LOG_LINE_RE = /^\[(.+?)\] CMD=(\S+) ARGS=(.*?) USER=(\S+) PID=(\d+) PPID=(\d+) CALLER=(.*)$/;
+const COMMAND_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/;
+const log = logger.module('CheckAudit');
+
+interface AuditCommandResult {
+  output: string;
+  exitCode: number | null;
+  timedOut: boolean;
+  success: boolean;
+}
+
+export interface HijackCommandPlan {
+  origPath: string;
+  backupCommand: string;
+  writeCommand: string;
+  verifyCommand: string;
+  functionalVerifyCommand: string;
+  restoreCommand: string;
+  restoreVerifyCommand: string;
+}
+
+export function isValidAbsoluteCommandPath(path: string): boolean {
+  return path.length > 1 && path.length <= 4096
+    && path.startsWith('/')
+    && !path.split('/').includes('..')
+    && /^\/[A-Za-z0-9._+@%/:=-]+$/.test(path);
+}
+
+function privileged(command: string, isRoot: boolean): string {
+  return isRoot ? command : `sudo ${command /* shell-safe: 完整命令的操作数已逐项 shq() */}`;
+}
+
+function buildWrapperContent(name: string, origPath: string): string {
+  const isShell = ['bash', 'sh'].includes(name);
+  const shebang = isShell ? '#!' + origPath : '#!/bin/bash';
+  return [
+    shebang,
+    'ORIG=' + shq(origPath),
+    'LOG=' + shq(LOG_PATH),
+    "TS=$(date '+%Y-%m-%d %H:%M:%S')",
+    'CALLER=$(ps -o comm= $PPID 2>/dev/null)',
+    'echo "[$TS] CMD=' + name + ' ARGS=$* USER=$(whoami) PID=$$ PPID=$PPID CALLER=$CALLER" >> $LOG',
+    'exec "$ORIG" "$@"',
+  ].join('\n');
+}
+
+export function buildHijackCommandPlan(name: string, path: string, isRoot: boolean): HijackCommandPlan {
+  if (!COMMAND_NAME_RE.test(name)) throw new Error('命令名不合法');
+  if (!isValidAbsoluteCommandPath(path)) throw new Error('系统命令路径不合法');
+  const origPath = path + '_orig';
+  const wrapper = buildWrapperContent(name, origPath);
+  const bytes = new TextEncoder().encode(wrapper);
+  const b64 = btoa(Array.from(bytes, byte => String.fromCharCode(byte)).join(''));
+  const innerWrite = `printf %s ${shq(b64)} | base64 -d > ${shq(path)} && chmod +x -- ${shq(path)}`;
+  return {
+    origPath,
+    backupCommand: privileged(`cp -n -- ${shq(path)} ${shq(origPath)}`, isRoot),
+    writeCommand: privileged(`/bin/sh -c ${shq(innerWrite)}`, isRoot),
+    verifyCommand: `file -- ${shq(path)} 2>/dev/null`,
+    functionalVerifyCommand: `${shq(path)} --help </dev/null >/dev/null 2>&1; code=$?; [ "$code" -le 2 ] && echo WRAPPER_OK`,
+    restoreCommand: privileged(`mv -- ${shq(origPath)} ${shq(path)}`, isRoot),
+    restoreVerifyCommand: `file -- ${shq(path)} 2>/dev/null | grep -vqE 'script|text|ASCII' && [ ! -e ${shq(origPath)} ] && echo ORIGINAL_OK`,
+  };
+}
 
 // ──── 管理器 ────
 
@@ -149,18 +218,31 @@ class CheckAuditManager {
 
   // ──── SSH ────
 
-  /** 需要 root 权限的命令：如果当前不是 root 则自动加 sudo */
-  private priv(cmd: string): string {
-    return this.isRoot ? cmd : `sudo ${cmd}`;
+  private async exec(cmd: string): Promise<string> {
+    return (await this.execResult(cmd)).output;
   }
 
-  private async exec(cmd: string): Promise<string> {
+  private async execResult(cmd: string): Promise<AuditCommandResult> {
+    const capturedTarget = activeTargetContext.get();
     try {
-      const r = await invoke('ssh_execute_command_direct', { command: cmd }) as any;
-      return r?.output || '';
+      const r = await invokeTargetBoundSSH('ssh_execute_command_direct', { command: cmd }) as any;
+      const exitCode = typeof r?.exit_code === 'number' ? r.exit_code : null;
+      const timedOut = r?.timed_out === true;
+      return {
+        output: r?.output || '', exitCode, timedOut,
+        success: !timedOut && exitCode === 0,
+      };
     } catch (e) {
-      console.warn('SSH failed:', cmd, e);
-      return '';
+      if (capturedTarget && !activeTargetContext.matches(capturedTarget)) throw e;
+      log.warn('SSH 命令失败', e);
+      reportError(e, { module: 'CheckAudit', action: '执行 SSH 命令', silent: true });
+      return { output: String(e), exitCode: null, timedOut: false, success: false };
+    }
+  }
+
+  private assertTarget(target: TargetIdentity): void {
+    if (!activeTargetContext.matches(target)) {
+      throw new Error(`核查审计期间目标已变化，已停止后续动作；原目标 ${target.username}@${target.host}:${target.port}`);
     }
   }
 
@@ -179,9 +261,9 @@ class CheckAuditManager {
     const batchSize = 5;
     for (let i = 0; i < this.commands.length; i += batchSize) {
       const batch = this.commands.slice(i, i + batchSize);
-      const names = batch.map(c => c.name).join(' ');
+      const names = batch.map(c => shq(c.name)).join(' ');
       const out = await this.exec(
-        `for cmd in ${names}; do p=$(which $cmd 2>/dev/null); if [ -z "$p" ]; then echo "$cmd|MISSING|"; elif file "$p" 2>/dev/null | grep -qE "script|text"; then echo "$cmd|HIJACKED|$p"; else echo "$cmd|ORIGINAL|$p"; fi; done`
+        `for cmd in ${names /* shell-safe: 每个命令名均已由 shq() 包裹 */}; do p=$(which "$cmd" 2>/dev/null); if [ -z "$p" ]; then echo "$cmd|MISSING|"; elif file "$p" 2>/dev/null | grep -qE "script|text"; then echo "$cmd|HIJACKED|$p"; else echo "$cmd|ORIGINAL|$p"; fi; done`
       );
       out.split('\n').filter(Boolean).forEach(line => {
         const parts = line.split('|');
@@ -199,27 +281,6 @@ class CheckAuditManager {
     this.renderContent();
   }
 
-  /**
-   * 生成 wrapper 脚本内容
-   * bash/sh 特殊处理: shebang 必须指向备份的原始解释器，否则无限递归
-   */
-  private buildWrapperContent(name: string, origPath: string): string {
-    // bash/sh 被劫持后，wrapper 的 shebang 不能再指向 /bin/bash (那就是 wrapper 自己)
-    // 必须指向备份的原始二进制
-    const isShell = ['bash', 'sh'].includes(name);
-    const shebang = isShell ? '#!' + origPath : '#!/bin/bash';
-
-    return [
-      shebang,
-      'ORIG="' + origPath + '"',
-      'LOG="' + LOG_PATH + '"',
-      "TS=$(date '+%Y-%m-%d %H:%M:%S')",
-      'CALLER=$(ps -o comm= $PPID 2>/dev/null)',
-      'echo "[$TS] CMD=' + name + ' ARGS=$* USER=$(whoami) PID=$$ PPID=$PPID CALLER=$CALLER" >> $LOG',
-      'exec "$ORIG" "$@"',
-    ].join('\n');
-  }
-
   async deployHijack(name: string, skipConfirm = false): Promise<void> {
     const cmd = this.commands.find(c => c.name === name);
     if (!cmd || !cmd.path) {
@@ -234,27 +295,38 @@ class CheckAuditManager {
       window.showNotification?.(`${name} 未安装，跳过`, 'warning');
       return;
     }
+    if (!COMMAND_NAME_RE.test(name) || !isValidAbsoluteCommandPath(cmd.path)) {
+      window.showNotification?.(`${name} 的命令名或系统路径不合法，已阻止替换`, 'error');
+      return;
+    }
+    const capturedTarget = activeTargetContext.get();
+    if (!capturedTarget) throw new Error('请先连接并确认目标主机');
 
     // 劫持会用 wrapper 替换系统命令,尤其 bash/sh/cat 等基础命令一旦 wrapper 异常可能影响整机,必须二次确认
     if (!skipConfirm) {
       const confirmed = await showConfirm({
         title: '部署命令劫持',
-        message: `确定要劫持系统命令 "${name}"(${cmd.path})？\n\n将用 wrapper 脚本替换该命令以记录 check 脚本行为,原文件备份为 ${cmd.path}_orig。\n\n若为 bash/sh/cat 等基础命令,wrapper 异常可能影响整机命令执行,请确认已了解风险。`,
+        message: `目标：${capturedTarget.username}@${capturedTarget.host}:${capturedTarget.port}\n指纹：${capturedTarget.hostKeyFingerprint}\n\n确定要劫持系统命令 "${name}"(${cmd.path})？\n\n将用 wrapper 脚本替换该命令以记录 check 脚本行为,原文件备份为 ${cmd.path}_orig。\n\n若为 bash/sh/cat 等基础命令,wrapper 异常可能影响整机命令执行,请确认已了解风险。`,
         dangerous: true,
+        defaultFocus: 'cancel',
       });
       if (!confirmed) return;
     }
+    this.assertTarget(capturedTarget);
 
-    const origPath = cmd.path + '_orig';
+    const plan = buildHijackCommandPlan(name, cmd.path, this.isRoot);
+    const { origPath, backupCommand, writeCommand, verifyCommand, functionalVerifyCommand, restoreCommand, restoreVerifyCommand } = plan;
     this.showOutput(`正在部署 ${name} 劫持...\n路径: ${cmd.path}\n备份: ${origPath}`);
 
     // 步骤 1: 备份原始二进制
-    const bkOut = await this.exec(this.priv(`cp -n "${cmd.path}" "${origPath}"`));
+    const backupResult = await this.execResult(backupCommand);
+    this.assertTarget(capturedTarget);
 
     // 验证备份
-    const bkCheck = await this.exec(`ls "${origPath}" 2>/dev/null && echo "BK_OK"`);
+    const bkCheck = await this.exec(`[ -f ${shq(origPath)} ] && echo "BK_OK"`);
+    this.assertTarget(capturedTarget);
     if (!bkCheck.includes('BK_OK')) {
-      this.showOutput(`备份失败，无法继续\n输出: ${bkOut}\n\n请确认:\n1. 当前身份: ${this.isRoot ? 'root' : '非root'}\n2. 路径是否可写: ls -la $(dirname ${cmd.path})`);
+      this.showOutput(`备份失败，无法继续\n输出: ${backupResult.output}\n\n请确认:\n1. 当前身份: ${this.isRoot ? 'root' : '非root'}\n2. 目标目录是否可写`);
       window.showNotification?.(`${name} 备份失败`, 'error');
       return;
     }
@@ -262,43 +334,93 @@ class CheckAuditManager {
     // 步骤 2: 生成 wrapper 并写入
     // 劫持 bash/sh 时，写入命令本身不能依赖被劫持的 shell
     // 所以统一用 /usr/bin/env + 已备份的原始 bash 来执行
-    const wrapper = this.buildWrapperContent(name, origPath);
-    const b64 = btoa(wrapper);
-    const writeOut = await this.exec(this.priv(`/bin/sh -c 'echo ${b64} | base64 -d > "${cmd.path}" && chmod +x "${cmd.path}"'`));
+    const writeResult = await this.execResult(writeCommand);
+    this.assertTarget(capturedTarget);
 
     // 步骤 3: 验证写入
-    const verify = await this.exec(`file "${cmd.path}" 2>/dev/null`);
+    const verify = await this.exec(verifyCommand);
+    this.assertTarget(capturedTarget);
     const isScript = /script|text|ASCII/.test(verify);
 
     // 步骤 4: 验证 wrapper 能正常工作（用 --help 或无参数快速测试）
-    if (isScript) {
-      const testOut = await this.exec(`"${cmd.path}" --help 2>&1 | head -1 || "${cmd.path}" 2>&1 | head -1`);
-      const testOk = testOut.length > 0;
+    const testResult = isScript ? await this.execResult(functionalVerifyCommand) : null;
+    this.assertTarget(capturedTarget);
+    const testOk = Boolean(testResult?.success && testResult.output.includes('WRAPPER_OK'));
+
+    if (writeResult.success && isScript && testOk) {
 
       cmd.status = 'hijacked';
       cmd.origPath = origPath;
-      this.showOutput(`${name} 劫持部署成功\n\n备份: ${origPath}\nWrapper: ${cmd.path}\n验证: file → ${verify.trim()}\n功能测试: ${testOk ? '通过' : '未确认'} ${testOut.substring(0, 100)}\n${writeOut}`);
+      const receipt = operationJournal.record({
+        source: 'check-audit', server: capturedTarget.host, target: capturedTarget,
+        title: `部署 ${name} 命令审计 wrapper`,
+        command: `${backupCommand}\n${writeCommand}`,
+        restoreCommand, restoreVerifyCommand, restoreVerifyExpected: 'ORIGINAL_OK',
+        backupInfo: origPath, output: writeResult.output,
+        exitCode: writeResult.exitCode, timedOut: writeResult.timedOut,
+        verifyCommand: `${verifyCommand}\n${functionalVerifyCommand}`,
+        verifyOutput: `${verify}\n${testResult?.output || ''}`, verified: true, success: true,
+      });
+      cmd.journalEntryId = receipt.id;
+      this.showOutput(`${name} 劫持部署成功\n\n备份: ${origPath}\nWrapper: ${cmd.path}\n验证: file → ${verify.trim()}\n功能测试: 通过\n${writeResult.output}`);
       window.showNotification?.(`${name} 劫持成功`, 'success');
     } else {
       // 写入失败，恢复原始
-      await this.exec(this.priv(`mv "${origPath}" "${cmd.path}"`));
-      this.showOutput(`${name} wrapper 写入失败，已自动恢复原始文件\n\nfile 输出: ${verify}\n写入输出: ${writeOut}\n\n可能原因:\n1. base64 命令不可用 (尝试: which base64)\n2. 文件系统只读\n3. SELinux/AppArmor 阻止`);
-      window.showNotification?.(`${name} 劫持失败，已恢复`, 'error');
+      this.assertTarget(capturedTarget);
+      const restoreResult = await this.execResult(restoreCommand);
+      const restoreVerify = await this.exec(restoreVerifyCommand);
+      this.assertTarget(capturedTarget);
+      const restored = restoreResult.success && restoreVerify.includes('ORIGINAL_OK');
+      operationJournal.record({
+        source: 'check-audit', server: capturedTarget.host, target: capturedTarget,
+        title: `部署 ${name} 命令审计 wrapper 失败${restored ? '（已自动恢复）' : '（恢复未确认）'}`,
+        command: `${backupCommand}\n${writeCommand}`,
+        restoreCommand: restored ? undefined : restoreCommand,
+        restoreVerifyCommand: restored ? undefined : restoreVerifyCommand,
+        restoreVerifyExpected: restored ? undefined : 'ORIGINAL_OK',
+        backupInfo: origPath, output: writeResult.output,
+        exitCode: writeResult.exitCode, timedOut: writeResult.timedOut,
+        verifyCommand: `${verifyCommand}\n${functionalVerifyCommand}`,
+        verifyOutput: `${verify}\n${testResult?.output || ''}`, verified: false, success: false,
+      });
+      this.showOutput(`${name} wrapper 写入或功能验证失败，${restored ? '已自动恢复原始文件' : '自动恢复未通过验证，请立即人工检查'}\n\nfile 输出: ${verify}\n写入输出: ${writeResult.output}`);
+      window.showNotification?.(`${name} 劫持失败，${restored ? '已恢复' : '恢复未确认'}`, 'error');
     }
     this.renderContent();
   }
 
-  async restoreCommand(name: string): Promise<void> {
+  async restoreCommand(name: string, skipConfirm = false): Promise<void> {
     const cmd = this.commands.find(c => c.name === name);
     if (!cmd || !cmd.path) return;
 
-    const origPath = cmd.origPath || (cmd.path + '_orig');
+    if (!COMMAND_NAME_RE.test(name) || !isValidAbsoluteCommandPath(cmd.path)) {
+      window.showNotification?.(`${name} 的命令名或系统路径不合法，已阻止恢复`, 'error');
+      return;
+    }
+    const plan = buildHijackCommandPlan(name, cmd.path, this.isRoot);
+    const origPath = cmd.origPath || plan.origPath;
+    const capturedTarget = activeTargetContext.get();
+    if (!capturedTarget) throw new Error('请先连接并确认目标主机');
+    if (!skipConfirm) {
+      const confirmed = await showConfirm({
+        title: `恢复系统命令：${name}`,
+        message: `目标：${capturedTarget.username}@${capturedTarget.host}:${capturedTarget.port}\n指纹：${capturedTarget.hostKeyFingerprint}\n\n将用备份 ${origPath} 覆盖 ${cmd.path}，并读回验证原始二进制。`,
+        confirmText: '恢复并验证', cancelText: '取消', dangerous: true, defaultFocus: 'cancel',
+      });
+      if (!confirmed) return;
+    }
+    this.assertTarget(capturedTarget);
 
     // 先检查备份文件是否存在
-    const backupCheck = await this.exec(`ls "${origPath}" 2>/dev/null && echo "EXISTS"`);
+    const backupCheck = await this.exec(`[ -f ${shq(origPath)} ] && echo "EXISTS"`);
+    this.assertTarget(capturedTarget);
     if (!backupCheck.includes('EXISTS')) {
       // 备份可能用别的后缀，尝试查找
-      const search = await this.exec(`ls "${cmd.path}"_orig* "${cmd.path}".bak* 2>/dev/null | head -5`);
+      const slash = cmd.path.lastIndexOf('/');
+      const dir = slash > 0 ? cmd.path.slice(0, slash) : '.';
+      const base = slash >= 0 ? cmd.path.slice(slash + 1) : cmd.path;
+      const search = await this.exec(`find ${shq(dir)} -maxdepth 1 -type f \( -name ${shq(`${base}_orig*`)} -o -name ${shq(`${base}.bak*`)} \) -print 2>/dev/null | head -5`);
+      this.assertTarget(capturedTarget);
       if (search.trim()) {
         this.showOutput(`标准备份 ${origPath} 不存在，但找到以下备份:\n${search}\n\n请手动选择恢复，例如:\n${this.isRoot ? '' : 'sudo '}mv "${search.split('\\n')[0].trim()}" "${cmd.path}"`);
       } else {
@@ -308,13 +430,28 @@ class CheckAuditManager {
       return;
     }
 
-    const out = await this.exec(this.priv(`mv "${origPath}" "${cmd.path}"`) + ' 2>&1 && echo "RESTORE_OK"');
-    if (out.includes('RESTORE_OK')) {
+    const restoreCommand = cmd.origPath === plan.origPath || !cmd.origPath
+      ? plan.restoreCommand
+      : privileged(`mv -- ${shq(origPath)} ${shq(cmd.path)}`, this.isRoot);
+    const restoreResult = await this.execResult(restoreCommand);
+    this.assertTarget(capturedTarget);
+    const verifyCommand = `file -- ${shq(cmd.path)} 2>/dev/null | grep -vqE 'script|text|ASCII' && [ ! -e ${shq(origPath)} ] && echo ORIGINAL_OK`;
+    const verifyResult = await this.execResult(verifyCommand);
+    this.assertTarget(capturedTarget);
+    const restored = restoreResult.success && verifyResult.success && verifyResult.output.includes('ORIGINAL_OK');
+    operationJournal.record({
+      source: 'check-audit', server: capturedTarget.host, target: capturedTarget,
+      title: `恢复 ${name} 原始系统命令`, command: restoreCommand,
+      output: restoreResult.output, exitCode: restoreResult.exitCode, timedOut: restoreResult.timedOut,
+      verifyCommand, verifyOutput: verifyResult.output, verified: restored, success: restored,
+    });
+    if (restored) {
       cmd.status = 'original';
+      if (cmd.journalEntryId) operationJournal.markRolledBack(cmd.journalEntryId);
       this.showOutput(`${name} 已恢复为原始二进制`);
       window.showNotification?.(`${name} 已恢复`, 'success');
     } else {
-      this.showOutput(`${name} 恢复失败:\n${out}`);
+      this.showOutput(`${name} 恢复失败或读回验证未通过:\n${restoreResult.output}\n${verifyResult.output}`);
       window.showNotification?.(`${name} 恢复失败`, 'error');
     }
     this.renderContent();
@@ -329,6 +466,7 @@ class CheckAuditManager {
       title: '批量部署命令劫持',
       message: `确定要一次性劫持 ${targets.length} 个系统命令(${targets.map(c => c.name).join(', ')})？\n\n每个命令都会被 wrapper 替换、原文件备份为 *_orig。\n\n其中含 bash/sh/cat 等基础命令,wrapper 异常可能影响整机命令执行。`,
       dangerous: true,
+      defaultFocus: 'cancel',
     });
     if (!confirmed) return;
 
@@ -342,7 +480,7 @@ class CheckAuditManager {
     const targets = this.commands.filter(c => c.status === 'hijacked');
     if (targets.length === 0) { window.showNotification?.('没有已劫持的命令', 'info'); return; }
     for (const cmd of targets) {
-      await this.restoreCommand(cmd.name);
+      await this.restoreCommand(cmd.name, true);
     }
     window.showNotification?.(`已恢复 ${targets.length} 个命令`, 'success');
   }
@@ -351,8 +489,11 @@ class CheckAuditManager {
     const input = document.getElementById('ca-custom-input') as HTMLInputElement;
     if (!input) return;
     const name = input.value.trim();
-    if (!name || this.commands.find(c => c.name === name)) {
-      window.showNotification?.(!name ? '请输入命令名' : '命令已存在', 'warning');
+    if (!name || !COMMAND_NAME_RE.test(name) || this.commands.find(c => c.name === name)) {
+      const message = !name ? '请输入命令名'
+        : !COMMAND_NAME_RE.test(name) ? '命令名仅允许字母、数字、点、下划线、加号和连字符'
+          : '命令已存在';
+      window.showNotification?.(message, 'warning');
       return;
     }
     this.commands.push({ name, path: '', status: 'checking', origPath: '', custom: true });
@@ -368,7 +509,7 @@ class CheckAuditManager {
   // ──── 审计日志 ────
 
   async refreshLog(): Promise<void> {
-    const raw = await this.exec(`tail -500 ${LOG_PATH} 2>/dev/null`);
+    const raw = await this.exec(`tail -500 ${shq(LOG_PATH)} 2>/dev/null`);
     this.logEntries = [];
     raw.split('\n').filter(Boolean).forEach(line => {
       const m = LOG_LINE_RE.exec(line);
@@ -408,7 +549,7 @@ class CheckAuditManager {
   }
 
   async clearLog(): Promise<void> {
-    await this.exec(`> ${LOG_PATH}`);
+    await this.exec(`: > ${shq(LOG_PATH)}`);
     this.logEntries = [];
     this.renderContent();
     window.showNotification?.('日志已清空', 'success');
@@ -503,13 +644,18 @@ class CheckAuditManager {
 
   private cycleToSuggestion(c: CheckCycle): FixSuggestion | null {
     const id = `fix-${c.command}-${this.suggestions.length}`;
+    const command = this.commands.some(item => item.name === c.command) && COMMAND_NAME_RE.test(c.command)
+      ? c.command
+      : 'false';
     if (c.category === 'file-read' && c.args) {
+      const path = c.args.split(/\s+/).find(part => part.startsWith('/')) || '';
+      if (!path) return null;
       return {
         id, severity: 'critical', category: 'file',
-        title: `确保文件 ${c.args} 存在且内容正确`,
+        title: `确保文件 ${path} 存在且内容正确`,
         description: `Check 脚本${c.intervalSeconds ? `每 ${c.intervalSeconds} 秒` : ''}使用 ${c.command} 读取此文件`,
-        checkCommand: `${c.command} ${c.args}`,
-        fixCommand: `ls -la ${c.args} && ${c.command} ${c.args} | head -5`,
+        checkCommand: `ls -la -- ${shq(path)}`,
+        fixCommand: `ls -la -- ${shq(path)} && ${command /* shell-safe: 来自当前白名单命令目录 */} -- ${shq(path)} | head -5`,
       };
     }
     if (c.category === 'network') {
@@ -519,18 +665,19 @@ class CheckAuditManager {
         id, severity: 'critical', category: 'network',
         title: `确保 ${url} 可访问`,
         description: `Check 脚本${c.intervalSeconds ? `每 ${c.intervalSeconds} 秒` : ''}请求此 URL`,
-        checkCommand: `${c.command} ${c.args}`,
-        fixCommand: `curl -sI ${url} | head -5`,
+        checkCommand: `curl -sI -- ${shq(url)} | head -5`,
+        fixCommand: `curl -sI -- ${shq(url)} | head -5`,
       };
     }
     if (c.category === 'service-check') {
       const svc = c.args.replace(/status\s*/i, '').trim().split(/\s+/)[0] || '';
+      const safeService = /^[A-Za-z0-9@_.:-]+$/.test(svc) ? svc : '';
       return {
         id, severity: 'warning', category: 'service',
-        title: `确保服务 ${svc || c.command} 正在运行`,
+        title: `确保服务 ${safeService || c.command} 正在运行`,
         description: `Check 脚本检查服务状态: ${c.command} ${c.args}`,
-        checkCommand: `${c.command} ${c.args}`,
-        fixCommand: svc ? `systemctl start ${svc} && systemctl status ${svc}` : `${c.command} ${c.args}`,
+        checkCommand: safeService ? `systemctl status -- ${shq(safeService)}` : `${command /* shell-safe: 来自当前白名单命令目录 */} --help`,
+        fixCommand: safeService ? `systemctl start -- ${shq(safeService)} && systemctl status -- ${shq(safeService)}` : `${command /* shell-safe: 来自当前白名单命令目录 */} --help`,
       };
     }
     if (c.category === 'database') {
@@ -538,8 +685,8 @@ class CheckAuditManager {
         id, severity: 'critical', category: 'database',
         title: `确保数据库连接正常`,
         description: `Check 脚本使用 ${c.command} 测试数据库: ${c.args.substring(0, 60)}`,
-        checkCommand: `${c.command} ${c.args}`,
-        fixCommand: c.command === 'mysql' ? `systemctl status mysql && ${c.command} ${c.args}` : `systemctl status redis && ${c.command} ${c.args}`,
+        checkCommand: `${command /* shell-safe: 来自当前白名单命令目录 */} --version`,
+        fixCommand: c.command === 'mysql' ? 'systemctl status mysql' : 'systemctl status redis',
       };
     }
     if (c.count >= 3) {
@@ -547,8 +694,8 @@ class CheckAuditManager {
         id, severity: 'info', category: 'process',
         title: `Check 执行 ${c.command} ${c.args.substring(0, 40)}`,
         description: `共 ${c.count} 次${c.intervalSeconds ? `，周期约 ${c.intervalSeconds}s` : ''}`,
-        checkCommand: `${c.command} ${c.args}`,
-        fixCommand: `${c.command} ${c.args}`,
+        checkCommand: `${command /* shell-safe: 来自当前白名单命令目录 */} --help`,
+        fixCommand: `${command /* shell-safe: 来自当前白名单命令目录 */} --help`,
       };
     }
     return null;

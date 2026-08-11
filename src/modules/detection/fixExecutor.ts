@@ -2,10 +2,11 @@
  * 修复执行引擎 — 备份 → 修复 → 验证 → 记录
  */
 
-import { invoke } from '@tauri-apps/api/core';
 import type { FixActionDef } from './detectionFixMapper';
 import { fixHistoryManager, type FixHistoryEntry } from './fixHistoryManager';
 import { operationJournal } from '../core/operationJournal';
+import { executeEmergencyCommand } from '../emergency/commandExecution';
+import { shq } from '../core/shellEscape';
 
 export type FixStatus = 'pending' | 'executing' | 'success' | 'failed' | 'rolled-back';
 
@@ -32,6 +33,7 @@ export interface FixResult {
 // 基线配置项解析后的可执行数据
 export interface ResolvedBaselineItem {
   id: string;
+  filePath: string;
   readCommand: string;
   writeCommand: (value: string) => string;
   parseRegex: string;
@@ -56,11 +58,16 @@ class FixExecutor {
     action.status = 'executing';
     onStatus?.(action);
 
-    try {
-      let output = '';
-      let beforeValue = '';
-      let afterValue = '';
+    let output = '';
+    let beforeValue = '';
+    let afterValue = '';
+    let backupInfo = '';
+    let restoreCommand: string | undefined;
+    let restoreVerifyCommand: string | undefined;
+    let restoreVerifyPattern: string | undefined;
+    let restoreExpectedValue: string | undefined;
 
+    try {
       if (action.def.type === 'baseline' && resolvedBaseline) {
         // 1. 读取当前值
         const readOut = await this.exec(resolvedBaseline.readCommand);
@@ -68,8 +75,24 @@ class FixExecutor {
         beforeValue = match?.[1]?.trim() || readOut.trim();
         action.currentValue = beforeValue;
 
-        // 2. 备份
-        await this.exec(resolvedBaseline.backupCommand);
+        // 2. 确定性备份：路径进入 receipt，回滚不再靠猜时间戳
+        const backupPath = `${resolvedBaseline.filePath}.lovelyres.${Date.now()}.${action.id}.bak`;
+        const backupState = await this.exec(
+          `if [ -e ${shq(resolvedBaseline.filePath)} ]; then cp -p -- ${shq(resolvedBaseline.filePath)} ${shq(backupPath)} && printf present; else printf absent; fi`,
+        );
+        const originalPresent = backupState.trim().endsWith('present');
+        backupInfo = originalPresent ? backupPath : '原文件不存在';
+        const restoreFile = originalPresent
+          ? `cp -p -- ${shq(backupPath)} ${shq(resolvedBaseline.filePath)}`
+          : `rm -f -- ${shq(resolvedBaseline.filePath)}`;
+        restoreCommand = resolvedBaseline.restartCommand
+          ? `${restoreFile} && ${resolvedBaseline.restartCommand}`
+          : restoreFile;
+        restoreVerifyCommand = originalPresent
+          ? resolvedBaseline.readCommand
+          : `test ! -e ${shq(resolvedBaseline.filePath)} && echo absent`;
+        restoreVerifyPattern = originalPresent ? resolvedBaseline.parseRegex : '(absent)';
+        restoreExpectedValue = originalPresent ? beforeValue : 'absent';
 
         // 3. 写入推荐值
         const writeCmd = resolvedBaseline.writeCommand(action.def.recommendedValue || resolvedBaseline.recommendedValue);
@@ -83,14 +106,21 @@ class FixExecutor {
         // 5. 读回验证
         const verifyOut = await this.exec(resolvedBaseline.readCommand);
         const verifyMatch = new RegExp(resolvedBaseline.parseRegex).exec(verifyOut);
-        afterValue = verifyMatch?.[1]?.trim() || verifyOut.trim();
+        if (!verifyMatch?.[1]) {
+          throw new Error(`读回验证失败，无法解析配置项 ${resolvedBaseline.id}`);
+        }
+        afterValue = verifyMatch[1].trim();
         action.afterValue = afterValue;
+        const expected = (action.def.recommendedValue || resolvedBaseline.recommendedValue).trim();
+        if (afterValue.replace(/\s+/g, ' ').toLowerCase() !== expected.replace(/\s+/g, ' ').toLowerCase()) {
+          throw new Error(`读回验证不一致：期望 ${expected}，实际 ${afterValue}`);
+        }
 
       } else if (action.def.type === 'command' && action.def.command) {
         output = await this.exec(action.def.command);
 
       } else if (action.def.type === 'snippet') {
-        output = `代码片段 ${action.def.snippetId}: 请到安全速查页面复制修复代码`;
+        throw new Error(`代码片段 ${action.def.snippetId} 需要在安全速查页面人工确认后执行`);
       }
 
       action.status = 'success';
@@ -98,8 +128,6 @@ class FixExecutor {
       onStatus?.(action);
 
       // 记录到历史
-      const backupInfo = resolvedBaseline?.backupCommand || '';
-      const restoreCommand = resolvedBaseline ? `${resolvedBaseline.backupCommand.replace('cp -n', 'ls')} && echo "backup exists"` : undefined;
       fixHistoryManager.addEntry({
         detectionItemId: action.detectionItemId,
         findingTitle: action.findingTitle,
@@ -110,6 +138,9 @@ class FixExecutor {
         afterValue,
         backupInfo,
         restoreCommand,
+        restoreVerifyCommand,
+        restoreVerifyPattern,
+        restoreExpectedValue,
         command: action.def.command,
         output,
         success: true,
@@ -143,10 +174,29 @@ class FixExecutor {
         fixTitle: action.def.title,
         type: action.def.type,
         baselineItemId: action.def.baselineItemId,
+        beforeValue,
+        afterValue,
+        backupInfo,
+        restoreCommand,
+        restoreVerifyCommand,
+        restoreVerifyPattern,
+        restoreExpectedValue,
         command: action.def.command,
         output: String(e),
         success: false,
         server: this.server,
+      });
+      operationJournal.record({
+        source: action.def.type === 'baseline' ? 'baseline' : 'detection-fix',
+        server: this.server,
+        title: action.def.title,
+        command: action.def.command || (resolvedBaseline ? resolvedBaseline.writeCommand(action.def.recommendedValue || resolvedBaseline.recommendedValue) : ''),
+        beforeValue,
+        afterValue,
+        backupInfo,
+        restoreCommand,
+        output: String(e),
+        success: false,
       });
 
       return { action, success: false, output: String(e) };
@@ -207,8 +257,9 @@ class FixExecutor {
   /** SSH 命令执行 */
   private async exec(cmd: string): Promise<string> {
     try {
-      const r = await invoke('ssh_execute_command_direct', { command: cmd }) as any;
-      return r?.output || '';
+      const result = await executeEmergencyCommand({ command: cmd });
+      if (!result.success) throw new Error(`${result.message}${result.output ? `: ${result.output}` : ''}`);
+      return result.output;
     } catch (e) {
       throw new Error(`命令执行失败: ${e}`);
     }

@@ -8,9 +8,9 @@
  */
 
 import type { LovelyResApp } from '../core/app';
-import { showConfirm, showPrompt } from './confirmDialog';
-import { createIconHTML } from './iconMapping';
+import { showPrompt } from './confirmDialog';
 import './sftpDetailPanel'; // 注册 SFTP 文件详情侧栏的 window 函数
+import { initSftpSharedFunctions } from './sftpGlobalFunctions';
 import { sftpManager } from '../remote/sftpManager';
 import { sshConnectionManager } from '../remote/sshConnectionManager';
 import { sshConnectionDialog } from '../ui/sshConnectionDialog';
@@ -19,11 +19,16 @@ import { dockerPageManager } from '../docker/dockerPageManager';
 import { emergencyPageManager } from '../emergency/emergencyPageManager';
 import { KubernetesPageManager } from '../kubernetes/kubernetesPageManager';
 import { quickDetectionManager } from '../detection/quickDetectionManager';
+import { quickDetectionPageController } from '../detection/quickDetectionPageController';
 import { sshTerminalManager } from '../ssh/sshTerminalManager';
 import type { SettingsPageManager } from '../settings/settingsPageManager';
+import {
+  targetCapabilityStore,
+  type CapabilityAwareFeature,
+} from '../core/targetCapabilities';
 
 import { logger } from '../core/logger';
-/** 正式包 drop 掉 console，诊断信息只有进 logger 才留得下来（设置→工具→诊断日志 可导出） */
+/** 正式包 drop 掉 console，诊断信息只有进 logger 才留得下来（状态栏「日志」按钮可导出） */
 const log = logger.module('GlobalFn');
 
 
@@ -31,17 +36,44 @@ interface GlobalFunctionsDeps {
   app: LovelyResApp;
   settingsPageManager: SettingsPageManager;
   openSSHTerminalWindow: () => Promise<void>;
+  openSftpWindow: () => Promise<void>;
 }
 
 let globalEventsBound = false;
 let sftpListenerBound = false;
 let settingsEscapeHandler: ((event: KeyboardEvent) => void) | null = null;
 
+const PAGE_CAPABILITY_FEATURES: Partial<Record<string, CapabilityAwareFeature>> = {
+  'system-info': 'system-info',
+  'log-analysis': 'log-analysis',
+  'packet-capture': 'packet-capture',
+  firewall: 'firewall',
+  docker: 'docker',
+  kubernetes: 'kubernetes',
+  'baseline-quick-edit': 'baseline-mutation',
+};
+
+function renderTargetCapabilityNotice(pageId: string): void {
+  document.querySelector('[data-target-capability-notice]')?.remove();
+  const feature = PAGE_CAPABILITY_FEATURES[pageId];
+  const result = feature ? targetCapabilityStore.evaluate(feature) : null;
+  if (!result || result.available) return;
+
+  const workspace = document.querySelector<HTMLElement>('.main-workspace');
+  if (!workspace) return;
+  const notice = document.createElement('div');
+  notice.dataset.targetCapabilityNotice = feature;
+  notice.setAttribute('role', 'status');
+  notice.style.cssText = 'margin:12px 16px;padding:10px 12px;border:1px solid var(--color-warning,#d99a24);border-radius:8px;background:color-mix(in srgb,var(--color-warning,#d99a24) 12%,transparent);font-size:13px;';
+  notice.textContent = `当前目标能力不足：${result.reason}。替代方案：${result.alternative}`;
+  workspace.prepend(notice);
+}
+
 /**
  * 注册所有全局函数到 window 对象
  */
 export function initGlobalFunctions(deps: GlobalFunctionsDeps): void {
-  const { app, settingsPageManager, openSSHTerminalWindow } = deps;
+  const { app, settingsPageManager, openSSHTerminalWindow, openSftpWindow } = deps;
 
   // 账号 / 口令处置面板（供检测报告的用户类 Finding 按钮调起）
   import('../detection/userDisposal').then(({ userDisposal }) => {
@@ -56,7 +88,53 @@ export function initGlobalFunctions(deps: GlobalFunctionsDeps): void {
     localStorage.setItem('sidebar-collapsed', nav.classList.contains('collapsed') ? '1' : '0');
   };
 
-  // ──── 侧边栏：分组折叠/展开 ────
+  // ──── 侧边栏：分组折叠/展开（智能折叠）────
+  // 规则：展开 ⟺ 用户显式展开 ∥（含当前页 ∧ 未被用户显式收起）。
+  // 显式展开记 sidebar-groups-open；显式收起的"当前组"记
+  // sidebar-groups-active-closed（切页时清除，新页的组自动展开）。
+  const OPEN_GROUPS_KEY = 'sidebar-groups-open';
+  const ACTIVE_CLOSED_KEY = 'sidebar-groups-active-closed';
+
+  function readOpenGroups(): string[] {
+    try {
+      const v = JSON.parse(localStorage.getItem(OPEN_GROUPS_KEY) || '[]');
+      return Array.isArray(v) ? v : [];
+    } catch { return []; }
+  }
+
+  // 从 DOM 现状回写两份持久化状态（手动开合分组后调用）
+  function persistOpenGroups(): void {
+    const open: string[] = [];
+    let activeClosed: string | null = null;
+    document.querySelectorAll('.sidebar-group').forEach(g => {
+      const el = g as HTMLElement;
+      const id = el.getAttribute('data-group-id');
+      if (!id) return;
+      const hasActive = !!el.querySelector('.sidebar-item.active');
+      const isOpen = el.classList.contains('open');
+      if (isOpen && !hasActive) open.push(id);
+      if (!isOpen && hasActive) activeClosed = id;
+    });
+    localStorage.setItem(OPEN_GROUPS_KEY, JSON.stringify(open));
+    if (activeClosed) localStorage.setItem(ACTIVE_CLOSED_KEY, activeClosed);
+    else localStorage.removeItem(ACTIVE_CLOSED_KEY);
+  }
+
+  // 统一施加开合规则 + 组行高亮；切页/重渲/搜索清空后都走这里
+  function syncSidebarGroups(): void {
+    const opened = readOpenGroups();
+    const activeClosed = localStorage.getItem(ACTIVE_CLOSED_KEY);
+    document.querySelectorAll('.sidebar-group').forEach(g => {
+      const el = g as HTMLElement;
+      const id = el.getAttribute('data-group-id');
+      const hasActive = !!el.querySelector('.sidebar-item.active');
+      el.classList.toggle('open', (!!id && opened.includes(id)) || (hasActive && id !== activeClosed));
+      el.querySelector('.sidebar-group-row')?.classList.toggle('active', hasActive);
+    });
+  }
+  // 兼容旧名（app.ts / systemInfoTabManager.ts 通过 window 调用）
+  (window as any).syncSidebarActiveGroup = syncSidebarGroups;
+
   (window as any).toggleSidebarGroup = (groupId: string) => {
     const nav = document.querySelector('.sidebar-nav');
     // 轨道（折叠）模式下点击分组：先展开整条侧边栏，再确保该组打开
@@ -69,6 +147,7 @@ export function initGlobalFunctions(deps: GlobalFunctionsDeps): void {
     }
     const grp = document.querySelector(`.sidebar-group[data-group-id="${groupId}"]`);
     if (!grp) return;
+    // 任何分组都可开可合；含当前页的组被显式收起后，切页前保持收起
     grp.classList.toggle('open');
     persistOpenGroups();
   };
@@ -86,49 +165,30 @@ export function initGlobalFunctions(deps: GlobalFunctionsDeps): void {
         el.hidden = !match;
         if (match) anyVisible = true;
       });
+      // 子段标签：段内没有可见项时一并隐藏，避免残留孤标题
+      g.querySelectorAll('.sidebar-itemsec').forEach(sec => {
+        let sib = sec.nextElementSibling;
+        let any = false;
+        while (sib && !sib.classList.contains('sidebar-itemsec')) {
+          if (sib.classList.contains('sidebar-item') && !(sib as HTMLElement).hidden) any = true;
+          sib = sib.nextElementSibling;
+        }
+        (sec as HTMLElement).hidden = q !== '' && !any;
+      });
       g.hidden = q !== '' && !anyVisible;
       if (q !== '') g.classList.toggle('open', anyVisible);
     });
     if (q === '') applySidebarState();
   };
 
-  // 持久化已展开的分组集合
-  function persistOpenGroups(): void {
-    const open: string[] = [];
-    document.querySelectorAll('.sidebar-group.open').forEach(g => {
-      const id = (g as HTMLElement).getAttribute('data-group-id');
-      if (id) open.push(id);
-    });
-    localStorage.setItem('sidebar-groups-open', JSON.stringify(open));
-  }
-
-  // 同步活动分组行高亮（依据当前活动叶子；含活动叶子的组始终展开）
-  function syncSidebarActiveGroup(): void {
-    document.querySelectorAll('.sidebar-group').forEach(g => {
-      const el = g as HTMLElement;
-      const hasActive = !!el.querySelector('.sidebar-item.active');
-      el.querySelector('.sidebar-group-row')?.classList.toggle('active', hasActive);
-      if (hasActive) el.classList.add('open');
-    });
-  }
-  (window as any).syncSidebarActiveGroup = syncSidebarActiveGroup;
-
-  // 施加持久化的侧边栏状态（折叠 + 分组展开 + 活动组）；每次侧边栏渲染后调用
+  // 施加持久化的侧边栏状态（折叠轨道 + 智能折叠分组）；每次侧边栏渲染后调用
   function applySidebarState(): void {
     const nav = document.querySelector('.sidebar-nav');
     if (!nav) return;
     nav.classList.toggle('collapsed', localStorage.getItem('sidebar-collapsed') === '1');
-    let openGroups: string[] | null = null;
-    try { openGroups = JSON.parse(localStorage.getItem('sidebar-groups-open') || 'null'); } catch { openGroups = null; }
-    if (Array.isArray(openGroups)) {
-      document.querySelectorAll('.sidebar-group').forEach(g => {
-        const el = g as HTMLElement;
-        const id = el.getAttribute('data-group-id');
-        const hasActive = !!el.querySelector('.sidebar-item.active');
-        el.classList.toggle('open', hasActive || (id ? openGroups!.includes(id) : false));
-      });
-    }
-    syncSidebarActiveGroup();
+    // 旧键迁移：「默认全展开」时代的显式收起列表在智能折叠下无意义，直接废弃
+    localStorage.removeItem('sidebar-groups-closed');
+    syncSidebarGroups();
   }
   (window as any).applySidebarState = applySidebarState;
 
@@ -136,151 +196,8 @@ export function initGlobalFunctions(deps: GlobalFunctionsDeps): void {
   requestAnimationFrame(() => applySidebarState());
 
   // ──── SFTP 面板全局函数 ────
-  // SFTP 当前目录内的客户端过滤（按文件名）
-  (window as any).sftpFilterFiles = (query: string) => {
-    const q = (query || '').trim().toLowerCase();
-    document.querySelectorAll('#sftp-file-list .sftp-file-row').forEach(row => {
-      const el = row as HTMLElement;
-      const name = (el.querySelector('.file-name')?.textContent || '').toLowerCase();
-      const isParent = el.classList.contains('parent-dir-item');
-      el.style.display = (!q || isParent || name.includes(q)) ? '' : 'none';
-    });
-  };
-
-  (window as any).sftpRefresh = () => {
-    try {
-      if (sftpManager && (sftpManager as any).refreshCurrentDirectory) {
-        (sftpManager as any).refreshCurrentDirectory();
-        window.showNotification && window.showNotification('文件列表已刷新', 'success');
-      }
-    } catch (e) {
-      log.error('刷新失败:', e);
-      window.showNotification && window.showNotification(`刷新失败: ${e}`, 'error');
-    }
-  };
-
-  (window as any).sftpOpenUpload = () => {
-    try {
-      if (sftpManager && (sftpManager as any).getCurrentPath && (window as any).uploadModal) {
-        (window as any).uploadModal.show((sftpManager as any).getCurrentPath());
-      } else {
-        window.showNotification && window.showNotification('上传窗口未初始化', 'error');
-      }
-    } catch (e) {
-      log.error('打开上传对话框失败:', e);
-      window.showNotification && window.showNotification(`打开上传对话框失败: ${e}`, 'error');
-    }
-  };
-
-  (window as any).sftpOpenCreateFolder = () => {
-    try {
-      if (sftpManager && (sftpManager as any).getCurrentPath && (window as any).createFolderModal) {
-        (window as any).createFolderModal.show((sftpManager as any).getCurrentPath());
-      } else {
-        window.showNotification && window.showNotification('新建文件夹窗口未初始化', 'error');
-      }
-    } catch (e) {
-      log.error('打开新建文件夹对话框失败:', e);
-      window.showNotification && window.showNotification(`打开新建文件夹失败: ${e}`, 'error');
-    }
-  };
-
-  (window as any).toggleSftpHistory = () => {
-    try {
-      if ((window as any).fileContextMenu && (window as any).fileContextMenu.showHistoryModal) {
-        (window as any).fileContextMenu.showHistoryModal();
-      } else {
-        window.showNotification && window.showNotification('文件分析历史窗口未初始化', 'error');
-      }
-    } catch (e) {
-      log.error('显示历史记录失败:', e);
-      window.showNotification && window.showNotification(`显示历史记录失败: ${e}`, 'error');
-    }
-  };
-
-  (window as any).setSftpSortMode = (mode: 'name-asc' | 'name-desc' | 'size-asc' | 'size-desc' | 'modified-asc' | 'modified-desc') => {
-    try {
-      sftpManager.setSortMode(mode);
-    } catch (e) {
-      log.error('设置排序方式失败:', e);
-      window.showNotification && window.showNotification(`设置排序方式失败: ${e}`, 'error');
-    }
-  };
-
-  // ──── SFTP 新建文件 ────
-  (window as any).sftpCreateFile = async () => {
-    try {
-      const currentPath = sftpManager.getCurrentPath();
-      const fileName = await showPrompt({ title: '新建文件', message: '请输入文件名:', defaultValue: 'new_file.txt' });
-      if (!fileName || !fileName.trim()) return;
-
-      const fullPath = currentPath === '/'
-        ? `/${fileName.trim()}`
-        : `${currentPath}/${fileName.trim()}`;
-
-      // Write empty file via existing sftp_write_file command
-      (window as any).__TAURI__.core.invoke('sftp_write_file', {
-        path: fullPath,
-        content: ''
-      }).then(() => {
-        window.showNotification && window.showNotification(`文件已创建: ${fileName}`, 'success');
-        sftpManager.refreshCurrentDirectory();
-      }).catch((e: any) => {
-        window.showNotification && window.showNotification(`创建文件失败: ${e}`, 'error');
-      });
-    } catch (e) {
-      log.error('创建文件失败:', e);
-      window.showNotification && window.showNotification(`创建文件失败: ${e}`, 'error');
-    }
-  };
-
-  // ──── SFTP 完整性快照 ────
-  (window as any).sftpIntegritySnapshot = async () => {
-    try {
-      const currentPath = sftpManager.getCurrentPath();
-      if (!(await showConfirm({ title: '完整性快照', message: `将为 ${currentPath} 目录生成文件哈希清单（md5sum），是否继续？` }))) return;
-
-      window.showNotification && window.showNotification('正在生成完整性快照...', 'info');
-
-      const cmd = `find "${currentPath}" -maxdepth 1 -type f -exec md5sum {} \\; 2>/dev/null | sort -k2`;
-      (window as any).__TAURI__.core.invoke('ssh_execute_command_direct', { command: cmd })
-        .then((result: any) => {
-          const output = result?.output || '(空目录或无文件)';
-          if (typeof result?.exit_code === 'number' && result.exit_code !== 0) {
-            window.showNotification && window.showNotification(`生成快照命令返回退出码 ${result.exit_code}`, 'warning');
-          }
-          // Show in modal
-          const modal = document.createElement('div');
-          modal.className = 'modal-overlay';
-          modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;';
-          modal.innerHTML = `
-            <div style="background:var(--bg-primary);border-radius:12px;padding:24px;max-width:700px;width:90%;max-height:80vh;display:flex;flex-direction:column;border:1px solid var(--border-color);">
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-                <h3 style="margin:0;font-size:16px;color:var(--text-primary);">${createIconHTML('🛡️', { size: 16 })} 文件完整性快照 — ${currentPath}</h3>
-                <button onclick="this.closest('.modal-overlay').remove()" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:20px;">✕</button>
-              </div>
-              <div style="font-size:11px;color:var(--text-secondary);margin-bottom:12px;">
-                生成时间: ${new Date().toLocaleString()} | 可复制保存，用于前后对比
-              </div>
-              <textarea readonly style="flex:1;min-height:300px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:12px;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text-primary);resize:vertical;">${output.replace(/</g, '&lt;')}</textarea>
-              <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end;">
-                <button onclick="navigator.clipboard.writeText(this.closest('.modal-overlay').querySelector('textarea').value);(window.showNotification||alert)('已复制到剪贴板','success')" class="modern-btn secondary">${createIconHTML('📋', { size: 16 })} 复制</button>
-                <button onclick="this.closest('.modal-overlay').remove()" class="modern-btn primary">关闭</button>
-              </div>
-            </div>
-          `;
-          document.body.appendChild(modal);
-          modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
-          window.showNotification && window.showNotification('完整性快照已生成', 'success');
-        })
-        .catch((e: any) => {
-          window.showNotification && window.showNotification(`生成快照失败: ${e}`, 'error');
-        });
-    } catch (e) {
-      log.error('完整性快照失败:', e);
-      window.showNotification && window.showNotification(`完整性快照失败: ${e}`, 'error');
-    }
-  };
+  // 注册逻辑与 SFTP 独立窗口共用（src/modules/ui/sftpGlobalFunctions.ts）
+  initSftpSharedFunctions();
 
   // ──── 暴露管理器到全局 ────
   (window as any).remoteOperationsManager = remoteOperationsManager;
@@ -346,9 +263,25 @@ export function initGlobalFunctions(deps: GlobalFunctionsDeps): void {
       quickDetectionManager.cancelScan();
     }
 
+    // SFTP 已迁移至独立窗口：直接打开窗口，主窗口页面保持不变
+    if (pageId === 'remote-operations') {
+      const result = targetCapabilityStore.evaluate('sftp');
+      if (result && !result.available) {
+        window.showNotification?.(`${result.reason}；${result.alternative}`, 'warning');
+        return;
+      }
+      void openSftpWindow();
+      return;
+    }
+
     // SFTP: 切走时标记需要重新绑定DOM事件，但不丢弃数据
     if (pageId !== 'remote-operations') {
       remoteOperationsPageInitialized = false;
+    }
+
+    // 切页后新当前组自动展开：清除上一页"显式收起当前组"的标记
+    if (app?.getStateManager()?.getState()?.currentPage !== pageId) {
+      localStorage.removeItem(ACTIVE_CLOSED_KEY);
     }
 
     document.querySelectorAll('.sidebar-item[data-nav-id], .activity-bar-item[data-nav-id], .nav-item[data-nav-id]').forEach(item => {
@@ -356,13 +289,14 @@ export function initGlobalFunctions(deps: GlobalFunctionsDeps): void {
       const navId = htmlItem.getAttribute('data-nav-id');
       htmlItem.classList.toggle('active', navId === pageId);
     });
-    syncSidebarActiveGroup();
+    syncSidebarGroups();
 
     const sm = app.getStateManager();
     if (app && sm) {
       const prevPage = sm.getState()?.currentPage;
       sm.setCurrentPage(pageId as any);
       app.render();
+      setTimeout(() => renderTargetCapabilityNotice(pageId), 0);
       // 进出带「上下文分组」的页面时重渲主侧边栏，以并入/移除其上下文分组
       const CTX_PAGES = ['system-info', 'remote-operations'];
       if (prevPage !== pageId && (CTX_PAGES.includes(prevPage as string) || CTX_PAGES.includes(pageId))) {
@@ -383,6 +317,19 @@ export function initGlobalFunctions(deps: GlobalFunctionsDeps): void {
         (window as any).openWebTerminal?.();
         return;
       } else if (pageId === 'ssh-terminal') {
+        const result = targetCapabilityStore.evaluate('terminal');
+        if (result && !result.available) {
+          window.showNotification?.(`${result.reason}；${result.alternative}`, 'warning');
+          setTimeout(() => {
+            const sm2 = app?.getStateManager();
+            if (app && sm2) {
+              sm2.setCurrentPage('system-info');
+              app.render();
+              renderTargetCapabilityNotice('system-info');
+            }
+          }, 0);
+          return;
+        }
         openSSHTerminalWindow();
         setTimeout(() => {
           const sm2 = app?.getStateManager();
@@ -454,7 +401,9 @@ export function initGlobalFunctions(deps: GlobalFunctionsDeps): void {
         }).catch((e) => {
           log.error('加载安全速查模块失败:', e);
           window.showNotification?.('加载安全速查模块失败', 'error');
-        });
+          });
+      } else if (pageId === 'quick-detection') {
+        quickDetectionPageController.initialize();
       } else if (pageId === 'check-audit') {
         import('../checkAudit/checkAuditManager').then(({ checkAuditManager }) => {
           checkAuditManager.initialize();
@@ -579,41 +528,6 @@ export function initGlobalFunctions(deps: GlobalFunctionsDeps): void {
 
   (window as any).hideSettingsOverlay = closeSettingsOverlay;
 
-  // ──── 连接面板下拉菜单 ────
-  (window as any).toggleUserDropdown = () => {
-    const dropdown = document.getElementById('user-dropdown-menu');
-    if (dropdown) {
-      dropdown.style.display = dropdown.style.display === 'block' ? 'none' : 'block';
-    }
-  };
-
-  if (!globalEventsBound) {
-    document.addEventListener('click', (event) => {
-      const dropdown = document.getElementById('user-dropdown-menu');
-      const connectionPanel = document.querySelector('.user-panel');
-      if (dropdown && connectionPanel) {
-        const clickedInsideDropdown = dropdown.contains(event.target as Node);
-        const clickedOnPanel = connectionPanel.contains(event.target as Node);
-        if (!clickedInsideDropdown && !clickedOnPanel && dropdown.style.display === 'block') {
-          dropdown.style.display = 'none';
-        }
-      }
-    });
-    globalEventsBound = true;
-  }
-
-  (window as any).handleUserMenuAction = async (action: string) => {
-    const dropdown = document.getElementById('user-dropdown-menu');
-    if (dropdown) dropdown.style.display = 'none';
-    switch (action) {
-      case 'settings':
-        (window as any).showSettingsOverlay && (window as any).showSettingsOverlay();
-        break;
-      default:
-        log.warn('未知的菜单操作:', action);
-    }
-  };
-
   // ──── 远程操作页面初始化 ────
   (window as any).initRemoteOperationsPage = async function () {
     if (remoteOperationsPageInitialized) return;
@@ -729,4 +643,3 @@ export function initGlobalFunctions(deps: GlobalFunctionsDeps): void {
   };
 
 }
-

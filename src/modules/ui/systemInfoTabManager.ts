@@ -6,9 +6,10 @@
 
 import { sshConnectionManager } from '../remote/sshConnectionManager';
 import { statusIcon } from './iconMapping';
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH';
 
 import { logger } from '../core/logger';
-/** 正式包 drop 掉 console，诊断信息只有进 logger 才留得下来（设置→工具→诊断日志 可导出） */
+/** 正式包 drop 掉 console，诊断信息只有进 logger 才留得下来（状态栏「日志」按钮可导出） */
 const log = logger.module('SysInfoTabs');
 
 
@@ -95,19 +96,20 @@ function showTableLoadingState(tabId: string): void {
  * 获取当前活跃标签页的tabId
  */
 function getActiveTabId(): string | null {
-  const activeTab = document.querySelector('.sidebar-item[data-tab].active');
-  return activeTab ? activeTab.getAttribute('data-tab') : null;
+  const activeTab = document.querySelector('[data-system-tab].active');
+  return activeTab ? activeTab.getAttribute('data-system-tab') : null;
 }
 
 function switchSystemInfoTab(tabId: string): void {
   log.debug('切换系统信息标签页:', tabId);
 
-  // 更新主侧边栏中系统信息 tab 叶子的 active 状态，并同步分组高亮
-  document.querySelectorAll('.sidebar-item[data-tab]').forEach(btn => {
-    btn.classList.toggle('active', btn.getAttribute('data-tab') === tabId);
+  // 更新页内调查镜头的 active 状态与当前视图标签
+  document.querySelectorAll('[data-system-tab]').forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-system-tab') === tabId);
   });
-  (window as any).syncSidebarActiveGroup && (window as any).syncSidebarActiveGroup();
-
+  document.querySelectorAll('.si-lens-group').forEach(group => {
+    group.classList.toggle('active', !!group.querySelector(`[data-system-tab="${tabId}"]`));
+  });
   // 更新标签页内容
   const contentContainer = document.getElementById('system-info-content');
   if (contentContainer) {
@@ -407,9 +409,8 @@ async function fetchSingleTabData(tabId: string): Promise<any[]> {
 }
 
 async function fetchExtraTabData(tabId: string): Promise<any[]> {
-  const { invoke } = await import('@tauri-apps/api/core');
   const exec = async (cmd: string) => {
-    const r = await invoke('ssh_execute_command_direct', { command: cmd }) as any;
+    const r = await invokeTargetBoundSSH('ssh_execute_command_direct', { command: cmd }) as any;
     return r?.output || '';
   };
 
@@ -532,4 +533,18 @@ export function initSystemInfoTabManager(): void {
   (window as any).loadSystemDetailedInfo = loadSystemDetailedInfo;
   (window as any).loadSystemInfoTabData = loadSystemInfoTabData;
   (window as any).refreshAllSystemInfo = refreshAllSystemInfo;
+
+  if (!(window as any).__systemInfoNavigationBound) {
+    document.addEventListener('click', event => {
+      const trigger = event.target instanceof Element
+        ? event.target.closest<HTMLElement>('[data-system-tab]')
+        : null;
+      if (!trigger) return;
+      const tabId = trigger.dataset.systemTab;
+      if (!tabId) return;
+      switchSystemInfoTab(tabId);
+      trigger.closest('details')?.removeAttribute('open');
+    });
+    (window as any).__systemInfoNavigationBound = true;
+  }
 }

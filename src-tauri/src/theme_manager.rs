@@ -154,7 +154,7 @@ impl ThemeManager {
         settings.theme = theme_name.clone();
         save_settings(&settings)?;
 
-        println!("🎨 主题已设置为: {}", theme_name);
+        crate::alog_info!("主题已设置为: {}", theme_name);
         Ok(())
     }
 
@@ -265,7 +265,7 @@ impl ThemeManager {
         // 这里可以保存自定义主题到文件
         // save_custom_theme(&theme_config)?;
 
-        println!("✅ 自定义主题已创建: {}", name);
+        crate::alog_info!("自定义主题已创建: {}", name);
         Ok(theme_config)
     }
 
@@ -285,7 +285,7 @@ impl ThemeManager {
         // 验证主题配置
         Self::validate_theme_config(&theme_config)?;
 
-        println!("✅ 主题配置已导入: {}", theme_config.name);
+        crate::alog_info!("主题配置已导入: {}", theme_config.name);
         Ok(theme_config)
     }
 

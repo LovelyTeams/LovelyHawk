@@ -5,7 +5,7 @@
  * 调查标记 / 操作），并异步拉取哈希、预览、访问/创建时间。
  */
 
-import { invoke } from '@tauri-apps/api/core';
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH';
 import { iconForFile } from './iconMapping';
 import { escapeHtml as esc } from '../core/htmlEscape';
 
@@ -99,21 +99,21 @@ async function fetchDetail(file: any): Promise<void> {
   const q = shellQuote(path);
 
   if (file.file_type !== 'directory') {
-    invoke('ssh_execute_dashboard_command_direct', { command: `sha256sum ${q} 2>/dev/null | awk '{print $1}'` })
+    invokeTargetBoundSSH('ssh_execute_dashboard_command_direct', { command: `sha256sum ${q} 2>/dev/null | awk '{print $1}'` })
       .then((res: any) => {
         const hash = String(res?.output || '').trim().split('\n')[0];
         const el = document.getElementById('sftp-detail-hash');
         if (el) el.textContent = hash || '无法计算';
       }).catch(() => { const el = document.getElementById('sftp-detail-hash'); if (el) el.textContent = '无法计算'; });
 
-    invoke('ssh_execute_dashboard_command_direct', { command: `head -c 4000 ${q} 2>/dev/null` })
+    invokeTargetBoundSSH('ssh_execute_dashboard_command_direct', { command: `head -c 4000 ${q} 2>/dev/null` })
       .then((res: any) => {
         const el = document.getElementById('sftp-detail-preview');
         if (el) el.textContent = String(res?.output || '').slice(0, 4000) || '（空）';
       }).catch(() => { const el = document.getElementById('sftp-detail-preview'); if (el) el.textContent = '无法预览'; });
   }
 
-  invoke('ssh_execute_dashboard_command_direct', { command: `stat -c '%x|%w' ${q} 2>/dev/null` })
+  invokeTargetBoundSSH('ssh_execute_dashboard_command_direct', { command: `stat -c '%x|%w' ${q} 2>/dev/null` })
     .then((res: any) => {
       const [atime, ctime] = String(res?.output || '').trim().split('|');
       const a = document.getElementById('sftp-detail-atime');
@@ -174,8 +174,7 @@ export function initSftpDetailPanel(): void {
   w.sftpDetailDownload = () => {
     if (!currentFile) return;
     if (w.sftpDownloadSelected) { w.sftpDownloadSelected(); return; }
-    invoke('sftp_download', { remotePath: currentFile.path }).catch(() => {});
-    w.showNotification?.('开始下载…', 'info');
+    w.showNotification?.('下载入口尚未初始化，请刷新 SFTP 页面后重试', 'error');
   };
 }
 

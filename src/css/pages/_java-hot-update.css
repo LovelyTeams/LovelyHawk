@@ -38,7 +38,7 @@
   padding: 2px 8px;
   border-radius: 10px;
   background: var(--accent-color);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 .jhu-header-actions {
@@ -125,7 +125,7 @@
 }
 
 .jhu-table tbody tr.selected {
-  background: rgba(var(--accent-rgb, 59, 130, 246), 0.1);
+  background: color-mix(in srgb, var(--accent-color) 10%, transparent);
 }
 
 .jhu-process-row {
@@ -173,7 +173,7 @@
 
 .jhu-btn.primary {
   background: var(--accent-color);
-  color: #fff;
+  color: var(--accent-contrast);
   border-color: var(--accent-color);
 }
 
@@ -196,7 +196,7 @@
 }
 
 .jhu-action-btn:hover { background: var(--hover-bg); }
-.jhu-action-btn.danger:hover { background: rgba(239, 68, 68, 0.15); }
+.jhu-action-btn.danger:hover { background: var(--sev-critical-bg); }
 
 /* ──── Cards ──── */
 .jhu-cards {
@@ -298,9 +298,9 @@
   margin-right: 8px;
 }
 
-.jhu-status-dot.running { background: #22c55e; }
-.jhu-status-dot.stopped { background: #ef4444; }
-.jhu-status-dot.unknown { background: #94a3b8; }
+.jhu-status-dot.running { background: var(--status-running); }
+.jhu-status-dot.stopped { background: var(--status-stopped); }
+.jhu-status-dot.unknown { background: var(--sev-neutral-fg); }
 
 .jhu-status-badge {
   padding: 2px 8px;
@@ -308,9 +308,9 @@
   font-size: 11px;
 }
 
-.jhu-status-badge.running { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
-.jhu-status-badge.stopped { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
-.jhu-status-badge.unknown { background: rgba(148, 163, 184, 0.15); color: #94a3b8; }
+.jhu-status-badge.running { background: var(--sev-success-bg); color: var(--sev-success-fg); }
+.jhu-status-badge.stopped { background: var(--sev-critical-bg); color: var(--sev-critical-fg); }
+.jhu-status-badge.unknown { background: var(--sev-neutral-bg); color: var(--sev-neutral-fg); }
 
 .jhu-tag {
   padding: 2px 8px;
@@ -532,5 +532,5 @@
 /* ──── Docker selected container ──── */
 .jhu-deploy-card.jhu-selected {
   border-color: var(--accent-color);
-  background: rgba(var(--accent-rgb, 59, 130, 246), 0.06);
+  background: color-mix(in srgb, var(--accent-color) 6%, transparent);
 }

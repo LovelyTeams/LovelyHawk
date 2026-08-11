@@ -171,3 +171,22 @@ td.st-trunc.st-trunc {
 .st-w300 { --st-max: 300px; }
 .st-w350 { --st-max: 350px; }
 .st-w500 { --st-max: 500px; }
+
+/* ──────────────────────────────────────────────────────────────
+ * SOC 表格辅助（对齐设计稿）
+ * ────────────────────────────────────────────────────────────── */
+
+/* 行级风险底色：整行淡 tint，hover 加深。用在 <tr class="row-critical"> */
+tr.row-critical td { background: var(--sev-critical-bg); }
+tr.row-critical:hover td { background: var(--sev-critical-bg-hover); }
+tr.row-high td { background: var(--sev-high-bg); }
+tr.row-high:hover td { background: var(--sev-high-bg-hover); }
+
+/* 数字列：等宽 + 表格数字，PID/端口/字节/百分比统一 */
+.num, td.num, th.num {
+  font-variant-numeric: tabular-nums;
+}
+.mono, td.mono {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+}

@@ -119,32 +119,71 @@ pub const COMMON_LOG_FILES: &[(&str, &str)] = &[
 ];
 
 pub const HIGHLIGHT_KEYWORDS: &[&str] = &[
-    "Failed password", "failed", "Failed", "FAILED",
-    "Accepted", "accepted",
-    "sudo", "SUDO", "su:",
-    "authentication failure", "Invalid user", "invalid",
-    "error", "Error", "ERROR",
-    "warning", "Warning", "WARNING",
-    "denied", "Denied", "DENIED",
-    "unauthorized", "Unauthorized",
-    "root", "ROOT",
-    "attack", "Attack", "ATTACK",
-    "intrusion", "Intrusion",
-    "breach", "Breach",
-    "segfault", "oom-killer", "Out of memory",
-    "reverse mapping", "COMMAND=",
+    "Failed password",
+    "failed",
+    "Failed",
+    "FAILED",
+    "Accepted",
+    "accepted",
+    "sudo",
+    "SUDO",
+    "su:",
+    "authentication failure",
+    "Invalid user",
+    "invalid",
+    "error",
+    "Error",
+    "ERROR",
+    "warning",
+    "Warning",
+    "WARNING",
+    "denied",
+    "Denied",
+    "DENIED",
+    "unauthorized",
+    "Unauthorized",
+    "root",
+    "ROOT",
+    "attack",
+    "Attack",
+    "ATTACK",
+    "intrusion",
+    "Intrusion",
+    "breach",
+    "Breach",
+    "segfault",
+    "oom-killer",
+    "Out of memory",
+    "reverse mapping",
+    "COMMAND=",
 ];
 
 /// 用于应急响应的高危关键词（权重更高）
 const SUSPICIOUS_KEYWORDS: &[&str] = &[
-    "reverse shell", "nc -e", "ncat", "/dev/tcp", "/dev/udp",
-    "base64", "eval", "wget http", "curl http",
-    "chmod 777", "chmod +s", "setuid",
-    "LD_PRELOAD", "LD_LIBRARY_PATH",
-    "crontab -e", "/etc/cron",
-    "useradd", "usermod", "passwd",
-    "iptables -F", "ufw disable", "firewalld stop",
-    "history -c", "unset HISTFILE",
+    "reverse shell",
+    "nc -e",
+    "ncat",
+    "/dev/tcp",
+    "/dev/udp",
+    "base64",
+    "eval",
+    "wget http",
+    "curl http",
+    "chmod 777",
+    "chmod +s",
+    "setuid",
+    "LD_PRELOAD",
+    "LD_LIBRARY_PATH",
+    "crontab -e",
+    "/etc/cron",
+    "useradd",
+    "usermod",
+    "passwd",
+    "iptables -F",
+    "ufw disable",
+    "firewalld stop",
+    "history -c",
+    "unset HISTFILE",
     ".ssh/authorized_keys",
 ];
 
@@ -163,15 +202,22 @@ pub fn parse_log_line(line: &str, keywords: &[&str]) -> LogEntry {
     let fields: Vec<&str> = line.split_whitespace().collect();
 
     let timestamp = if fields.len() >= 3 {
-        format!("{} {} {}", fields.get(0).unwrap_or(&""),
-                fields.get(1).unwrap_or(&""),
-                fields.get(2).unwrap_or(&""))
+        format!(
+            "{} {} {}",
+            fields.get(0).unwrap_or(&""),
+            fields.get(1).unwrap_or(&""),
+            fields.get(2).unwrap_or(&"")
+        )
     } else {
         String::new()
     };
 
     let service = if fields.len() >= 5 {
-        fields.get(4).unwrap_or(&"").trim_end_matches(':').to_string()
+        fields
+            .get(4)
+            .unwrap_or(&"")
+            .trim_end_matches(':')
+            .to_string()
     } else {
         "unknown".to_string()
     };
@@ -205,16 +251,29 @@ fn parse_audit_line(line: &str, highlighted: bool) -> LogEntry {
     let comm = extract_field(line, "comm=").replace('"', "");
 
     let level = if audit_type == "EXECVE" || audit_type == "SYSCALL" {
-        if success == "no" { "ERROR".to_string() } else { "WARN".to_string() }
+        if success == "no" {
+            "ERROR".to_string()
+        } else {
+            "WARN".to_string()
+        }
     } else if audit_type.contains("USER_AUTH") || audit_type.contains("USER_LOGIN") {
-        if success == "no" { "ERROR".to_string() } else { "INFO".to_string() }
+        if success == "no" {
+            "ERROR".to_string()
+        } else {
+            "INFO".to_string()
+        }
     } else {
         "INFO".to_string()
     };
 
     let service = format!("audit({})", audit_type);
     let message = if !exe.is_empty() {
-        format!("{} exe={} comm={}", line.split("):").nth(1).unwrap_or("").trim(), exe, comm)
+        format!(
+            "{} exe={} comm={}",
+            line.split("):").nth(1).unwrap_or("").trim(),
+            exe,
+            comm
+        )
     } else {
         line.split("):").nth(1).unwrap_or(line).trim().to_string()
     };
@@ -264,8 +323,12 @@ fn extract_audit_timestamp(line: &str) -> String {
 
 fn detect_level(line: &str) -> String {
     let lower = line.to_lowercase();
-    if lower.contains("fail") || lower.contains("error") || lower.contains("denied")
-        || lower.contains("invalid user") || lower.contains("authentication failure") {
+    if lower.contains("fail")
+        || lower.contains("error")
+        || lower.contains("denied")
+        || lower.contains("invalid user")
+        || lower.contains("authentication failure")
+    {
         "ERROR".to_string()
     } else if lower.contains("warn") {
         "WARN".to_string()
@@ -299,7 +362,9 @@ pub fn analyze_threats(entries: &[LogEntry]) -> ThreatSummary {
         if lower.contains("failed password") || lower.contains("authentication failure") {
             brute_force += 1;
             if let Some(ip) = extract_ip(raw) {
-                let e = ip_map.entry(ip).or_insert((0, String::new(), "failed_login".to_string()));
+                let e = ip_map
+                    .entry(ip)
+                    .or_insert((0, String::new(), "failed_login".to_string()));
                 e.0 += 1;
                 e.1 = entry.timestamp.clone();
                 e.2 = "failed_login".to_string();
@@ -314,7 +379,10 @@ pub fn analyze_threats(entries: &[LogEntry]) -> ThreatSummary {
         if lower.contains("accepted password") || lower.contains("accepted publickey") {
             success_login += 1;
             if let Some(ip) = extract_ip(raw) {
-                let e = ip_map.entry(ip).or_insert((0, String::new(), "accepted_login".to_string()));
+                let e =
+                    ip_map
+                        .entry(ip)
+                        .or_insert((0, String::new(), "accepted_login".to_string()));
                 e.0 += 1;
                 e.1 = entry.timestamp.clone();
             }
@@ -346,17 +414,26 @@ pub fn analyze_threats(entries: &[LogEntry]) -> ThreatSummary {
     }
 
     // Top 10 IP
-    let mut top_ips: Vec<IpCount> = ip_map.into_iter()
-        .map(|(ip, (count, last_seen, action))| IpCount { ip, count, last_seen, action_type: action })
+    let mut top_ips: Vec<IpCount> = ip_map
+        .into_iter()
+        .map(|(ip, (count, last_seen, action))| IpCount {
+            ip,
+            count,
+            last_seen,
+            action_type: action,
+        })
         .collect();
     top_ips.sort_by(|a, b| b.count.cmp(&a.count));
     top_ips.truncate(20);
 
     // Top 20 用户
-    let mut top_users: Vec<UserCount> = user_map.into_iter()
+    let mut top_users: Vec<UserCount> = user_map
+        .into_iter()
         .map(|(username, (success, fail))| UserCount {
             count: success + fail,
-            username, success_count: success, fail_count: fail
+            username,
+            success_count: success,
+            fail_count: fail,
         })
         .collect();
     top_users.sort_by(|a, b| b.count.cmp(&a.count));
@@ -394,7 +471,9 @@ fn extract_ip(line: &str) -> Option<String> {
     for pat in &patterns {
         if let Some(pos) = line.find(pat) {
             let rest = &line[pos + pat.len()..];
-            let token = rest.split(|c: char| !c.is_ascii_digit() && c != '.').next()?;
+            let token = rest
+                .split(|c: char| !c.is_ascii_digit() && c != '.')
+                .next()?;
             if is_valid_ip(token) {
                 return Some(token.to_string());
             }
@@ -412,7 +491,9 @@ fn extract_ip(line: &str) -> Option<String> {
 
 fn is_valid_ip(s: &str) -> bool {
     let parts: Vec<&str> = s.split('.').collect();
-    if parts.len() != 4 { return false; }
+    if parts.len() != 4 {
+        return false;
+    }
     parts.iter().all(|p| p.parse::<u8>().is_ok())
 }
 
@@ -460,7 +541,13 @@ fn extract_hour(timestamp: &str) -> Option<usize> {
 
 // ==================== 命令生成 ====================
 
-pub fn generate_log_read_command(log_path: &str, page: usize, page_size: usize, filter: Option<&str>, date_filter: Option<&str>) -> String {
+pub fn generate_log_read_command(
+    log_path: &str,
+    page: usize,
+    page_size: usize,
+    filter: Option<&str>,
+    date_filter: Option<&str>,
+) -> String {
     let page = page.max(1);
     let page_size = page_size.clamp(1, 10_000);
     let total_lines = page.saturating_mul(page_size);
@@ -480,20 +567,39 @@ pub fn generate_log_read_command(log_path: &str, page: usize, page_size: usize, 
 
     if grep_part.is_empty() {
         if page == 1 {
-            format!("tail -n {} -- {} 2>/dev/null || echo 'Log file not found'", page_size, quoted_path)
+            format!(
+                "tail -n {} -- {} 2>/dev/null || echo 'Log file not found'",
+                page_size, quoted_path
+            )
         } else {
-            format!("tail -n {} -- {} 2>/dev/null | head -n {} || echo 'Log file not found'", total_lines, quoted_path, page_size)
+            format!(
+                "tail -n {} -- {} 2>/dev/null | head -n {} || echo 'Log file not found'",
+                total_lines, quoted_path, page_size
+            )
         }
     } else {
         if page == 1 {
-            format!("cat -- {} 2>/dev/null {} | tail -n {} || echo 'No matching entries'", quoted_path, grep_part, page_size)
+            format!(
+                "cat -- {} 2>/dev/null {} | tail -n {} || echo 'No matching entries'",
+                quoted_path, grep_part, page_size
+            )
         } else {
-            format!("cat -- {} 2>/dev/null {} | tail -n {} | head -n {} || echo 'No matching entries'", quoted_path, grep_part, total_lines, page_size)
+            format!(
+                "cat -- {} 2>/dev/null {} | tail -n {} | head -n {} || echo 'No matching entries'",
+                quoted_path, grep_part, total_lines, page_size
+            )
         }
     }
 }
 
-pub fn generate_journalctl_command(page: usize, page_size: usize, unit: Option<&str>, filter: Option<&str>, since: Option<&str>, until: Option<&str>) -> String {
+pub fn generate_journalctl_command(
+    page: usize,
+    page_size: usize,
+    unit: Option<&str>,
+    filter: Option<&str>,
+    since: Option<&str>,
+    until: Option<&str>,
+) -> String {
     let mut cmd = String::from("journalctl --no-pager");
 
     if let Some(unit_name) = unit {
@@ -534,21 +640,34 @@ pub fn generate_journalctl_command(page: usize, page_size: usize, unit: Option<&
 
 /// 生成威胁分析命令 — 读取更多行用于统计（最近 2000 行）
 pub fn generate_threat_analysis_command(log_path: &str) -> String {
-    format!("tail -n 2000 -- {} 2>/dev/null || echo ''", shell_quote(log_path))
+    format!(
+        "tail -n 2000 -- {} 2>/dev/null || echo ''",
+        shell_quote(log_path)
+    )
 }
 
 /// 生成多日志关联读取命令
 pub fn generate_multi_log_command(log_paths: &[String], line_limit: usize) -> Vec<String> {
-    log_paths.iter().map(|path| {
-        format!("tail -n {} -- {} 2>/dev/null || echo ''", line_limit.clamp(1, 10_000), shell_quote(path))
-    }).collect()
+    log_paths
+        .iter()
+        .map(|path| {
+            format!(
+                "tail -n {} -- {} 2>/dev/null || echo ''",
+                line_limit.clamp(1, 10_000),
+                shell_quote(path)
+            )
+        })
+        .collect()
 }
 
 /// 生成 IOC 搜索命令（对每个 indicator 在每个日志文件中 grep）
 pub fn generate_ioc_search_command(indicator: &str, log_path: &str) -> String {
     format!(
         "grep -F -c -- {} {} 2>/dev/null || echo '0'; grep -F -m 3 -- {} {} 2>/dev/null || true",
-        shell_quote(indicator), shell_quote(log_path), shell_quote(indicator), shell_quote(log_path)
+        shell_quote(indicator),
+        shell_quote(log_path),
+        shell_quote(indicator),
+        shell_quote(log_path)
     )
 }
 
@@ -586,7 +705,8 @@ mod command_tests {
 
     #[test]
     fn pagination_does_not_overflow_or_allow_unbounded_page_size() {
-        let command = generate_log_read_command("/var/log/syslog", usize::MAX, usize::MAX, None, None);
+        let command =
+            generate_log_read_command("/var/log/syslog", usize::MAX, usize::MAX, None, None);
         assert!(command.contains("head -n 10000"));
     }
 

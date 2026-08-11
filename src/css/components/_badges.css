@@ -22,7 +22,7 @@
   font-size: 10px;
   font-weight: 600;
   color: var(--success-color);
-  background: rgba(34, 197, 94, 0.1);
+  background: var(--sev-success-bg);
   padding: 2px 6px;
   border-radius: 4px;
   flex-shrink: 0;
@@ -36,7 +36,7 @@
   color: var(--text-secondary);
   font-weight: 500;
 }
-.server-status-badge.connected { background: rgba(16, 185, 129, 0.1); color: var(--success-color); }
+.server-status-badge.connected { background: var(--sev-success-bg); color: var(--success-color); }
 
 .tech-tag {
   font-size: 11px;
@@ -50,3 +50,59 @@
 }
 
 .port-badge { background: var(--bg-tertiary); padding: 0 4px; border-radius: 4px; font-size: 11px; }
+
+/* ──────────────────────────────────────────────────────────────
+ * 五级风险徽章（对齐设计稿：圆点 + 文字，tinted 底 + 彩色字）
+ * 用法：<span class="sev-pill lv-critical">高危</span>
+ * 等级：lv-critical 高危 / lv-high 较高 / lv-warn 中危
+ *       lv-info 低 / lv-neutral 信息 / lv-success 正常
+ * ────────────────────────────────────────────────────────────── */
+.sev-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+.sev-pill::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+.sev-pill.lv-critical { background: var(--sev-critical-bg); color: var(--sev-critical-fg); border-color: var(--sev-critical-border); }
+.sev-pill.lv-high     { background: var(--sev-high-bg); color: var(--sev-high-fg); border-color: var(--sev-high-border); }
+.sev-pill.lv-warn     { background: var(--sev-warn-bg); color: var(--sev-warn-fg); border-color: var(--sev-warn-border); }
+.sev-pill.lv-info     { background: var(--sev-info-bg); color: var(--sev-info-fg); border-color: var(--sev-info-border); }
+.sev-pill.lv-neutral  { background: var(--sev-neutral-bg); color: var(--sev-neutral-fg); border-color: var(--sev-neutral-border); }
+.sev-pill.lv-success  { background: var(--sev-success-bg); color: var(--sev-success-fg); border-color: var(--sev-success-border); }
+
+/* 无边框文字变体（表格密集行内更轻量） */
+.sev-pill.plain { border-color: transparent; padding: 2px 6px; }
+
+/* 连接/状态徽章：ESTAB 绿 / LISTEN 蓝 / SYN-SENT 黄 / 其他灰 */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-mono, monospace);
+  line-height: 18px;
+  white-space: nowrap;
+  background: var(--sev-neutral-bg);
+  color: var(--sev-neutral-fg);
+}
+.status-pill.st-ok      { background: var(--sev-success-bg); color: var(--sev-success-fg); }
+.status-pill.st-info    { background: var(--sev-info-bg); color: var(--sev-info-fg); }
+.status-pill.st-warn    { background: var(--sev-warn-bg); color: var(--sev-warn-fg); }
+.status-pill.st-high    { background: var(--sev-high-bg); color: var(--sev-high-fg); }
+.status-pill.st-critical { background: var(--sev-critical-bg); color: var(--sev-critical-fg); }

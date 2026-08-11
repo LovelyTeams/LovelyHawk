@@ -19,7 +19,7 @@ import { sshConnectionManager } from '../remote/sshConnectionManager';
 import { showConfirm } from '../ui/confirmDialog';
 
 import { logger } from '../core/logger';
-/** 正式包 drop 掉 console，诊断信息只有进 logger 才留得下来（设置→工具→诊断日志 可导出） */
+/** 正式包 drop 掉 console，诊断信息只有进 logger 才留得下来（状态栏「日志」按钮可导出） */
 const log = logger.module('App');
 
 
@@ -32,7 +32,7 @@ export interface ServerInfo {
 }
 
 export interface AppState {
-  theme: 'light' | 'dark' | 'sakura' | 'midnight' | 'ocean';
+  theme: 'light' | 'dark' | 'sakura';
   isConnected: boolean;
   currentServer?: string; // 保留向后兼容
   serverInfo?: ServerInfo; // 新增详细服务器信息
@@ -122,8 +122,11 @@ export class LovelyResApp {
     try {
       // 从后端加载主题设置
       const savedTheme = await this.loadThemeFromBackend();
-      if (savedTheme && ['light', 'dark', 'sakura', 'midnight', 'ocean'].includes(savedTheme)) {
-        this.stateManager.setTheme(savedTheme as 'light' | 'dark' | 'sakura' | 'midnight' | 'ocean');
+      if (savedTheme && ['light', 'dark', 'sakura'].includes(savedTheme)) {
+        this.stateManager.setTheme(savedTheme as 'light' | 'dark' | 'sakura');
+      } else if (savedTheme) {
+        // 历史已移除主题（midnight/ocean 等）回落为深色
+        this.stateManager.setTheme('dark');
       }
       
       // 应用主题
@@ -151,13 +154,11 @@ export class LovelyResApp {
   /**
    * 设置主题
    */
-  async setTheme(theme: 'light' | 'dark' | 'sakura' | 'midnight' | 'ocean'): Promise<void> {
+  async setTheme(theme: 'light' | 'dark' | 'sakura'): Promise<void> {
     const themeNames: Record<string, string> = {
       'light': '浅色',
       'dark': '深色',
-      'sakura': '樱花粉',
-      'midnight': '暗夜',
-      'ocean': '深海',
+      'sakura': '粉色',
     };
 
     // 如果已经在该主题，不进行操作
@@ -193,7 +194,7 @@ export class LovelyResApp {
    */
   async toggleTheme(): Promise<void> {
     const currentTheme = this.stateManager.getState().theme;
-    const themes: ('light' | 'dark' | 'sakura' | 'midnight' | 'ocean')[] = ['light', 'dark', 'sakura', 'midnight', 'ocean'];
+    const themes: ('light' | 'dark' | 'sakura')[] = ['light', 'dark', 'sakura'];
     const nextIndex = (themes.indexOf(currentTheme) + 1) % themes.length;
     await this.setTheme(themes[nextIndex]);
   }
@@ -235,6 +236,12 @@ export class LovelyResApp {
     // 局部更新：替换整个 workspace 元素（renderMainWorkspace 返回含 wrapper 的完整 HTML）
     workspace.outerHTML = this.modernUIRenderer.renderMainWorkspace();
 
+    // 上下文栏位于标题栏中，但阶段随当前页面变化，需要与工作区同步刷新。
+    const incidentContext = document.querySelector('.incident-context-bar');
+    if (incidentContext) {
+      incidentContext.outerHTML = this.modernUIRenderer.renderIncidentContextBar();
+    }
+
     // 同步更新侧边栏 active 状态
     const currentPage = this.stateManager.getState().currentPage;
     document.querySelectorAll('.sidebar-item[data-nav-id], .activity-bar-item[data-nav-id]').forEach(item => {
@@ -267,8 +274,8 @@ export class LovelyResApp {
       const themeBtn = target.closest('[data-theme-value]');
       if (themeBtn) {
         const theme = themeBtn.getAttribute('data-theme-value');
-        if (theme && ['light', 'dark', 'sakura', 'midnight', 'ocean'].includes(theme)) {
-          this.setTheme(theme as 'light' | 'dark' | 'sakura' | 'midnight' | 'ocean');
+        if (theme && ['light', 'dark', 'sakura'].includes(theme)) {
+          this.setTheme(theme as 'light' | 'dark' | 'sakura');
           // 主题切换后重新渲染设置菜单以更新激活状态
           this.rerenderSettingsMenu();
           return; // 不要触发下方的"点击外部关闭"逻辑
@@ -379,15 +386,6 @@ export class LovelyResApp {
       } catch (e) {
         log.error('Failed to open devtools:', e);
       }
-    };
-
-    // 菜单操作
-    (window as any).handleUserMenuAction = (action: string) => {
-        if (action === 'settings') {
-            this.stateManager.setCurrentPage('settings');
-            this.modernUIRenderer.updateState(this.stateManager.getState());
-            this.render();
-        }
     };
   }
 
@@ -581,13 +579,11 @@ export class LovelyResApp {
       btn.classList.toggle('active', themeValue === currentTheme);
     });
 
-    // Update theme swatches in settings dropdown
+    // Update theme swatches in settings dropdown（边框高亮由 .theme-swatch.active CSS 控制）
     document.querySelectorAll('.theme-swatch[data-theme-value]').forEach(btn => {
       const el = btn as HTMLElement;
       const themeValue = el.getAttribute('data-theme-value');
-      const isActive = themeValue === currentTheme;
-      el.classList.toggle('active', isActive);
-      el.style.borderColor = isActive ? 'var(--primary-color)' : 'transparent';
+      el.classList.toggle('active', themeValue === currentTheme);
     });
   }
 

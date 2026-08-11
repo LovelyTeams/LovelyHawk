@@ -4,19 +4,40 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
+import { activeTargetContext, targetIdentityFromBackend } from '../core/targetContext';
+import { targetCapabilityStore } from '../core/targetCapabilities';
+import {
+  connectSSHAdvancedWithHostKeyConfirmation,
+} from './hostKeyConfirmation';
 
 /**
  * SSH账号凭证
  */
 export interface SSHAccountCredential {
   username: string;
-  authType: 'password' | 'key' | 'certificate';
+  authType: SSHAuthType;
   encryptedPassword?: string; // AES加密的密码
   keyPath?: string;
   keyPassphrase?: string; // SSH密钥的密码短语
   certificatePath?: string;
+  agentIdentityFingerprint?: string;
   isDefault: boolean; // 是否为默认账号
   description?: string; // 账号描述（如：超级管理员、数据库管理员等）
+}
+
+export type SSHAuthType = 'password' | 'key' | 'certificate' | 'keyboard-interactive' | 'agent';
+
+export interface SSHJumpHostConfig {
+  host: string;
+  port: number;
+  username: string;
+  authType: SSHAuthType;
+  encryptedPassword?: string;
+  keyPath?: string;
+  keyPassphrase?: string;
+  certificatePath?: string;
+  agentIdentityFingerprint?: string;
+  hostKeyFingerprint?: string;
 }
 
 export interface SSHConnection {
@@ -26,11 +47,13 @@ export interface SSHConnection {
   port: number;
   // 保留单账号字段用于向后兼容，将在未来版本废弃
   username: string;
-  authType: 'password' | 'key' | 'certificate';
+  authType: SSHAuthType;
   encryptedPassword?: string; // AES加密的密码
   keyPath?: string;
   keyPassphrase?: string; // SSH密钥的密码短语
   certificatePath?: string;
+  agentIdentityFingerprint?: string;
+  jumpHost?: SSHJumpHostConfig;
   // 新增多账号支持
   accounts: SSHAccountCredential[]; // 多账号列表
   activeAccount?: string; // 当前活动的账号用户名
@@ -38,12 +61,17 @@ export interface SSHConnection {
   isConnected: boolean;
   lastConnected?: Date;
   tags?: string[];
+  notes?: string;
+  environment?: string;
+  role?: string;
+  group?: string;
+  hostKeyFingerprint?: string;
 }
 
 import { logger } from '../core/logger';
 import { reportError } from '../utils/errorHandler';
 
-/** 正式包 drop 掉 console，日志统一进 logger 环形缓冲（设置→工具→诊断日志 可导出） */
+/** 正式包 drop 掉 console，日志统一进 logger 环形缓冲（状态栏「日志」按钮可导出） */
 const log = logger.module('SSHConnection');
 
 export class SSHConfigManager {
@@ -72,6 +100,19 @@ export class SSHConfigManager {
         keyPath: conn.key_path,
         keyPassphrase: conn.key_passphrase,
         certificatePath: conn.certificate_path,
+        agentIdentityFingerprint: conn.agent_identity_fingerprint,
+        jumpHost: conn.jump_host ? {
+          host: conn.jump_host.host,
+          port: conn.jump_host.port,
+          username: conn.jump_host.username,
+          authType: conn.jump_host.auth_type,
+          encryptedPassword: conn.jump_host.encrypted_password,
+          keyPath: conn.jump_host.key_path,
+          keyPassphrase: conn.jump_host.key_passphrase,
+          certificatePath: conn.jump_host.certificate_path,
+          agentIdentityFingerprint: conn.jump_host.agent_identity_fingerprint,
+          hostKeyFingerprint: conn.jump_host.host_key_fingerprint,
+        } : undefined,
         // 转换多账号数据
         accounts: (conn.accounts || []).map((acc: any) => ({
           username: acc.username,
@@ -80,13 +121,19 @@ export class SSHConfigManager {
           keyPath: acc.key_path,
           keyPassphrase: acc.key_passphrase,
           certificatePath: acc.certificate_path,
+          agentIdentityFingerprint: acc.agent_identity_fingerprint,
           isDefault: acc.is_default,
           description: acc.description
         })),
         activeAccount: conn.active_account,
         isConnected: false, // 应用启动时重置所有连接状态为未连接
         lastConnected: conn.last_connected ? new Date(conn.last_connected) : undefined,
-        tags: conn.tags
+        tags: conn.tags || [],
+        notes: conn.notes || '',
+        environment: conn.environment || '',
+        role: conn.role || '',
+        group: conn.group || '',
+        hostKeyFingerprint: conn.host_key_fingerprint || undefined,
       }));
       log.info('SSH连接配置已加载', { count: this.connections.length });
     } catch (error) {
@@ -112,6 +159,19 @@ export class SSHConfigManager {
         key_path: conn.keyPath || null,
         key_passphrase: conn.keyPassphrase || null,
         certificate_path: conn.certificatePath || null,
+        agent_identity_fingerprint: conn.agentIdentityFingerprint || null,
+        jump_host: conn.jumpHost ? {
+          host: conn.jumpHost.host,
+          port: conn.jumpHost.port,
+          username: conn.jumpHost.username,
+          auth_type: conn.jumpHost.authType,
+          encrypted_password: conn.jumpHost.encryptedPassword || null,
+          key_path: conn.jumpHost.keyPath || null,
+          key_passphrase: conn.jumpHost.keyPassphrase || null,
+          certificate_path: conn.jumpHost.certificatePath || null,
+          agent_identity_fingerprint: conn.jumpHost.agentIdentityFingerprint || null,
+          host_key_fingerprint: conn.jumpHost.hostKeyFingerprint || null,
+        } : null,
         // 转换多账号数据
         accounts: conn.accounts.map(acc => ({
           username: acc.username,
@@ -120,13 +180,19 @@ export class SSHConfigManager {
           key_path: acc.keyPath || null,
           key_passphrase: acc.keyPassphrase || null,
           certificate_path: acc.certificatePath || null,
+          agent_identity_fingerprint: acc.agentIdentityFingerprint || null,
           is_default: acc.isDefault,
           description: acc.description || null
         })),
         active_account: conn.activeAccount || null,
         is_connected: conn.isConnected,
         last_connected: conn.lastConnected,
-        tags: null
+        tags: conn.tags || [],
+        notes: conn.notes || null,
+        environment: conn.environment || null,
+        role: conn.role || null,
+        group: conn.group || null,
+        host_key_fingerprint: conn.hostKeyFingerprint || null,
       }));
 
       await invoke('save_ssh_connections', { connections: backendConnections });
@@ -168,10 +234,25 @@ export class SSHConfigManager {
           password: (connection as any).password
         }) as string;
         newConnection.encryptedPassword = encryptedPassword;
+        delete (newConnection as any).password;
         log.debug('[添加连接] 主账号密码加密成功');
       } catch (error) {
         reportError(error, { module: 'SSHConnection', action: '密码加密' });
         throw new Error('密码加密失败');
+      }
+    }
+
+    const jumpPassword = (connection.jumpHost as any)?.password;
+    if (connection.jumpHost?.authType === 'password' && jumpPassword) {
+      try {
+        newConnection.jumpHost = { ...connection.jumpHost };
+        newConnection.jumpHost.encryptedPassword = await invoke('encrypt_password', {
+          password: jumpPassword,
+        }) as string;
+        delete (newConnection.jumpHost as any).password;
+      } catch (error) {
+        reportError(error, { module: 'SSHConnection', action: '堡垒机密码加密' });
+        throw new Error('堡垒机密码加密失败');
       }
     }
 
@@ -234,6 +315,35 @@ export class SSHConfigManager {
       }
     } else if ((updates as any).password === undefined || (updates as any).password === '') {
       log.debug('[更新连接] 密码为空，保持原有密码不变');
+    }
+    if (updates.authType && updates.authType !== 'password') {
+      updates.encryptedPassword = undefined;
+    }
+
+    const jumpPassword = (updates.jumpHost as any)?.password;
+    if (updates.jumpHost?.authType === 'password'
+      && this.connections[index].jumpHost?.authType === 'password'
+      && !jumpPassword) {
+      updates.jumpHost = {
+        ...this.connections[index].jumpHost,
+        ...updates.jumpHost,
+        encryptedPassword: this.connections[index].jumpHost?.encryptedPassword,
+      };
+    }
+    if (updates.jumpHost && updates.jumpHost.authType !== 'password') {
+      updates.jumpHost = { ...updates.jumpHost, encryptedPassword: undefined };
+    }
+    if (updates.jumpHost?.authType === 'password' && jumpPassword) {
+      try {
+        updates.jumpHost = { ...updates.jumpHost };
+        updates.jumpHost.encryptedPassword = await invoke('encrypt_password', {
+          password: jumpPassword,
+        }) as string;
+        delete (updates.jumpHost as any).password;
+      } catch (error) {
+        reportError(error, { module: 'SSHConnection', action: '堡垒机密码加密' });
+        throw new Error('堡垒机密码加密失败');
+      }
     }
 
     // 加密额外账号的密码
@@ -321,20 +431,55 @@ export class SSHConfigManager {
       }
 
       // 调用后端SSH连接命令 (russh)
-      const result = await invoke('ssh_connect_direct', {
+      let jumpPassword: string | undefined;
+      if (connection.jumpHost?.authType === 'password' && connection.jumpHost.encryptedPassword) {
+        jumpPassword = await invoke('decrypt_password', {
+          encryptedPassword: connection.jumpHost.encryptedPassword,
+        }) as string;
+      }
+      const connectRequest = {
         host: connection.host,
         port: connection.port,
         username: connection.username,
-        authType: connection.authType,
-        password,
-        keyPath: connection.keyPath,
-        keyPassphrase: connection.keyPassphrase,
-      });
+        authentication: {
+          authType: connection.authType,
+          password,
+          keyPath: connection.keyPath,
+          keyPassphrase: connection.keyPassphrase,
+          certificatePath: connection.certificatePath,
+          agentIdentityFingerprint: connection.agentIdentityFingerprint,
+        },
+        jumpHost: connection.jumpHost ? {
+          host: connection.jumpHost.host,
+          port: connection.jumpHost.port,
+          username: connection.jumpHost.username,
+          expectedHostKeyFingerprint: connection.jumpHost.hostKeyFingerprint,
+          authentication: {
+            authType: connection.jumpHost.authType,
+            password: jumpPassword,
+            keyPath: connection.jumpHost.keyPath,
+            keyPassphrase: connection.jumpHost.keyPassphrase,
+            certificatePath: connection.jumpHost.certificatePath,
+            agentIdentityFingerprint: connection.jumpHost.agentIdentityFingerprint,
+          },
+        } : null,
+      };
+      const result = await connectSSHAdvancedWithHostKeyConfirmation(connectRequest);
 
       // 连接成功，更新状态
       connection.isConnected = true;
       connection.lastConnected = new Date();
+      connection.hostKeyFingerprint = result.host_key_fingerprint;
+      if (connection.jumpHost && connectRequest.jumpHost?.expectedHostKeyFingerprint) {
+        connection.jumpHost.hostKeyFingerprint = connectRequest.jumpHost.expectedHostKeyFingerprint;
+      }
       this.activeConnection = connection;
+      activeTargetContext.activate(targetIdentityFromBackend(result));
+      try {
+        await targetCapabilityStore.probeActiveTarget();
+      } catch (error) {
+        log.warn('SSH 已连接，但目标能力预检失败', error);
+      }
       
       // 异步保存连接状态（不阻塞连接流程）
       this.saveConnections().catch(err => {
@@ -363,6 +508,7 @@ export class SSHConfigManager {
       
       this.activeConnection.isConnected = false;
       this.activeConnection = undefined;
+      activeTargetContext.clear();
       
       await this.saveConnections();
       
@@ -397,16 +543,32 @@ export class SSHConfigManager {
         password = (connection as any).password;
       }
 
-      await invoke('ssh_test_connection', {
+      await connectSSHAdvancedWithHostKeyConfirmation<boolean>({
         host: connection.host,
         port: connection.port,
         username: connection.username,
-        authType: connection.authType,
-        password,
-        keyPath: connection.keyPath,
-        keyPassphrase: connection.keyPassphrase,
-        certificatePath: connection.certificatePath
-      });
+        authentication: {
+          authType: connection.authType,
+          password,
+          keyPath: connection.keyPath,
+          keyPassphrase: connection.keyPassphrase,
+          certificatePath: connection.certificatePath,
+          agentIdentityFingerprint: connection.agentIdentityFingerprint,
+        },
+        jumpHost: connection.jumpHost ? {
+          host: connection.jumpHost.host,
+          port: connection.jumpHost.port,
+          username: connection.jumpHost.username,
+          authentication: {
+            authType: connection.jumpHost.authType,
+            password: (connection.jumpHost as any).password,
+            keyPath: connection.jumpHost.keyPath,
+            keyPassphrase: connection.jumpHost.keyPassphrase,
+            certificatePath: connection.jumpHost.certificatePath,
+            agentIdentityFingerprint: connection.jumpHost.agentIdentityFingerprint,
+          },
+        } : null,
+      }, undefined, undefined, undefined, 'ssh_test_connection_advanced');
 
       return true;
     } catch (error) {

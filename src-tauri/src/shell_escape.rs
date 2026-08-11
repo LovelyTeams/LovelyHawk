@@ -100,7 +100,15 @@ mod tests {
     /// 调用点依赖这一点（引号写在 format! 串里）
     #[test]
     fn inner_form_differs_only_by_outer_quotes() {
-        for s in ["", "plain", "a b", "O'Brien", "; rm -rf /", "$(id)", "a'b'c"] {
+        for s in [
+            "",
+            "plain",
+            "a b",
+            "O'Brien",
+            "; rm -rf /",
+            "$(id)",
+            "a'b'c",
+        ] {
             assert_eq!(format!("'{}'", shq_inner(s)), shq(s), "不变量被破坏: {s:?}");
         }
     }
@@ -112,11 +120,11 @@ mod tests {
         }
         for bad in [
             "",
-            "1table",              // 不能数字开头
+            "1table", // 不能数字开头
             "users; DROP DATABASE prod; --",
             "a b",
             "a-b",
-            "a.b",                 // 库名表名必须分开校验
+            "a.b", // 库名表名必须分开校验
             "a`b",
             "a'b",
             &"x".repeat(65),

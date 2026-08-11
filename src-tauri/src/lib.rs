@@ -26,26 +26,28 @@
 )]
 
 // 模块声明
-pub mod crypto_keys;
+pub mod ai_proxy;
+pub mod app_log; // 后端日志环形缓冲区（alog_info/alog_warn/alog_error 宏）
+pub mod commands;
+pub mod crypto; // 共享 AES-256-GCM 文本加密（enc:v1: 格式）
+pub mod db_manager;
+pub mod detection_commands; // 检测命令处理器（从 lib.rs 拆分）
 pub mod detection_manager;
-pub mod detection_commands;  // 检测命令处理器（从 lib.rs 拆分）
+pub mod docker_commands; // Docker 命令处理器（从 lib.rs 拆分）
 pub mod docker_manager;
-pub mod docker_commands;     // Docker 命令处理器（从 lib.rs 拆分）
 pub mod file_analysis;
 pub mod log_analysis;
+pub mod net_guard; // 出站请求防护（SSRF / header 白名单 / 共享客户端）
 pub mod packet_capture;
+pub mod path_guard; // 本地路径防护（上传源收敛 / 下载目标校验）
 pub mod settings;
+pub mod shell_escape; // shell / SQL 转义，全 crate 唯一实现
+pub mod ssh_compat; // SSH 版本/目标能力兼容契约
 pub mod ssh_connection_manager;
-pub mod ssh_manager_russh;  // 使用 russh 实现的 SSH 管理器
+pub mod ssh_manager_russh; // 使用 russh 实现的 SSH 管理器
 pub mod theme_manager;
 pub mod types;
 pub mod window_manager;
-pub mod commands;
-pub mod ai_proxy;
-pub mod net_guard;           // 出站请求防护（SSRF / header 白名单 / 共享客户端）
-pub mod shell_escape;        // shell / SQL 转义，全 crate 唯一实现
-pub mod path_guard;          // 本地路径防护（上传源收敛 / 下载目标校验）
-pub mod db_manager;
 
 use std::sync::Mutex;
 use tauri::Manager;
@@ -74,13 +76,21 @@ pub fn lock_or_recover<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 /// 打开 Web 终端窗口（ttyd/wetty/shellinabox 等）
 #[tauri::command]
-async fn open_web_terminal(app: tauri::AppHandle, url: String, title: String) -> Result<String, String> {
+async fn open_web_terminal(
+    app: tauri::AppHandle,
+    url: String,
+    title: String,
+) -> Result<String, String> {
     // 与 ai_proxy 共用同一套校验（scheme / host / 内嵌凭据 / 链路本地地址）
-    net_guard::validate_outbound_url(&url)
-        .map_err(|e| format!("Web 终端 URL 校验失败: {}", e))?;
+    net_guard::validate_outbound_url(&url).map_err(|e| format!("Web 终端 URL 校验失败: {}", e))?;
 
-    let label = format!("web-term-{}", std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
+    let label = format!(
+        "web-term-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+    );
 
     window_manager::WindowManager::create_external_window(
         &app, &label, &title, &url, 900.0, 600.0,
@@ -96,7 +106,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(AppState {
             settings: Mutex::new(settings::load_settings().unwrap_or_default()),
-            ssh_connection_manager: Mutex::new(ssh_connection_manager::SSHConnectionManager::new().expect("Failed to initialize SSH Connection Manager")),
+            ssh_connection_manager: Mutex::new(
+                ssh_connection_manager::SSHConnectionManager::new()
+                    .expect("Failed to initialize SSH Connection Manager"),
+            ),
             ssh_manager: ssh_manager_russh::SSHManagerRussh::new(),
             ssh_terminal_creation_lock: Mutex::new(()),
         })
@@ -115,15 +128,22 @@ pub fn run() {
             commands::misc_commands::get_system_fonts,
             commands::misc_commands::ai_proxy_request,
             commands::misc_commands::ai_proxy_stream,
-            commands::misc_commands::get_rsa_public_key,
+            commands::misc_commands::ai_proxy_stream_cancel,
+            commands::misc_commands::ai_list_models,
+            commands::misc_commands::encrypt_ai_key,
+            commands::misc_commands::migrate_ai_keys,
             // SSH commands
             commands::ssh_commands::load_ssh_connections,
             commands::ssh_commands::save_ssh_connections,
             commands::ssh_commands::encrypt_password,
             commands::ssh_commands::decrypt_password,
             commands::ssh_commands::ssh_connect_direct,
+            commands::ssh_commands::ssh_connect_advanced,
             commands::ssh_commands::ssh_test_connection,
+            commands::ssh_commands::ssh_test_connection_advanced,
             commands::ssh_commands::ssh_disconnect_direct,
+            commands::ssh_commands::ssh_disconnect_session_direct,
+            commands::ssh_commands::ssh_set_current_session,
             commands::ssh_commands::ssh_execute_command_direct,
             commands::ssh_commands::ssh_execute_dashboard_command_direct,
             commands::ssh_commands::ssh_execute_batch_commands,
@@ -132,8 +152,10 @@ pub fn run() {
             commands::ssh_commands::test_ssh_performance,
             commands::ssh_commands::diagnose_shell_performance,
             commands::ssh_commands::detect_system_type,
+            commands::ssh_commands::ssh_probe_capabilities,
             commands::ssh_commands::start_packet_capture,
             commands::ssh_commands::stop_packet_capture,
+            commands::ssh_commands::capture_pcap_evidence,
             commands::ssh_commands::get_network_interfaces,
             commands::ssh_commands::ssh_create_terminal_session,
             commands::ssh_commands::ssh_close_terminal_session,
@@ -152,6 +174,7 @@ pub fn run() {
             commands::sftp_commands::sftp_list_files,
             commands::sftp_commands::sftp_read_file,
             commands::sftp_commands::sftp_write_file,
+            commands::sftp_commands::sftp_atomic_write_file,
             commands::sftp_commands::sftp_upload,
             commands::sftp_commands::sftp_download,
             commands::sftp_commands::sftp_create_directory,
@@ -234,19 +257,34 @@ pub fn run() {
             commands::db_commands::db_get_stats,
             // Web 终端
             open_web_terminal,
+            // 后端日志环形缓冲
+            app_log::get_backend_logs,
+            app_log::clear_backend_logs,
+            app_log::report_frontend_ready,
         ])
         .setup(|app| {
             // 应用初始化逻辑
-            println!("🚀 LovelyRes 后端初始化完成");
+            crate::alog_info!("LovelyRes 后端初始化完成");
+
+            // 启动时一次性迁移 settings.json 中明文存储的 AI API Key
+            match commands::misc_commands::migrate_ai_keys_impl() {
+                Ok(count) if count > 0 => {
+                    crate::alog_info!("启动迁移完成：{} 个 AI API Key 已加密", count);
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    crate::alog_warn!("AI API Key 迁移失败: {}", e);
+                }
+            }
 
             // 在 Windows 开发环境下，强制关闭主窗口的原生标题栏（decorations），避免 dev 下平台特定配置未生效
             #[cfg(target_os = "windows")]
             {
                 if let Some(main) = app.get_webview_window("main") {
                     if let Err(e) = main.set_decorations(false) {
-                        eprintln!("⚠️ 设置窗口装饰失败: {}", e);
+                        crate::alog_error!("设置窗口装饰失败: {}", e);
                     } else {
-                        println!("✅ Windows 下开发模式强制关闭标题栏");
+                        crate::alog_info!("Windows 下开发模式强制关闭标题栏");
                     }
 
                     // 强制设置窗口大小为配置文件中的值，避免被缓存的窗口状态覆盖
@@ -254,16 +292,16 @@ pub fn run() {
                         width: 1200,
                         height: 800,
                     })) {
-                        eprintln!("⚠️ 设置窗口大小失败: {}", e);
+                        crate::alog_error!("设置窗口大小失败: {}", e);
                     } else {
-                        println!("✅ 窗口大小已强制设置为 1200x800");
+                        crate::alog_info!("窗口大小已强制设置为 1200x800");
                     }
                 }
             }
 
             // 设置 app_handle 到 SSH 管理器
 
-            println!("✅ LovelyRes 应用初始化完成");
+            crate::alog_info!("LovelyRes 应用初始化完成");
 
             Ok(())
         })

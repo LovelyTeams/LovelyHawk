@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use reqwest::Url;
 use url::Host;
@@ -112,37 +112,128 @@ pub fn filter_headers(headers: &HashMap<String, String>) -> (Vec<(String, String
     (kept, dropped)
 }
 
-/// 非流式请求用的共享客户端（带整体超时）
-///
-/// 共享而非每次 build：每请求重建会丢掉连接池并重做 TLS 握手。
-pub fn http_client() -> Result<&'static reqwest::Client, String> {
-    static CLIENT: OnceLock<Result<reqwest::Client, String>> = OnceLock::new();
-    CLIENT
-        .get_or_init(|| {
-            reqwest::Client::builder()
-                .connect_timeout(std::time::Duration::from_secs(8))
-                .timeout(std::time::Duration::from_secs(60))
-                .build()
-                .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))
-        })
-        .as_ref()
-        .map_err(|e| e.clone())
+/// AI 请求的代理配置（来自 settings.json 的 ai.useProxy/proxyType/proxyUrl）
+#[derive(Debug, Clone)]
+pub struct ProxySettings {
+    /// "http"（http/https 代理）或 "socks5"
+    pub proxy_type: String,
+    /// 完整代理 URL，如 http://127.0.0.1:8080 / socks5://127.0.0.1:1080
+    pub proxy_url: String,
 }
 
-/// 流式请求用的共享客户端
+impl ProxySettings {
+    fn cache_key(&self) -> String {
+        format!("{}|{}", self.proxy_type, self.proxy_url)
+    }
+}
+
+/// 校验代理配置并构造 reqwest::Proxy。
+///
+/// proxy_type 与 URL scheme 必须匹配，否则拼错类型的配置会以难以排查的方式
+/// 失败（连接超时），不如在这里直接给出明确错误。
+fn build_proxy(settings: &ProxySettings) -> Result<reqwest::Proxy, String> {
+    let parsed = Url::parse(&settings.proxy_url).map_err(|e| format!("无效的代理 URL: {}", e))?;
+
+    match settings.proxy_type.as_str() {
+        "http" => {
+            if !matches!(parsed.scheme(), "http" | "https") {
+                return Err(format!(
+                    "http 代理的 URL 必须是 http/https scheme，收到: {}",
+                    parsed.scheme()
+                ));
+            }
+        }
+        "socks5" => {
+            if parsed.scheme() != "socks5" {
+                return Err(format!(
+                    "socks5 代理的 URL 必须是 socks5:// scheme，收到: {}",
+                    parsed.scheme()
+                ));
+            }
+        }
+        other => {
+            return Err(format!("不支持的代理类型: {}", other));
+        }
+    }
+
+    reqwest::Proxy::all(settings.proxy_url.as_str()).map_err(|e| format!("创建代理失败: {}", e))
+}
+
+/// 按代理配置构造（并缓存）独立客户端。
+///
+/// 走代理的配置远少于直连，且代理地址可能随时改，所以不用 OnceLock：
+/// 以序列化配置为 key 缓存最近一份，配置变化时重建。
+fn proxied_client(
+    settings: &ProxySettings,
+    cache: &Mutex<Option<(String, reqwest::Client)>>,
+    stream: bool,
+) -> Result<reqwest::Client, String> {
+    let key = settings.cache_key();
+    let mut guard = cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    if let Some((cached_key, client)) = guard.as_ref() {
+        if *cached_key == key {
+            return Ok(client.clone());
+        }
+    }
+
+    let proxy = build_proxy(settings)?;
+    let mut builder = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(8))
+        .proxy(proxy);
+    if !stream {
+        builder = builder.timeout(std::time::Duration::from_secs(60));
+    }
+    let client = builder
+        .build()
+        .map_err(|e| format!("创建代理 HTTP 客户端失败: {}", e))?;
+
+    *guard = Some((key, client.clone()));
+    Ok(client)
+}
+
+/// 非流式请求用的客户端（带整体超时）
+///
+/// `None` 走共享的 OnceLock 客户端（行为与之前一致）；`Some` 走按配置缓存的
+/// 代理客户端。共享而非每次 build：每请求重建会丢掉连接池并重做 TLS 握手。
+pub fn http_client(proxy: Option<&ProxySettings>) -> Result<reqwest::Client, String> {
+    static CLIENT: OnceLock<Result<reqwest::Client, String>> = OnceLock::new();
+    static PROXY_CACHE: Mutex<Option<(String, reqwest::Client)>> = Mutex::new(None);
+
+    match proxy {
+        None => CLIENT
+            .get_or_init(|| {
+                reqwest::Client::builder()
+                    .connect_timeout(std::time::Duration::from_secs(8))
+                    .timeout(std::time::Duration::from_secs(60))
+                    .build()
+                    .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))
+            })
+            .clone(),
+        Some(settings) => proxied_client(settings, &PROXY_CACHE, false),
+    }
+}
+
+/// 流式请求用的客户端
 ///
 /// 刻意不设整体 timeout：流式补全可能持续很久，设了会从中间被切断。
-pub fn stream_client() -> Result<&'static reqwest::Client, String> {
+pub fn stream_client(proxy: Option<&ProxySettings>) -> Result<reqwest::Client, String> {
     static CLIENT: OnceLock<Result<reqwest::Client, String>> = OnceLock::new();
-    CLIENT
-        .get_or_init(|| {
-            reqwest::Client::builder()
-                .connect_timeout(std::time::Duration::from_secs(8))
-                .build()
-                .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))
-        })
-        .as_ref()
-        .map_err(|e| e.clone())
+    static PROXY_CACHE: Mutex<Option<(String, reqwest::Client)>> = Mutex::new(None);
+
+    match proxy {
+        None => CLIENT
+            .get_or_init(|| {
+                reqwest::Client::builder()
+                    .connect_timeout(std::time::Duration::from_secs(8))
+                    .build()
+                    .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))
+            })
+            .clone(),
+        Some(settings) => proxied_client(settings, &PROXY_CACHE, true),
+    }
 }
 
 #[cfg(test)]
@@ -211,5 +302,74 @@ mod tests {
         assert_eq!(dropped.len(), 2);
         assert!(dropped.contains(&"Host".to_string()));
         assert!(dropped.contains(&"X-Forwarded-For".to_string()));
+    }
+
+    #[test]
+    fn proxy_rejects_invalid_url() {
+        let settings = ProxySettings {
+            proxy_type: "http".into(),
+            proxy_url: "not a url".into(),
+        };
+        assert!(build_proxy(&settings).is_err());
+        assert!(http_client(Some(&settings)).is_err());
+    }
+
+    #[test]
+    fn proxy_rejects_scheme_mismatch() {
+        // http 代理却给了 socks5 URL
+        let settings = ProxySettings {
+            proxy_type: "http".into(),
+            proxy_url: "socks5://127.0.0.1:1080".into(),
+        };
+        assert!(build_proxy(&settings).is_err());
+        // socks5 代理却给了 http URL
+        let settings = ProxySettings {
+            proxy_type: "socks5".into(),
+            proxy_url: "http://127.0.0.1:8080".into(),
+        };
+        assert!(build_proxy(&settings).is_err());
+        // 未知代理类型
+        let settings = ProxySettings {
+            proxy_type: "socks4".into(),
+            proxy_url: "socks4://127.0.0.1:1080".into(),
+        };
+        assert!(build_proxy(&settings).is_err());
+    }
+
+    #[test]
+    fn proxy_accepts_valid_configs() {
+        for (proxy_type, proxy_url) in [
+            ("http", "http://127.0.0.1:8080"),
+            ("http", "https://proxy.internal:8443"),
+            ("socks5", "socks5://127.0.0.1:1080"),
+        ] {
+            let settings = ProxySettings {
+                proxy_type: proxy_type.into(),
+                proxy_url: proxy_url.into(),
+            };
+            assert!(build_proxy(&settings).is_ok(), "should accept {proxy_url}");
+            assert!(http_client(Some(&settings)).is_ok());
+            assert!(stream_client(Some(&settings)).is_ok());
+        }
+        // 直连路径不受影响
+        assert!(http_client(None).is_ok());
+        assert!(stream_client(None).is_ok());
+    }
+
+    #[test]
+    fn proxy_client_is_cached_per_config() {
+        let a = ProxySettings {
+            proxy_type: "http".into(),
+            proxy_url: "http://127.0.0.1:8080".into(),
+        };
+        let b = ProxySettings {
+            proxy_type: "http".into(),
+            proxy_url: "http://127.0.0.1:9090".into(),
+        };
+        // 相同配置重复调用不报错（命中缓存），配置变化也能重建
+        assert!(http_client(Some(&a)).is_ok());
+        assert!(http_client(Some(&a)).is_ok());
+        assert!(http_client(Some(&b)).is_ok());
+        assert!(http_client(Some(&a)).is_ok());
     }
 }

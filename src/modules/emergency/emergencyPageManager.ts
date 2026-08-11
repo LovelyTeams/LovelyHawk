@@ -3,22 +3,59 @@ import { CommandHistoryManager } from '../utils/commandHistoryManager';
 import { SystemDetector, type SystemInfo } from '../utils/systemDetector';
 import { CommandAdapter } from './commandAdapter';
 import { aiService } from '../ai/aiService';
+import { renderAIMarkdown } from '../ai/aiOutput';
 import { initOutputContextMenu } from './outputContextMenu';
 import { busyboxManager } from '../core/busyboxManager';
 import { executeEmergencyCommand } from './commandExecution';
 import { formatOutput } from '../core/outputFormatter';
+import { openSftpAt } from '../remote/sftpWindowBridge';
+import { incidentCaseManager } from '../case/incidentCaseManager';
 import {
-  findCategory, findCommand, getCmdString,
+  activeTargetContext,
+  stableTargetKey,
+  type TargetIdentity,
+} from '../core/targetContext';
+import { showConfirm } from '../ui/confirmDialog';
+import { reportError } from '../utils/errorHandler';
+import {
+  deriveMeta, findCategory, findCommand, getCmdString,
   renderChecksColumn, renderFavoritesColumn, renderDetailShell, emptyDetail,
   renderFindingsPane, renderInfoPane, renderFindingPanel, parseFindings,
   type Finding,
 } from './emergencyView';
+
+export interface SavedEmergencyAccount {
+  username?: string;
+  description?: string;
+  is_default?: boolean;
+}
+
+export interface SavedEmergencyConnection {
+  host?: string;
+  port?: number;
+  username?: string;
+  host_key_fingerprint?: string | null;
+  accounts?: SavedEmergencyAccount[];
+}
+
+export function accountsForTarget(
+  connections: SavedEmergencyConnection[],
+  target: TargetIdentity,
+): SavedEmergencyAccount[] {
+  return connections.find(item => {
+    if (item.host !== target.host || item.port !== target.port) return false;
+    if (item.host_key_fingerprint && item.host_key_fingerprint !== target.hostKeyFingerprint) return false;
+    return item.username === target.username
+      || item.accounts?.some(account => account.username === target.username) === true;
+  })?.accounts || [];
+}
 
 class EmergencyPageManager {
   private categories: EmergencyCategory[] = emergencyCategories;
   private byId: Map<string, EmergencyCommand> = new Map();
   private initialized = false;
   private systemInfo: SystemInfo | null = null;
+  private targetKey: string | null = null;
   private eventsBound = false;
   private debounceTimer: number | null = null;
   private boundClickHandler: ((e: Event) => void) | null = null;
@@ -32,7 +69,6 @@ class EmergencyPageManager {
   private lastExitCode: number | null = null;
   private lastDurationMs = 0;
   private favorites = new Set<string>();
-  private investigation: string[] = [];
 
   constructor() {
     this.rebuildIndex();
@@ -115,17 +151,42 @@ class EmergencyPageManager {
     (window as any).emergencyPageManager = this;
     this.registerGlobals();
 
-    if (this.initialized) {
-      await this.loadAccountList();
-      if (this.systemInfo) this.displaySystemInfo();
+    const target = activeTargetContext.get();
+    if (!target) {
+      window.showNotification?.('没有已确认的活动 SSH 目标，请先连接服务器', 'warning');
       return;
     }
+    const nextTargetKey = stableTargetKey(target);
+    if (this.targetKey !== nextTargetKey) {
+      this.resetTargetState();
+      this.targetKey = nextTargetKey;
+      this.initialized = false;
+    }
 
-    // async 操作不阻塞事件绑定
-    await this.detectSystem();
-    await this.loadAccountList();
+    try {
+      if (this.initialized) {
+        await this.loadAccountList(target);
+        if (this.systemInfo) this.displaySystemInfo();
+        return;
+      }
 
-    this.initialized = true;
+      await this.detectSystem(target);
+      await this.loadAccountList(target);
+      if (activeTargetContext.matches(target)) this.initialized = true;
+    } catch (error) {
+      reportError(error, { module: 'EmergencyPage', action: '初始化应急命令页面' });
+    }
+  }
+
+  private resetTargetState(): void {
+    this.systemInfo = null;
+    this.selectedCmd = null;
+    this.lastOutput = '';
+    this.lastExitCode = null;
+    this.lastDurationMs = 0;
+    this.currentFindings = [];
+    this.currentStats = { total: 0, normal: 0, attention: 0, high: 0 };
+    this.isExecuting = false;
   }
 
   deactivate(): void {
@@ -163,28 +224,31 @@ class EmergencyPageManager {
 
   private locateFile(path: string): void {
     const dir = path.replace(/\/[^/]*$/, '') || '/';
-    const sftp = (window as any).sftpManager;
-    const app = (window as any).app;
-    if (sftp?.navigateToPath) {
-      try {
-        if (app?.switchPage) app.switchPage('remote-operations');
-        sftp.navigateToPath(dir);
-        window.showNotification?.(`已在文件管理器定位到 ${dir}`, 'success');
-        return;
-      } catch { /* fallthrough */ }
+    try {
+      void openSftpAt(dir);
+      window.showNotification?.(`已在文件管理器定位到 ${dir}`, 'success');
+    } catch {
+      navigator.clipboard?.writeText(path).catch(() => {});
+      window.showNotification?.(`已复制路径：${path}`, 'info');
     }
-    navigator.clipboard?.writeText(path).catch(() => {});
-    window.showNotification?.(`已复制路径：${path}`, 'info');
   }
 
-  private addToInvestigation(path: string): void {
+  private async addToInvestigation(path: string): Promise<void> {
     if (!path) return;
-    if (this.investigation.includes(path)) {
-      window.showNotification?.('该项已在调查清单中', 'info');
-      return;
+    try {
+      incidentCaseManager.addIOC('path', path, `emergency:${this.selectedCmd?.id || 'finding'}`);
+      const evidence = await incidentCaseManager.addEvidence({
+        kind: 'path',
+        label: `应急检查发现路径：${path}`,
+        locator: path,
+        source: `emergency:${this.selectedCmd?.id || 'finding'}`,
+        preview: this.currentFindings.find(item => item.path === path)?.raw || path,
+      });
+      const incident = incidentCaseManager.getActiveCase();
+      window.showNotification?.(`已加入案件 ${incident?.id || ''} · SHA-256 ${evidence.sha256.slice(0, 12)}…`, 'success');
+    } catch (error) {
+      window.showNotification?.(`加入案件失败：${error}`, 'error');
     }
-    this.investigation.push(path);
-    window.showNotification?.(`已加入调查清单（共 ${this.investigation.length} 项）：${path}`, 'success');
   }
 
   private showFavorites(): void {
@@ -256,11 +320,14 @@ class EmergencyPageManager {
 
   // ──── System Detection ────
 
-  private async detectSystem(): Promise<void> {
+  private async detectSystem(target: TargetIdentity): Promise<void> {
     try {
-      this.systemInfo = await SystemDetector.detectSystem();
+      const systemInfo = await SystemDetector.detectSystem();
+      if (!activeTargetContext.matches(target)) throw new Error('系统检测期间活动目标已变化');
+      this.systemInfo = systemInfo;
       this.displaySystemInfo();
-    } catch {
+    } catch (error) {
+      if (!activeTargetContext.matches(target)) throw error;
       this.systemInfo = {
         type: 'generic', name: 'Linux', version: '',
         prettyName: 'Generic Linux', packageManager: 'unknown', initSystem: 'unknown'
@@ -284,26 +351,28 @@ class EmergencyPageManager {
 
   // ──── Account List ────
 
-  private async loadAccountList(): Promise<void> {
+  private async loadAccountList(target: TargetIdentity): Promise<void> {
+    const select = document.getElementById('emergency-account-select') as HTMLSelectElement | null;
+    if (!select) return;
+    select.replaceChildren(new Option('默认账号', ''));
+
     try {
       const invoke = (window as any).__TAURI__?.core?.invoke;
       if (!invoke) return;
-      const connections = await invoke('load_ssh_connections') as any[];
+      const connections = await invoke('load_ssh_connections') as SavedEmergencyConnection[];
+      if (!activeTargetContext.matches(target)) throw new Error('加载账号期间活动目标已变化');
       if (!connections.length) return;
 
-      const accounts = connections[0].accounts || [];
-      const select = document.getElementById('emergency-account-select') as HTMLSelectElement;
-      if (!select) return;
-
-      select.innerHTML = '<option value="">默认账号</option>';
-      accounts.forEach((a: any) => {
+      const accounts = accountsForTarget(connections, target);
+      accounts.forEach(a => {
+        if (!a.username) return;
         const opt = document.createElement('option');
         opt.value = a.username;
         opt.textContent = `${a.username}${a.description ? ` (${a.description})` : ''}${a.is_default ? ' [默认]' : ''}`;
         select.appendChild(opt);
       });
-    } catch (e) {
-      console.error('加载账号列表失败:', e);
+    } catch (error) {
+      reportError(error, { module: 'EmergencyPage', action: '加载当前目标账号', silent: true });
     }
   }
 
@@ -564,21 +633,30 @@ class EmergencyPageManager {
     const command = codeEl?.textContent?.trim() || '';
     if (!command) return;
 
-    const app = (window as any).app;
-    const sshManager = app?.sshManager;
-    const sshConnectionManager = (window as any).sshConnectionManager;
-    const tauriInvoke = (window as any).__TAURI__?.core?.invoke;
-
-    const hasCoordinatorConn = sshManager?.isConnected?.() ?? false;
-    const hasDirectConn = sshConnectionManager?.isConnected?.() ?? false;
-
-    if (!hasCoordinatorConn && !hasDirectConn) {
-      window.showNotification?.('未连接到服务器', 'warning');
+    const capturedTarget = activeTargetContext.get();
+    if (!capturedTarget) {
+      window.showNotification?.('没有已确认的活动 SSH 目标，请先连接服务器', 'warning');
       return;
     }
 
     const accountSelect = document.getElementById('emergency-account-select') as HTMLSelectElement;
     const selectedUsername = accountSelect?.value || '';
+    if (!deriveMeta(command).readonly) {
+      const targetLabel = `${capturedTarget.username}@${capturedTarget.host}:${capturedTarget.port}`;
+      const confirmed = await showConfirm({
+        title: '确认执行可写命令',
+        description: `目标指纹：${capturedTarget.hostKeyFingerprint}`,
+        message: `精确目标：${targetLabel}${selectedUsername ? `\n运行账户：${selectedUsername}` : ''}\n\n命令：\n${command}`,
+        confirmText: '在此目标执行',
+        dangerous: true,
+        defaultFocus: 'cancel',
+      });
+      if (!confirmed) return;
+      if (!activeTargetContext.matches(capturedTarget)) {
+        window.showNotification?.('确认期间活动目标已变化，已阻止执行', 'error');
+        return;
+      }
+    }
 
     // UI：进入执行态
     this.isExecuting = true;
@@ -590,13 +668,6 @@ class EmergencyPageManager {
     const findingsPane = document.getElementById('em-pane-findings');
     if (findingsPane) findingsPane.innerHTML = '<div class="em-loading"><span class="em-loading-spinner"></span>正在执行检查…</div>';
 
-    const withTimeout = <T>(p: Promise<T>, ms = 30000): Promise<T> => {
-      return new Promise<T>((resolve, reject) => {
-        const t = setTimeout(() => reject(new Error('执行超时')), ms);
-        p.then(v => { clearTimeout(t); resolve(v); }, e => { clearTimeout(t); reject(e); });
-      });
-    };
-
     const started = Date.now();
     let rawOutput = '';
     let displayedCommand = command;
@@ -605,32 +676,16 @@ class EmergencyPageManager {
     let durationMs = 0;
 
     try {
-      if (hasDirectConn && tauriInvoke) {
-        try {
-          const result = await executeEmergencyCommand({
-            command,
-            username: selectedUsername || undefined,
-            timeoutSec: 120,
-          });
-          displayedCommand = result.command;
-          resultSuccess = result.success;
-          rawOutput = result.output;
-          exitCode = result.exit_code;
-          durationMs = result.duration_ms || (Date.now() - started);
-        } catch (e: any) {
-          if (hasCoordinatorConn && sshManager?.executeCommand) {
-            rawOutput = await withTimeout(sshManager.executeCommand(command), 20000);
-            durationMs = Date.now() - started;
-          } else {
-            throw e;
-          }
-        }
-      } else if (hasCoordinatorConn && sshManager?.executeCommand) {
-        rawOutput = await withTimeout(sshManager.executeCommand(command));
-        durationMs = Date.now() - started;
-      } else {
-        throw new Error('当前连接状态不支持执行命令');
-      }
+      const result = await executeEmergencyCommand({
+        command,
+        username: selectedUsername || undefined,
+        timeoutSec: 120,
+      });
+      displayedCommand = result.command;
+      resultSuccess = result.success;
+      rawOutput = result.output;
+      exitCode = result.exit_code;
+      durationMs = result.duration_ms || (Date.now() - started);
     } catch (err) {
       rawOutput = `命令执行失败: ${err}`;
       resultSuccess = false;
@@ -639,7 +694,15 @@ class EmergencyPageManager {
     }
 
     // 历史记录
-    CommandHistoryManager.saveCommand(displayedCommand, `${this.selectedCmd.name} · ${this.selectedCmd.id}`, rawOutput ?? '');
+    if (activeTargetContext.matches(capturedTarget)) {
+      await CommandHistoryManager.saveCommand(
+        displayedCommand,
+        `${this.selectedCmd.name} · ${this.selectedCmd.id}`,
+        rawOutput ?? '',
+        exitCode,
+        'emergency-page',
+      );
+    }
 
     // 解析 + 渲染各区块
     this.lastOutput = rawOutput;
@@ -741,21 +804,17 @@ class EmergencyPageManager {
 ${question}`;
 
       body.textContent = '';
-      let fullText = '';
       await aiService.generateConciseSolutionStream(
         this.selectedCmd.name,
         prompt,
         'info',
         undefined,
-        (chunk: string) => { fullText = chunk; body.textContent = chunk; },
+        (chunk: string) => { body.textContent += chunk; },
         (final: string) => {
-          // 记录到 AI 历史
-          import('../ai/aiHistoryManager').then(({ aiHistoryManager }) => {
-            aiHistoryManager.addRecord({ question: `[${this.selectedCmd?.name}] ${command}`, answer: final, source: 'emergency' });
-          }).catch(() => {});
+          // 完成后一次性渲染 markdown（流式期间保持 textContent 纯文本增量）
+          renderAIMarkdown(body, final || '分析完成');
         }
       );
-      if (!body.textContent) body.textContent = fullText || '分析完成';
     } catch (e) {
       body.textContent = `AI 分析失败: ${e}`;
     }

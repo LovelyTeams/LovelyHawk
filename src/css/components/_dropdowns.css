@@ -17,51 +17,8 @@
   backdrop-filter: blur(12px);
 }
 
-/* Settings Dropdown */
-.sidebar-settings-container { position: relative; width: 100%; }
-
-.settings-dropdown-menu {
-  display: none;
-  position: absolute;
-  bottom: 0;
-  left: calc(100% + 12px);
-  width: 280px;
-  min-width: 280px;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-  z-index: 1000;
-  padding: 12px;
-  animation: slideInLeft 0.2s ease-out;
-  backdrop-filter: blur(12px);
-  flex-direction: column;
-  gap: 12px;
-}
-.settings-dropdown-menu.show { display: flex; }
-
-.settings-group { display: flex; flex-direction: column; gap: 8px; }
-.settings-group-title { font-size: 11px; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; padding-left: 4px; white-space: nowrap; }
-
-.settings-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s;
-  color: var(--text-primary);
-  background: transparent;
-  border: none;
-  width: 100%;
-  text-align: left;
-  white-space: nowrap;
-  font-size: 14px;
-}
-.settings-item:hover { background: var(--bg-hover); }
-.settings-item-icon { display: flex; align-items: center; justify-content: center; color: var(--text-secondary); flex-shrink: 0; }
-.settings-item:hover .settings-item-icon { color: var(--primary-color); }
+/* Settings Dropdown 的唯一定义在 layout/_sidebar.css（弹出方向/尺寸以侧栏为准），
+   这里不再重复声明，避免两处互相覆盖。 */
 
 /* Dropdown Items (shared) */
 .dropdown-section-title {
@@ -88,12 +45,12 @@
   margin-bottom: 2px;
 }
 .dropdown-item:hover { background: var(--bg-hover); }
-.dropdown-item.active { background: rgba(34, 197, 94, 0.08); }
-.dropdown-item.active:hover { background: rgba(34, 197, 94, 0.12); }
+.dropdown-item.active { background: var(--sev-success-bg); }
+.dropdown-item.active:hover { background: var(--sev-success-bg-hover); }
 .dropdown-item.primary { margin-bottom: 4px; }
-.dropdown-item.primary:hover { background: rgba(59, 130, 246, 0.08); }
+.dropdown-item.primary:hover { background: color-mix(in srgb, var(--primary-color) 10%, transparent); }
 .dropdown-item.danger { margin-bottom: 4px; }
-.dropdown-item.danger:hover { background: rgba(239, 68, 68, 0.08); }
+.dropdown-item.danger:hover { background: var(--sev-critical-bg); }
 
 .dropdown-item-icon {
   width: 32px; height: 32px;
@@ -108,11 +65,11 @@
   position: relative;
 }
 .dropdown-item:hover .dropdown-item-icon { background: var(--bg-primary); color: var(--text-primary); box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
-.dropdown-item-icon.success { background: rgba(34, 197, 94, 0.1); color: var(--success-color); }
+.dropdown-item-icon.success { background: var(--sev-success-bg); color: var(--success-color); }
 .dropdown-item.active:hover .dropdown-item-icon.success { background: var(--success-color); color: white; }
-.dropdown-item-icon.primary { background: rgba(59, 130, 246, 0.1); color: var(--primary-color); }
+.dropdown-item-icon.primary { background: color-mix(in srgb, var(--primary-color) 12%, transparent); color: var(--primary-color); }
 .dropdown-item.primary:hover .dropdown-item-icon.primary { background: var(--primary-color); color: white; }
-.dropdown-item-icon.danger { background: rgba(239, 68, 68, 0.1); color: var(--error-color); }
+.dropdown-item-icon.danger { background: var(--sev-critical-bg); color: var(--error-color); }
 .dropdown-item.danger:hover .dropdown-item-icon.danger { background: var(--error-color); color: white; }
 
 .dropdown-item-content { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }

@@ -6,12 +6,12 @@
 import { createIconHTML } from './iconMapping';
 
 export class ThemeManager {
-  private currentTheme: 'light' | 'dark' | 'sakura' | 'midnight' | 'ocean' = 'light';
+  private currentTheme: 'light' | 'dark' | 'sakura' = 'light';
 
   /**
    * 切换主题
    */
-  private static readonly THEME_CYCLE = ['light', 'dark', 'sakura', 'midnight', 'ocean'] as const;
+  private static readonly THEME_CYCLE = ['light', 'dark', 'sakura'] as const;
 
   toggleTheme(): string {
     const body = document.body;
@@ -39,7 +39,7 @@ export class ThemeManager {
     html.setAttribute('data-theme', theme);
 
     // 更新body类名
-    body.classList.remove('light-theme', 'dark-theme', 'sakura-theme', 'midnight-theme', 'ocean-theme');
+    body.classList.remove('light-theme', 'dark-theme', 'sakura-theme');
     body.classList.add(`${theme}-theme`);
 
     // 动态加载主题CSS文件
@@ -48,7 +48,7 @@ export class ThemeManager {
     // 保存到localStorage
     localStorage.setItem('lovelyres-theme', theme);
 
-    this.currentTheme = theme as 'light' | 'dark' | 'sakura' | 'midnight' | 'ocean';
+    this.currentTheme = theme as 'light' | 'dark' | 'sakura';
 
     // 移除过渡动画类 (在动画完成后)
     setTimeout(() => {
@@ -81,8 +81,11 @@ export class ThemeManager {
     // 从localStorage加载保存的主题
     const savedTheme = localStorage.getItem('lovelyres-theme');
 
-    if (savedTheme && ['light', 'dark', 'sakura', 'midnight', 'ocean'].includes(savedTheme)) {
+    if (savedTheme && ['light', 'dark', 'sakura'].includes(savedTheme)) {
       this.setTheme(savedTheme);
+    } else if (savedTheme) {
+      // 历史已移除主题（midnight/ocean 等）回落为深色
+      this.setTheme('dark');
     } else {
       // 检查系统偏好
       const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -108,7 +111,7 @@ export class ThemeManager {
    */
   getThemeConfig(theme?: string) {
     const targetTheme = theme || this.currentTheme;
-    
+
     const configs = {
       light: {
         name: '浅色',
@@ -128,18 +131,18 @@ export class ThemeManager {
         icon: '🌙',
         description: '护眼舒适的深色主题',
         colors: {
-          primary: '#4299e1',
-          secondary: '#63b3ed',
-          accent: '#81e6d9',
-          background: '#0f172a',
-          surface: '#1e293b',
+          primary: '#3aa0ff',
+          secondary: '#38bdf8',
+          accent: '#6db3ff',
+          background: '#0a0e1a',
+          surface: '#10182b',
           text: '#f1f5f9'
         }
       },
       sakura: {
-        name: '樱花粉',
+        name: '粉色',
         icon: '🌸',
-        description: '温柔浪漫的樱花主题',
+        description: '温柔浪漫的粉色主题',
         colors: {
           primary: '#ff9bb3',
           secondary: '#ffb3c1',
@@ -147,32 +150,6 @@ export class ThemeManager {
           background: '#fef9f9',
           surface: '#fffefe',
           text: '#744c4c'
-        }
-      },
-      midnight: {
-        name: '暗夜',
-        icon: '🔮',
-        description: '高对比霓虹暗黑主题',
-        colors: {
-          primary: '#7c3aed',
-          secondary: '#a855f7',
-          accent: '#c084fc',
-          background: '#000000',
-          surface: '#0a0a0f',
-          text: '#fafafa'
-        }
-      },
-      ocean: {
-        name: '深海',
-        icon: '🌊',
-        description: '沉浸专注的蓝绿主题',
-        colors: {
-          primary: '#06b6d4',
-          secondary: '#22d3ee',
-          accent: '#67e8f9',
-          background: '#0b1120',
-          surface: '#111c32',
-          text: '#e2e8f0'
         }
       }
     };
@@ -187,9 +164,7 @@ export class ThemeManager {
     return [
       this.getThemeConfig('light'),
       this.getThemeConfig('dark'),
-      this.getThemeConfig('sakura'),
-      this.getThemeConfig('midnight'),
-      this.getThemeConfig('ocean')
+      this.getThemeConfig('sakura')
     ];
   }
 
@@ -198,7 +173,7 @@ export class ThemeManager {
    */
   applyCustomTheme(customColors: Record<string, string>): void {
     const root = document.documentElement;
-    
+
     Object.entries(customColors).forEach(([property, value]) => {
       if (property.startsWith('--')) {
         root.style.setProperty(property, value);
@@ -213,11 +188,11 @@ export class ThemeManager {
    */
   resetTheme(): void {
     const root = document.documentElement;
-    
+
     // 移除所有自定义CSS变量
     const computedStyle = getComputedStyle(root);
     const customProperties = Array.from(computedStyle).filter(prop => prop.startsWith('--'));
-    
+
     customProperties.forEach(prop => {
       root.style.removeProperty(prop);
     });
@@ -254,7 +229,7 @@ export class ThemeManager {
   importThemeConfig(configJson: string): boolean {
     try {
       const config = JSON.parse(configJson);
-      
+
       if (config.theme) {
         this.setTheme(config.theme);
       }
@@ -285,7 +260,7 @@ export class ThemeManager {
   }
 
   /**
-   * 检查是否为樱花主题
+   * 检查是否为粉色主题
    */
   isSakuraTheme(): boolean {
     return this.currentTheme === 'sakura';
@@ -300,10 +275,10 @@ export class ThemeManager {
     const r = parseInt(hex.substr(0, 2), 16);
     const g = parseInt(hex.substr(2, 2), 16);
     const b = parseInt(hex.substr(4, 2), 16);
-    
+
     // 计算亮度
     const brightness = (r * 299 + g * 587 + b * 114) / 1000;
-    
+
     return brightness > 128 ? '#000000' : '#ffffff';
   }
 
@@ -312,7 +287,7 @@ export class ThemeManager {
    */
   generateThemePreview(theme: string): string {
     const config = this.getThemeConfig(theme);
-    
+
     return `
       <div style="
         background: ${config.colors.background};

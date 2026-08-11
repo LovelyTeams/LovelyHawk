@@ -4,6 +4,13 @@
  */
 
 import { sshConnectionManager } from '../remote/sshConnectionManager';
+import { activeTargetContext } from '../core/targetContext';
+import {
+  connectSSHAdvancedWithHostKeyConfirmation,
+  type SSHAuthenticationArgs,
+  type SSHAuthType,
+  type SSHJumpHostArgs,
+} from '../ssh/hostKeyConfirmation';
 import { showConfirm, showPrompt } from './confirmDialog';
 import { busyboxManager } from '../core/busyboxManager';
 
@@ -93,15 +100,61 @@ function hideAddServerForm(): void {
 // ──── 认证方式切换 ────
 
 function scSetAuthType(type: string): void {
+  setAuthBlocks('sc', type as SSHAuthType);
   const hidden = document.getElementById('sc-auth-type') as HTMLInputElement;
   if (hidden) hidden.value = type;
-  document.querySelectorAll('.sc-auth-option').forEach(btn => {
-    btn.classList.toggle('active', btn.textContent?.includes(type === 'password' ? '密码' : '密钥') || false);
-  });
-  const pwBlock = document.getElementById('sc-auth-password');
-  const keyBlock = document.getElementById('sc-auth-key');
-  if (pwBlock) pwBlock.style.display = type === 'password' ? '' : 'none';
-  if (keyBlock) keyBlock.style.display = type === 'key' ? '' : 'none';
+  const select = document.getElementById('sc-auth-select') as HTMLSelectElement;
+  if (select) select.value = type;
+}
+
+function setAuthBlocks(prefix: string, type: SSHAuthType): void {
+  const show = (suffix: string, visible: boolean) => {
+    const element = document.getElementById(`${prefix}-${suffix}`) as HTMLElement | null;
+    if (element) element.style.display = visible ? '' : 'none';
+  };
+  show('auth-password', type === 'password');
+  show('auth-key', type === 'key' || type === 'certificate');
+  show('cert-row', type === 'certificate');
+  show('auth-keyboard', type === 'keyboard-interactive');
+  show('auth-agent', type === 'agent');
+}
+
+function scSetJumpAuthType(type: string): void {
+  const authType = type as SSHAuthType;
+  setAuthBlocks('sc-jump', authType);
+  setAuthBlocks('scw-jump', authType);
+}
+
+function value(id: string): string {
+  return (document.getElementById(id) as HTMLInputElement | HTMLSelectElement)?.value?.trim() || '';
+}
+
+function readAuthentication(prefix: string, authType: SSHAuthType): SSHAuthenticationArgs {
+  return {
+    authType,
+    password: authType === 'password' ? value(`${prefix}-password`) : undefined,
+    keyPath: authType === 'key' || authType === 'certificate' ? value(`${prefix}-keypath`) : undefined,
+    keyPassphrase: authType === 'key' || authType === 'certificate'
+      ? value(`${prefix}-keypass`)
+      : undefined,
+    certificatePath: authType === 'certificate' ? value(`${prefix}-certpath`) : undefined,
+    agentIdentityFingerprint: authType === 'agent'
+      ? value(`${prefix}-agent-fingerprint`)
+      : undefined,
+  };
+}
+
+function readJumpHost(prefix: 'sc' | 'scw'): SSHJumpHostArgs | null {
+  const enabled = (document.getElementById(`${prefix}-jump-enabled`) as HTMLInputElement)?.checked;
+  if (!enabled) return null;
+  const authType = (value(`${prefix}-jump-auth-type`) || 'password') as SSHAuthType;
+  const port = Number.parseInt(value(`${prefix}-jump-port`) || '22', 10);
+  return {
+    host: value(`${prefix}-jump-host`),
+    port,
+    username: value(`${prefix}-jump-username`) || 'root',
+    authentication: readAuthentication(`${prefix}-jump`, authType),
+  };
 }
 
 // ──── 连接 ────
@@ -137,8 +190,56 @@ async function connectServer(serverId: string): Promise<void> {
       }
     }
 
+    let jumpHost: SSHJumpHostArgs | null = null;
+    if (connection.jumpHost) {
+      let jumpPassword: string | undefined;
+      if (connection.jumpHost.authType === 'password' && connection.jumpHost.encryptedPassword) {
+        jumpPassword = await (window as any).__TAURI__.core.invoke('decrypt_password', {
+          encryptedPassword: connection.jumpHost.encryptedPassword,
+        });
+      }
+      jumpHost = {
+        host: connection.jumpHost.host,
+        port: connection.jumpHost.port,
+        username: connection.jumpHost.username,
+        expectedHostKeyFingerprint: connection.jumpHost.hostKeyFingerprint,
+        authentication: {
+          authType: connection.jumpHost.authType,
+          password: jumpPassword,
+          keyPath: connection.jumpHost.keyPath,
+          keyPassphrase: connection.jumpHost.keyPassphrase,
+          certificatePath: connection.jumpHost.certificatePath,
+          agentIdentityFingerprint: connection.jumpHost.agentIdentityFingerprint,
+        },
+      };
+    }
+
     stateManager?.setLoadingStep?.(`正在连接 ${connection.host}:${connection.port}...`);
-    await sshConnectionManager.connect(connection.host, connection.port, connection.username, password, authType, connection.keyPath, connection.keyPassphrase);
+    await sshConnectionManager.connect(
+      connection.host,
+      connection.port,
+      connection.username,
+      password,
+      authType,
+      connection.keyPath,
+      connection.keyPassphrase,
+      {
+        certificatePath: connection.certificatePath,
+        agentIdentityFingerprint: connection.agentIdentityFingerprint,
+        jumpHost,
+      },
+    );
+    const trustedTarget = activeTargetContext.get();
+    if (trustedTarget && trustedTarget.host === connection.host && trustedTarget.port === connection.port) {
+      await sshManager.updateConnection(serverId, {
+        hostKeyFingerprint: trustedTarget.hostKeyFingerprint,
+        jumpHost: connection.jumpHost && jumpHost ? {
+          ...connection.jumpHost,
+          hostKeyFingerprint: jumpHost.expectedHostKeyFingerprint
+            || connection.jumpHost.hostKeyFingerprint,
+        } : connection.jumpHost,
+      });
+    }
     recordLastConnected(serverId);
 
     stateManager?.setLoadingStep?.('连接成功，正在初始化...');
@@ -226,18 +327,55 @@ async function saveServer(): Promise<void> {
   const password = (document.getElementById('sc-password') as HTMLInputElement)?.value || '';
   const keyPath = (document.getElementById('sc-keypath') as HTMLInputElement)?.value || '';
   const keyPassphrase = (document.getElementById('sc-keypass') as HTMLInputElement)?.value || '';
+  const certificatePath = value('sc-certpath');
+  const agentIdentityFingerprint = value('sc-agent-fingerprint');
+  const jump = readJumpHost('sc');
+  const notes = (document.getElementById('sc-notes') as HTMLInputElement)?.value?.trim().slice(0, 500) || '';
+  const environment = (document.getElementById('sc-environment') as HTMLSelectElement)?.value?.trim().slice(0, 32) || '';
+  const role = (document.getElementById('sc-role') as HTMLInputElement)?.value?.trim().slice(0, 64) || '';
+  const group = (document.getElementById('sc-group') as HTMLInputElement)?.value?.trim().slice(0, 64) || '';
+  const tags = [...new Set(((document.getElementById('sc-tags') as HTMLInputElement)?.value || '')
+    .split(/[,，]/).map(tag => tag.trim()).filter(Boolean).map(tag => tag.slice(0, 32)))].slice(0, 20);
   const editingId = (document.getElementById('sc-editing-id') as HTMLInputElement)?.value || '';
+  const existing = editingId ? getApp()?.sshManager?.getConnection(editingId) : null;
 
   if (!host) { window.showNotification?.('请输入主机地址', 'warning'); return; }
   if (!username) { window.showNotification?.('请输入用户名', 'warning'); return; }
-  if (authType === 'password' && !password && !editingId) { window.showNotification?.('请输入密码', 'warning'); return; }
+  if (authType === 'password' && !password
+    && (!existing || existing.authType !== 'password' || !existing.encryptedPassword)) {
+    window.showNotification?.('请输入密码', 'warning'); return;
+  }
+  if ((authType === 'key' || authType === 'certificate') && !keyPath) { window.showNotification?.('请选择私钥文件', 'warning'); return; }
+  if (authType === 'certificate' && !certificatePath) { window.showNotification?.('请选择 OpenSSH 用户证书', 'warning'); return; }
+  if (jump && (!jump.host || !jump.username || !Number.isInteger(jump.port) || jump.port < 1 || jump.port > 65535)) { window.showNotification?.('堡垒机配置不完整', 'warning'); return; }
+  if (jump?.authentication.authType === 'password'
+    && !jump.authentication.password
+    && (!existing?.jumpHost
+      || existing.jumpHost.authType !== 'password'
+      || !existing.jumpHost.encryptedPassword)) {
+    window.showNotification?.('请输入堡垒机密码', 'warning'); return;
+  }
 
   const serverData: any = {
     name: name || `${username}@${host}`,
     host, port, username, authType,
     password: authType === 'password' ? password : undefined,
-    keyPath: authType === 'key' ? keyPath : undefined,
-    keyPassphrase: authType === 'key' ? keyPassphrase : undefined,
+    keyPath: authType === 'key' || authType === 'certificate' ? keyPath : undefined,
+    keyPassphrase: authType === 'key' || authType === 'certificate' ? keyPassphrase : undefined,
+    certificatePath: authType === 'certificate' ? certificatePath : undefined,
+    agentIdentityFingerprint: authType === 'agent' ? agentIdentityFingerprint : undefined,
+    jumpHost: jump ? {
+      host: jump.host,
+      port: jump.port,
+      username: jump.username,
+      authType: jump.authentication.authType,
+      password: jump.authentication.password,
+      keyPath: jump.authentication.keyPath,
+      keyPassphrase: jump.authentication.keyPassphrase,
+      certificatePath: jump.authentication.certificatePath,
+      agentIdentityFingerprint: jump.authentication.agentIdentityFingerprint,
+    } : null,
+    notes, environment, role, group, tags,
   };
 
   try {
@@ -347,15 +485,11 @@ function recordLastConnected(key: string): void {
 }
 
 function scwSetAuthType(type: string): void {
+  setAuthBlocks('scw', type as SSHAuthType);
   const hidden = document.getElementById('scw-auth-type') as HTMLInputElement;
   if (hidden) hidden.value = type;
-  document.querySelectorAll('.sc-seg-opt').forEach(btn => {
-    btn.classList.toggle('active', btn.getAttribute('data-auth') === type);
-  });
-  const pw = document.getElementById('scw-auth-password');
-  const key = document.getElementById('scw-auth-key');
-  if (pw) (pw as HTMLElement).style.display = type === 'password' ? '' : 'none';
-  if (key) (key as HTMLElement).style.display = type === 'key' ? '' : 'none';
+  const select = document.getElementById('scw-auth-select') as HTMLSelectElement;
+  if (select) select.value = type;
 }
 
 function scwTogglePassword(btn: HTMLElement): void {
@@ -381,6 +515,20 @@ function scSelectServer(id: string): void {
   set('scw-port', String(conn.port || 22));
   set('scw-selected-id', id);
   if (conn.keyPath) set('scw-keypath', conn.keyPath);
+  if (conn.certificatePath) set('scw-certpath', conn.certificatePath);
+  if (conn.agentIdentityFingerprint) set('scw-agent-fingerprint', conn.agentIdentityFingerprint);
+  const jumpEnabled = document.getElementById('scw-jump-enabled') as HTMLInputElement;
+  if (jumpEnabled) jumpEnabled.checked = !!conn.jumpHost;
+  if (conn.jumpHost) {
+    set('scw-jump-host', conn.jumpHost.host || '');
+    set('scw-jump-port', String(conn.jumpHost.port || 22));
+    set('scw-jump-username', conn.jumpHost.username || 'root');
+    set('scw-jump-auth-type', conn.jumpHost.authType || 'password');
+    set('scw-jump-keypath', conn.jumpHost.keyPath || '');
+    set('scw-jump-certpath', conn.jumpHost.certificatePath || '');
+    set('scw-jump-agent-fingerprint', conn.jumpHost.agentIdentityFingerprint || '');
+    scSetJumpAuthType(conn.jumpHost.authType || 'password');
+  }
   scwSetAuthType(conn.authType || 'password');
   document.querySelectorAll('.sc-hist-item').forEach(el => {
     el.classList.toggle('active', el.getAttribute('data-server-id') === id);
@@ -396,15 +544,20 @@ async function scConnectForm(): Promise<void> {
   const password = (document.getElementById('scw-password') as HTMLInputElement)?.value || '';
   const keyPath = scwVal('scw-keypath');
   const keyPassphrase = (document.getElementById('scw-keypass') as HTMLInputElement)?.value || '';
+  const certificatePath = scwVal('scw-certpath');
+  const agentIdentityFingerprint = scwVal('scw-agent-fingerprint');
+  const jumpHost = readJumpHost('scw');
   const remember = (document.getElementById('scw-remember') as HTMLInputElement)?.checked ?? false;
   const selectedId = scwVal('scw-selected-id');
 
   if (!host) { window.showNotification?.('请输入服务器地址', 'warning'); return; }
-  if (authType === 'key' && !keyPath && !selectedId) { window.showNotification?.('请选择私钥文件', 'warning'); return; }
+  if ((authType === 'key' || authType === 'certificate') && !keyPath && !selectedId) { window.showNotification?.('请选择私钥文件', 'warning'); return; }
+  if (authType === 'certificate' && !certificatePath && !selectedId) { window.showNotification?.('请选择 OpenSSH 用户证书', 'warning'); return; }
   if (authType === 'password' && !password && !selectedId) { window.showNotification?.('请输入密码', 'warning'); return; }
+  if (jumpHost && (!jumpHost.host || !jumpHost.username || !Number.isInteger(jumpHost.port) || jumpHost.port < 1 || jumpHost.port > 65535)) { window.showNotification?.('堡垒机配置不完整', 'warning'); return; }
 
   // 选中了已保存的服务器且未输入新密码 → 走保存记录（可解密已存密码）
-  if (selectedId && !password && authType === 'password') {
+  if (selectedId && !password && !value('scw-jump-password')) {
     return connectServer(selectedId);
   }
 
@@ -413,7 +566,16 @@ async function scConnectForm(): Promise<void> {
   (window as any).refreshDashboard?.();
 
   try {
-    await sshConnectionManager.connect(host, port, username, password, authType, keyPath, keyPassphrase);
+    await sshConnectionManager.connect(
+      host,
+      port,
+      username,
+      password,
+      authType,
+      keyPath,
+      keyPassphrase,
+      { certificatePath, agentIdentityFingerprint, jumpHost },
+    );
 
     // 记住此连接 → 保存（仅新连接）
     if (remember && !selectedId) {
@@ -421,8 +583,22 @@ async function scConnectForm(): Promise<void> {
         await getApp()?.sshManager?.addConnection({
           name: `${username}@${host}`, host, port, username, authType,
           password: authType === 'password' ? password : undefined,
-          keyPath: authType === 'key' ? keyPath : undefined,
-          keyPassphrase: authType === 'key' ? keyPassphrase : undefined,
+          keyPath: authType === 'key' || authType === 'certificate' ? keyPath : undefined,
+          keyPassphrase: authType === 'key' || authType === 'certificate' ? keyPassphrase : undefined,
+          certificatePath: authType === 'certificate' ? certificatePath : undefined,
+          agentIdentityFingerprint: authType === 'agent' ? agentIdentityFingerprint : undefined,
+          jumpHost: jumpHost ? {
+            host: jumpHost.host,
+            port: jumpHost.port,
+            username: jumpHost.username,
+            authType: jumpHost.authentication.authType,
+            password: jumpHost.authentication.password,
+            keyPath: jumpHost.authentication.keyPath,
+            keyPassphrase: jumpHost.authentication.keyPassphrase,
+            certificatePath: jumpHost.authentication.certificatePath,
+            agentIdentityFingerprint: jumpHost.authentication.agentIdentityFingerprint,
+            hostKeyFingerprint: jumpHost.expectedHostKeyFingerprint,
+          } : undefined,
         });
       } catch { /* 保存失败不阻断连接 */ }
     }
@@ -502,7 +678,9 @@ function scExportConfig(): void {
   if (!sshManager) return;
   const conns = sshManager.getConnections().map((c: any) => ({
     name: c.name, host: c.host, port: c.port, username: c.username,
-    authType: c.authType, accounts: c.accounts,
+    authType: c.authType, accounts: c.accounts, notes: c.notes,
+    environment: c.environment, role: c.role, group: c.group, tags: c.tags,
+    hostKeyFingerprint: c.hostKeyFingerprint,
     // 不导出密码
   }));
   const json = JSON.stringify(conns, null, 2);
@@ -539,6 +717,10 @@ async function testConnection(): Promise<void> {
   const authType = (document.getElementById('sc-auth-type') as HTMLInputElement)?.value || 'password';
   const password = (document.getElementById('sc-password') as HTMLInputElement)?.value || '';
   const keyPath = (document.getElementById('sc-keypath') as HTMLInputElement)?.value || '';
+  const keyPassphrase = value('sc-keypass');
+  const certificatePath = value('sc-certpath');
+  const agentIdentityFingerprint = value('sc-agent-fingerprint');
+  const jumpHost = readJumpHost('sc');
 
   if (!host) { window.showNotification?.('请输入主机地址', 'warning'); return; }
 
@@ -546,10 +728,20 @@ async function testConnection(): Promise<void> {
   if (testBtn) { testBtn.disabled = true; testBtn.textContent = '测试中...'; }
 
   try {
-    await (window as any).__TAURI__.core.invoke('ssh_test_connection', {
-      host, port, username, password: authType === 'password' ? password : '',
-      authType, keyPath: authType === 'key' ? keyPath : '',
-    });
+    await connectSSHAdvancedWithHostKeyConfirmation<boolean>({
+      host,
+      port,
+      username,
+      authentication: {
+        authType: authType as SSHAuthType,
+        password: authType === 'password' ? password : undefined,
+        keyPath: authType === 'key' || authType === 'certificate' ? keyPath : undefined,
+        keyPassphrase,
+        certificatePath,
+        agentIdentityFingerprint,
+      },
+      jumpHost,
+    }, undefined, undefined, undefined, 'ssh_test_connection_advanced');
     window.showNotification?.('连接测试成功', 'success');
   } catch (e) {
     window.showNotification?.(`连接测试失败: ${e}`, 'error');
@@ -565,6 +757,7 @@ async function selectPrivateKeyFile(targetId: string = 'sc-keypath'): Promise<vo
     const { open } = await import('@tauri-apps/plugin-dialog');
     const selected = await open({ title: '选择 SSH 私钥文件', multiple: false });
     if (typeof selected === 'string') {
+      if (targetId.startsWith('scw-')) scClearSelection();
       const input = document.getElementById(targetId) as HTMLInputElement;
       if (input) input.value = selected;
     }
@@ -584,7 +777,45 @@ function refreshServerList(): void {
 
 // ──── 注册到 window ────
 
+let delegatedServerFormEventsBound = false;
+
+function bindDelegatedServerFormEvents(): void {
+  if (delegatedServerFormEventsBound) return;
+  delegatedServerFormEventsBound = true;
+
+  document.addEventListener('change', (event) => {
+    const element = (event.target as Element | null)?.closest<HTMLSelectElement>('[data-sc-action]');
+    if (!element) return;
+    if (element.dataset.scAction === 'auth-type') {
+      if (element.dataset.scPrefix === 'scw') {
+        scClearSelection();
+        scwSetAuthType(element.value);
+      } else scSetAuthType(element.value);
+    } else if (element.dataset.scAction === 'jump-auth-type') {
+      if (element.id.startsWith('scw-')) scClearSelection();
+      scSetJumpAuthType(element.value);
+    }
+  });
+
+  document.addEventListener('click', (event) => {
+    const element = (event.target as Element | null)?.closest<HTMLElement>('[data-sc-action="select-key"]');
+    if (!element) return;
+    event.preventDefault();
+    const targetId = element.dataset.targetId || 'sc-keypath';
+    if (targetId.startsWith('scw-')) scClearSelection();
+    void selectPrivateKeyFile(targetId);
+  });
+
+  document.addEventListener('input', (event) => {
+    const element = event.target as HTMLInputElement | HTMLSelectElement | null;
+    if (!element?.id.startsWith('scw-')) return;
+    if (element.id === 'scw-selected-id' || element.id === 'scw-remember') return;
+    scClearSelection();
+  });
+}
+
 export function initServerModalManager(): void {
+  bindDelegatedServerFormEvents();
   (window as any).showServerModal = showServerModal;
   (window as any).hideServerModal = hideServerModal;
   (window as any).showAddServerForm = showAddServerForm;
@@ -610,6 +841,8 @@ export function initServerModalManager(): void {
   (window as any).scSelectServer = scSelectServer;
   (window as any).scClearSelection = scClearSelection;
   (window as any).scwSetAuthType = scwSetAuthType;
+  (window as any).scSetJumpAuthType = scSetJumpAuthType;
+  (window as any).scwSetJumpAuthType = scSetJumpAuthType;
   (window as any).scwTogglePassword = scwTogglePassword;
   (window as any).scManageServers = scManageServers;
   (window as any).scCloseManage = scCloseManage;

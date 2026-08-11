@@ -15,8 +15,8 @@
  * 离线约束：所有 IP / 端口拼入命令前经 shq 转义并做格式校验；破坏性规则需先在 VM 实测。
  */
 
-import { invoke } from '@tauri-apps/api/core';
 import { operationJournal } from '../core/operationJournal';
+import { executeEmergencyCommand } from '../emergency/commandExecution';
 import { sshConnectionManager } from '../remote/sshConnectionManager';
 import { showConfirm } from '../ui/confirmDialog';
 import { shq, isValidIpOrCidr, isValidPort } from '../core/shellEscape';
@@ -49,10 +49,9 @@ class FirewallManager {
   }
 
   private async exec(cmd: string, timeoutSec = 60): Promise<string> {
-    const r = await invoke('ssh_execute_emergency_command_direct', {
-      command: cmd, username: null, timeoutSec, cwd: null,
-    }) as any;
-    return r?.output || '';
+    const result = await executeEmergencyCommand({ command: cmd, timeoutSec });
+    if (!result.success) throw new Error(`${result.message}${result.output ? `: ${result.output}` : ''}`);
+    return result.output;
   }
 
   // ──────── 探测 & 加载规则 ────────

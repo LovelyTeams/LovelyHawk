@@ -154,7 +154,7 @@ export function renderDetailShell(catTitle: string, cmd: EmergencyCommand, cmdSt
           <span class="em-exec-status" id="em-exec-status"></span>
           <div class="em-meta-badges">
             <span class="em-mb ${meta.readonly ? 'ro' : 'rw'}">${meta.readonly ? '只读' : '可写'}</span>
-            <span class="em-mb risk-low">低风险</span>
+            <span class="em-mb ${meta.readonly ? 'risk-low' : 'risk-high'}">${meta.readonly ? '低风险' : '高风险'}</span>
             <span class="em-mb time">${meta.est}</span>
           </div>
         </div>

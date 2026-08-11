@@ -3,7 +3,7 @@
  * 提供 CPU/内存/磁盘/网络的定时轮询与数据缓存
  */
 
-import { invoke } from '@tauri-apps/api/core';
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH';
 import { eventBus } from '../core/eventBus';
 
 // ========== 数据类型 ==========
@@ -135,7 +135,7 @@ export class LiveMonitor {
     `.trim();
 
     try {
-      const result: any = await invoke('ssh_execute_dashboard_command_direct', { command: cmd });
+      const result: any = await invokeTargetBoundSSH('ssh_execute_dashboard_command_direct', { command: cmd });
       return this.parseMetrics(result?.output || '');
     } catch {
       return null;

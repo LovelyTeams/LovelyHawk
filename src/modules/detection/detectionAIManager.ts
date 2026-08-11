@@ -4,7 +4,7 @@
  * and related modal UI for detection results.
  */
 
-import { invoke } from '@tauri-apps/api/core';
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH';
 import { aiService } from '../ai/aiService';
 import { showAlert, showConfirm } from '../ui/confirmDialog';
 import {
@@ -20,34 +20,7 @@ export class DetectionAIManager {
   public currentReport: DetectionReport | null = null;
 
   async generateAISolutionStream(title: string, description: string, severity: string, containerId: string): Promise<void> {
-    // 检查是否配置了 AI
-    if (!aiService.isConfigured()) {
-      const goToSettings = await showConfirm({
-        title: 'AI 服务未配置',
-        message: 'AI 服务尚未配置，无法生成解决方案。',
-        description: '是否前往设置页面配置 AI API？',
-        confirmText: '前往设置',
-        cancelText: '取消',
-        dangerous: false
-      });
-
-      if (goToSettings) {
-        // 打开设置页面
-        const settingsBtn = document.querySelector('[data-page="settings"]') as HTMLElement;
-        if (settingsBtn) {
-          settingsBtn.click();
-          // 切换到 AI 设置标签
-          setTimeout(() => {
-            const aiTab = document.querySelector('[data-tab="ai"]') as HTMLElement;
-            if (aiTab) {
-              aiTab.click();
-            }
-          }, 500);
-        }
-      }
-      return;
-    }
-
+    // 配置检查不再前置：loadAIConfig 会在未配置时抛出友好错误，由下方 catch 展示
     const container = document.getElementById(containerId);
     if (!container) return;
 
@@ -167,11 +140,11 @@ export class DetectionAIManager {
       container.innerHTML = `
         <div style="
           padding: 12px;
-          background: rgba(239, 68, 68, 0.1);
+          background: var(--sev-critical-bg);
           border-radius: 6px;
-          border-left: 3px solid #ef4444;
+          border-left: 3px solid var(--sev-critical-border);
         ">
-          <div style="font-weight: 500; color: #ef4444; margin-bottom: 4px; font-size: 13px;">${statusIcon('error', { size: 14 })} AI 生成失败</div>
+          <div style="font-weight: 500; color: var(--sev-critical-fg); margin-bottom: 4px; font-size: 13px;">${statusIcon('error', { size: 14 })} AI 生成失败</div>
           <div style="font-size: 12px; color: var(--text-secondary);">${error.message}</div>
         </div>
       `;
@@ -284,11 +257,11 @@ export class DetectionAIManager {
       ">${this.escapeHtml(command)}</div>
       <div style="
         padding: 10px 12px;
-        background: rgba(239, 68, 68, 0.1);
+        background: var(--sev-critical-bg);
         border-radius: 6px;
-        border-left: 3px solid #ef4444;
+        border-left: 3px solid var(--sev-critical-border);
       ">
-        <div style="font-weight: 500; color: #ef4444; margin-bottom: 6px; font-size: 12px;">${statusIcon('warning', { size: 14 })} 重要提示</div>
+        <div style="font-weight: 500; color: var(--sev-critical-fg); margin-bottom: 6px; font-size: 12px;">${statusIcon('warning', { size: 14 })} 重要提示</div>
         <ul style="margin: 0; padding-left: 18px; font-size: 11px; color: var(--text-secondary); line-height: 1.6;">
           <li>请确保您了解此命令的作用</li>
           <li>命令将在SSH连接的服务器上执行</li>
@@ -396,7 +369,7 @@ export class DetectionAIManager {
 
     try {
       // 调用 Tauri 后端命令执行
-      const result = await invoke('execute_detection_command', { command });
+      const result = await invokeTargetBoundSSH('execute_detection_command', { command });
 
       // 显示执行结果
       if (result && typeof result === 'object') {
@@ -418,7 +391,7 @@ export class DetectionAIManager {
 
         // 显示退出码
         if (output.exit_code !== null) {
-          const exitCodeColor = output.exit_code === 0 ? '#22c55e' : '#ef4444';
+          const exitCodeColor = output.exit_code === 0 ? 'var(--sev-success-fg)' : 'var(--sev-critical-fg)';
           const exitCodeText = output.exit_code === 0 ? '成功' : '失败';
           outputHtml += `<div style="color: ${exitCodeColor}; margin-top: 8px; font-size: 11px; font-weight: 500;">
             ${exitCodeText} (退出码: ${output.exit_code})
@@ -431,7 +404,7 @@ export class DetectionAIManager {
       }
     } catch (error: any) {
       outputElement.innerHTML = `
-        <div style="color: #ef4444;">${statusIcon('error', { size: 14 })} 执行失败</div>
+        <div style="color: var(--sev-critical-fg);">${statusIcon('error', { size: 14 })} 执行失败</div>
         <div style="margin-top: 8px; color: var(--text-secondary);">${this.escapeHtml(error.message || error.toString())}</div>
       `;
       console.error('命令执行失败:', error);
@@ -451,34 +424,7 @@ export class DetectionAIManager {
    * AI 生成解决方案（完整版，用于详细方案）
    */
   async generateAISolution(title: string, description: string, severity: string = 'medium'): Promise<void> {
-    // 检查是否配置了 AI
-    if (!aiService.isConfigured()) {
-      const goToSettings = await showConfirm({
-        title: 'AI 服务未配置',
-        message: 'AI 服务尚未配置，无法生成解决方案。',
-        description: '是否前往设置页面配置 AI API？',
-        confirmText: '前往设置',
-        cancelText: '取消',
-        dangerous: false
-      });
-
-      if (goToSettings) {
-        // 打开设置页面
-        const settingsBtn = document.querySelector('[data-page="settings"]') as HTMLElement;
-        if (settingsBtn) {
-          settingsBtn.click();
-          // 切换到 AI 设置标签
-          setTimeout(() => {
-            const aiTab = document.querySelector('[data-tab="ai"]') as HTMLElement;
-            if (aiTab) {
-              aiTab.click();
-            }
-          }, 500);
-        }
-      }
-      return;
-    }
-
+    // 配置检查不再前置：loadAIConfig 会在未配置时抛出友好错误，由下方 catch 展示
     // 显示加载提示
     const loadingModal = this.showLoadingModal('正在生成 AI 解决方案...');
 
@@ -706,15 +652,15 @@ export class DetectionAIManager {
                 <span>风险提示</span>
               </h4>
               <div style="
-                background: #fef3c7;
-                border-left: 3px solid #f59e0b;
+                background: var(--sev-warn-bg);
+                border-left: 3px solid var(--sev-warn-border);
                 padding: 16px;
                 border-radius: 8px;
               ">
                 <ul style="
                   margin: 0;
                   padding-left: 20px;
-                  color: #92400e;
+                  color: var(--sev-warn-fg);
                   line-height: 1.8;
                 ">
                   ${solution.risks.map((risk: string) => `<li style="margin-bottom: 8px;">${risk}</li>`).join('')}

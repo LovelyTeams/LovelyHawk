@@ -4,7 +4,12 @@
  */
 
 import * as IconPark from '@icon-park/svg'
-import { CommandHistoryManager, type CommandHistoryItem } from '../utils/commandHistoryManager'
+import {
+  CommandHistoryManager,
+  isVerifiedCommandHistoryItem,
+  type CommandHistoryItem,
+} from '../utils/commandHistoryManager'
+import { escapeHtml } from '../core/htmlEscape'
 import { showConfirm } from './confirmDialog'
 import { createIconHTML } from './iconMapping'
 
@@ -161,7 +166,7 @@ export class CommandHistoryModal {
     const emptyEl = document.getElementById('cmd-history-empty');
     if (!listEl || !emptyEl) return;
 
-    let history = this.currentFilter 
+    const history = this.currentFilter
       ? CommandHistoryManager.search(this.currentFilter)
       : CommandHistoryManager.getHistory();
 
@@ -207,23 +212,38 @@ export class CommandHistoryModal {
     const commandPreview = item.command.length > 80 
       ? item.command.substring(0, 80) + '...'
       : item.command;
+    const verified = isVerifiedCommandHistoryItem(item);
+    const targetLabel = verified
+      ? `${item.target.username}@${item.target.host}:${item.target.port}`
+      : '旧版记录 · 未绑定目标';
+    const fingerprint = verified ? item.target.hostKeyFingerprint : '';
+    const riskLabel = verified
+      ? (item.risk === 'read-only' ? '只读' : '可写 · 需确认')
+      : '不可重放';
+    const riskColor = verified && item.risk === 'read-only'
+      ? 'var(--sev-success-fg)'
+      : 'var(--sev-warn-fg)';
 
     return `
-      <div data-cmd-history-id="${item.id}" style="
+      <div class="cmd-history-item" data-cmd-history-id="${escapeHtml(item.id)}" style="
         padding: var(--spacing-md);
         background: var(--bg-secondary);
         border: 1px solid var(--border-color);
         border-radius: var(--border-radius);
         transition: all 0.2s;
-      " onmouseover="this.style.borderColor='var(--primary-color)'" onmouseout="this.style.borderColor='var(--border-color)'">
+      ">
         <div style="display: flex; justify-content: space-between; align-items: start; gap: 12px; margin-bottom: 8px;">
           <div style="flex: 1; min-width: 0;">
             <div style="font-weight: 600; color: var(--text-primary); margin-bottom: 4px; font-size: 14px;">
-              ${this.escapeHtml(item.title)}
+              ${escapeHtml(item.title)}
             </div>
             <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;">
               ${IconPark.Time({ theme: 'outline', size: '12', fill: 'currentColor' })}
-              ${dateStr}
+              ${escapeHtml(dateStr)}
+              <span style="margin-left:10px;">目标：${escapeHtml(targetLabel)}</span>
+              ${fingerprint ? `<span title="${escapeHtml(fingerprint)}" style="margin-left:10px;">指纹：${escapeHtml(fingerprint.slice(0, 24))}${fingerprint.length > 24 ? '…' : ''}</span>` : ''}
+              <span style="margin-left:10px; color:${riskColor};">${escapeHtml(riskLabel)}</span>
+              ${verified ? `<span style="margin-left:10px;">来源：${escapeHtml(item.source)}</span>` : ''}
             </div>
             <code style="
               display: block;
@@ -236,13 +256,13 @@ export class CommandHistoryModal {
               overflow: hidden;
               text-overflow: ellipsis;
               white-space: nowrap;
-            ">${this.escapeHtml(commandPreview)}</code>
+            ">${escapeHtml(commandPreview)}</code>
           </div>
           <div style="display: flex; gap: 6px; flex-shrink: 0;">
             <button class="cmd-history-view modern-btn secondary" style="font-size: 12px; padding: 6px 10px;" title="查看详情">
               ${IconPark.PreviewOpen({ theme: 'outline', size: '14', fill: 'currentColor' })}
             </button>
-            <button class="cmd-history-execute modern-btn primary" style="font-size: 12px; padding: 6px 10px;" title="重新执行">
+            <button class="cmd-history-execute modern-btn primary" style="font-size: 12px; padding: 6px 10px;" title="${verified ? '重新执行' : '旧版记录未绑定目标，禁止重放'}" ${verified ? '' : 'disabled'}>
               ${IconPark.Play({ theme: 'outline', size: '14', fill: 'currentColor' })}
             </button>
             <button class="cmd-history-delete modern-btn secondary" style="font-size: 12px; padding: 6px 10px;" title="删除">
@@ -272,25 +292,28 @@ export class CommandHistoryModal {
     const item = CommandHistoryManager.getById(id);
     if (!item) return;
 
-    // 关闭历史记录模态框
-    this.hide();
-
-    // 使用 EmergencyResultModal 执行命令
-    const emergencyModal = (window as any).emergencyResultModal;
-    if (emergencyModal) {
-      // 先显示模态框
-      emergencyModal.show(item.title, item.command, '正在执行命令...');
-      
-      // 然后触发执行
-      setTimeout(() => {
-        const executeBtn = document.getElementById('em-modal-execute-btn');
-        if (executeBtn) {
-          executeBtn.click();
-        }
-      }, 100);
-    } else {
-      window.showNotification?.('命令执行窗口未初始化，无法重新执行', 'error');
+    let assessment;
+    try {
+      assessment = await CommandHistoryManager.assessReplay(item);
+    } catch (error) {
+      window.showNotification?.(`历史记录校验失败: ${error}`, 'error');
+      return;
     }
+    if (!assessment.allowed) {
+      window.showNotification?.(assessment.reason, 'warning');
+      return;
+    }
+
+    const emergencyModal = (window as unknown as {
+      emergencyResultModal?: { replayHistoryItem: (historyItem: CommandHistoryItem) => Promise<boolean> };
+    }).emergencyResultModal;
+    if (!emergencyModal?.replayHistoryItem) {
+      window.showNotification?.('命令执行窗口未初始化，无法重新执行', 'error');
+      return;
+    }
+
+    this.hide();
+    await emergencyModal.replayHistoryItem(item);
   }
 
   private async deleteCommand(id: string): Promise<void> {
@@ -301,13 +324,5 @@ export class CommandHistoryModal {
     }
   }
 
-  private escapeHtml(text: string): string {
-    return text
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
-  }
 }
 

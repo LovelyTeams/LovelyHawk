@@ -1,4 +1,8 @@
-import { KubernetesManager } from './kubernetesManager';
+import { KubernetesManager, type K8sMutationResult } from './kubernetesManager';
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH';
+import { activeTargetContext } from '../core/targetContext';
+import { operationJournal } from '../core/operationJournal';
+import { shq } from '../core/shellEscape';
 import {
     K8sEmergencyAction, K8sPodForensicReport,
     K8sAnomalyAlert, K8sPod, K8sEvent,
@@ -26,10 +30,39 @@ export class KubernetesEmergencyManager {
     }
 
     private recordAction(action: K8sEmergencyAction): void {
+        if (action.targetIdentity && action.command) {
+            const receipt = operationJournal.record({
+                source: 'kubernetes',
+                server: action.targetIdentity.host,
+                target: action.targetIdentity,
+                title: `Kubernetes 应急动作 ${action.type}: ${action.namespace ? `${action.namespace}/` : ''}${action.target}`,
+                command: action.command,
+                restoreCommand: action.status === 'completed' ? action.rollbackCommand || undefined : undefined,
+                output: action.result || action.error || '',
+                exitCode: action.exitCode,
+                timedOut: action.timedOut,
+                verifyCommand: action.verifyCommand,
+                verifyOutput: action.verifyOutput,
+                verified: action.verified,
+                restoreVerifyCommand: action.restoreVerifyCommand,
+                restoreVerifyExpected: action.restoreVerifyExpected,
+                success: action.status === 'completed',
+            });
+            action.operationId = receipt.id;
+        }
         this.actionHistory.push(action);
         if (this.actionHistory.length > KubernetesEmergencyManager.MAX_ACTION_HISTORY) {
             this.actionHistory.length = KubernetesEmergencyManager.MAX_ACTION_HISTORY;
         }
+    }
+
+    private attachResult(action: K8sEmergencyAction, result: K8sMutationResult): void {
+        action.command = result.command;
+        action.exitCode = result.exitCode;
+        action.timedOut = result.timedOut;
+        action.verifyCommand = result.verifyCommand;
+        action.verifyOutput = result.verifyOutput;
+        action.verified = result.verified;
     }
 
     // ============================================================
@@ -44,12 +77,20 @@ export class KubernetesEmergencyManager {
             const policyYaml = this.generateIsolationPolicy(policyName, namespace, podLabels);
 
             const result = await this.manager.applyYaml(policyYaml);
+            this.attachResult(action, result);
 
             if (result.success) {
-                action.status = 'completed';
-                action.result = `NetworkPolicy "${policyName}" applied successfully`;
-                action.rollbackCommand = `kubectl delete networkpolicy ${policyName} -n ${namespace}`;
-                this.isolationPolicies.set(`${namespace}/${podName}`, policyName);
+                const policies = await this.manager.getNetworkPolicies(namespace);
+                action.verified = policies.some(policy => policy.name === policyName);
+                action.verifyCommand = `kubectl get networkpolicy ${shq(policyName)} -n ${shq(namespace)} -o name`;
+                action.verifyOutput = action.verified ? `networkpolicy.networking.k8s.io/${policyName}` : '';
+                action.status = action.verified ? 'completed' : 'failed';
+                action.result = action.verified ? `NetworkPolicy "${policyName}" applied successfully` : undefined;
+                action.error = action.verified ? undefined : '隔离策略应用后未能读回';
+                action.rollbackCommand = `kubectl delete networkpolicy ${shq(policyName)} -n ${shq(namespace)}`;
+                action.restoreVerifyCommand = `[ -z "$(kubectl get networkpolicy ${shq(policyName)} -n ${shq(namespace)} --ignore-not-found -o name)" ] && echo absent`;
+                action.restoreVerifyExpected = 'absent';
+                if (action.verified) this.isolationPolicies.set(`${namespace}/${podName}`, policyName);
             } else {
                 action.status = 'failed';
                 action.error = result.output;
@@ -77,6 +118,7 @@ export class KubernetesEmergencyManager {
 
         try {
             const result = await this.manager.deleteResource('networkpolicy', policyName, namespace);
+            this.attachResult(action, result);
             if (result.success) {
                 action.status = 'completed';
                 action.result = `Isolation policy "${policyName}" removed`;
@@ -105,13 +147,16 @@ export class KubernetesEmergencyManager {
             // Get current replicas for rollback
             const deployments = await this.manager.getDeployments(namespace);
             const deploy = deployments.find(d => d.name === deploymentName);
-            const currentReplicas = deploy?.replicas || 1;
+            const currentReplicas = deploy?.replicas ?? 1;
 
             const result = await this.manager.scaleDeployment(deploymentName, namespace, 0);
+            this.attachResult(action, result);
             if (result.success) {
                 action.status = 'completed';
                 action.result = `Scaled ${deploymentName} to 0 replicas`;
-                action.rollbackCommand = `kubectl scale deployment ${deploymentName} -n ${namespace} --replicas=${currentReplicas}`;
+                action.rollbackCommand = `kubectl scale deployment ${shq(deploymentName)} -n ${shq(namespace)} --replicas=${currentReplicas}`;
+                action.restoreVerifyCommand = `[ "$(kubectl get deployment ${shq(deploymentName)} -n ${shq(namespace)} -o jsonpath='{.spec.replicas}')" = ${shq(currentReplicas)} ] && echo restored`;
+                action.restoreVerifyExpected = 'restored';
             } else {
                 action.status = 'failed';
                 action.error = result.output;
@@ -130,10 +175,13 @@ export class KubernetesEmergencyManager {
 
         try {
             const result = await this.manager.cordonNode(nodeName);
+            this.attachResult(action, result);
             if (result.success) {
                 action.status = 'completed';
                 action.result = `Node ${nodeName} cordoned`;
-                action.rollbackCommand = `kubectl uncordon ${nodeName}`;
+                action.rollbackCommand = `kubectl uncordon ${shq(nodeName)}`;
+                action.restoreVerifyCommand = `[ "$(kubectl get node ${shq(nodeName)} -o jsonpath='{.spec.unschedulable}')" != true ] && echo restored`;
+                action.restoreVerifyExpected = 'restored';
             } else {
                 action.status = 'failed';
                 action.error = result.output;
@@ -152,10 +200,13 @@ export class KubernetesEmergencyManager {
 
         try {
             const result = await this.manager.drainNode(nodeName);
+            this.attachResult(action, result);
             if (result.success) {
                 action.status = 'completed';
                 action.result = `Node ${nodeName} drained`;
-                action.rollbackCommand = `kubectl uncordon ${nodeName}`;
+                action.rollbackCommand = `kubectl uncordon ${shq(nodeName)}`;
+                action.restoreVerifyCommand = `[ "$(kubectl get node ${shq(nodeName)} -o jsonpath='{.spec.unschedulable}')" != true ] && echo restored`;
+                action.restoreVerifyExpected = 'restored';
             } else {
                 action.status = 'failed';
                 action.error = result.output;
@@ -173,13 +224,10 @@ export class KubernetesEmergencyManager {
         const action = this.createAction('delete_pod', podName, namespace);
 
         try {
-            const cmd = force
-                ? `kubectl delete pod ${podName} -n ${namespace} --force --grace-period=0`
-                : `kubectl delete pod ${podName} -n ${namespace}`;
+            const result = await this.manager.deletePod(podName, namespace, force);
+            this.attachResult(action, result);
 
-            const result = await (window as any).__TAURI__.core.invoke('ssh_execute_dashboard_command_direct', { command: cmd });
-
-            if (result.exit_code === 0) {
+            if (result.success) {
                 action.status = 'completed';
                 action.result = `Pod ${podName} deleted${force ? ' (force)' : ''}`;
                 action.rollbackCommand = ''; // Cannot rollback a pod delete
@@ -202,6 +250,9 @@ export class KubernetesEmergencyManager {
 
     public async deleteServiceAccount(saName: string, namespace: string): Promise<K8sEmergencyAction> {
         const action = this.createAction('delete_sa', saName, namespace);
+        const commands: string[] = [];
+        const outputs: string[] = [];
+        let allSucceeded = true;
 
         try {
             // First delete any ClusterRoleBindings referencing this SA
@@ -211,7 +262,10 @@ export class KubernetesEmergencyManager {
                     s => s.kind === 'ServiceAccount' && s.name === saName && (s.namespace === namespace || !s.namespace)
                 );
                 if (hasSubject) {
-                    await this.manager.deleteResource('clusterrolebinding', crb.name);
+                    const deletion = await this.manager.deleteResource('clusterrolebinding', crb.name);
+                    commands.push(deletion.command);
+                    outputs.push(deletion.output);
+                    allSucceeded = allSucceeded && deletion.success;
                 }
             }
 
@@ -222,18 +276,27 @@ export class KubernetesEmergencyManager {
                     s => s.kind === 'ServiceAccount' && s.name === saName
                 );
                 if (hasSubject) {
-                    await this.manager.deleteResource('rolebinding', rb.name, namespace);
+                    const deletion = await this.manager.deleteResource('rolebinding', rb.name, namespace);
+                    commands.push(deletion.command);
+                    outputs.push(deletion.output);
+                    allSucceeded = allSucceeded && deletion.success;
                 }
             }
 
             // Delete the ServiceAccount itself
             const result = await this.manager.deleteServiceAccount(saName, namespace);
-            if (result.success) {
+            this.attachResult(action, result);
+            commands.push(result.command);
+            outputs.push(result.output);
+            action.command = commands.join(' ; ');
+            action.result = outputs.filter(Boolean).join('\n');
+            action.verified = allSucceeded && result.success;
+            if (action.verified) {
                 action.status = 'completed';
-                action.result = `ServiceAccount "${saName}" and associated bindings deleted from namespace "${namespace}"`;
+                action.result = `ServiceAccount "${saName}" and associated bindings deleted from namespace "${namespace}"\n${action.result}`.trim();
             } else {
                 action.status = 'failed';
-                action.error = result.output;
+                action.error = 'ServiceAccount 或关联绑定存在删除/验证失败，结果为部分完成';
             }
         } catch (e) {
             action.status = 'failed';
@@ -253,10 +316,13 @@ export class KubernetesEmergencyManager {
 
         try {
             const result = await this.manager.suspendCronJob(name, namespace);
+            this.attachResult(action, result);
             if (result.success) {
                 action.status = 'completed';
                 action.result = `CronJob "${name}" suspended in namespace "${namespace}"`;
-                action.rollbackCommand = `kubectl patch cronjob ${name} -n ${namespace} -p '{"spec":{"suspend":false}}'`;
+                action.rollbackCommand = `kubectl patch cronjob ${shq(name)} -n ${shq(namespace)} -p '{"spec":{"suspend":false}}'`;
+                action.restoreVerifyCommand = `[ "$(kubectl get cronjob ${shq(name)} -n ${shq(namespace)} -o jsonpath='{.spec.suspend}')" != true ] && echo restored`;
+                action.restoreVerifyExpected = 'restored';
             } else {
                 action.status = 'failed';
                 action.error = result.output;
@@ -542,10 +608,18 @@ export class KubernetesEmergencyManager {
 
         try {
             const result = await this.manager.isolateNamespace(namespace);
+            this.attachResult(action, result);
             if (result.success) {
-                action.status = 'completed';
-                action.result = `Namespace "${namespace}" isolated with deny-all NetworkPolicy`;
-                action.rollbackCommand = `kubectl delete networkpolicy lovelyres-deny-all -n ${namespace}`;
+                const policies = await this.manager.getNetworkPolicies(namespace);
+                action.verified = policies.some(policy => policy.name === 'lovelyres-deny-all');
+                action.verifyCommand = `kubectl get networkpolicy 'lovelyres-deny-all' -n ${shq(namespace)} -o name`;
+                action.verifyOutput = action.verified ? 'networkpolicy.networking.k8s.io/lovelyres-deny-all' : '';
+                action.status = action.verified ? 'completed' : 'failed';
+                action.result = action.verified ? `Namespace "${namespace}" isolated with deny-all NetworkPolicy` : undefined;
+                action.error = action.verified ? undefined : '命名空间隔离策略应用后未能读回';
+                action.rollbackCommand = `kubectl delete networkpolicy 'lovelyres-deny-all' -n ${shq(namespace)}`;
+                action.restoreVerifyCommand = `[ -z "$(kubectl get networkpolicy 'lovelyres-deny-all' -n ${shq(namespace)} --ignore-not-found -o name)" ] && echo absent`;
+                action.restoreVerifyExpected = 'absent';
             } else {
                 action.status = 'failed';
                 action.error = result.output;
@@ -566,16 +640,14 @@ export class KubernetesEmergencyManager {
     public async batchDeletePods(pods: { name: string; namespace: string }[], force: boolean = true): Promise<K8sEmergencyAction> {
         const action = this.createAction('batch_delete', `${pods.length} pods`, '');
         const results: string[] = [];
+        const commands: string[] = [];
         let failures = 0;
 
         for (const pod of pods) {
             try {
-                const cmd = force
-                    ? `kubectl delete pod ${pod.name} -n ${pod.namespace} --force --grace-period=0`
-                    : `kubectl delete pod ${pod.name} -n ${pod.namespace}`;
-
-                const result = await (window as any).__TAURI__.core.invoke('ssh_execute_dashboard_command_direct', { command: cmd });
-                if (result.exit_code === 0) {
+                const result = await this.manager.deletePod(pod.name, pod.namespace, force);
+                commands.push(result.command);
+                if (result.success) {
                     results.push(`✓ ${pod.namespace}/${pod.name}`);
                 } else {
                     results.push(`✗ ${pod.namespace}/${pod.name}: ${result.output?.substring(0, 80)}`);
@@ -587,8 +659,11 @@ export class KubernetesEmergencyManager {
             }
         }
 
-        action.status = failures === pods.length ? 'failed' : 'completed';
+        action.status = failures === 0 ? 'completed' : 'failed';
         action.result = results.join('\n');
+        action.command = commands.join(' ; ');
+        action.verified = failures === 0;
+        action.verifyOutput = `${pods.length - failures}/${pods.length} deleted and absent`;
         if (failures > 0) action.error = `${failures}/${pods.length} failed`;
 
         this.recordAction(action);
@@ -601,14 +676,14 @@ export class KubernetesEmergencyManager {
 
     public generateIsolationPolicy(policyName: string, namespace: string, podLabels: Record<string, string>): string {
         const matchLabels = Object.entries(podLabels)
-            .map(([k, v]) => `        ${k}: "${v}"`)
+            .map(([k, v]) => `        ${JSON.stringify(k)}: ${JSON.stringify(v)}`)
             .join('\n');
 
         return `apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: ${policyName}
-  namespace: ${namespace}
+  name: ${JSON.stringify(policyName)}
+  namespace: ${JSON.stringify(namespace)}
   labels:
     lovelyres-emergency: "true"
     lovelyres-action: "isolate"
@@ -623,6 +698,13 @@ ${matchLabels}
 
     public getActionHistory(): K8sEmergencyAction[] {
         return [...this.actionHistory];
+    }
+
+    /** Kubernetes 运行态只属于当前 SSH 会话；切换目标后由页面管理器调用。 */
+    public resetTargetState(): void {
+        this.actionHistory = [];
+        this.anomalyAlerts = [];
+        this.isolationPolicies.clear();
     }
 
     public getAnomalyAlerts(): K8sAnomalyAlert[] {
@@ -643,15 +725,17 @@ ${matchLabels}
         if (!action || !action.rollbackCommand) {
             return { success: false, output: 'No rollback command available' };
         }
+        if (!action.targetIdentity || !activeTargetContext.matches(action.targetIdentity)) {
+            return { success: false, output: '当前目标与应急动作目标不一致，已阻止回滚' };
+        }
 
         try {
-            const result = await (window as any).__TAURI__.core.invoke('ssh_execute_dashboard_command_direct', {
+            const result: any = await invokeTargetBoundSSH('ssh_execute_dashboard_command_direct', {
                 command: action.rollbackCommand
             });
-            return {
-                success: result.exit_code === 0,
-                output: result.output || ''
-            };
+            const success = result.timed_out !== true && result.exit_code === 0;
+            if (success && action.operationId) operationJournal.markRolledBack(action.operationId);
+            return { success, output: result.output || '' };
         } catch (e) {
             return { success: false, output: String(e) };
         }
@@ -666,7 +750,8 @@ ${matchLabels}
             status: 'executing',
             timestamp: new Date().toISOString(),
             performedBy: 'LovelyRes',
-            rollbackCommand: ''
+            rollbackCommand: '',
+            targetIdentity: activeTargetContext.get() || undefined,
         };
     }
 }

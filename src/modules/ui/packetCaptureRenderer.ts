@@ -1,15 +1,22 @@
 import {
-  NetworkTree,
   Play,
   Pause,
   Delete,
   Shield,
   Search,
-  Export
+  Export,
+  Trace
 } from '@icon-park/svg';
-import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { showAlert } from './confirmDialog';
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH';
+import { incidentCaseManager } from '../case/incidentCaseManager';
+import {
+  mergeWithActiveCaseIOCs,
+  persistIOCsToActiveCase,
+} from '../case/iocWorkspace';
+import { reportError } from '../utils/errorHandler';
+import { targetCapabilityStore } from '../core/targetCapabilities';
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 
@@ -28,6 +35,19 @@ interface NetworkInterface {
   name: string;
   index: number;
   ips: string[];
+}
+
+interface PcapEvidenceReceipt {
+  cancelled: boolean;
+  localPath?: string;
+  sha256?: string;
+  sizeBytes?: number;
+  interface: string;
+  filter?: string;
+  packetLimit?: number;
+  durationSeconds: number;
+  capturedAt: string;
+  remoteCleanupVerified: boolean;
 }
 
 type PacketTab = 'realtime' | 'statistics' | 'conversations' | 'dns-http' | 'threat';
@@ -99,6 +119,7 @@ export class PacketCaptureRenderer {
   // Core state
   private packets: PacketEntry[] = [];
   private isCapturing = false;
+  private isSavingPcap = false;
   private interfaces: NetworkInterface[] = [];
   private selectedInterface = '';
   private currentTab: PacketTab = 'realtime';
@@ -250,7 +271,7 @@ export class PacketCaptureRenderer {
     }
 
     try {
-      const result = await invoke('get_network_interfaces') as NetworkInterface[];
+      const result = await invokeTargetBoundSSH<NetworkInterface[]>('get_network_interfaces');
       this.interfaces = Array.isArray(result) ? result : [];
       if (this.interfaces.length > 0 && !this.selectedInterface) {
         this.selectedInterface = this.interfaces[0].name;
@@ -259,11 +280,12 @@ export class PacketCaptureRenderer {
       console.error('Failed to load network interfaces:', e);
       this.interfaces = [];
     }
+    this.iocList = mergeWithActiveCaseIOCs(this.iocList);
 
     const interfaceOptions = this.interfaces
       .map(
         iface =>
-          `<option value="${iface.name}" ${iface.name === this.selectedInterface ? 'selected' : ''}>${iface.name} (${iface.ips.join(', ')})</option>`
+          `<option value="${this.escapeHtml(iface.name)}" ${iface.name === this.selectedInterface ? 'selected' : ''}>${this.escapeHtml(iface.name)} (${this.escapeHtml(iface.ips.join(', '))})</option>`
       )
       .join('');
 
@@ -271,7 +293,7 @@ export class PacketCaptureRenderer {
       <div class="pc-page">
         <div class="pc-header">
           <div class="pc-header-left">
-            <div class="pc-header-icon">${icon(NetworkTree, '22', 'filled')}</div>
+            <div class="pc-header-icon">${icon(Trace, '22')}</div>
             <div>
               <h2 class="pc-header-title">网络抓包</h2>
               <div class="pc-header-subtitle">网络流量实时捕获 · 协议分析 · 威胁检测</div>
@@ -280,9 +302,11 @@ export class PacketCaptureRenderer {
           <div class="pc-header-right">
             <select data-pc-action="select-interface">${interfaceOptions}</select>
             <input placeholder="BPF 过滤器..." id="pc-filter-input" class="pc-filter-input" />
-            <input type="number" value="0" placeholder="数量" id="pc-count-input" style="width:60px" class="pc-count-input" />
+            <input type="number" min="0" max="100000" value="0" placeholder="数量" id="pc-count-input" style="width:72px" class="pc-count-input" title="0 表示不限数量；原始证据最多 100000 包" />
+            <input type="number" min="1" max="300" value="15" id="pc-duration-input" style="width:66px" class="pc-count-input" title="原始 PCAP 证据采集时长（秒）" />
             <button class="modern-btn primary" data-pc-action="start-capture" id="pc-start-btn">${icon(Play)} 开始</button>
             <button class="modern-btn secondary hidden" data-pc-action="stop-capture" id="pc-stop-btn">${icon(Pause)} 停止</button>
+            <button class="modern-btn secondary" data-pc-action="capture-evidence" id="pc-evidence-btn" title="采集原始 PCAP，下载后验证 SHA-256 并加入当前案件">${icon(Export)} PCAP 证据</button>
             <button class="modern-btn secondary" data-pc-action="clear-packets">${icon(Delete)} 清空</button>
           </div>
         </div>
@@ -580,8 +604,11 @@ export class PacketCaptureRenderer {
         <div class="pc-ioc-area">
           <div class="pc-ioc-input-wrap">
             <div style="font-size:13px;font-weight:600;margin-bottom:6px">${icon(Shield, '14')} IOC 实时匹配</div>
-            <textarea class="pc-ioc-input" id="pc-ioc-input" placeholder="输入可疑 IP/域名，每行一个">${this.iocList.join('\n')}</textarea>
-            <button class="modern-btn primary sm" data-pc-action="apply-ioc" style="margin-top:6px">应用 IOC</button>
+            <textarea class="pc-ioc-input" id="pc-ioc-input" placeholder="输入可疑 IP/域名，每行一个">${this.escapeHtml(this.iocList.join('\n'))}</textarea>
+            <div style="display:flex;gap:6px;margin-top:6px">
+              <button class="modern-btn primary sm" data-pc-action="apply-ioc">应用并保存到案件</button>
+              <button class="modern-btn secondary sm" data-pc-action="sync-case-ioc">同步案件 IOC</button>
+            </div>
           </div>
           <div id="pc-ioc-results" style="flex:1">${this.renderIocResults()}</div>
         </div>
@@ -1020,6 +1047,9 @@ export class PacketCaptureRenderer {
       case 'stop-capture':
         this.stopCapture();
         break;
+      case 'capture-evidence':
+        this.capturePcapEvidence();
+        break;
       case 'clear-packets':
         this.clearAll();
         break;
@@ -1053,6 +1083,9 @@ export class PacketCaptureRenderer {
       case 'apply-ioc':
         this.applyIoc();
         break;
+      case 'sync-case-ioc':
+        this.syncCaseIocs();
+        break;
       case 'goto-packet':
         this.gotoPacket(parseInt(el.dataset.packetId!));
         break;
@@ -1065,6 +1098,15 @@ export class PacketCaptureRenderer {
   }
 
   private async startCapture(): Promise<void> {
+    const capability = targetCapabilityStore.evaluate('packet-capture');
+    if (capability && !capability.available) {
+      showAlert({
+        title: '目标不支持实时抓包',
+        message: `${capability.reason}。${capability.alternative}`,
+        type: 'warning',
+      });
+      return;
+    }
     const filterInput = document.getElementById('pc-filter-input') as HTMLInputElement | null;
     const countInput = document.getElementById('pc-count-input') as HTMLInputElement | null;
     const filter = filterInput?.value || '';
@@ -1083,7 +1125,7 @@ export class PacketCaptureRenderer {
     this.updateCaptureButtons();
 
     try {
-      await invoke('start_packet_capture', {
+      await invokeTargetBoundSSH('start_packet_capture', {
         interface: this.selectedInterface,
         filter: filter || null,
         count: count > 0 ? count : null,
@@ -1098,12 +1140,109 @@ export class PacketCaptureRenderer {
 
   private async stopCapture(): Promise<void> {
     try {
-      await invoke('stop_packet_capture');
+      await invokeTargetBoundSSH('stop_packet_capture');
     } catch (e) {
       console.error('Failed to stop capture:', e);
     }
     this.isCapturing = false;
     this.updateCaptureButtons();
+  }
+
+  private async capturePcapEvidence(): Promise<void> {
+    const capability = targetCapabilityStore.evaluate('packet-capture');
+    if (capability && !capability.available) {
+      showAlert({
+        title: '目标不支持原始 PCAP 采集',
+        message: `${capability.reason}。${capability.alternative}`,
+        type: 'warning',
+      });
+      return;
+    }
+    if (this.isCapturing) {
+      showAlert({ title: '请先停止实时抓包', message: '原始证据采集使用独立、有限时的 tcpdump 任务，请先停止当前实时抓包。', type: 'warning' });
+      return;
+    }
+    if (this.isSavingPcap) return;
+    if (!this.selectedInterface) {
+      showAlert({ title: '提示', message: '请选择网络接口', type: 'warning' });
+      return;
+    }
+
+    const filterInput = document.getElementById('pc-filter-input') as HTMLInputElement | null;
+    const countInput = document.getElementById('pc-count-input') as HTMLInputElement | null;
+    const durationInput = document.getElementById('pc-duration-input') as HTMLInputElement | null;
+    const filter = filterInput?.value.trim() || '';
+    const packetLimit = Number.parseInt(countInput?.value || '0', 10) || 0;
+    const durationSeconds = Number.parseInt(durationInput?.value || '15', 10);
+    if (packetLimit < 0 || packetLimit > 100_000) {
+      showAlert({ title: '数量无效', message: '原始 PCAP 证据的数量上限必须为 0–100000，0 表示仅受时长限制。', type: 'warning' });
+      return;
+    }
+    if (!Number.isInteger(durationSeconds) || durationSeconds < 1 || durationSeconds > 300) {
+      showAlert({ title: '时长无效', message: '原始 PCAP 证据采集时长必须为 1–300 秒。', type: 'warning' });
+      return;
+    }
+
+    const button = document.getElementById('pc-evidence-btn') as HTMLButtonElement | null;
+    const originalButtonHtml = button?.innerHTML || '';
+    this.isSavingPcap = true;
+    if (button) {
+      button.disabled = true;
+      button.textContent = '采集中…';
+    }
+
+    let receipt: PcapEvidenceReceipt;
+    try {
+      receipt = await invokeTargetBoundSSH<PcapEvidenceReceipt>('capture_pcap_evidence', {
+        interface: this.selectedInterface,
+        filter: filter || null,
+        packetLimit: packetLimit > 0 ? packetLimit : null,
+        durationSeconds,
+      });
+    } catch (error) {
+      reportError(error, { module: 'PacketCapture', action: '采集原始 PCAP 证据' });
+      return;
+    } finally {
+      this.isSavingPcap = false;
+      if (button) {
+        button.disabled = false;
+        button.innerHTML = originalButtonHtml;
+      }
+    }
+
+    if (receipt.cancelled) return;
+    if (!receipt.localPath || !receipt.sha256 || receipt.sizeBytes == null) {
+      reportError(new Error('后端未返回完整的 PCAP 证据回执'), {
+        module: 'PacketCapture', action: '登记原始 PCAP 证据',
+      });
+      return;
+    }
+
+    window.showNotification?.(
+      `PCAP 已保存并验证：${this.formatBytes(receipt.sizeBytes)}`,
+      receipt.remoteCleanupVerified ? 'success' : 'warning',
+    );
+    try {
+      await incidentCaseManager.addEvidence({
+        kind: 'pcap',
+        label: `原始网络抓包 · ${receipt.interface}`,
+        source: 'packet-capture',
+        locator: receipt.localPath,
+        externalSha256: receipt.sha256,
+        preview: [
+          `采集时间：${receipt.capturedAt}`,
+          `接口：${receipt.interface}`,
+          `时长：${receipt.durationSeconds}s`,
+          `包数上限：${receipt.packetLimit ?? '仅时长限制'}`,
+          `过滤器：${receipt.filter || '无'}`,
+          `大小：${receipt.sizeBytes} bytes`,
+          `远端临时文件清理：${receipt.remoteCleanupVerified ? '已验证' : '未验证，请人工检查 /tmp/lovelyres-pcap-*'}`,
+        ].join('\n'),
+      });
+      window.showNotification?.('PCAP 证据已加入当前案件', 'success');
+    } catch (error) {
+      reportError(error, { module: 'PacketCapture', action: '将 PCAP 登记到案件' });
+    }
   }
 
   private clearAll(): void {
@@ -1230,6 +1369,14 @@ export class PacketCaptureRenderer {
       .split('\n')
       .map(s => s.trim())
       .filter(Boolean);
+    try {
+      const added = persistIOCsToActiveCase(this.iocList, 'packet-capture');
+      this.iocList = mergeWithActiveCaseIOCs(this.iocList);
+      textarea.value = this.iocList.join('\n');
+      if (added > 0) window.showNotification?.(`${added} 个 IOC 已加入当前案件`, 'success');
+    } catch (error) {
+      reportError(error, { module: 'PacketCapture', action: '保存 IOC 到案件' });
+    }
     this.iocHitCounts.clear();
 
     // Re-scan existing packets for IOC hits
@@ -1246,6 +1393,13 @@ export class PacketCaptureRenderer {
     // Update IOC results display
     const resultsEl = document.getElementById('pc-ioc-results');
     if (resultsEl) resultsEl.innerHTML = this.renderIocResults();
+  }
+
+  private syncCaseIocs(): void {
+    this.iocList = mergeWithActiveCaseIOCs(this.iocList);
+    const textarea = document.getElementById('pc-ioc-input') as HTMLTextAreaElement | null;
+    if (textarea) textarea.value = this.iocList.join('\n');
+    this.applyIoc();
   }
 
   private refreshPacketList(): void {
@@ -1609,8 +1763,9 @@ export class PacketCaptureRenderer {
       .pc-stat-card {
         background: var(--bg-secondary);
         border: 1px solid var(--border-color);
-        border-radius: 8px;
-        padding: 12px;
+        border-radius: 10px;
+        padding: 14px 16px;
+        box-shadow: var(--card-shadow);
       }
       .pc-stat-card-title {
         font-size: 12px;

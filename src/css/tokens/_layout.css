@@ -7,6 +7,6 @@
  * (with main-content margin driven by the same var) a localized change.
  */
 :root {
-  --sidebar-width: 268px;
+  --sidebar-width: 232px;
   --sidebar-width-collapsed: 52px;
 }

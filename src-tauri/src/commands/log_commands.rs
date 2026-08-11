@@ -1,8 +1,8 @@
 // Log reading/analysis commands — 应急响应增强版
 
-use tauri::State;
-use crate::AppState;
 use crate::log_analysis;
+use crate::AppState;
+use tauri::State;
 
 /// 读取系统日志文件
 #[tauri::command]
@@ -13,10 +13,11 @@ pub async fn read_system_log(
     filter: Option<String>,
     date_filter: Option<String>,
     with_analysis: Option<bool>,
+    session_id: String,
     state: State<'_, AppState>,
 ) -> Result<log_analysis::LogAnalysisResult, String> {
     let manager = &state.ssh_manager;
-    if !manager.is_connected() {
+    if !manager.is_session_connected(&session_id) {
         return Err("没有活动的 SSH 连接".to_string());
     }
 
@@ -24,16 +25,30 @@ pub async fn read_system_log(
     let page_size = page_size.unwrap_or(100);
 
     let command = log_analysis::generate_log_read_command(
-        &log_path, page, page_size,
-        filter.as_deref(), date_filter.as_deref()
+        &log_path,
+        page,
+        page_size,
+        filter.as_deref(),
+        date_filter.as_deref(),
     );
 
-    let output = manager.execute_dashboard_command(&command)
+    let output = manager
+        .execute_dashboard_command_as_user_on_session_with_timeout(
+            &session_id,
+            &command,
+            None,
+            std::time::Duration::from_secs(60),
+        )
         .map_err(|e| format!("读取日志失败: {}", e))?;
 
-    let entries: Vec<log_analysis::LogEntry> = output.output
+    let entries: Vec<log_analysis::LogEntry> = output
+        .output
         .lines()
-        .filter(|line| !line.trim().is_empty() && !line.contains("Log file not found") && !line.contains("No matching entries"))
+        .filter(|line| {
+            !line.trim().is_empty()
+                && !line.contains("Log file not found")
+                && !line.contains("No matching entries")
+        })
         .map(|line| log_analysis::parse_log_line(line, log_analysis::HIGHLIGHT_KEYWORDS))
         .collect();
 
@@ -43,8 +58,16 @@ pub async fn read_system_log(
     let threat_summary = if with_analysis.unwrap_or(false) {
         // 读取更多行用于分析
         let analysis_cmd = log_analysis::generate_threat_analysis_command(&log_path);
-        if let Ok(analysis_output) = manager.execute_dashboard_command(&analysis_cmd) {
-            let analysis_entries: Vec<log_analysis::LogEntry> = analysis_output.output
+        if let Ok(analysis_output) = manager
+            .execute_dashboard_command_as_user_on_session_with_timeout(
+                &session_id,
+                &analysis_cmd,
+                None,
+                std::time::Duration::from_secs(60),
+            )
+        {
+            let analysis_entries: Vec<log_analysis::LogEntry> = analysis_output
+                .output
                 .lines()
                 .filter(|line| !line.trim().is_empty())
                 .map(|line| log_analysis::parse_log_line(line, log_analysis::HIGHLIGHT_KEYWORDS))
@@ -76,10 +99,11 @@ pub async fn read_journalctl_log(
     since: Option<String>,
     until: Option<String>,
     with_analysis: Option<bool>,
+    session_id: String,
     state: State<'_, AppState>,
 ) -> Result<log_analysis::LogAnalysisResult, String> {
     let manager = &state.ssh_manager;
-    if !manager.is_connected() {
+    if !manager.is_session_connected(&session_id) {
         return Err("没有活动的 SSH 连接".to_string());
     }
 
@@ -87,15 +111,25 @@ pub async fn read_journalctl_log(
     let page_size = page_size.unwrap_or(100);
 
     let command = log_analysis::generate_journalctl_command(
-        page, page_size,
-        unit.as_deref(), filter.as_deref(),
-        since.as_deref(), until.as_deref()
+        page,
+        page_size,
+        unit.as_deref(),
+        filter.as_deref(),
+        since.as_deref(),
+        until.as_deref(),
     );
 
-    let output = manager.execute_dashboard_command(&command)
+    let output = manager
+        .execute_dashboard_command_as_user_on_session_with_timeout(
+            &session_id,
+            &command,
+            None,
+            std::time::Duration::from_secs(60),
+        )
         .map_err(|e| format!("读取 journalctl 日志失败: {}", e))?;
 
-    let entries: Vec<log_analysis::LogEntry> = output.output
+    let entries: Vec<log_analysis::LogEntry> = output
+        .output
         .lines()
         .filter(|line| !line.trim().is_empty() && !line.contains("journalctl not available"))
         .map(|line| log_analysis::parse_log_line(line, log_analysis::HIGHLIGHT_KEYWORDS))
@@ -123,10 +157,11 @@ pub async fn read_journalctl_log(
 pub async fn analyze_multi_log(
     log_paths: Vec<String>,
     line_limit: Option<usize>,
+    session_id: String,
     state: State<'_, AppState>,
 ) -> Result<log_analysis::MultiLogResult, String> {
     let manager = &state.ssh_manager;
-    if !manager.is_connected() {
+    if !manager.is_session_connected(&session_id) {
         return Err("没有活动的 SSH 连接".to_string());
     }
 
@@ -137,20 +172,25 @@ pub async fn analyze_multi_log(
     let mut sources: Vec<String> = Vec::new();
 
     // 用 batch 命令并行读取
-    let batch_results = manager.execute_batch_commands(
-        &commands.iter().map(|s| s.to_string()).collect::<Vec<_>>()
-    ).map_err(|e| format!("关联分析失败: {}", e))?;
+    let batch_results = manager
+        .execute_batch_commands_on_session(
+            &session_id,
+            &commands.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+        )
+        .map_err(|e| format!("关联分析失败: {}", e))?;
 
     for (i, result) in batch_results.iter().enumerate() {
         let source = log_paths.get(i).cloned().unwrap_or_default();
         sources.push(source.clone());
 
         if let Ok(output) = result {
-            let entries: Vec<log_analysis::LogEntry> = output.output
+            let entries: Vec<log_analysis::LogEntry> = output
+                .output
                 .lines()
                 .filter(|line| !line.trim().is_empty())
                 .map(|line| {
-                    let mut entry = log_analysis::parse_log_line(line, log_analysis::HIGHLIGHT_KEYWORDS);
+                    let mut entry =
+                        log_analysis::parse_log_line(line, log_analysis::HIGHLIGHT_KEYWORDS);
                     entry.source = Some(source.clone());
                     entry
                 })
@@ -178,10 +218,11 @@ pub async fn analyze_multi_log(
 pub async fn search_ioc_in_logs(
     indicators: Vec<String>,
     log_paths: Vec<String>,
+    session_id: String,
     state: State<'_, AppState>,
 ) -> Result<log_analysis::IocSearchResult, String> {
     let manager = &state.ssh_manager;
-    if !manager.is_connected() {
+    if !manager.is_session_connected(&session_id) {
         return Err("没有活动的 SSH 连接".to_string());
     }
 
@@ -194,7 +235,9 @@ pub async fn search_ioc_in_logs(
 
     for indicator in &indicators {
         let clean = indicator.trim();
-        if clean.is_empty() { continue; }
+        if clean.is_empty() {
+            continue;
+        }
         for log_path in &log_paths {
             commands.push(log_analysis::generate_ioc_search_command(clean, log_path));
             lookup.push((clean.to_string(), log_path.clone()));
@@ -202,10 +245,14 @@ pub async fn search_ioc_in_logs(
     }
 
     if commands.is_empty() {
-        return Ok(log_analysis::IocSearchResult { results, total_matches: 0 });
+        return Ok(log_analysis::IocSearchResult {
+            results,
+            total_matches: 0,
+        });
     }
 
-    let batch_results = manager.execute_batch_commands(&commands)
+    let batch_results = manager
+        .execute_batch_commands_on_session(&session_id, &commands)
         .map_err(|e| format!("IOC 搜索失败: {}", e))?;
 
     for (i, result) in batch_results.iter().enumerate() {
@@ -213,12 +260,14 @@ pub async fn search_ioc_in_logs(
             if let Ok(output) = result {
                 let lines: Vec<&str> = output.output.lines().collect();
                 // 第一行是 grep -c 的结果（数字），后面是 grep -m 3 的匹配行
-                let count = lines.first()
+                let count = lines
+                    .first()
                     .and_then(|l| l.trim().parse::<usize>().ok())
                     .unwrap_or(0);
 
                 if count > 0 {
-                    let sample_lines: Vec<String> = lines.iter()
+                    let sample_lines: Vec<String> = lines
+                        .iter()
                         .skip(1)
                         .filter(|l| !l.trim().is_empty())
                         .take(3)
@@ -240,24 +289,35 @@ pub async fn search_ioc_in_logs(
     // 按匹配数降序
     results.sort_by(|a, b| b.count.cmp(&a.count));
 
-    Ok(log_analysis::IocSearchResult { results, total_matches })
+    Ok(log_analysis::IocSearchResult {
+        results,
+        total_matches,
+    })
 }
 
 /// 列出可用的日志文件
 #[tauri::command]
 pub async fn list_log_files(
+    session_id: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<log_analysis::LogFileInfo>, String> {
     let manager = &state.ssh_manager;
-    if !manager.is_connected() {
+    if !manager.is_session_connected(&session_id) {
         return Err("没有活动的 SSH 连接".to_string());
     }
 
     let command = log_analysis::generate_list_log_files_command();
-    let output = manager.execute_dashboard_command(&command)
+    let output = manager
+        .execute_dashboard_command_as_user_on_session_with_timeout(
+            &session_id,
+            &command,
+            None,
+            std::time::Duration::from_secs(60),
+        )
         .map_err(|e| format!("列出日志文件失败: {}", e))?;
 
-    let mut log_files: Vec<log_analysis::LogFileInfo> = output.output
+    let mut log_files: Vec<log_analysis::LogFileInfo> = output
+        .output
         .lines()
         .filter_map(|line| {
             let parts: Vec<&str> = line.split('|').collect();
@@ -266,7 +326,13 @@ pub async fn list_log_files(
                 let path = parts[1].to_string();
                 let name = path.split('/').last().unwrap_or(&path).to_string();
                 let modified = parts[2].to_string();
-                Some(log_analysis::LogFileInfo { path, name, size, modified, readable: true })
+                Some(log_analysis::LogFileInfo {
+                    path,
+                    name,
+                    size,
+                    modified,
+                    readable: true,
+                })
             } else {
                 None
             }
@@ -278,7 +344,9 @@ pub async fn list_log_files(
             log_files.push(log_analysis::LogFileInfo {
                 path: path.to_string(),
                 name: name.to_string(),
-                size: 0, modified: String::new(), readable: false,
+                size: 0,
+                modified: String::new(),
+                readable: false,
             });
         }
     }
@@ -290,22 +358,33 @@ pub async fn list_log_files(
 #[tauri::command]
 pub async fn get_log_file_info(
     log_path: String,
+    session_id: String,
     state: State<'_, AppState>,
 ) -> Result<log_analysis::LogFileInfo, String> {
     let manager = &state.ssh_manager;
-    if !manager.is_connected() {
+    if !manager.is_session_connected(&session_id) {
         return Err("没有活动的 SSH 连接".to_string());
     }
 
     let command = log_analysis::generate_log_file_info_command(&log_path);
-    let output = manager.execute_dashboard_command(&command)
+    let output = manager
+        .execute_dashboard_command_as_user_on_session_with_timeout(
+            &session_id,
+            &command,
+            None,
+            std::time::Duration::from_secs(60),
+        )
         .map_err(|e| format!("获取日志文件信息失败: {}", e))?;
 
     let name = log_path.split('/').last().unwrap_or(&log_path).to_string();
 
     if output.output.contains("readable:no") {
         return Ok(log_analysis::LogFileInfo {
-            path: log_path, name, size: 0, modified: String::new(), readable: false,
+            path: log_path,
+            name,
+            size: 0,
+            modified: String::new(),
+            readable: false,
         });
     }
 
@@ -320,6 +399,10 @@ pub async fn get_log_file_info(
     }
 
     Ok(log_analysis::LogFileInfo {
-        path: log_path, name, size, modified, readable: true,
+        path: log_path,
+        name,
+        size,
+        modified,
+        readable: true,
     })
 }

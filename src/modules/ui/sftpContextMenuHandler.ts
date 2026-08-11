@@ -4,10 +4,11 @@
  */
 
 import { sftpManager } from '../remote/sftpManager';
-import { showConfirm, showPrompt } from './confirmDialog';
+import { showConfirm, showPrompt } from './confirmDialog';
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH';
 
 import { logger } from '../core/logger';
-/** 正式包 drop 掉 console，诊断信息只有进 logger 才留得下来（设置→工具→诊断日志 可导出） */
+/** 正式包 drop 掉 console，诊断信息只有进 logger 才留得下来（状态栏「日志」按钮可导出） */
 const log = logger.module('SftpCtxMenu');
 
 
@@ -267,7 +268,7 @@ export function initSftpContextMenuHandler(): void {
       });
       if (savePath) {
         window.showNotification && window.showNotification(`开始下载: ${file.name}`, 'info');
-        await (window as any).__TAURI__.core.invoke('sftp_download', {
+        await invokeTargetBoundSSH('sftp_download', {
           remotePath: remotePath,
           localPath: savePath
         });
@@ -297,7 +298,7 @@ export function initSftpContextMenuHandler(): void {
     const oldPath = `${currentPath}/${file.name}`.replace(/\/+/g, '/');
     const newPath = `${currentPath}/${newName}`.replace(/\/+/g, '/');
     try {
-      await (window as any).__TAURI__.core.invoke('sftp_rename', {
+      await invokeTargetBoundSSH('sftp_rename', {
         oldPath: oldPath,
         newPath: newPath
       });
@@ -320,14 +321,14 @@ export function initSftpContextMenuHandler(): void {
       window.showNotification && window.showNotification(`正在删除: ${file.name}`, 'info');
       if (isDir) {
         const quotedPath = quoteShellArg(filePath);
-        const result = await (window as any).__TAURI__.core.invoke('ssh_execute_command_direct', {
+        const result = await invokeTargetBoundSSH('ssh_execute_command_direct', {
           command: `rm -rf -- ${quotedPath} 2>&1; test ! -e ${quotedPath}`
         }) as { output?: string; exit_code?: number | null };
         if (result?.exit_code !== 0) {
           throw new Error(result?.output || `远端删除命令返回退出码 ${result?.exit_code ?? 'unknown'}`);
         }
       } else {
-        await (window as any).__TAURI__.core.invoke('sftp_delete', {
+        await invokeTargetBoundSSH('sftp_delete', {
           path: filePath
         });
       }

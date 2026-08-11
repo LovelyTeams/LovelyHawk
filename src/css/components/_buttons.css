@@ -91,7 +91,7 @@
 .modern-btn[style*="--success-color"]:hover:not(:disabled) {
   filter: brightness(1.08);
   transform: translateY(-1px);
-  box-shadow: 0 8px 20px rgba(34, 197, 94, 0.22);
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--success-color) 24%, transparent);
 }
 
 .modern-btn.compact {
@@ -205,3 +205,27 @@
 
 /* Refresh button */
 .refresh-btn { padding: 8px 16px; font-size: 13px; gap: 6px; border-radius: 10px; }
+
+/* 危险幽灵按钮（抽屉/面板里的"结束进程""封禁"类操作）：
+   红 tint 底 + 红字，hover 加深——比实心红按钮轻，适合次级危险操作 */
+.modern-btn.danger-outline {
+  background: var(--sev-critical-bg);
+  color: var(--sev-critical-fg);
+  border: 1px solid var(--sev-critical-border);
+  box-shadow: none;
+}
+.modern-btn.danger-outline:hover {
+  background: var(--sev-critical-bg-hover);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--sev-critical-fg) 22%, transparent);
+}
+
+/* 警告幽灵按钮（"禁用 sudo""隔离"类） */
+.modern-btn.warn-outline {
+  background: var(--sev-high-bg);
+  color: var(--sev-high-fg);
+  border: 1px solid var(--sev-high-border);
+  box-shadow: none;
+}
+.modern-btn.warn-outline:hover {
+  background: var(--sev-high-bg-hover);
+}

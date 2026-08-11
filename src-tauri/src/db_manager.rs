@@ -1,20 +1,146 @@
 //! Database Manager — 通过 SSH 远程管理数据库
 //! 支持 MySQL/MariaDB, PostgreSQL, Redis, MongoDB, DM, KingBase, etc.
 
+use crate::ssh_manager_russh::{SSHManagerRussh, TerminalOutput};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use crate::ssh_manager_russh::SSHManagerRussh;
+
+pub trait DbCommandRunner {
+    fn execute_command(&self, command: &str) -> Result<TerminalOutput, String>;
+    fn execute_batch_commands(
+        &self,
+        commands: &[String],
+    ) -> Result<Vec<Result<TerminalOutput, String>>, String>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::VecDeque;
+    use std::sync::Mutex;
+
+    struct FakeRunner {
+        outputs: Mutex<VecDeque<TerminalOutput>>,
+    }
+
+    impl FakeRunner {
+        fn new(outputs: Vec<TerminalOutput>) -> Self {
+            Self {
+                outputs: Mutex::new(outputs.into()),
+            }
+        }
+    }
+
+    impl DbCommandRunner for FakeRunner {
+        fn execute_command(&self, _command: &str) -> Result<TerminalOutput, String> {
+            self.outputs
+                .lock()
+                .expect("fake runner mutex poisoned")
+                .pop_front()
+                .ok_or_else(|| "missing fake output".to_string())
+        }
+
+        fn execute_batch_commands(
+            &self,
+            _commands: &[String],
+        ) -> Result<Vec<Result<TerminalOutput, String>>, String> {
+            Ok(Vec::new())
+        }
+    }
+
+    fn mysql_connection() -> DbConnection {
+        DbConnection {
+            db_type: "mysql".to_string(),
+            host: "127.0.0.1".to_string(),
+            port: 3306,
+            username: "root".to_string(),
+            password: String::new(),
+            database: Some("test".to_string()),
+        }
+    }
+
+    #[test]
+    fn execute_sql_reports_non_zero_exit_as_error() {
+        let runner = FakeRunner::new(vec![TerminalOutput::new("mysql", "access denied", Some(2))]);
+        let result = execute_sql(&runner, "mysql", &mysql_connection(), "SELECT 1")
+            .expect("result should remain serializable for the UI");
+
+        assert_eq!(result.exit_code, Some(2));
+        assert!(!result.timed_out);
+        assert!(result.error.as_deref().unwrap_or_default().contains("非 0"));
+    }
+
+    #[test]
+    fn service_control_requires_state_readback() {
+        let runner = FakeRunner::new(vec![
+            TerminalOutput::new("systemctl start", "", Some(0)),
+            TerminalOutput::new("systemctl is-active", "inactive\nunknown", Some(3)),
+        ]);
+        let result = service_control(&runner, "mysql", "start").expect("service result");
+
+        assert!(!result.success);
+        assert!(!result.verified);
+        assert_eq!(result.exit_code, Some(0));
+    }
+
+    #[test]
+    fn service_stop_accepts_verified_inactive_state() {
+        let runner = FakeRunner::new(vec![
+            TerminalOutput::new("systemctl stop", "", Some(0)),
+            TerminalOutput::new("systemctl is-active", "inactive\nunknown", Some(3)),
+        ]);
+        let result = service_control(&runner, "mysql", "stop").expect("service result");
+
+        assert!(result.success);
+        assert!(result.verified);
+        assert_eq!(result.verify_output, "inactive\nunknown");
+    }
+}
+
+pub struct SessionDbRunner<'a> {
+    manager: &'a SSHManagerRussh,
+    session_id: &'a str,
+}
+
+impl<'a> SessionDbRunner<'a> {
+    pub fn new(manager: &'a SSHManagerRussh, session_id: &'a str) -> Self {
+        Self {
+            manager,
+            session_id,
+        }
+    }
+}
+
+impl DbCommandRunner for SessionDbRunner<'_> {
+    fn execute_command(&self, command: &str) -> Result<TerminalOutput, String> {
+        self.manager
+            .execute_dashboard_command_as_user_on_session_with_timeout(
+                self.session_id,
+                command,
+                None,
+                std::time::Duration::from_secs(120),
+            )
+    }
+
+    fn execute_batch_commands(
+        &self,
+        commands: &[String],
+    ) -> Result<Vec<Result<TerminalOutput, String>>, String> {
+        self.manager
+            .execute_batch_commands_on_session(self.session_id, commands)
+    }
+}
 
 // ==================== Types ====================
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DatabaseInfo {
-    pub db_type: String,        // mysql, postgresql, redis, mongodb, dm, kingbase, etc.
-    pub name: String,           // Display name
-    pub version: String,        // Version string
-    pub status: String,         // running, stopped, unknown
-    pub port: u16,              // Default port
-    pub data_dir: String,       // Data directory path
+    pub db_type: String,  // mysql, postgresql, redis, mongodb, dm, kingbase, etc.
+    pub name: String,     // Display name
+    pub version: String,  // Version string
+    pub status: String,   // running, stopped, unknown
+    pub port: u16,        // Default port
+    pub data_dir: String, // Data directory path
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,6 +161,20 @@ pub struct SqlResult {
     pub affected_rows: Option<usize>,
     pub execution_time_ms: u64,
     pub error: Option<String>,
+    pub exit_code: Option<i32>,
+    pub timed_out: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbServiceControlResult {
+    pub success: bool,
+    pub command: String,
+    pub output: String,
+    pub exit_code: Option<i32>,
+    pub timed_out: bool,
+    pub verify_output: String,
+    pub verify_command: String,
+    pub verified: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,7 +229,10 @@ fn validate_db_field(label: &str, value: &str) -> Result<(), String> {
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | ':' | '@'));
     if !safe {
-        return Err(format!("{}包含非法字符(仅允许字母数字及 . _ - : @):{}", label, value));
+        return Err(format!(
+            "{}包含非法字符(仅允许字母数字及 . _ - : @):{}",
+            label, value
+        ));
     }
     if value.starts_with('-') {
         return Err(format!("{}不能以 - 开头:{}", label, value));
@@ -113,7 +256,7 @@ fn validate_conn_fields(conn: &DbConnection, database: &str) -> Result<(), Strin
 // ==================== detect_databases ====================
 
 /// Detect installed databases on the remote server via SSH.
-pub fn detect_databases(ssh: &SSHManagerRussh) -> Result<Vec<DatabaseInfo>, String> {
+pub fn detect_databases(ssh: &impl DbCommandRunner) -> Result<Vec<DatabaseInfo>, String> {
     let commands: Vec<String> = vec![
         // MySQL / MariaDB
         "systemctl is-active mysql mysqld mariadb 2>/dev/null | head -1".to_string(),
@@ -129,7 +272,8 @@ pub fn detect_databases(ssh: &SSHManagerRussh) -> Result<Vec<DatabaseInfo>, Stri
         "mongod --version 2>/dev/null | head -1 || echo '__NOT_INSTALLED__'".to_string(),
         // DM (达梦)
         "systemctl is-active DmServiceDMSERVER 2>/dev/null | head -1".to_string(),
-        "/opt/dmdbms/bin/dm_svc_conf print_version 2>/dev/null || echo '__NOT_INSTALLED__'".to_string(),
+        "/opt/dmdbms/bin/dm_svc_conf print_version 2>/dev/null || echo '__NOT_INSTALLED__'"
+            .to_string(),
         // KingBase
         "systemctl is-active kingbase 2>/dev/null | head -1".to_string(),
         "ksql --version 2>/dev/null || echo '__NOT_INSTALLED__'".to_string(),
@@ -151,8 +295,16 @@ pub fn detect_databases(ssh: &SSHManagerRussh) -> Result<Vec<DatabaseInfo>, Stri
     let mysql_status = get_output(0);
     let mysql_version = get_output(1);
     if !mysql_version.contains("__NOT_INSTALLED__") && !mysql_version.is_empty() {
-        let status = if mysql_status.contains("active") { "running" } else { "stopped" };
-        let name = if mysql_version.to_lowercase().contains("mariadb") { "MariaDB" } else { "MySQL" };
+        let status = if mysql_status.contains("active") {
+            "running"
+        } else {
+            "stopped"
+        };
+        let name = if mysql_version.to_lowercase().contains("mariadb") {
+            "MariaDB"
+        } else {
+            "MySQL"
+        };
         databases.push(DatabaseInfo {
             db_type: "mysql".to_string(),
             name: name.to_string(),
@@ -167,7 +319,11 @@ pub fn detect_databases(ssh: &SSHManagerRussh) -> Result<Vec<DatabaseInfo>, Stri
     let pg_status = get_output(2);
     let pg_version = get_output(3);
     if !pg_version.contains("__NOT_INSTALLED__") && !pg_version.is_empty() {
-        let status = if pg_status.contains("active") { "running" } else { "stopped" };
+        let status = if pg_status.contains("active") {
+            "running"
+        } else {
+            "stopped"
+        };
         databases.push(DatabaseInfo {
             db_type: "postgresql".to_string(),
             name: "PostgreSQL".to_string(),
@@ -182,7 +338,11 @@ pub fn detect_databases(ssh: &SSHManagerRussh) -> Result<Vec<DatabaseInfo>, Stri
     let redis_status = get_output(4);
     let redis_version = get_output(5);
     if !redis_version.contains("__NOT_INSTALLED__") && !redis_version.is_empty() {
-        let status = if redis_status.contains("active") { "running" } else { "stopped" };
+        let status = if redis_status.contains("active") {
+            "running"
+        } else {
+            "stopped"
+        };
         databases.push(DatabaseInfo {
             db_type: "redis".to_string(),
             name: "Redis".to_string(),
@@ -197,7 +357,11 @@ pub fn detect_databases(ssh: &SSHManagerRussh) -> Result<Vec<DatabaseInfo>, Stri
     let mongo_status = get_output(6);
     let mongo_version = get_output(7);
     if !mongo_version.contains("__NOT_INSTALLED__") && !mongo_version.is_empty() {
-        let status = if mongo_status.contains("active") { "running" } else { "stopped" };
+        let status = if mongo_status.contains("active") {
+            "running"
+        } else {
+            "stopped"
+        };
         databases.push(DatabaseInfo {
             db_type: "mongodb".to_string(),
             name: "MongoDB".to_string(),
@@ -212,7 +376,11 @@ pub fn detect_databases(ssh: &SSHManagerRussh) -> Result<Vec<DatabaseInfo>, Stri
     let dm_status = get_output(8);
     let dm_version = get_output(9);
     if !dm_version.contains("__NOT_INSTALLED__") && !dm_version.is_empty() {
-        let status = if dm_status.contains("active") { "running" } else { "stopped" };
+        let status = if dm_status.contains("active") {
+            "running"
+        } else {
+            "stopped"
+        };
         databases.push(DatabaseInfo {
             db_type: "dm".to_string(),
             name: "DM (达梦)".to_string(),
@@ -227,7 +395,11 @@ pub fn detect_databases(ssh: &SSHManagerRussh) -> Result<Vec<DatabaseInfo>, Stri
     let kb_status = get_output(10);
     let kb_version = get_output(11);
     if !kb_version.contains("__NOT_INSTALLED__") && !kb_version.is_empty() {
-        let status = if kb_status.contains("active") { "running" } else { "stopped" };
+        let status = if kb_status.contains("active") {
+            "running"
+        } else {
+            "stopped"
+        };
         databases.push(DatabaseInfo {
             db_type: "kingbase".to_string(),
             name: "KingBase".to_string(),
@@ -245,7 +417,7 @@ pub fn detect_databases(ssh: &SSHManagerRussh) -> Result<Vec<DatabaseInfo>, Stri
 
 /// Execute a SQL statement (or command) against the specified database type via its CLI.
 pub fn execute_sql(
-    ssh: &SSHManagerRussh,
+    ssh: &impl DbCommandRunner,
     db_type: &str,
     conn: &DbConnection,
     sql: &str,
@@ -300,7 +472,11 @@ pub fn execute_sql(
             let auth = if conn.username.is_empty() {
                 String::new()
             } else {
-                format!("-u {user} -p '{pass}' --authenticationDatabase admin", user = conn.username, pass = escaped_pass)
+                format!(
+                    "-u {user} -p '{pass}' --authenticationDatabase admin",
+                    user = conn.username,
+                    pass = escaped_pass
+                )
             };
             // 用与密码一致的单引号转义(原先的 replace('\'', "\\'") 在单引号内是错误转义,
             // 既会让含单引号的合法 JS 断裂,也留有注入面)
@@ -321,6 +497,33 @@ pub fn execute_sql(
     let elapsed = start.elapsed().as_millis() as u64;
     let raw = output.output.trim().to_string();
 
+    if !output.is_success() {
+        let reason = if output.timed_out {
+            "数据库命令执行超时".to_string()
+        } else {
+            format!(
+                "数据库命令退出状态非 0: {}",
+                output
+                    .exit_code
+                    .map_or_else(|| "unknown".to_string(), |code| code.to_string())
+            )
+        };
+        return Ok(SqlResult {
+            columns: vec![],
+            rows: vec![],
+            row_count: 0,
+            affected_rows: None,
+            execution_time_ms: elapsed,
+            error: Some(if raw.is_empty() {
+                reason
+            } else {
+                format!("{}\n{}", reason, raw)
+            }),
+            exit_code: output.exit_code,
+            timed_out: output.timed_out,
+        });
+    }
+
     // Check for error indicators
     if raw.starts_with("ERROR") || raw.contains("error:") || raw.contains("FATAL:") {
         return Ok(SqlResult {
@@ -330,6 +533,8 @@ pub fn execute_sql(
             affected_rows: None,
             execution_time_ms: elapsed,
             error: Some(raw),
+            exit_code: output.exit_code,
+            timed_out: output.timed_out,
         });
     }
 
@@ -350,6 +555,8 @@ pub fn execute_sql(
         affected_rows: None,
         execution_time_ms: elapsed,
         error: None,
+        exit_code: output.exit_code,
+        timed_out: output.timed_out,
     })
 }
 
@@ -381,9 +588,7 @@ fn parse_pg_output(raw: &str) -> (Vec<String>, Vec<Vec<String>>) {
 
     // -t omits headers; we return generic column names
     let first_cols: Vec<&str> = lines[0].split('|').collect();
-    let columns: Vec<String> = (0..first_cols.len())
-        .map(|i| format!("col{}", i))
-        .collect();
+    let columns: Vec<String> = (0..first_cols.len()).map(|i| format!("col{}", i)).collect();
     let rows: Vec<Vec<String>> = lines
         .iter()
         .map(|line| line.split('|').map(|s| s.trim().to_string()).collect())
@@ -418,7 +623,7 @@ fn parse_mongo_output(raw: &str) -> (Vec<String>, Vec<Vec<String>>) {
 
 /// List databases on the remote server.
 pub fn list_databases(
-    ssh: &SSHManagerRussh,
+    ssh: &impl DbCommandRunner,
     db_type: &str,
     conn: &DbConnection,
 ) -> Result<Vec<String>, String> {
@@ -444,7 +649,12 @@ pub fn list_databases(
             return Ok(dbs);
         }
         "mongodb" => {
-            let result = execute_sql(ssh, db_type, conn, "db.adminCommand({listDatabases:1}).databases.map(d=>d.name).join('\\n')")?;
+            let result = execute_sql(
+                ssh,
+                db_type,
+                conn,
+                "db.adminCommand({listDatabases:1}).databases.map(d=>d.name).join('\\n')",
+            )?;
             let mut dbs = Vec::new();
             for row in &result.rows {
                 if let Some(val) = row.first() {
@@ -478,7 +688,7 @@ pub fn list_databases(
 
 /// List tables (or collections) in the given database.
 pub fn list_tables(
-    ssh: &SSHManagerRussh,
+    ssh: &impl DbCommandRunner,
     db_type: &str,
     conn: &DbConnection,
     database: &str,
@@ -529,7 +739,12 @@ pub fn list_tables(
         "mongodb" => {
             let mut mg_conn = conn.clone();
             mg_conn.database = Some(database.to_string());
-            let result = execute_sql(ssh, "mongodb", &mg_conn, "db.getCollectionNames().join('\\n')")?;
+            let result = execute_sql(
+                ssh,
+                "mongodb",
+                &mg_conn,
+                "db.getCollectionNames().join('\\n')",
+            )?;
             if let Some(ref err) = result.error {
                 return Err(err.clone());
             }
@@ -559,7 +774,7 @@ pub fn list_tables(
 
 /// List columns (schema) for a specific table.
 pub fn list_columns(
-    ssh: &SSHManagerRussh,
+    ssh: &impl DbCommandRunner,
     db_type: &str,
     conn: &DbConnection,
     database: &str,
@@ -636,7 +851,7 @@ pub fn list_columns(
 
 /// List database users.
 pub fn list_users(
-    ssh: &SSHManagerRussh,
+    ssh: &impl DbCommandRunner,
     db_type: &str,
     conn: &DbConnection,
 ) -> Result<Vec<DbUser>, String> {
@@ -659,7 +874,8 @@ pub fn list_users(
             Ok(users)
         }
         "postgresql" => {
-            let sql = "SELECT usename, CASE WHEN usesuper THEN 'SUPERUSER' ELSE 'USER' END FROM pg_user";
+            let sql =
+                "SELECT usename, CASE WHEN usesuper THEN 'SUPERUSER' ELSE 'USER' END FROM pg_user";
             let result = execute_sql(ssh, db_type, conn, sql)?;
             if let Some(ref err) = result.error {
                 return Err(err.clone());
@@ -729,12 +945,15 @@ pub fn list_users(
 
 /// Start / stop / restart / status a database service.
 pub fn service_control(
-    ssh: &SSHManagerRussh,
+    ssh: &impl DbCommandRunner,
     db_type: &str,
     action: &str,
-) -> Result<String, String> {
+) -> Result<DbServiceControlResult, String> {
     if !["start", "stop", "restart", "status"].contains(&action) {
-        return Err(format!("不支持的操作: {}，仅支持 start/stop/restart/status", action));
+        return Err(format!(
+            "不支持的操作: {}，仅支持 start/stop/restart/status",
+            action
+        ));
     }
 
     let cmd = match db_type {
@@ -761,37 +980,46 @@ pub fn service_control(
 
     let output = ssh.execute_command(&cmd)?;
     let result = output.output.trim().to_string();
+    let status_cmd = match db_type {
+        "mysql" => "systemctl is-active mysql mysqld mariadb 2>/dev/null",
+        "postgresql" => "systemctl is-active postgresql 2>/dev/null",
+        "redis" => "systemctl is-active redis redis-server 2>/dev/null",
+        "mongodb" => "systemctl is-active mongod mongodb 2>/dev/null",
+        "dm" => "systemctl is-active DmServiceDMSERVER 2>/dev/null",
+        "kingbase" => "systemctl is-active kingbase 2>/dev/null",
+        _ => unreachable!(),
+    };
+    let status_output = ssh.execute_command(status_cmd)?;
+    let verify_output = status_output.output.trim().to_string();
+    let any_active = verify_output.lines().any(|line| line.trim() == "active");
+    let verified = match action {
+        "start" | "restart" | "status" => any_active,
+        "stop" => !any_active,
+        _ => false,
+    };
+    let success = output.is_success() && verified;
 
-    // For status action, also check with is-active
-    if action == "status" {
-        let status_cmd = match db_type {
-            "mysql" => "systemctl is-active mysql mysqld mariadb 2>/dev/null | head -1",
-            "postgresql" => "systemctl is-active postgresql 2>/dev/null",
-            "redis" => "systemctl is-active redis redis-server 2>/dev/null | head -1",
-            "mongodb" => "systemctl is-active mongod mongodb 2>/dev/null | head -1",
-            "dm" => "systemctl is-active DmServiceDMSERVER 2>/dev/null",
-            "kingbase" => "systemctl is-active kingbase 2>/dev/null",
-            _ => "",
-        };
-        if !status_cmd.is_empty() {
-            let status_output = ssh.execute_command(status_cmd)?;
-            let active_status = status_output.output.trim().to_string();
-            return Ok(format!("{}\n状态: {}", result, active_status));
-        }
-    }
-
-    if result.is_empty() {
-        Ok(format!("{}操作 {} 执行成功", db_type, action))
-    } else {
-        Ok(result)
-    }
+    Ok(DbServiceControlResult {
+        success,
+        command: cmd,
+        output: if result.is_empty() {
+            format!("{}操作 {} 已执行", db_type, action)
+        } else {
+            result
+        },
+        exit_code: output.exit_code,
+        timed_out: output.timed_out,
+        verify_output,
+        verify_command: status_cmd.to_string(),
+        verified,
+    })
 }
 
 // ==================== backup_database ====================
 
 /// Backup a database to /tmp on the remote server.
 pub fn backup_database(
-    ssh: &SSHManagerRussh,
+    ssh: &impl DbCommandRunner,
     db_type: &str,
     conn: &DbConnection,
     database: &str,
@@ -844,7 +1072,11 @@ pub fn backup_database(
             let auth = if conn.username.is_empty() {
                 String::new()
             } else {
-                format!("-u {user} -p '{pass}' --authenticationDatabase admin", user = conn.username, pass = escaped_pass)
+                format!(
+                    "-u {user} -p '{pass}' --authenticationDatabase admin",
+                    user = conn.username,
+                    pass = escaped_pass
+                )
             };
             format!(
                 "mongodump --host {host} --port {port} {auth} --db {db} --out /tmp/backup_{ts}/ 2>&1 && echo 'OK:/tmp/backup_{ts}/'",
@@ -876,7 +1108,7 @@ pub fn backup_database(
 
 /// Get runtime statistics for a database.
 pub fn get_db_stats(
-    ssh: &SSHManagerRussh,
+    ssh: &impl DbCommandRunner,
     db_type: &str,
     conn: &DbConnection,
 ) -> Result<DbStats, String> {
@@ -927,7 +1159,9 @@ pub fn get_db_stats(
                             "Connections" => connections = val.parse().unwrap_or(0),
                             "Threads_connected" => active_connections = val.parse().unwrap_or(0),
                             "Slow_queries" => slow_queries = val.parse().unwrap_or(0),
-                            _ => { extra.insert(key.to_string(), val.to_string()); }
+                            _ => {
+                                extra.insert(key.to_string(), val.to_string());
+                            }
                         }
                     }
                 }
@@ -995,7 +1229,13 @@ pub fn get_db_stats(
         }
         "redis" => {
             let result = execute_sql(ssh, "redis", conn, "INFO")?;
-            let raw = result.rows.iter().filter_map(|r| r.first()).cloned().collect::<Vec<String>>().join("\n");
+            let raw = result
+                .rows
+                .iter()
+                .filter_map(|r| r.first())
+                .cloned()
+                .collect::<Vec<String>>()
+                .join("\n");
 
             let mut extra = HashMap::new();
             let mut uptime = String::new();
@@ -1017,7 +1257,9 @@ pub fn get_db_stats(
                             connections = val.parse().unwrap_or(0);
                             active_connections = connections;
                         }
-                        "used_memory_human" => { extra.insert("used_memory".to_string(), val.to_string()); }
+                        "used_memory_human" => {
+                            extra.insert("used_memory".to_string(), val.to_string());
+                        }
                         _ => {}
                     }
                 }
@@ -1027,7 +1269,10 @@ pub fn get_db_stats(
                 uptime,
                 connections,
                 active_connections,
-                db_size_total: extra.get("used_memory").cloned().unwrap_or_else(|| "unknown".to_string()),
+                db_size_total: extra
+                    .get("used_memory")
+                    .cloned()
+                    .unwrap_or_else(|| "unknown".to_string()),
                 slow_queries: 0,
                 extra,
             })
@@ -1040,7 +1285,13 @@ pub fn get_db_stats(
                 "var s=db.serverStatus(); print(JSON.stringify({uptime:s.uptime,current:s.connections.current,available:s.connections.available,totalCreated:s.connections.totalCreated}))",
             )?;
 
-            let raw = result.rows.iter().filter_map(|r| r.first()).cloned().collect::<Vec<String>>().join("");
+            let raw = result
+                .rows
+                .iter()
+                .filter_map(|r| r.first())
+                .cloned()
+                .collect::<Vec<String>>()
+                .join("");
             // Try to parse JSON
             let mut uptime = String::new();
             let mut connections: u64 = 0;

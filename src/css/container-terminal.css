@@ -49,7 +49,7 @@ body.container-terminal-window {
 
 .terminal-title-icon {
   width: 28px; height: 28px; border-radius: 6px;
-  background: rgba(88, 166, 255, 0.12);
+  background: color-mix(in srgb, var(--term-accent) 12%, transparent);
   display: flex; align-items: center; justify-content: center;
   font-size: 14px;
 }
@@ -62,7 +62,7 @@ body.container-terminal-window {
 
 .terminal-title-badge {
   font-size: 10px; padding: 2px 6px; border-radius: 4px;
-  background: rgba(63, 185, 80, 0.15); color: var(--term-success);
+  background: color-mix(in srgb, var(--term-success) 15%, transparent); color: var(--term-success);
   font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
 }
 
@@ -78,7 +78,7 @@ body.container-terminal-window {
   cursor: pointer; transition: border-color 0.2s;
 }
 .shell-selector:hover { border-color: var(--term-accent); }
-.shell-selector:focus { outline: none; border-color: var(--term-accent); box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.15); }
+.shell-selector:focus { outline: none; border-color: var(--term-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--term-accent) 15%, transparent); }
 
 .terminal-btn {
   border: 1px solid var(--term-border); color: var(--term-text);
@@ -88,11 +88,11 @@ body.container-terminal-window {
 }
 .terminal-btn:hover { background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.15); }
 .terminal-btn.primary {
-  background: var(--term-accent); border-color: var(--term-accent); color: #fff;
+  background: var(--term-accent); border-color: var(--term-accent); color: var(--accent-contrast);
 }
 .terminal-btn.primary:hover { background: #4c9aed; }
-.terminal-btn.danger { border-color: rgba(248, 81, 73, 0.4); color: var(--term-error); }
-.terminal-btn.danger:hover { background: rgba(248, 81, 73, 0.12); }
+.terminal-btn.danger { border-color: color-mix(in srgb, var(--term-error) 40%, transparent); color: var(--term-error); }
+.terminal-btn.danger:hover { background: color-mix(in srgb, var(--term-error) 12%, transparent); }
 
 /* ─── Command Input ─── */
 .terminal-input-section {
@@ -116,7 +116,7 @@ body.container-terminal-window {
 }
 .terminal-input:focus {
   outline: none; border-color: var(--term-accent);
-  box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.1);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--term-accent) 10%, transparent);
 }
 .terminal-input::placeholder { color: var(--term-text-dim); opacity: 0.5; }
 
@@ -129,7 +129,7 @@ body.container-terminal-window {
 .command-line {
   margin: 12px 0 4px 0; display: flex; align-items: baseline; gap: 8px;
   padding: 6px 10px; border-radius: 4px;
-  background: rgba(88, 166, 255, 0.04);
+  background: color-mix(in srgb, var(--term-accent) 4%, transparent);
   border-left: 3px solid var(--term-accent);
 }
 .command-line .prompt-symbol { color: var(--term-success); font-weight: 700; }
@@ -149,7 +149,7 @@ body.container-terminal-window {
 .command-error {
   color: var(--term-error); margin: 4px 0 8px 0; font-size: 12px;
   padding: 6px 10px; border-radius: 4px;
-  background: rgba(248, 81, 73, 0.06);
+  background: color-mix(in srgb, var(--term-error) 6%, transparent);
   border-left: 3px solid var(--term-error);
 }
 
@@ -239,6 +239,6 @@ body.container-terminal-window {
 .status-dot {
   width: 6px; height: 6px; border-radius: 50%;
   background: var(--term-success);
-  box-shadow: 0 0 6px rgba(63, 185, 80, 0.4);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--term-success) 40%, transparent);
 }
-.status-dot.disconnected { background: var(--term-error); box-shadow: 0 0 6px rgba(248, 81, 73, 0.4); }
+.status-dot.disconnected { background: var(--term-error); box-shadow: 0 0 6px color-mix(in srgb, var(--term-error) 40%, transparent); }

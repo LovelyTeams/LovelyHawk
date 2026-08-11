@@ -6,7 +6,7 @@
  * 反弹Shell / 伪装 等），供进程表格与统计 chips 复用。
  */
 
-import { invoke } from '@tauri-apps/api/core';
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH';
 import { showConfirm } from './confirmDialog';
 import { escapeHtml as esc } from '../core/htmlEscape';
 
@@ -230,6 +230,11 @@ function footActionsHTML(pid: string): string {
 }
 
 /** 在右侧常驻详情侧栏中展示某个进程的详情 */
+/** 详情侧栏展开状态（会话内记忆；默认收缩，点击进程行才展开，重渲后保持） */
+let procSideExpanded = false;
+/** 供渲染器在重渲时恢复展开态 */
+export function isProcSideExpanded(): boolean { return procSideExpanded; }
+
 export function openProcessDrawer(pid: string): void {
   const cache = (window as any).systemInfoCache;
   const procs = cache?.detailedInfo?.processes || [];
@@ -251,11 +256,11 @@ export function openProcessDrawer(pid: string): void {
   const foot = document.getElementById('proc-side-foot');
   if (foot) foot.innerHTML = footActionsHTML(String(pid));
 
-  // 选中进程时自动展开侧栏（若用户之前收起了）
+  // 选中进程时自动展开侧栏（默认收缩，点击才展开；会话内记忆）
+  procSideExpanded = true;
   const side = document.getElementById('proc-side');
   if (side?.classList.contains('collapsed')) {
     side.classList.remove('collapsed');
-    try { localStorage.setItem('proc-side-collapsed', 'false'); } catch { /* ignore */ }
   }
 
   void fetchExtended(String(pid));
@@ -266,7 +271,7 @@ function toggleProcSide(): void {
   const side = document.getElementById('proc-side');
   if (!side) return;
   const collapsed = side.classList.toggle('collapsed');
-  try { localStorage.setItem('proc-side-collapsed', collapsed ? 'true' : 'false'); } catch { /* ignore */ }
+  procSideExpanded = !collapsed;
 }
 
 /** 异步拉取扩展信息（父进程名 / 优先级 / cwd / pgid / sid / 线程 / exe） */
@@ -283,7 +288,7 @@ async function fetchExtended(pid: string): Promise<void> {
     `echo "CWD:$(readlink /proc/${p}/cwd 2>/dev/null)";` +
     `echo "EXE:$(readlink /proc/${p}/exe 2>/dev/null)"`;
   try {
-    const res = (await invoke('ssh_execute_dashboard_command_direct', { command: cmd })) as { output: string };
+    const res = (await invokeTargetBoundSSH('ssh_execute_dashboard_command_direct', { command: cmd })) as { output: string };
     const out = res?.output || '';
     const get = (k: string) => (out.match(new RegExp(`^${k}:(.*)$`, 'm'))?.[1] || '').trim();
     const set = (id: string, v: string) => { const el = document.getElementById(id); if (el && v) el.textContent = v; };
@@ -319,6 +324,8 @@ async function copyText(text: string): Promise<void> {
 
 function registerHandlers(): void {
   const w = window as any;
+  // 旧键迁移：进程详情侧栏改为「默认收缩 + 会话内记忆」，不再持久化展开状态
+  try { localStorage.removeItem('proc-side-collapsed'); } catch { /* ignore */ }
   w.toggleProcSide = toggleProcSide;
   w.openProcessDrawer = openProcessDrawer;
 
@@ -364,7 +371,7 @@ function registerHandlers(): void {
     });
     if (!ok) return;
     try {
-      await invoke('ssh_execute_dashboard_command_direct', { command: `kill -9 ${p} 2>&1` });
+      await invokeTargetBoundSSH('ssh_execute_dashboard_command_direct', { command: `kill -9 ${p} 2>&1` });
       notify(`已发送终止信号到进程 ${p}`, 'success');
       const body = document.getElementById('proc-side-body');
       if (body) body.innerHTML = '<div class="proc-side-empty"><p>进程已终止</p></div>';

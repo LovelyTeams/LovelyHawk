@@ -11,7 +11,7 @@
   border-radius: 50%;
   background: var(--sev-warn-fg);
 }
-.sftp-loc-dot.high { background: var(--sev-critical-border-strong, #ef4444); }
+.sftp-loc-dot.high { background: var(--sev-critical-border-strong); }
 .sftp-loc-dot.warn { background: var(--sev-warn-fg); }
 
 /* ──── 头部 + 路径栏 ────
@@ -23,30 +23,33 @@
 .sftp-title-wrap { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
 .sftp-title { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; color: var(--text-primary); white-space: nowrap; }
 
-/* 计数 chips —— 与 .sys-chip 同源的视觉语言 */
+/* 计数 chips —— 卡片语言（1px 边框 + 10px 圆角 + bg-secondary），
+   但位于标题行，尺寸按标题旁徽标而非统计卡取值。 */
 .sftp-chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 9px;
-  border-radius: 999px;
-  font-size: 12px;
-  line-height: 1.7;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   background: var(--bg-secondary);
-  color: var(--text-secondary);
+  color: var(--text-primary);
   border: 1px solid var(--border-color);
+  box-shadow: var(--card-shadow);
 }
 .sftp-chip[hidden] { display: none; }
 .sftp-chip-risk {
   background: var(--sev-critical-bg);
   color: var(--sev-critical-fg);
   border-color: var(--sev-critical-border);
-  font-weight: 600;
 }
-.sftp-chip-risk svg { width: 13px; height: 13px; }
+.sftp-chip-risk svg { width: 14px; height: 14px; }
 .sftp-chip-conn::before { content: '●'; font-size: 9px; }
-.sftp-chip-conn.is-on { color: var(--sev-success-fg); border-color: var(--sev-success-border, var(--border-color)); }
+.sftp-chip-conn.is-on { color: var(--sev-success-fg); border-color: var(--sev-success-border); }
 .sftp-chip-conn.is-off { color: var(--text-secondary); opacity: 0.75; }
 
 .sftp-head-actions { display: flex; align-items: center; gap: 8px; justify-content: flex-end; flex-shrink: 0; }
@@ -181,10 +184,11 @@
   border-radius: 6px;
   font-size: 11px;
   font-weight: 600;
+  border: 1px solid transparent;
 }
-.sftp-risk-tag.high { background: var(--sev-critical-bg); color: var(--sev-critical-fg); }
-.sftp-risk-tag.warn { background: var(--sev-warn-bg); color: var(--sev-warn-fg); }
-.sftp-risk-tag.info { background: var(--surface-tertiary, var(--bg-tertiary)); color: var(--text-secondary); }
+.sftp-risk-tag.high { background: var(--sev-critical-bg); color: var(--sev-critical-fg); border-color: var(--sev-critical-border); }
+.sftp-risk-tag.warn { background: var(--sev-warn-bg); color: var(--sev-warn-fg); border-color: var(--sev-warn-border); }
+.sftp-risk-tag.info { background: var(--sev-info-bg); color: var(--sev-info-fg); border-color: var(--sev-info-border); }
 .sftp-risk-none { color: var(--text-secondary); opacity: 0.5; }
 
 /* ──── 文件详情侧栏（常驻可收缩，复用 .pd-* 样式）──── */
@@ -274,8 +278,8 @@
   border-radius: 7px;
   font-size: 11px;
   font-weight: 600;
-  background: var(--sev-info-bg-hover, rgba(99,102,241,0.16));
-  color: var(--sev-info-fg, #4338ca);
+  background: var(--sev-info-bg-hover);
+  color: var(--sev-info-fg);
 }
 .sftp-detail-actions { display: flex; gap: 8px; margin-top: 18px; }
 
@@ -322,6 +326,15 @@
   overflow: hidden;
   box-shadow: var(--shadow-sm);
   transition: all 0.3s ease;
+}
+
+/* SFTP 独立窗口：内容区贴满视口，页面容器去圆角/边框 */
+.sftp-window, .sftp-window #app { height: 100vh; overflow: hidden; }
+.sftp-window-content { height: calc(100vh - 45px); }
+.sftp-window-content .sftp-page-container {
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
 }
 
 /* Header — removed, merged into toolbar */
@@ -400,7 +413,7 @@
 }
 
 .quick-jump-btn.risk-highlight:hover {
-  background: rgba(239, 68, 68, 0.1);
+  background: var(--sev-critical-bg);
   opacity: 1;
 }
 
@@ -634,11 +647,11 @@
 }
 
 .risk-badge-critical {
-  color: #ef4444;
+  color: var(--sev-critical-fg);
 }
 
 .risk-badge-warning {
-  color: #f59e0b;
+  color: var(--sev-warn-fg);
 }
 
 .risk-badge-info {
@@ -657,7 +670,7 @@
 }
 
 .owner-cell.owner-root {
-  color: #ef4444;
+  color: var(--sev-critical-fg);
   font-weight: 600;
 }
 

@@ -3,6 +3,7 @@
  */
 
 import * as IconPark from '@icon-park/svg'
+import { shq } from '../core/shellEscape'
 import { BaseContextMenu, type MenuAction } from './contextMenu/baseContextMenu'
 
 export class StartupContextMenu extends BaseContextMenu {
@@ -256,6 +257,9 @@ export class StartupContextMenu extends BaseContextMenu {
     if (!this.currentStartup) return null
 
     const { name, type, path, command } = this.currentStartup
+    if (type === 'systemd' && !/^[A-Za-z0-9_.@:-]{1,256}$/.test(name)) return null
+    const quotedName = shq(name)
+    const enabledState = `if systemctl is-enabled --quiet ${quotedName}; then echo enabled; else echo disabled; fi`
 
     const actions: Record<string, MenuAction> = {
       'details': {
@@ -275,24 +279,40 @@ export class StartupContextMenu extends BaseContextMenu {
       },
       'enable': {
         command: type === 'systemd'
-          ? `systemctl enable ${name} 2>&1 && echo "已启用自启动" || echo "启用失败"`
+          ? `systemctl enable ${quotedName}`
           : `echo "启动类型: ${type}"; echo ""; echo "该类型的启动项需要手动配置"`,
         title: `启用自启动 - ${name}`,
-        actionName: '启用自启动'
+        actionName: '启用自启动',
+        mutating: type === 'systemd', dangerous: false,
+        verifyCommand: type === 'systemd' ? enabledState : undefined,
+        verifyExpected: type === 'systemd' ? 'enabled' : undefined,
+        restoreCommand: type === 'systemd' ? `systemctl disable ${quotedName}` : undefined,
+        restoreVerifyCommand: type === 'systemd' ? enabledState : undefined,
+        restoreVerifyExpected: type === 'systemd' ? 'disabled' : undefined,
       },
       'disable': {
         command: type === 'systemd'
-          ? `systemctl disable ${name} 2>&1 && echo "已禁用自启动" || echo "禁用失败"`
+          ? `systemctl disable ${quotedName}`
           : `echo "启动类型: ${type}"; echo ""; echo "该类型的启动项需要手动配置"`,
         title: `禁用自启动 - ${name}`,
-        actionName: '禁用自启动'
+        actionName: '禁用自启动',
+        mutating: type === 'systemd', dangerous: type === 'systemd',
+        verifyCommand: type === 'systemd' ? enabledState : undefined,
+        verifyExpected: type === 'systemd' ? 'disabled' : undefined,
+        restoreCommand: type === 'systemd' ? `systemctl enable ${quotedName}` : undefined,
+        restoreVerifyCommand: type === 'systemd' ? enabledState : undefined,
+        restoreVerifyExpected: type === 'systemd' ? 'enabled' : undefined,
       },
       'run-now': {
         command: type === 'systemd'
-          ? `systemctl start ${name} 2>&1 || echo "启动失败"`
+          ? `systemctl start ${quotedName}`
           : `${command} 2>&1 &`,
         title: `立即运行 - ${name}`,
-        actionName: '立即运行'
+        actionName: '立即运行',
+        mutating: true,
+        dangerous: true,
+        verifyCommand: type === 'systemd' ? `systemctl is-active ${quotedName}` : undefined,
+        verifyExpected: type === 'systemd' ? 'active' : undefined,
       },
       'startup-type': {
         command: `echo "=== 启动类型分析 ==="; echo ""; echo "类型: ${type}"; echo ""; case "${type}" in systemd) echo "systemd服务单元，由systemd管理";; rc.local) echo "传统启动脚本，在/etc/rc.local中配置";; cron) echo "定时任务，由cron管理";; init.d) echo"传统SysV init脚本";; *) echo "其他类型";; esac`,

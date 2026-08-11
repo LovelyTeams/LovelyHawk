@@ -31,4 +31,11 @@ describe('commandExecution', () => {
     expect(empty.kind).toBe('empty');
     expect(empty.success).toBe(true);
   });
+
+  it('does not treat a missing exit status as success', () => {
+    const unknown = classifyCommandResult({ output: 'partial output' }, 'collect');
+
+    expect(unknown.kind).toBe('error');
+    expect(unknown.success).toBe(false);
+  });
 });

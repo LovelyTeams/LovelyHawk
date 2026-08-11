@@ -3,7 +3,7 @@
  * 包含所有独立的安全和性能检测方法
  */
 
-import { invoke } from '@tauri-apps/api/core';
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH';
 import type { DetectionResult, Finding } from './quickDetectionManager';
 import { reportError } from '../utils/errorHandler';
 
@@ -16,6 +16,15 @@ const SCORING_RULES = {
 };
 
 export class DetectionModules {
+  private commandTimeoutSec: number | undefined;
+
+  setCommandTimeout(timeoutSec?: number): void {
+    this.commandTimeoutSec = timeoutSec;
+  }
+
+  private commandArgs(): { timeoutSec: number | undefined } {
+    return { timeoutSec: this.commandTimeoutSec };
+  }
 
   /**
    * 按 ID 执行单项检测 (公开方法，供 fixExecutor 验证用)
@@ -79,7 +88,7 @@ export class DetectionModules {
    */
   public async runPortScan(): Promise<DetectionResult> {
     try {
-      const scanResult = await invoke('detect_port_scan') as any;
+      const scanResult = await invokeTargetBoundSSH('detect_port_scan', this.commandArgs()) as any;
 
       const findings: Finding[] = [];
       let severity: 'critical' | 'high' | 'medium' | 'low' | 'info' = 'info';
@@ -120,7 +129,7 @@ export class DetectionModules {
    */
   public async runUserAudit(): Promise<DetectionResult> {
     try {
-      const auditResult = await invoke('detect_user_audit') as any;
+      const auditResult = await invokeTargetBoundSSH('detect_user_audit', this.commandArgs()) as any;
 
       const findings: Finding[] = [];
       let severity: 'critical' | 'high' | 'medium' | 'low' | 'info' = 'info';
@@ -184,7 +193,7 @@ export class DetectionModules {
    */
   public async runBackdoorScan(): Promise<DetectionResult> {
     try {
-      const scanResult = await invoke('detect_backdoor') as any;
+      const scanResult = await invokeTargetBoundSSH('detect_backdoor', this.commandArgs()) as any;
 
       const findings: Finding[] = [];
       let severity: 'critical' | 'high' | 'medium' | 'low' | 'info' = 'info';
@@ -260,7 +269,7 @@ export class DetectionModules {
    */
   public async runProcessAnalysis(): Promise<DetectionResult> {
     try {
-      const analysisResult = await invoke('detect_process_analysis') as any;
+      const analysisResult = await invokeTargetBoundSSH('detect_process_analysis', this.commandArgs()) as any;
 
       const findings: Finding[] = [];
       let severity: 'critical' | 'high' | 'medium' | 'low' | 'info' = 'info';
@@ -313,7 +322,7 @@ export class DetectionModules {
    */
   public async runFilePermissionCheck(): Promise<DetectionResult> {
     try {
-      const checkResult = await invoke('detect_file_permission') as any;
+      const checkResult = await invokeTargetBoundSSH('detect_file_permission', this.commandArgs()) as any;
 
       const findings: Finding[] = [];
       let severity: 'critical' | 'high' | 'medium' | 'low' | 'info' = 'info';
@@ -361,7 +370,7 @@ export class DetectionModules {
    */
   public async runSSHAudit(): Promise<DetectionResult> {
     try {
-      const auditResult = await invoke('detect_ssh_audit') as any;
+      const auditResult = await invokeTargetBoundSSH('detect_ssh_audit', this.commandArgs()) as any;
 
       const findings: Finding[] = [];
       let severity: 'critical' | 'high' | 'medium' | 'low' | 'info' = 'info';
@@ -421,7 +430,7 @@ export class DetectionModules {
    */
   public async runLogAnalysis(): Promise<DetectionResult> {
     try {
-      const analysisResult = await invoke('detect_log_analysis') as any;
+      const analysisResult = await invokeTargetBoundSSH('detect_log_analysis', this.commandArgs()) as any;
 
       const findings: Finding[] = [];
       let severity: 'critical' | 'high' | 'medium' | 'low' | 'info' = 'info';
@@ -470,7 +479,7 @@ export class DetectionModules {
    */
   public async runFirewallCheck(): Promise<DetectionResult> {
     try {
-      const checkResult = await invoke('detect_firewall_check') as any;
+      const checkResult = await invokeTargetBoundSSH('detect_firewall_check', this.commandArgs()) as any;
 
       const findings: Finding[] = [];
       let severity: 'critical' | 'high' | 'medium' | 'low' | 'info' = 'info';
@@ -519,7 +528,7 @@ export class DetectionModules {
    */
   public async runCPUTest(): Promise<DetectionResult> {
     try {
-      const testResult = await invoke('detect_cpu_test') as any;
+      const testResult = await invokeTargetBoundSSH('detect_cpu_test', this.commandArgs()) as any;
 
       const findings: Finding[] = [];
 
@@ -550,7 +559,7 @@ export class DetectionModules {
    */
   public async runMemoryTest(): Promise<DetectionResult> {
     try {
-      const testResult = await invoke('detect_memory_test') as any;
+      const testResult = await invokeTargetBoundSSH('detect_memory_test', this.commandArgs()) as any;
 
       const findings: Finding[] = [];
 
@@ -581,7 +590,7 @@ export class DetectionModules {
    */
   public async runDiskTest(): Promise<DetectionResult> {
     try {
-      const testResult = await invoke('detect_disk_test') as any;
+      const testResult = await invokeTargetBoundSSH('detect_disk_test', this.commandArgs()) as any;
 
       const findings: Finding[] = [];
 
@@ -612,7 +621,7 @@ export class DetectionModules {
    */
   public async runNetworkTest(): Promise<DetectionResult> {
     try {
-      const testResult = await invoke('detect_network_test') as any;
+      const testResult = await invokeTargetBoundSSH('detect_network_test', this.commandArgs()) as any;
 
       const findings: Finding[] = [];
 
@@ -643,7 +652,7 @@ export class DetectionModules {
    */
   public async runPasswordPolicyCheck(): Promise<DetectionResult> {
     try {
-      const result = await invoke('detect_password_policy') as any;
+      const result = await invokeTargetBoundSSH('detect_password_policy', this.commandArgs()) as any;
       return this.processBasicDetectionResult(result, '密码策略');
     } catch (error) {
       reportError(error, { module: 'Detection', action: '密码策略检查' });
@@ -656,7 +665,7 @@ export class DetectionModules {
    */
   public async runSudoAudit(): Promise<DetectionResult> {
     try {
-      const result = await invoke('detect_sudo_config') as any;
+      const result = await invokeTargetBoundSSH('detect_sudo_config', this.commandArgs()) as any;
       return this.processBasicDetectionResult(result, 'Sudo 配置');
     } catch (error) {
       reportError(error, { module: 'Detection', action: 'Sudo 审计' });
@@ -669,7 +678,7 @@ export class DetectionModules {
    */
   public async runPAMConfigCheck(): Promise<DetectionResult> {
     try {
-      const result = await invoke('detect_pam_config') as any;
+      const result = await invokeTargetBoundSSH('detect_pam_config', this.commandArgs()) as any;
       return this.processBasicDetectionResult(result, 'PAM 配置');
     } catch (error) {
       reportError(error, { module: 'Detection', action: 'PAM 配置检查' });
@@ -682,7 +691,7 @@ export class DetectionModules {
    */
   public async runAccountLockoutCheck(): Promise<DetectionResult> {
     try {
-      const result = await invoke('detect_account_lockout') as any;
+      const result = await invokeTargetBoundSSH('detect_account_lockout', this.commandArgs()) as any;
       return this.processBasicDetectionResult(result, '账号锁定策略');
     } catch (error) {
       reportError(error, { module: 'Detection', action: '账号锁定策略检查' });
@@ -695,7 +704,7 @@ export class DetectionModules {
    */
   public async runSELinuxStatusCheck(): Promise<DetectionResult> {
     try {
-      const result = await invoke('detect_selinux_status') as any;
+      const result = await invokeTargetBoundSSH('detect_selinux_status', this.commandArgs()) as any;
       return this.processBasicDetectionResult(result, 'SELinux/AppArmor');
     } catch (error) {
       reportError(error, { module: 'Detection', action: 'SELinux 状态检查' });
@@ -708,7 +717,7 @@ export class DetectionModules {
    */
   public async runKernelParamsCheck(): Promise<DetectionResult> {
     try {
-      const result = await invoke('detect_kernel_params') as any;
+      const result = await invokeTargetBoundSSH('detect_kernel_params', this.commandArgs()) as any;
       return this.processBasicDetectionResult(result, '内核参数');
     } catch (error) {
       reportError(error, { module: 'Detection', action: '内核参数检查' });
@@ -721,7 +730,7 @@ export class DetectionModules {
    */
   public async runSystemUpdatesCheck(): Promise<DetectionResult> {
     try {
-      const result = await invoke('detect_system_updates') as any;
+      const result = await invokeTargetBoundSSH('detect_system_updates', this.commandArgs()) as any;
       return this.processBasicDetectionResult(result, '系统补丁');
     } catch (error) {
       reportError(error, { module: 'Detection', action: '系统补丁检查' });
@@ -734,7 +743,7 @@ export class DetectionModules {
    */
   public async runUnnecessaryServicesCheck(): Promise<DetectionResult> {
     try {
-      const result = await invoke('detect_unnecessary_services') as any;
+      const result = await invokeTargetBoundSSH('detect_unnecessary_services', this.commandArgs()) as any;
       return this.processBasicDetectionResult(result, '不必要服务');
     } catch (error) {
       reportError(error, { module: 'Detection', action: '不必要服务检查' });
@@ -747,7 +756,7 @@ export class DetectionModules {
    */
   public async runAutoStartServicesCheck(): Promise<DetectionResult> {
     try {
-      const result = await invoke('detect_auto_start_services') as any;
+      const result = await invokeTargetBoundSSH('detect_auto_start_services', this.commandArgs()) as any;
       return this.processBasicDetectionResult(result, '自启动服务');
     } catch (error) {
       reportError(error, { module: 'Detection', action: '自启动服务审计' });
@@ -760,7 +769,7 @@ export class DetectionModules {
    */
   public async runAuditConfigCheck(): Promise<DetectionResult> {
     try {
-      const result = await invoke('detect_audit_config') as any;
+      const result = await invokeTargetBoundSSH('detect_audit_config', this.commandArgs()) as any;
       return this.processBasicDetectionResult(result, '审计配置');
     } catch (error) {
       reportError(error, { module: 'Detection', action: '审计配置检查' });
@@ -773,7 +782,7 @@ export class DetectionModules {
    */
   public async runHistoryAudit(): Promise<DetectionResult> {
     try {
-      const result = await invoke('detect_history_audit') as any;
+      const result = await invokeTargetBoundSSH('detect_history_audit', this.commandArgs()) as any;
       return this.processBasicDetectionResult(result, '历史命令');
     } catch (error) {
       reportError(error, { module: 'Detection', action: '历史命令审计' });
@@ -786,7 +795,7 @@ export class DetectionModules {
    */
   public async runNTPConfigCheck(): Promise<DetectionResult> {
     try {
-      const result = await invoke('detect_ntp_config') as any;
+      const result = await invokeTargetBoundSSH('detect_ntp_config', this.commandArgs()) as any;
       return this.processBasicDetectionResult(result, 'NTP 配置');
     } catch (error) {
       reportError(error, { module: 'Detection', action: 'NTP 配置检查' });
@@ -799,7 +808,7 @@ export class DetectionModules {
    */
   public async runDNSConfigCheck(): Promise<DetectionResult> {
     try {
-      const result = await invoke('detect_dns_config') as any;
+      const result = await invokeTargetBoundSSH('detect_dns_config', this.commandArgs()) as any;
       return this.processBasicDetectionResult(result, 'DNS 配置');
     } catch (error) {
       reportError(error, { module: 'Detection', action: 'DNS 配置检查' });
@@ -921,7 +930,7 @@ export class DetectionModules {
 
   public async runWebshellScan(): Promise<DetectionResult> {
     try {
-      const result = await invoke('detect_webshell') as any;
+      const result = await invokeTargetBoundSSH('detect_webshell', this.commandArgs()) as any;
       const findings: Finding[] = (result.suspicious_files || []).map((f: any) => ({
         title: `发现可疑 Webshell: ${f.path}`,
         description: `匹配模式: ${f.matched_pattern}`,
@@ -945,7 +954,7 @@ export class DetectionModules {
 
   public async runRootkitScan(): Promise<DetectionResult> {
     try {
-      const result = await invoke('detect_rootkit') as any;
+      const result = await invokeTargetBoundSSH('detect_rootkit', this.commandArgs()) as any;
       const findings: Finding[] = [];
       (result.hidden_processes || []).forEach((p: string) => findings.push({
         title: '发现隐藏进程', description: p, severity: 'critical',
@@ -972,7 +981,7 @@ export class DetectionModules {
 
   public async runPersistenceScan(): Promise<DetectionResult> {
     try {
-      const result = await invoke('detect_persistence') as any;
+      const result = await invokeTargetBoundSSH('detect_persistence', this.commandArgs()) as any;
       const findings: Finding[] = [];
       (result.suspicious_cron || []).forEach((c: string) => findings.push({
         title: '可疑计划任务', description: c, severity: 'high',
@@ -1011,7 +1020,7 @@ export class DetectionModules {
 
   public async runLogTamperCheck(): Promise<DetectionResult> {
     try {
-      const result = await invoke('detect_log_tamper') as any;
+      const result = await invokeTargetBoundSSH('detect_log_tamper', this.commandArgs()) as any;
       const findings: Finding[] = [];
       (result.truncated_logs || []).forEach((l: string) => findings.push({
         title: '日志被截断/清空', description: l, severity: 'high',
@@ -1038,7 +1047,7 @@ export class DetectionModules {
 
   public async runNetworkBackdoorScan(): Promise<DetectionResult> {
     try {
-      const result = await invoke('detect_network_backdoor') as any;
+      const result = await invokeTargetBoundSSH('detect_network_backdoor', this.commandArgs()) as any;
       const findings: Finding[] = [];
       (result.suspicious_listeners || []).forEach((l: string) => findings.push({
         title: '可疑网络监听', description: l, severity: 'high',
@@ -1065,7 +1074,7 @@ export class DetectionModules {
 
   public async runEnhancedUserAudit(): Promise<DetectionResult> {
     try {
-      const result = await invoke('detect_enhanced_user') as any;
+      const result = await invokeTargetBoundSSH('detect_enhanced_user', this.commandArgs()) as any;
       const findings: Finding[] = [];
       (result.uid_conflicts || []).forEach((u: string) => findings.push({
         title: 'UID 冲突', description: u, severity: 'critical',
@@ -1092,7 +1101,7 @@ export class DetectionModules {
 
   public async runHiddenCronCheck(): Promise<DetectionResult> {
     try {
-      const result = await invoke('detect_hidden_cron') as any;
+      const result = await invokeTargetBoundSSH('detect_hidden_cron', this.commandArgs()) as any;
       return this.processBasicDetectionResult(result, '隐藏计划任务');
     } catch (error) {
       return this.createErrorResult('隐藏计划任务检测失败');
@@ -1101,7 +1110,7 @@ export class DetectionModules {
 
   public async runSSHKeyAudit(): Promise<DetectionResult> {
     try {
-      const result = await invoke('detect_ssh_key_audit') as any;
+      const result = await invokeTargetBoundSSH('detect_ssh_key_audit', this.commandArgs()) as any;
       const findings: Finding[] = [];
       (result.unauthorized_keys || []).forEach((k: string) => findings.push({
         title: 'SSH 授权密钥', description: k, severity: 'medium',
@@ -1128,7 +1137,7 @@ export class DetectionModules {
 
   public async runTimestompCheck(): Promise<DetectionResult> {
     try {
-      const result = await invoke('detect_timestomp') as any;
+      const result = await invokeTargetBoundSSH('detect_timestomp', this.commandArgs()) as any;
       const findings: Finding[] = (result.suspicious_files || []).map((f: string) => ({
         title: '时间戳篡改嫌疑', description: f, severity: 'high' as const,
         recommendation: '文件的 mtime 和 ctime 差异过大，可能被 timestomp 篡改',
@@ -1146,7 +1155,7 @@ export class DetectionModules {
 
   public async runEnhancedProcessAnalysis(): Promise<DetectionResult> {
     try {
-      const result = await invoke('detect_enhanced_process') as any;
+      const result = await invokeTargetBoundSSH('detect_enhanced_process', this.commandArgs()) as any;
       const findings: Finding[] = [];
       (result.suspicious_processes || []).forEach((p: any) => findings.push({
         title: `可疑进程: ${p.name} (PID: ${p.pid})`,
@@ -1177,7 +1186,7 @@ export class DetectionModules {
 
   public async runBinTamperScan(): Promise<DetectionResult> {
     try {
-      const result = await invoke('detect_bin_tamper') as string[];
+      const result = await invokeTargetBoundSSH('detect_bin_tamper', this.commandArgs()) as string[];
       const findings: Finding[] = (result || []).map((line: string) => {
         const [path] = line.split(':');
         return {
@@ -1202,7 +1211,7 @@ export class DetectionModules {
 
   public async runImmutableFilesScan(): Promise<DetectionResult> {
     try {
-      const result = await invoke('detect_immutable_files') as string[];
+      const result = await invokeTargetBoundSSH('detect_immutable_files', this.commandArgs()) as string[];
       const findings: Finding[] = (result || []).map((line: string) => {
         const parts = line.trim().split(/\s+/);
         const attrs = parts[0] || '';
@@ -1230,7 +1239,7 @@ export class DetectionModules {
 
   private async k8sExec(cmd: string): Promise<any> {
     try {
-      const result = await invoke('ssh_execute_dashboard_command_direct', { command: cmd }) as any;
+      const result = await invokeTargetBoundSSH('ssh_execute_dashboard_command_direct', { command: cmd }) as any;
       if (result.exit_code !== 0) return null;
       return JSON.parse(result.output);
     } catch { return null; }
@@ -1440,7 +1449,7 @@ export class DetectionModules {
 
   public async runK8sNodePersistenceScan(): Promise<DetectionResult> {
     try {
-      const result = await invoke('ssh_execute_dashboard_command_direct', {
+      const result = await invokeTargetBoundSSH('ssh_execute_dashboard_command_direct', {
         command: `echo "=== SYSTEMD ===" && systemctl list-unit-files --type=service --state=enabled 2>/dev/null | grep -vE 'snap|systemd|network|docker|containerd|ssh|cron|rsyslog|apparmor|udev|dbus|accounts-daemon|getty|grub|polkit|irqbalance|fstrim|logrotate|lvm|multipathd|open-vm|blk-availability|ModemManager|gpu-manager|keyboard|console|finalrd|open-iscsi|pollinate|one-context' | head -15 && echo "=== CRONTAB ===" && crontab -l 2>&1 | grep -v "^#" | grep -v "^$" | head -10 && echo "=== SUSPICIOUS BINS ===" && find /usr/local/bin /usr/bin -newer /etc/hostname -type f -executable 2>/dev/null | head -10 && echo "=== STATIC PODS ===" && ls /etc/kubernetes/manifests/ 2>/dev/null || echo "N/A"`
       }) as any;
       const findings: Finding[] = [];

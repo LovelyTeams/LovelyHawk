@@ -1,24 +1,25 @@
+use crate::docker_manager;
+use crate::ssh_manager_russh;
+use crate::types;
+use crate::window_manager;
+use crate::AppState;
+use tauri::Manager;
 /**
  * Docker 命令处理器模块
  * 将 Docker 相关的 Tauri 命令从 lib.rs 中拆分出来
  */
-
 use tauri::State;
-use tauri::Manager;
-use crate::AppState;
-use crate::docker_manager;
-use crate::types;
-use crate::ssh_manager_russh;
-use crate::window_manager;
 
 /// 列出 Docker 容器
 #[tauri::command]
 pub async fn docker_list_containers(
+    session_id: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<types::DockerContainerSummary>, String> {
     let ssh = &state.ssh_manager;
+    let runner = docker_manager::SessionDockerRunner::new(ssh, &session_id);
     let manager = docker_manager::DockerManager::new();
-    manager.list_containers(ssh).map_err(Into::into)
+    manager.list_containers(&runner).map_err(Into::into)
 }
 
 /// 容器操作（start/stop/restart/remove 等）
@@ -26,12 +27,14 @@ pub async fn docker_list_containers(
 pub async fn docker_container_action(
     container_id: String,
     action: String,
+    session_id: String,
     state: State<'_, AppState>,
 ) -> Result<types::DockerActionResult, String> {
     let ssh = &state.ssh_manager;
+    let runner = docker_manager::SessionDockerRunner::new(ssh, &session_id);
     let manager = docker_manager::DockerManager::new();
     manager
-        .perform_action(ssh, &container_id, &action)
+        .perform_action(&runner, &container_id, &action)
         .map_err(Into::into)
 }
 
@@ -40,12 +43,14 @@ pub async fn docker_container_action(
 pub async fn docker_container_logs(
     container_id: String,
     options: Option<types::DockerLogsOptions>,
+    session_id: String,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let ssh = &state.ssh_manager;
+    let runner = docker_manager::SessionDockerRunner::new(ssh, &session_id);
     let manager = docker_manager::DockerManager::new();
     manager
-        .get_logs(ssh, &container_id, options)
+        .get_logs(&runner, &container_id, options)
         .map_err(Into::into)
 }
 
@@ -53,13 +58,13 @@ pub async fn docker_container_logs(
 #[tauri::command]
 pub async fn docker_inspect_container(
     container_id: String,
+    session_id: String,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let ssh = &state.ssh_manager;
+    let runner = docker_manager::SessionDockerRunner::new(ssh, &session_id);
     let manager = docker_manager::DockerManager::new();
-    manager
-        .inspect(ssh, &container_id)
-        .map_err(Into::into)
+    manager.inspect(&runner, &container_id).map_err(Into::into)
 }
 
 /// 读取容器内文件
@@ -67,12 +72,14 @@ pub async fn docker_inspect_container(
 pub async fn docker_read_container_file(
     container_id: String,
     path: String,
+    session_id: String,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let ssh = &state.ssh_manager;
+    let runner = docker_manager::SessionDockerRunner::new(ssh, &session_id);
     let manager = docker_manager::DockerManager::new();
     manager
-        .read_file(ssh, &container_id, &path)
+        .read_file(&runner, &container_id, &path)
         .map_err(Into::into)
 }
 
@@ -82,12 +89,14 @@ pub async fn docker_write_container_file(
     container_id: String,
     path: String,
     content: String,
+    session_id: String,
     state: State<'_, AppState>,
 ) -> Result<types::DockerActionResult, String> {
     let ssh = &state.ssh_manager;
+    let runner = docker_manager::SessionDockerRunner::new(ssh, &session_id);
     let manager = docker_manager::DockerManager::new();
     manager
-        .write_file(ssh, &container_id, &path, &content)
+        .write_file(&runner, &container_id, &path, &content)
         .map_err(Into::into)
 }
 
@@ -96,12 +105,14 @@ pub async fn docker_write_container_file(
 pub async fn docker_copy(
     container_id: String,
     request: types::DockerCopyRequest,
+    session_id: String,
     state: State<'_, AppState>,
 ) -> Result<types::DockerActionResult, String> {
     let ssh = &state.ssh_manager;
+    let runner = docker_manager::SessionDockerRunner::new(ssh, &session_id);
     let manager = docker_manager::DockerManager::new();
     manager
-        .copy(ssh, &container_id, &request)
+        .copy(&runner, &container_id, &request)
         .map_err(Into::into)
 }
 
@@ -111,13 +122,15 @@ pub async fn docker_exec_command(
     container_id: String,
     command: String,
     shell: Option<String>,
+    session_id: String,
     state: State<'_, AppState>,
 ) -> Result<ssh_manager_russh::TerminalOutput, String> {
     let ssh = &state.ssh_manager;
+    let runner = docker_manager::SessionDockerRunner::new(ssh, &session_id);
     let manager = docker_manager::DockerManager::new();
     let shell = shell.unwrap_or_else(|| "sh".to_string());
     manager
-        .exec_command(ssh, &container_id, &command, &shell)
+        .exec_command(&runner, &container_id, &command, &shell)
         .map_err(Into::into)
 }
 
@@ -127,13 +140,21 @@ pub async fn create_container_terminal_window(
     app: tauri::AppHandle,
     container_name: String,
     container_id: String,
+    session_id: String,
 ) -> Result<String, String> {
-    let window_label = format!("container-terminal-{}", container_id);
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    session_id.hash(&mut hasher);
+    container_id.hash(&mut hasher);
+    let window_label = format!("container-terminal-{:x}", hasher.finish());
     let window_title = format!("容器终端 - {}", container_name);
 
     // 检查窗口是否已存在
     if let Some(existing_window) = app.get_webview_window(&window_label) {
-        let _ = existing_window.set_focus().map_err(|e| format!("聚焦窗口失败: {}", e));
+        let _ = existing_window
+            .set_focus()
+            .map_err(|e| format!("聚焦窗口失败: {}", e));
         return Ok(window_label);
     }
 
@@ -145,14 +166,18 @@ pub async fn create_container_terminal_window(
         "index.html?window=container-terminal",
         900.0,
         600.0,
-    ).map_err(|e| format!("创建容器终端窗口失败: {}", e))?;
+    )
+    .map_err(|e| format!("创建容器终端窗口失败: {}", e))?;
 
     // 设置窗口数据
-    window.eval(&format!(
-        "window.containerInfo = {{ name: '{}', id: '{}' }};",
-        container_name.replace("'", "\\'"),
-        container_id.replace("'", "\\'")
-    )).map_err(|e| format!("设置窗口数据失败: {}", e))?;
+    let container_info = serde_json::json!({
+        "name": container_name,
+        "id": container_id,
+        "sessionId": session_id,
+    });
+    window
+        .eval(&format!("window.containerInfo = {};", container_info))
+        .map_err(|e| format!("设置窗口数据失败: {}", e))?;
 
     Ok(window_label)
 }

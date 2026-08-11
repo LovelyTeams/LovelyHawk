@@ -3,11 +3,10 @@
 
 use crate::types::{AppDataPaths, LovelyResError, LovelyResResult, SSHConnection};
 use aes_gcm::{
-    aead::{Aead, KeyInit, OsRng},
+    aead::{rand_core::RngCore, Aead, KeyInit, OsRng},
     Aes256Gcm, Nonce,
 };
 use base64::{engine::general_purpose, Engine as _};
-use rand::RngCore;
 use serde_json;
 use std::fs;
 
@@ -23,8 +22,9 @@ impl SSHConnectionManager {
         let data_paths =
             AppDataPaths::new().map_err(|e| LovelyResError::ConfigError(e.to_string()))?;
 
-        // 生成或加载加密密钥
-        let encryption_key = Self::get_or_create_encryption_key(&data_paths)?;
+        // 生成或加载加密密钥（共享实现见 crypto.rs，密钥文件路径不变）
+        let encryption_key =
+            crate::crypto::get_or_create_encryption_key().map_err(LovelyResError::ConfigError)?;
 
         Ok(Self {
             data_paths,
@@ -37,7 +37,7 @@ impl SSHConnectionManager {
         let config_file = &self.data_paths.ssh_connections_file;
 
         if !config_file.exists() {
-            println!("📁 SSH连接配置文件不存在，返回空列表");
+            crate::alog_info!("SSH连接配置文件不存在，返回空列表");
             return Ok(Vec::new());
         }
 
@@ -57,14 +57,13 @@ impl SSHConnectionManager {
         }
 
         if migrated_count > 0 {
-            println!("🔄 自动迁移了 {} 个旧账号数据到多账号模式", migrated_count);
+            crate::alog_info!("自动迁移了 {} 个旧账号数据到多账号模式", migrated_count);
             // 保存迁移后的数据
             if let Err(e) = self.save_connections(&connections) {
-                println!("⚠️ 保存迁移后的数据失败: {}", e);
+                crate::alog_warn!("保存迁移后的数据失败: {}", e);
             }
         }
 
-        //println!("✅ 成功加载 {} 个SSH连接配置", connections.len());
         Ok(connections)
     }
 
@@ -84,7 +83,7 @@ impl SSHConnectionManager {
         fs::write(config_file, content)
             .map_err(|e| LovelyResError::FileError(format!("写入SSH配置文件失败: {}", e)))?;
 
-        println!("✅ 成功保存 {} 个SSH连接配置", connections.len());
+        crate::alog_info!("成功保存 {} 个SSH连接配置", connections.len());
         Ok(())
     }
 
@@ -137,38 +136,6 @@ impl SSHConnectionManager {
             .map_err(|e| LovelyResError::AuthError(format!("解密结果不是有效UTF-8: {}", e)))
     }
 
-    /// 获取或创建加密密钥
-    fn get_or_create_encryption_key(data_paths: &AppDataPaths) -> LovelyResResult<[u8; 32]> {
-        let key_file = data_paths.app_data_dir.join("encryption.key");
-
-        if key_file.exists() {
-            // 加载现有密钥
-            let key_data = fs::read(&key_file)
-                .map_err(|e| LovelyResError::FileError(format!("读取加密密钥失败: {}", e)))?;
-
-            if key_data.len() != 32 {
-                return Err(LovelyResError::ConfigError("加密密钥长度错误".to_string()));
-            }
-
-            let mut key = [0u8; 32];
-            key.copy_from_slice(&key_data);
-
-            println!("🔑 加载现有加密密钥");
-            Ok(key)
-        } else {
-            // 生成新密钥
-            let mut key = [0u8; 32];
-            OsRng.fill_bytes(&mut key);
-
-            // 保存密钥
-            fs::write(&key_file, &key)
-                .map_err(|e| LovelyResError::FileError(format!("保存加密密钥失败: {}", e)))?;
-
-            println!("🔑 生成新的加密密钥");
-            Ok(key)
-        }
-    }
-
     /// 创建备份
     pub fn create_backup(&self) -> LovelyResResult<String> {
         let config_file = &self.data_paths.ssh_connections_file;
@@ -184,7 +151,7 @@ impl SSHConnectionManager {
         fs::copy(config_file, &backup_path)
             .map_err(|e| LovelyResError::FileError(format!("创建备份失败: {}", e)))?;
 
-        println!("✅ 创建SSH配置备份: {}", backup_filename);
+        crate::alog_info!("创建SSH配置备份: {}", backup_filename);
         Ok(backup_filename)
     }
 
@@ -201,7 +168,7 @@ impl SSHConnectionManager {
         fs::copy(&backup_path, config_file)
             .map_err(|e| LovelyResError::FileError(format!("从备份恢复失败: {}", e)))?;
 
-        println!("✅ 从备份恢复SSH配置: {}", backup_filename);
+        crate::alog_info!("从备份恢复SSH配置: {}", backup_filename);
         Ok(())
     }
 
@@ -245,14 +212,14 @@ impl SSHConnectionManager {
         let mut deleted_count = 0;
         for backup_file in backup_files.iter().skip(keep_count) {
             if let Err(e) = fs::remove_file(backup_file) {
-                println!("⚠️ 删除旧备份失败: {}: {}", backup_file.display(), e);
+                crate::alog_warn!("删除旧备份失败: {}: {}", backup_file.display(), e);
             } else {
                 deleted_count += 1;
             }
         }
 
         if deleted_count > 0 {
-            println!("✅ 清理了 {} 个旧备份文件", deleted_count);
+            crate::alog_info!("清理了 {} 个旧备份文件", deleted_count);
         }
 
         Ok(deleted_count)
@@ -268,11 +235,11 @@ impl SSHConnectionManager {
 
         match self.load_connections() {
             Ok(_) => {
-                println!("✅ SSH配置文件验证通过");
+                crate::alog_info!("SSH配置文件验证通过");
                 Ok(true)
             }
             Err(e) => {
-                println!("❌ SSH配置文件验证失败: {}", e);
+                crate::alog_info!("SSH配置文件验证失败: {}", e);
                 Ok(false)
             }
         }

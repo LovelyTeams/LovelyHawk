@@ -46,7 +46,7 @@ impl WindowManager {
                 .build()
                 .map_err(|e| format!("创建窗口失败: {}", e))?;
 
-        println!("✅ 创建窗口: {} ({})", title, label);
+        crate::alog_info!("创建窗口: {} ({})", title, label);
         Ok(window)
     }
 
@@ -59,25 +59,23 @@ impl WindowManager {
         width: f64,
         height: f64,
     ) -> Result<WebviewWindow, String> {
-        let external_url = url.parse::<tauri::Url>()
+        let external_url = url
+            .parse::<tauri::Url>()
             .map_err(|e| format!("无效的 URL: {}", e))?;
 
-        let window = tauri::WebviewWindowBuilder::new(
-            app,
-            label,
-            tauri::WebviewUrl::External(external_url),
-        )
-        .title(title)
-        .inner_size(width, height)
-        .center()
-        .resizable(true)
-        .minimizable(true)
-        .maximizable(true)
-        .closable(true)
-        .build()
-        .map_err(|e| format!("创建外部窗口失败: {}", e))?;
+        let window =
+            tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::External(external_url))
+                .title(title)
+                .inner_size(width, height)
+                .center()
+                .resizable(true)
+                .minimizable(true)
+                .maximizable(true)
+                .closable(true)
+                .build()
+                .map_err(|e| format!("创建外部窗口失败: {}", e))?;
 
-        println!("✅ 创建外部窗口: {}", title);
+        crate::alog_info!("创建外部窗口: {}", title);
         Ok(window)
     }
 
@@ -90,7 +88,7 @@ impl WindowManager {
     pub fn close_window(app: &tauri::AppHandle, label: &str) -> Result<(), String> {
         if let Some(window) = app.get_webview_window(label) {
             window.close().map_err(|e| format!("关闭窗口失败: {}", e))?;
-            println!("✅ 窗口已关闭: {}", label);
+            crate::alog_info!("窗口已关闭: {}", label);
         }
         Ok(())
     }
@@ -101,7 +99,7 @@ impl WindowManager {
             window
                 .minimize()
                 .map_err(|e| format!("最小化窗口失败: {}", e))?;
-            println!("✅ 窗口已最小化: {}", label);
+            crate::alog_info!("窗口已最小化: {}", label);
         }
         Ok(())
     }
@@ -117,12 +115,12 @@ impl WindowManager {
                 window
                     .unmaximize()
                     .map_err(|e| format!("还原窗口失败: {}", e))?;
-                println!("✅ 窗口已还原: {}", label);
+                crate::alog_info!("窗口已还原: {}", label);
             } else {
                 window
                     .maximize()
                     .map_err(|e| format!("最大化窗口失败: {}", e))?;
-                println!("✅ 窗口已最大化: {}", label);
+                crate::alog_info!("窗口已最大化: {}", label);
             }
         }
         Ok(())
@@ -142,7 +140,7 @@ impl WindowManager {
                     height: height as u32,
                 }))
                 .map_err(|e| format!("设置窗口大小失败: {}", e))?;
-            println!("✅ 窗口大小已设置: {} ({}x{})", label, width, height);
+            crate::alog_info!("窗口大小已设置: {} ({}x{})", label, width, height);
         }
         Ok(())
     }
@@ -161,7 +159,7 @@ impl WindowManager {
                     y: y as i32,
                 }))
                 .map_err(|e| format!("设置窗口位置失败: {}", e))?;
-            println!("✅ 窗口位置已设置: {} ({}, {})", label, x, y);
+            crate::alog_info!("窗口位置已设置: {} ({}, {})", label, x, y);
         }
         Ok(())
     }
@@ -172,7 +170,7 @@ impl WindowManager {
             window
                 .center()
                 .map_err(|e| format!("居中窗口失败: {}", e))?;
-            println!("✅ 窗口已居中: {}", label);
+            crate::alog_info!("窗口已居中: {}", label);
         }
         Ok(())
     }
@@ -187,7 +185,7 @@ impl WindowManager {
             window
                 .set_title(title)
                 .map_err(|e| format!("设置窗口标题失败: {}", e))?;
-            println!("✅ 窗口标题已设置: {} -> {}", label, title);
+            crate::alog_info!("窗口标题已设置: {} -> {}", label, title);
         }
         Ok(())
     }
@@ -202,7 +200,7 @@ impl WindowManager {
             // 注释掉图标设置，因为 API 已更改
             // let icon = tauri::Icon::File(std::path::PathBuf::from(icon_path));
             // window.set_icon(icon).map_err(|e| format!("设置窗口图标失败: {}", e))?;
-            println!("✅ 窗口图标设置功能暂时禁用: {} -> {}", label, icon_path);
+            crate::alog_info!("窗口图标设置功能暂时禁用: {} -> {}", label, icon_path);
         }
         Ok(())
     }
@@ -217,7 +215,7 @@ impl WindowManager {
             window
                 .set_always_on_top(always_on_top)
                 .map_err(|e| format!("设置窗口置顶失败: {}", e))?;
-            println!("✅ 窗口置顶已设置: {} -> {}", label, always_on_top);
+            crate::alog_info!("窗口置顶已设置: {} -> {}", label, always_on_top);
         }
         Ok(())
     }
@@ -277,7 +275,7 @@ impl WindowManager {
     pub fn show_window(app: &tauri::AppHandle, label: &str) -> Result<(), String> {
         if let Some(window) = app.get_webview_window(label) {
             window.show().map_err(|e| format!("显示窗口失败: {}", e))?;
-            println!("✅ 窗口已显示: {}", label);
+            crate::alog_info!("窗口已显示: {}", label);
         }
         Ok(())
     }
@@ -286,7 +284,7 @@ impl WindowManager {
     pub fn hide_window(app: &tauri::AppHandle, label: &str) -> Result<(), String> {
         if let Some(window) = app.get_webview_window(label) {
             window.hide().map_err(|e| format!("隐藏窗口失败: {}", e))?;
-            println!("✅ 窗口已隐藏: {}", label);
+            crate::alog_info!("窗口已隐藏: {}", label);
         }
         Ok(())
     }
@@ -297,7 +295,7 @@ impl WindowManager {
             window
                 .set_focus()
                 .map_err(|e| format!("聚焦窗口失败: {}", e))?;
-            println!("✅ 窗口已聚焦: {}", label);
+            crate::alog_info!("窗口已聚焦: {}", label);
         }
         Ok(())
     }
@@ -312,7 +310,7 @@ impl WindowManager {
             window
                 .set_resizable(resizable)
                 .map_err(|e| format!("设置窗口可调整大小失败: {}", e))?;
-            println!("✅ 窗口可调整大小已设置: {} -> {}", label, resizable);
+            crate::alog_info!("窗口可调整大小已设置: {} -> {}", label, resizable);
         }
         Ok(())
     }
@@ -331,7 +329,7 @@ impl WindowManager {
                     height: height as u32,
                 })))
                 .map_err(|e| format!("设置窗口最小大小失败: {}", e))?;
-            println!("✅ 窗口最小大小已设置: {} ({}x{})", label, width, height);
+            crate::alog_info!("窗口最小大小已设置: {} ({}x{})", label, width, height);
         }
         Ok(())
     }
@@ -350,7 +348,7 @@ impl WindowManager {
                     height: height as u32,
                 })))
                 .map_err(|e| format!("设置窗口最大大小失败: {}", e))?;
-            println!("✅ 窗口最大大小已设置: {} ({}x{})", label, width, height);
+            crate::alog_info!("窗口最大大小已设置: {} ({}x{})", label, width, height);
         }
         Ok(())
     }

@@ -8,8 +8,8 @@
  * 自锁保护：处置目标为当前登录用户时显式警告。
  */
 
-import { invoke } from '@tauri-apps/api/core';
 import { operationJournal } from '../core/operationJournal';
+import { executeEmergencyCommand } from '../emergency/commandExecution';
 import { sshConnectionManager } from '../remote/sshConnectionManager';
 import { showConfirm } from '../ui/confirmDialog';
 import { shq, isValidUsername } from '../core/shellEscape';
@@ -28,8 +28,9 @@ class UserDisposal {
   }
 
   private async exec(cmd: string): Promise<string> {
-    const r = await invoke('ssh_execute_command_direct', { command: cmd }) as any;
-    return r?.output || '';
+    const result = await executeEmergencyCommand({ command: cmd });
+    if (!result.success) throw new Error(`${result.message}${result.output ? `: ${result.output}` : ''}`);
+    return result.output;
   }
 
   /** 从 Finding 文本中提取候选用户名（用于预填） */

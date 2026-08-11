@@ -3,10 +3,12 @@
  * 选中文本后弹出操作菜单: 复制 / SFTP跳转 / 查看文件 / 删除文件 / AI分析 等
  */
 
-import { invoke } from '@tauri-apps/api/core';
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH';
 import { aiService } from '../ai/aiService';
+import { renderAIMarkdown } from '../ai/aiOutput';
 import { showConfirm } from '../ui/confirmDialog';
 import { escapeHtml } from '../core/htmlEscape';
+import { openSftpAt } from '../remote/sftpWindowBridge';
 
 let menuEl: HTMLElement | null = null;
 let selectedText = '';
@@ -164,14 +166,14 @@ function looksLikeIP(s: string): boolean {
 
 async function execSSH(cmd: string): Promise<string> {
   try {
-    const r = await invoke('ssh_execute_command_direct', { command: cmd }) as any;
+    const r = await invokeTargetBoundSSH('ssh_execute_command_direct', { command: cmd }) as any;
     return r?.output || '';
   } catch (e) {
     return `执行失败: ${e}`;
   }
 }
 
-function showResultModal(title: string, content: string): void {
+function showResultModal(title: string, content: string, opts?: { markdown?: boolean }): void {
   let overlay = document.getElementById('out-ctx-modal-overlay');
   if (overlay) overlay.remove();
 
@@ -184,13 +186,19 @@ function showResultModal(title: string, content: string): void {
         <span>${escapeHtml(title)}</span>
         <button class="out-ctx-modal-close" id="out-ctx-modal-close">&times;</button>
       </div>
-      <pre class="out-ctx-modal-body">${escapeHtml(content)}</pre>
+      <pre class="out-ctx-modal-body">${opts?.markdown ? '' : escapeHtml(content)}</pre>
       <div class="out-ctx-modal-footer">
         <button class="out-ctx-modal-btn" id="out-ctx-modal-copy">复制内容</button>
       </div>
     </div>
   `;
   document.body.appendChild(overlay);
+
+  // AI 输出按 markdown 渲染（复制按钮仍复制原文）
+  if (opts?.markdown) {
+    const bodyEl = overlay.querySelector('.out-ctx-modal-body') as HTMLElement | null;
+    if (bodyEl) renderAIMarkdown(bodyEl, content);
+  }
 
   const close = () => {
     overlay?.remove();
@@ -234,14 +242,8 @@ async function executeAction(action: string): Promise<void> {
     case 'sftp-jump': {
       // 提取目录
       const dir = text.includes('/') ? text.substring(0, text.lastIndexOf('/')) || '/' : text;
-      const sftpMgr = (window as any).sftpManager;
-      if (sftpMgr?.navigateTo) {
-        (window as any).switchPage?.('remote-operations');
-        setTimeout(() => sftpMgr.navigateTo(dir), 300);
-        window.showNotification?.(`SFTP 跳转到: ${dir}`, 'success');
-      } else {
-        window.showNotification?.('SFTP 管理器未初始化', 'warning');
-      }
+      void openSftpAt(dir);
+      window.showNotification?.(`SFTP 跳转到: ${dir}`, 'success');
       break;
     }
 
@@ -418,12 +420,8 @@ async function executeAction(action: string): Promise<void> {
           'medium'
         );
         const answer = result?.solution || '分析完成，未发现明显风险';
-        showResultModal('AI 分析', answer);
+        showResultModal('AI 分析', answer, { markdown: true });
         window.showNotification?.('AI 分析完成', 'success');
-        // 记录到 AI 历史
-        import('../ai/aiHistoryManager').then(({ aiHistoryManager }) => {
-          aiHistoryManager.addRecord({ question, answer, source: 'emergency' });
-        }).catch(() => {});
       } catch (e) {
         showResultModal('AI 分析', `AI 分析失败: ${e}`);
         window.showNotification?.(`AI 分析失败: ${e}`, 'error');

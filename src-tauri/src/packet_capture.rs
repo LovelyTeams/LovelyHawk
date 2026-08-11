@@ -23,6 +23,158 @@ pub struct NetworkInterface {
     pub ips: Vec<String>,
 }
 
+pub const MAX_PCAP_CAPTURE_SECONDS: u32 = 300;
+pub const MAX_PCAP_PACKET_COUNT: u32 = 100_000;
+const PCAP_RESULT_MARKER: &str = "LOVELYRES_PCAP_V1";
+const PCAP_REMOTE_PREFIX: &str = "/tmp/lovelyres-pcap-";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PcapEvidenceReceipt {
+    pub cancelled: bool,
+    pub local_path: Option<String>,
+    pub sha256: Option<String>,
+    pub size_bytes: Option<u64>,
+    pub interface: String,
+    pub filter: Option<String>,
+    pub packet_limit: Option<u32>,
+    pub duration_seconds: u32,
+    pub captured_at: String,
+    pub remote_cleanup_verified: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemotePcapMetadata {
+    pub size_bytes: u64,
+    pub sha256: String,
+}
+
+fn validate_interface(interface: &str) -> Result<(), String> {
+    if interface.is_empty()
+        || interface.len() > 64
+        || !interface
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"_.:@-".contains(&byte))
+    {
+        return Err("网络接口名称格式无效".to_string());
+    }
+    Ok(())
+}
+
+fn validate_filter(filter: Option<&str>) -> Result<Option<String>, String> {
+    let Some(filter) = filter.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    if filter.len() > 2048 || filter.contains(['\0', '\n', '\r']) {
+        return Err("BPF 过滤器过长或包含非法控制字符".to_string());
+    }
+    Ok(Some(filter.to_string()))
+}
+
+pub fn new_remote_pcap_path() -> String {
+    format!("{}{}.pcap", PCAP_REMOTE_PREFIX, uuid::Uuid::new_v4())
+}
+
+pub fn is_managed_remote_pcap_path(path: &str) -> bool {
+    let Some(id) = path
+        .strip_prefix(PCAP_REMOTE_PREFIX)
+        .and_then(|value| value.strip_suffix(".pcap"))
+    else {
+        return false;
+    };
+    uuid::Uuid::parse_str(id).is_ok()
+}
+
+pub fn generate_pcap_evidence_command(
+    interface: &str,
+    filter: Option<&str>,
+    packet_limit: Option<u32>,
+    duration_seconds: u32,
+    remote_path: &str,
+) -> Result<String, String> {
+    validate_interface(interface)?;
+    let filter = validate_filter(filter)?;
+    if !(1..=MAX_PCAP_CAPTURE_SECONDS).contains(&duration_seconds) {
+        return Err(format!("抓包时长必须为 1–{} 秒", MAX_PCAP_CAPTURE_SECONDS));
+    }
+    if packet_limit.is_some_and(|count| count == 0 || count > MAX_PCAP_PACKET_COUNT) {
+        return Err(format!("抓包数量上限必须为 1–{}", MAX_PCAP_PACKET_COUNT));
+    }
+    if !is_managed_remote_pcap_path(remote_path) {
+        return Err("远端 PCAP 路径不属于 LovelyRes 受管命名空间".to_string());
+    }
+
+    let remote = shell_quote(remote_path);
+    let count_arg = packet_limit
+        .map(|count| format!(" -c {}", count))
+        .unwrap_or_default();
+    let filter_arg = filter
+        .as_deref()
+        .map(|value| format!(" {}", shell_quote(value)))
+        .unwrap_or_default();
+
+    Ok(format!(
+        "set -u\n\
+umask 077\n\
+command -v tcpdump >/dev/null 2>&1 || {{ echo 'tcpdump 不可用' >&2; exit 127; }}\n\
+command -v timeout >/dev/null 2>&1 || {{ echo 'timeout 不可用' >&2; exit 127; }}\n\
+command -v sha256sum >/dev/null 2>&1 || {{ echo 'sha256sum 不可用' >&2; exit 127; }}\n\
+pcap_runner='tcpdump'\n\
+pcap_needs_chown=0\n\
+if [ \"$(id -u)\" -ne 0 ]; then\n\
+  command -v sudo >/dev/null 2>&1 || {{ echo '当前账号无抓包权限且 sudo 不可用' >&2; exit 126; }}\n\
+  sudo -n true >/dev/null 2>&1 || {{ echo '原始抓包需要 root 或免密 sudo' >&2; exit 126; }}\n\
+  pcap_runner='sudo -n tcpdump'\n\
+  pcap_needs_chown=1\n\
+fi\n\
+rm -f -- {remote}\n\
+capture_rc=0\n\
+timeout --signal=INT --kill-after=5s {duration_seconds}s $pcap_runner -nn -U -i {interface}{count_arg} -w {remote}{filter_arg} >/dev/null 2>&1 || capture_rc=$?\n\
+case \"$capture_rc\" in\n\
+  0|124|130) ;;\n\
+  *) if [ \"$pcap_needs_chown\" -eq 1 ]; then sudo -n rm -f -- {remote}; else rm -f -- {remote}; fi; exit \"$capture_rc\" ;;\n\
+esac\n\
+if [ \"$pcap_needs_chown\" -eq 1 ]; then sudo -n chown -- \"$(id -u):$(id -g)\" {remote}; fi\n\
+test -s {remote} || {{ rm -f -- {remote}; echo '未生成 PCAP 数据' >&2; exit 1; }}\n\
+pcap_size=$(wc -c < {remote})\n\
+pcap_hash=$(sha256sum {remote} | awk '{{print $1}}')\n\
+printf '{marker}\\t%s\\t%s\\n' \"$pcap_size\" \"$pcap_hash\"",
+        remote = remote,
+        duration_seconds = duration_seconds,
+        interface = shell_quote(interface),
+        count_arg = count_arg,
+        filter_arg = filter_arg,
+        marker = PCAP_RESULT_MARKER,
+    ))
+}
+
+pub fn parse_pcap_evidence_output(output: &str) -> Result<RemotePcapMetadata, String> {
+    let line = output
+        .lines()
+        .rev()
+        .find(|line| line.starts_with(PCAP_RESULT_MARKER))
+        .ok_or_else(|| "抓包结果缺少可验证元数据".to_string())?;
+    let mut parts = line.split('\t');
+    if parts.next() != Some(PCAP_RESULT_MARKER) {
+        return Err("抓包元数据版本无效".to_string());
+    }
+    let size_bytes = parts
+        .next()
+        .ok_or_else(|| "抓包元数据缺少文件大小".to_string())?
+        .parse::<u64>()
+        .map_err(|_| "抓包文件大小格式无效".to_string())?;
+    let sha256 = parts
+        .next()
+        .map(str::trim)
+        .filter(|value| value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .ok_or_else(|| "抓包 SHA-256 格式无效".to_string())?
+        .to_ascii_lowercase();
+    if parts.next().is_some() {
+        return Err("抓包元数据字段数量无效".to_string());
+    }
+    Ok(RemotePcapMetadata { size_bytes, sha256 })
+}
+
 /// 从端口号推断应用层协议
 fn infer_protocol_from_port(addr: &str) -> Option<&'static str> {
     // tcpdump 格式: 192.168.1.1.80 或 192.168.1.1.443
@@ -123,7 +275,8 @@ pub fn parse_tcpdump_line(line: &str, id: usize) -> PacketEntry {
 
             // 从端口推断应用层协议
             if let Some(app_proto) = infer_protocol_from_port(&entry.src)
-                .or_else(|| infer_protocol_from_port(&entry.dst)) {
+                .or_else(|| infer_protocol_from_port(&entry.dst))
+            {
                 entry.protocol = app_proto.to_string();
             }
         }
@@ -142,7 +295,11 @@ pub fn parse_tcpdump_line(line: &str, id: usize) -> PacketEntry {
 }
 
 /// 生成 tcpdump 命令（增强版: -tttt 完整时间戳, -v 获取 length）
-pub fn generate_tcpdump_command(interface: &str, filter: Option<&str>, count: Option<u32>) -> String {
+pub fn generate_tcpdump_command(
+    interface: &str,
+    filter: Option<&str>,
+    count: Option<u32>,
+) -> String {
     let mut cmd = format!("tcpdump -nne -l -tttt -v -i {}", shell_quote(interface));
 
     if let Some(c) = count {
@@ -172,5 +329,62 @@ mod command_tests {
         let command = generate_tcpdump_command("eth0; id", Some("tcp'; id; echo '"), Some(5));
         assert!(command.contains("-i 'eth0; id'"));
         assert!(command.contains("'tcp'\\''; id; echo '\\'''"));
+    }
+
+    #[test]
+    fn pcap_evidence_command_is_bounded_and_shell_quoted() {
+        let path = "/tmp/lovelyres-pcap-123e4567-e89b-12d3-a456-426614174000.pcap";
+        let command =
+            generate_pcap_evidence_command("eth0", Some("tcp port 443; id"), Some(500), 15, path)
+                .expect("valid evidence command");
+        assert!(command.contains("timeout --signal=INT --kill-after=5s 15s"));
+        assert!(command.contains("sudo -n true"));
+        assert!(command.contains("-c 500"));
+        assert!(command.contains("'tcp port 443; id'"));
+        assert!(command.contains("LOVELYRES_PCAP_V1"));
+        assert!(!command.contains("tcp port 443; id >/dev/null"));
+    }
+
+    #[test]
+    fn pcap_evidence_rejects_unmanaged_paths_and_unbounded_inputs() {
+        assert!(generate_pcap_evidence_command(
+            "eth0; id",
+            None,
+            None,
+            10,
+            &new_remote_pcap_path()
+        )
+        .is_err());
+        assert!(generate_pcap_evidence_command(
+            "eth0",
+            None,
+            Some(MAX_PCAP_PACKET_COUNT + 1),
+            10,
+            &new_remote_pcap_path()
+        )
+        .is_err());
+        assert!(generate_pcap_evidence_command(
+            "eth0",
+            None,
+            None,
+            MAX_PCAP_CAPTURE_SECONDS + 1,
+            &new_remote_pcap_path()
+        )
+        .is_err());
+        assert!(
+            generate_pcap_evidence_command("eth0", None, None, 10, "/tmp/user-chosen.pcap")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn pcap_evidence_metadata_requires_exact_marker_and_sha256() {
+        let hash = "ab".repeat(32);
+        let parsed =
+            parse_pcap_evidence_output(&format!("noise\n{}\t24\t{}\n", PCAP_RESULT_MARKER, hash))
+                .expect("valid marker");
+        assert_eq!(parsed.size_bytes, 24);
+        assert_eq!(parsed.sha256, hash);
+        assert!(parse_pcap_evidence_output("LOVELYRES_PCAP_V1\t24\tnot-a-hash").is_err());
     }
 }

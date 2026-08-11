@@ -9,13 +9,15 @@
  * 页面注册见 modernUIRenderer(renderSnapshotPage) / globalFunctions(switchPage) / app.ts(AppState)。
  */
 
-import { invoke } from '@tauri-apps/api/core';
-import { operationJournal, opSourceLabel } from '../core/operationJournal';
+import { operationJournal, opSourceLabel, type OperationEntry } from '../core/operationJournal';
+import { isArtifactForTarget, targetDisplayName } from '../core/targetBoundArtifact';
+import { executeEmergencyCommand } from '../emergency/commandExecution';
 import { sshConnectionManager } from '../remote/sshConnectionManager';
 import { showConfirm } from '../ui/confirmDialog';
 import { shq } from '../core/shellEscape';
 import { logger } from '../core/logger';
 import { reportError } from '../utils/errorHandler';
+import { activeTargetContext, isSameStableTarget, type TargetIdentity } from '../core/targetContext';
 
 const log = logger.module('Snapshot');
 
@@ -34,9 +36,10 @@ interface SnapshotItem {
   restoreCommand: string;     // 恢复该项的命令
 }
 
-interface DirSnapshot {
+export interface DirSnapshot {
   id: string;
   server: string;
+  target?: TargetIdentity;
   timestamp: number;
   remoteDir: string;          // /tmp/.lovelyres_snap/<ts>
   items: SnapshotItem[];
@@ -78,13 +81,9 @@ class SnapshotManager {
   }
 
   private async exec(cmd: string, timeoutSec = 120): Promise<string> {
-    const r = await invoke('ssh_execute_emergency_command_direct', {
-      command: cmd,
-      username: null,
-      timeoutSec,
-      cwd: null,
-    }) as any;
-    return r?.output || '';
+    const result = await executeEmergencyCommand({ command: cmd, timeoutSec });
+    if (!result.success) throw new Error(`${result.message}${result.output ? `: ${result.output}` : ''}`);
+    return result.output;
   }
 
   // ──────── 快照元数据持久化 ────────
@@ -117,8 +116,17 @@ class SnapshotManager {
         case 'rollback-all': this.onRollbackAll(); break;
         case 'clear-journal': this.onClearJournal(); break;
         case 'export-journal':
-          navigator.clipboard.writeText(operationJournal.exportAll(this.server())).catch(() => {});
-          window.showNotification?.('已复制操作日志', 'success');
+          {
+            const target = activeTargetContext.get();
+            if (!target) {
+              window.showNotification?.('当前 SSH 目标尚未完成可信身份确认', 'error');
+              break;
+            }
+            navigator.clipboard.writeText(operationJournal.exportTarget(target)).catch(e => {
+              reportError(e, { module: 'Snapshot', action: '复制目标操作日志' });
+            });
+            window.showNotification?.('已复制当前可信目标的操作日志', 'success');
+          }
           break;
         case 'export-report':
           void this.onExportDisposalReport(param === 'html' ? 'html' : 'markdown');
@@ -144,18 +152,22 @@ class SnapshotManager {
    */
   private async onExportDisposalReport(format: 'markdown' | 'html'): Promise<void> {
     const server = this.server();
-    const entries = operationJournal.list({ server });
-
-    if (!entries.length) {
-      window.showNotification?.('本机暂无处置记录，无法生成报告', 'warning');
-      return;
+    const target = activeTargetContext.get();
+    const entries = target ? operationJournal.list({ target }) : [];
+    let incident: import('../case/incidentCaseManager').IncidentCase | undefined;
+    try {
+      const { incidentCaseManager } = await import('../case/incidentCaseManager');
+      incidentCaseManager.syncOperationEntries(entries);
+      incident = incidentCaseManager.getActiveCase() || undefined;
+    } catch (e) {
+      log.warn('读取案件失败，报告将不含案件证据链', e);
     }
 
     let detection: import('../report/disposalReport').DisposalReportInput['detection'];
     try {
       const { quickDetectionManager } = await import('../detection/quickDetectionManager');
       const report = quickDetectionManager.getCurrentReport();
-      if (report) {
+      if (report?.target && target && isSameStableTarget(report.target, target)) {
         const findings = report.items
           .filter(i => i.status === 'completed' && i.result?.findings?.length)
           .flatMap(i => (i.result!.findings).map(f => ({
@@ -176,14 +188,19 @@ class SnapshotManager {
       log.warn('读取检测报告失败，报告将只含处置记录', e);
     }
 
+    if (!entries.length && !detection && !incident?.iocs.length && !incident?.evidence.length) {
+      window.showNotification?.('当前可信目标暂无检测、IOC、证据或处置记录，无法生成报告', 'warning');
+      return;
+    }
+
     try {
       const { downloadDisposalReport } = await import('../report/disposalReport');
       downloadDisposalReport(
-        { server, generatedAt: new Date(), entries, detection },
+        { server, generatedAt: new Date(), entries, detection, incident },
         format,
       );
       window.showNotification?.(
-        `已导出${format === 'markdown' ? ' Markdown' : ' HTML'}交付报告（${entries.length} 条处置${detection ? ' + 检测结果' : ''}）`,
+        `已导出${format === 'markdown' ? ' Markdown' : ' HTML'}交付报告（${entries.length} 条处置${detection ? ' + 检测结果' : ''}${incident ? ` + ${incident.evidence.length} 条案件证据` : ''}）`,
         'success',
       );
     } catch (e) {
@@ -194,6 +211,11 @@ class SnapshotManager {
   private async onRollbackOne(id: string): Promise<void> {
     const entry = operationJournal.get(id);
     if (!entry) return;
+    const target = activeTargetContext.get();
+    if (!target || !entry.target || !isSameStableTarget(entry.target, target)) {
+      window.showNotification?.('该操作记录不属于当前可信目标，已阻止回滚', 'error');
+      return;
+    }
     const ok = await showConfirm({
       title: '确认回滚',
       message: `将撤销操作：${entry.title}\n\n回滚命令：\n${entry.restoreCommand || '(无)'}`,
@@ -206,28 +228,39 @@ class SnapshotManager {
   }
 
   private async onRollbackAll(): Promise<void> {
-    const server = this.server();
-    const pending = operationJournal.list({ server }).filter(e => !e.rolledBack && e.restoreCommand);
+    const target = activeTargetContext.get();
+    if (!target) { window.showNotification?.('当前 SSH 目标尚未完成可信身份确认', 'error'); return; }
+    const pending = operationJournal.list({ target }).filter(e => this.canRollback(e, target));
     if (pending.length === 0) { window.showNotification?.('没有可回滚的操作', 'info'); return; }
     const ok = await showConfirm({
       title: '一键全回滚',
-      message: `将按时间倒序撤销本机 ${pending.length} 项操作。\n\n此动作会连续执行多条回滚命令，请确认已了解影响。`,
+      message: `目标：${targetDisplayName(target)}\n\n将按时间倒序撤销 ${pending.length} 项操作。\n\n此动作会连续执行多条回滚命令，请确认已了解影响。`,
       confirmText: `回滚 ${pending.length} 项`, cancelText: '取消', dangerous: true,
     });
     if (!ok) return;
-    const results = await operationJournal.rollbackAll(server);
+    if (!activeTargetContext.matches(target)) {
+      window.showNotification?.('确认期间活动目标已变化，已取消全量回滚', 'error');
+      return;
+    }
+    const results = await operationJournal.rollbackAllTarget(target);
     window.showNotification?.(`回滚完成：成功 ${results.filter(r => r.success).length}/${results.length}`, 'success');
     this.render();
   }
 
   private async onClearJournal(): Promise<void> {
+    const target = activeTargetContext.get();
+    if (!target) { window.showNotification?.('当前 SSH 目标尚未完成可信身份确认', 'error'); return; }
     const ok = await showConfirm({
       title: '清空操作日志',
-      message: '仅清除本机的操作历史记录（不会撤销已做的变更，也不删除靶机上的备份）。确定继续？',
+      message: `目标：${targetDisplayName(target)}\n\n仅清除该可信目标的操作历史记录（不会撤销已做的变更，也不删除靶机上的备份）。确定继续？`,
       confirmText: '清空', cancelText: '取消', dangerous: true,
     });
     if (!ok) return;
-    operationJournal.clear(this.server());
+    if (!activeTargetContext.matches(target)) {
+      window.showNotification?.('确认期间活动目标已变化，已取消清空', 'error');
+      return;
+    }
+    operationJournal.clearTarget(target);
     window.showNotification?.('操作日志已清空', 'success');
     this.render();
   }
@@ -236,6 +269,8 @@ class SnapshotManager {
 
   private async onCreateSnapshot(): Promise<void> {
     if (!sshConnectionManager.isConnected()) { window.showNotification?.('请先连接服务器', 'error'); return; }
+    const target = activeTargetContext.get();
+    if (!target) { window.showNotification?.('当前 SSH 目标尚未完成可信身份确认', 'error'); return; }
 
     // 收集勾选的路径
     const checks = Array.from(document.querySelectorAll('.snap-path-check')) as HTMLInputElement[];
@@ -244,10 +279,14 @@ class SnapshotManager {
 
     const ok = await showConfirm({
       title: '创建开赛快照',
-      message: `将打包 ${selected.length} 个位置到靶机 ${SNAP_ROOT}/ 下。\n\n打包大目录（如 /etc、/var/www）可能耗时数十秒，请耐心等待。`,
+      message: `目标：${targetDisplayName(target)}\n\n将打包 ${selected.length} 个位置到靶机 ${SNAP_ROOT}/ 下。\n\n打包大目录（如 /etc、/var/www）可能耗时数十秒，请耐心等待。`,
       confirmText: '开始快照', cancelText: '取消',
     });
     if (!ok) return;
+    if (!activeTargetContext.matches(target)) {
+      window.showNotification?.('确认期间活动目标已变化，已取消创建快照', 'error');
+      return;
+    }
 
     const ts = this.stamp();
     const remoteDir = `${SNAP_ROOT}/${ts}`;
@@ -286,13 +325,13 @@ class SnapshotManager {
       return;
     }
 
-    const snap: DirSnapshot = { id: `snap_${ts}`, server: this.server(), timestamp: Date.now(), remoteDir, items };
+    const snap: DirSnapshot = { id: `snap_${ts}`, server: target.host, target, timestamp: Date.now(), remoteDir, items };
     this.snapshots.push(snap);
     this.saveSnapshots();
 
     // 记入操作日志（快照创建本身可回滚 = 删除快照目录）
     operationJournal.record({
-      source: 'snapshot', server: this.server(),
+      source: 'snapshot', server: target.host, target, allowStableTargetReconnect: true,
       title: `创建开赛快照（${items.length} 项）`,
       command: `tar/cp -> ${remoteDir}`,
       backupInfo: remoteDir,
@@ -309,15 +348,24 @@ class SnapshotManager {
     const [snapId, idxStr] = param.split('|');
     const snap = this.snapshots.find(s => s.id === snapId);
     if (!snap) return;
+    const target = activeTargetContext.get();
+    if (!isArtifactForTarget(snap, target) || !target) {
+      window.showNotification?.('该快照未绑定当前可信目标，已阻止恢复', 'error');
+      return;
+    }
     const item = snap.items[Number(idxStr)];
     if (!item) return;
 
     const ok = await showConfirm({
       title: '恢复快照项',
-      message: `将用快照恢复：${item.label}\n\n命令：${item.restoreCommand}\n\n当前该位置的内容会被覆盖。建议恢复前对现状再拍一次快照。`,
+      message: `目标：${targetDisplayName(target)}\n\n将用快照恢复：${item.label}\n\n命令：${item.restoreCommand}\n\n当前该位置的内容会被覆盖。建议恢复前对现状再拍一次快照。`,
       confirmText: '恢复', cancelText: '取消', dangerous: true,
     });
     if (!ok) return;
+    if (!activeTargetContext.matches(target)) {
+      window.showNotification?.('确认期间活动目标已变化，已取消恢复', 'error');
+      return;
+    }
 
     let output = '';
     let success = true;
@@ -326,7 +374,7 @@ class SnapshotManager {
     } catch (e) { success = false; output = String(e); }
 
     operationJournal.record({
-      source: 'snapshot', server: this.server(),
+      source: 'snapshot', server: target.host, target,
       title: `恢复快照项：${item.label}`,
       command: item.restoreCommand,
       backupInfo: item.archive,
@@ -340,13 +388,27 @@ class SnapshotManager {
   private async onDeleteSnapshot(snapId: string): Promise<void> {
     const snap = this.snapshots.find(s => s.id === snapId);
     if (!snap) return;
+    const target = activeTargetContext.get();
+    if (!isArtifactForTarget(snap, target) || !target) {
+      window.showNotification?.('该快照未绑定当前可信目标，已阻止删除', 'error');
+      return;
+    }
     const ok = await showConfirm({
       title: '删除快照',
-      message: `将删除靶机上的备份目录 ${snap.remoteDir} 并移除本地记录。确定？`,
+      message: `目标：${targetDisplayName(target)}\n\n将删除靶机上的备份目录 ${snap.remoteDir} 并移除本地记录。确定？`,
       confirmText: '删除', cancelText: '取消', dangerous: true,
     });
     if (!ok) return;
-    try { await this.exec(`rm -rf ${shq(snap.remoteDir)}`); } catch { /* ignore */ }
+    if (!activeTargetContext.matches(target)) {
+      window.showNotification?.('确认期间活动目标已变化，已取消删除', 'error');
+      return;
+    }
+    try {
+      await this.exec(`rm -rf ${shq(snap.remoteDir)}`);
+    } catch (e) {
+      window.showNotification?.(`删除快照失败，本地记录已保留: ${e}`, 'error');
+      return;
+    }
     this.snapshots = this.snapshots.filter(s => s.id !== snapId);
     this.saveSnapshots();
     window.showNotification?.('快照已删除', 'success');
@@ -369,12 +431,12 @@ class SnapshotManager {
   }
 
   private renderHistory(): string {
-    const server = this.server();
-    const list = operationJournal.list({ server });
-    const pending = list.filter(e => !e.rolledBack && e.restoreCommand).length;
+    const target = activeTargetContext.get();
+    const list = target ? operationJournal.list({ target }) : [];
+    const pending = target ? list.filter(e => this.canRollback(e, target)).length : 0;
 
     const rows = list.map(e => {
-      const canRollback = !e.rolledBack && !!e.restoreCommand;
+      const canRollback = !!target && this.canRollback(e, target);
       const statusBadge = e.rolledBack
         ? '<span class="snap-badge rolled">已回滚</span>'
         : (e.success ? '<span class="snap-badge ok">已执行</span>' : '<span class="snap-badge fail">失败</span>');
@@ -413,8 +475,9 @@ class SnapshotManager {
   }
 
   private renderSnapshots(): string {
-    const server = this.server();
-    const mine = this.snapshots.filter(s => s.server === server).sort((a, b) => b.timestamp - a.timestamp);
+    const target = activeTargetContext.get();
+    const mine = this.snapshots.filter(s => isArtifactForTarget(s, target)).sort((a, b) => b.timestamp - a.timestamp);
+    const legacyCount = this.snapshots.filter(s => !s.target && s.server === this.server()).length;
 
     const pathChecks = PRESET_PATHS.map(p =>
       `<label class="snap-check"><input type="checkbox" class="snap-path-check" ${p.defaultOn ? 'checked' : ''}/> ${this.esc(p.label)}</label>`
@@ -450,6 +513,7 @@ class SnapshotManager {
         <div class="snap-hint">快照打包到靶机 ${SNAP_ROOT}/&lt;时间戳&gt;/ 下，恢复时按位置逐项还原。删除快照会移除靶机备份。</div>
       </div>
       <div class="snap-section-title" style="margin-top:16px;">已有快照（本机 ${mine.length} 个）</div>
+      ${legacyCount > 0 ? `<div class="snap-warning">发现 ${legacyCount} 条旧版 host-only 快照。因无法验证端口、账号和主机指纹，已禁止恢复与删除；请在当前目标重新创建快照。</div>` : ''}
       ${mine.length === 0 ? '<div class="snap-empty">尚无快照。建议进场后立刻创建一次开赛快照作为兜底。</div>' : snapCards}
     `;
   }
@@ -464,6 +528,12 @@ class SnapshotManager {
 
   private safeName(path: string): string {
     return path.replace(/^\//, '').replace(/[^a-zA-Z0-9._-]/g, '_') || 'root';
+  }
+
+  private canRollback(entry: OperationEntry, target: TargetIdentity): boolean {
+    if (entry.rolledBack || !entry.restoreCommand || !entry.target) return false;
+    return activeTargetContext.matches(entry.target)
+      || (entry.allowStableTargetReconnect === true && isSameStableTarget(entry.target, target));
   }
 
   private esc(s: string): string {
@@ -507,6 +577,7 @@ class SnapshotManager {
       .snap-badge.rolled{background:rgba(148,163,184,.15);color:var(--text-secondary);}
       .snap-muted{color:var(--text-secondary);}
       .snap-empty{color:var(--text-secondary);text-align:center;padding:40px 20px;font-size:13px;line-height:1.6;}
+      .snap-warning{color:#f59e0b;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);border-radius:6px;padding:10px 12px;margin-bottom:10px;font-size:12px;line-height:1.5;}
       .snap-panel{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:16px;}
       .snap-section-title{color:var(--text-primary);font-weight:600;font-size:13px;margin-bottom:10px;}
       .snap-checks{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;}

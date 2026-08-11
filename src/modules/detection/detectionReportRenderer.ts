@@ -12,6 +12,7 @@ import {
   Code
 } from '@icon-park/svg';
 import { createIconHTML } from '../ui/iconMapping';
+import { escapeHtml } from '../core/htmlEscape';
 
 import type { DetectionItem, DetectionResult, DetectionReport } from './quickDetectionManager';
 import { showAlert } from '../ui/confirmDialog';
@@ -23,6 +24,7 @@ import { showAlert } from '../ui/confirmDialog';
 export class DetectionReportRenderer {
   private currentReport: DetectionReport | null = null;
   private progressCallback?: (progress: number, current: string) => void;
+  private readonly boundReportModals = new WeakSet<HTMLElement>();
 
   /**
    * 设置当前报告引用
@@ -95,6 +97,11 @@ export class DetectionReportRenderer {
         statusEl.textContent = '失败';
         statusEl.style.background = 'rgba(239, 68, 68, 0.2)';
         statusEl.style.color = '#ef4444';
+        break;
+      case 'not-applicable':
+        statusEl.textContent = 'N/A';
+        statusEl.style.background = 'var(--sev-neutral-bg)';
+        statusEl.style.color = 'var(--sev-neutral-fg)';
         break;
       default:
         statusEl.textContent = '待检测';
@@ -241,7 +248,9 @@ export class DetectionReportRenderer {
    * 确保报告模态框存在
    */
   ensureReportModalExists(): void {
-    if (document.getElementById('detection-report-modal')) {
+    const existing = document.getElementById('detection-report-modal');
+    if (existing) {
+      this.bindReportModalActions(existing);
       return;
     }
 
@@ -249,7 +258,54 @@ export class DetectionReportRenderer {
     const modalHTML = this.renderReportModal();
     const tempDiv = document.createElement('div');
     tempDiv.innerHTML = modalHTML;
-    document.body.appendChild(tempDiv.firstElementChild!);
+    const modal = tempDiv.firstElementChild as HTMLElement;
+    document.body.appendChild(modal);
+    this.bindReportModalActions(modal);
+  }
+
+  private bindReportModalActions(modal: HTMLElement): void {
+    if (this.boundReportModals.has(modal)) return;
+    this.boundReportModals.add(modal);
+    modal.addEventListener('click', (event) => {
+      const target = event.target as HTMLElement | null;
+      const actionElement = target?.closest<HTMLElement>('[data-report-action]');
+      if (!actionElement) return;
+
+      const action = actionElement.dataset.reportAction;
+      if (action === 'close') {
+        this.closeReportModal();
+        return;
+      }
+      if (action === 'export') {
+        (window as any).quickDetection?.exportReport();
+        return;
+      }
+
+      const itemId = actionElement.dataset.itemId;
+      const item = itemId ? this.currentReport?.items.find(candidate => candidate.id === itemId) : undefined;
+      if (action === 'raw-output' && itemId) {
+        this.showRawOutput(itemId);
+        return;
+      }
+
+      const findingIndex = Number(actionElement.dataset.findingIndex);
+      const finding = Number.isInteger(findingIndex) ? item?.result?.findings[findingIndex] : undefined;
+      if (!finding) return;
+      if (action === 'user-disposal') {
+        (window as any).userDisposal?.openFromText(finding.description || finding.title);
+        return;
+      }
+      if (action === 'ai-solution') {
+        const containerId = actionElement.dataset.containerId;
+        if (!containerId) return;
+        (window as any).quickDetection?.generateAISolutionStream(
+          finding.title,
+          finding.description,
+          finding.severity,
+          containerId,
+        );
+      }
+    });
   }
 
   /**
@@ -268,7 +324,7 @@ export class DetectionReportRenderer {
         align-items: center;
         justify-content: center;
       ">
-        <div class="modal-overlay" onclick="window.quickDetection?.closeReportModal()" style="
+        <div class="modal-overlay" data-report-action="close" style="
           position: absolute;
           top: 0;
           left: 0;
@@ -300,7 +356,7 @@ export class DetectionReportRenderer {
               <h2 style="margin: 0; font-size: 24px; color: var(--text-primary); font-weight: 600;">${createIconHTML('🔍', { size: 18 })} 检测报告</h2>
               <p id="report-timestamp" style="margin: 4px 0 0 0; font-size: 14px; color: var(--text-secondary);"></p>
             </div>
-            <button onclick="window.quickDetection?.closeReportModal()" style="
+            <button data-report-action="close" style="
               background: transparent;
               border: none;
               font-size: 32px;
@@ -326,7 +382,7 @@ export class DetectionReportRenderer {
               border-radius: var(--border-radius-lg);
               padding: var(--spacing-lg);
               text-align: center;
-              background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(147, 51, 234, 0.1) 100%);
+              background: linear-gradient(135deg, color-mix(in srgb, var(--primary-color) 10%, transparent) 0%, color-mix(in srgb, var(--accent-purple) 10%, transparent) 100%);
             ">
               <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 8px;">安全评分</div>
               <div style="display: flex; align-items: baseline; justify-content: center; gap: 4px;">
@@ -351,31 +407,31 @@ export class DetectionReportRenderer {
               <div style="font-size: 16px; color: var(--text-primary); margin-bottom: var(--spacing-md); font-weight: 600;">问题统计</div>
               <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--spacing-sm);">
                 <div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg-secondary); border-radius: var(--border-radius);">
-                  <div style="width: 8px; height: 8px; border-radius: 50%; background: #ef4444;"></div>
+                  <div style="width: 8px; height: 8px; border-radius: 50%; background: var(--sev-critical-fg);"></div>
                   <div style="flex: 1;">
                     <div style="font-size: 12px; color: var(--text-secondary);">严重</div>
-                    <div id="report-critical-count" style="font-size: 24px; font-weight: 600; color: #ef4444;">0</div>
+                    <div id="report-critical-count" style="font-size: 24px; font-weight: 600; color: var(--sev-critical-fg);">0</div>
                   </div>
                 </div>
                 <div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg-secondary); border-radius: var(--border-radius);">
-                  <div style="width: 8px; height: 8px; border-radius: 50%; background: #f59e0b;"></div>
+                  <div style="width: 8px; height: 8px; border-radius: 50%; background: var(--sev-high-fg);"></div>
                   <div style="flex: 1;">
                     <div style="font-size: 12px; color: var(--text-secondary);">高危</div>
-                    <div id="report-high-count" style="font-size: 24px; font-weight: 600; color: #f59e0b;">0</div>
+                    <div id="report-high-count" style="font-size: 24px; font-weight: 600; color: var(--sev-high-fg);">0</div>
                   </div>
                 </div>
                 <div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg-secondary); border-radius: var(--border-radius);">
-                  <div style="width: 8px; height: 8px; border-radius: 50%; background: #eab308;"></div>
+                  <div style="width: 8px; height: 8px; border-radius: 50%; background: var(--sev-warn-fg);"></div>
                   <div style="flex: 1;">
                     <div style="font-size: 12px; color: var(--text-secondary);">中危</div>
-                    <div id="report-medium-count" style="font-size: 24px; font-weight: 600; color: #eab308;">0</div>
+                    <div id="report-medium-count" style="font-size: 24px; font-weight: 600; color: var(--sev-warn-fg);">0</div>
                   </div>
                 </div>
                 <div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg-secondary); border-radius: var(--border-radius);">
-                  <div style="width: 8px; height: 8px; border-radius: 50%; background: #3b82f6;"></div>
+                  <div style="width: 8px; height: 8px; border-radius: 50%; background: var(--sev-info-fg);"></div>
                   <div style="flex: 1;">
                     <div style="font-size: 12px; color: var(--text-secondary);">低危</div>
-                    <div id="report-low-count" style="font-size: 24px; font-weight: 600; color: #3b82f6;">0</div>
+                    <div id="report-low-count" style="font-size: 24px; font-weight: 600; color: var(--sev-info-fg);">0</div>
                   </div>
                 </div>
               </div>
@@ -395,10 +451,10 @@ export class DetectionReportRenderer {
             padding-top: var(--spacing-md);
             border-top: 1px solid var(--border-color);
           ">
-            <button class="modern-btn secondary" onclick="window.quickDetection?.exportReport()">
+            <button class="modern-btn secondary" data-report-action="export">
               ${createIconHTML('📄', { size: 14 })} 导出报告
             </button>
-            <button class="modern-btn primary" onclick="window.quickDetection?.closeReportModal()">
+            <button class="modern-btn primary" data-report-action="close">
               关闭
             </button>
           </div>
@@ -414,7 +470,10 @@ export class DetectionReportRenderer {
     // 更新时间戳
     const timestampEl = document.getElementById('report-timestamp');
     if (timestampEl) {
-      timestampEl.textContent = `${report.server} · ${new Date(report.timestamp).toLocaleString('zh-CN')} · 耗时 ${(report.totalDuration / 1000).toFixed(1)}s`;
+      const completeness = report.completeness
+        ? ` · 完整度 ${report.completeness.processedPercent}%（有效 ${report.completeness.completed} / 错误 ${report.completeness.failed} / N/A ${report.completeness.notApplicable}）`
+        : '';
+      timestampEl.textContent = `${report.server} · ${new Date(report.timestamp).toLocaleString('zh-CN')} · 耗时 ${(report.totalDuration / 1000).toFixed(1)}s${completeness}`;
     }
 
     // 更新评分
@@ -455,10 +514,15 @@ export class DetectionReportRenderer {
 
     // 按类别分组
     const securityItems = report.items.filter(item => item.category === 'security');
+    const competitionItems = report.items.filter(item => item.category === 'competition');
     const performanceItems = report.items.filter(item => item.category === 'performance');
 
     if (securityItems.length > 0) {
       html += this.renderReportCategory(`${createIconHTML('🔒', { size: 18 })} 安全检测结果`, securityItems);
+    }
+
+    if (competitionItems.length > 0) {
+      html += this.renderReportCategory(`${createIconHTML('🏁', { size: 18 })} 竞赛摸底结果`, competitionItems);
     }
 
     if (performanceItems.length > 0) {
@@ -500,7 +564,9 @@ export class DetectionReportRenderer {
    * 渲染单个报告项
    */
   renderReportItem(item: DetectionItem): string {
-    const statusColor = item.status === 'completed' ? '#22c55e' : item.status === 'failed' ? '#ef4444' : '#3b82f6';
+    const statusColor = item.status === 'completed' ? '#22c55e'
+      : item.status === 'failed' ? '#ef4444'
+        : item.status === 'not-applicable' ? '#94a3b8' : '#3b82f6';
     const statusIcon = item.status === 'completed'
       ? CheckOne({ theme: 'outline', size: '16', fill: statusColor })
       : item.status === 'failed'
@@ -517,14 +583,15 @@ export class DetectionReportRenderer {
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
           <div style="display: flex; align-items: center; gap: 8px;">
             <span style="color: ${statusColor}; font-size: 16px;">${statusIcon}</span>
-            <span style="font-weight: 500; color: var(--text-primary);">${item.name}</span>
+            <span style="font-weight: 500; color: var(--text-primary);">${escapeHtml(item.name)}</span>
           </div>
           <div style="display: flex; align-items: center; gap: 8px;">
             ${item.result?.rawOutput ? `
               <button
                 class="modern-btn secondary"
                 style="font-size: 12px; padding: 4px 8px; height: 24px;"
-                onclick="window.quickDetection?.showRawOutput('${item.id}')"
+                data-report-action="raw-output"
+                data-item-id="${escapeHtml(item.id)}"
                 title="查看原始结果"
               >
                 ${Code({ theme: 'outline', size: '14', fill: 'currentColor' })}
@@ -532,7 +599,7 @@ export class DetectionReportRenderer {
               </button>
             ` : ''}
             <span style="font-size: 14px; font-weight: 600; color: ${statusColor};">
-              ${item.result ? `${item.result.score}分` : '未完成'}
+              ${item.status === 'not-applicable' ? 'N/A' : item.result ? `${item.result.score}分` : '未完成'}
             </span>
           </div>
         </div>
@@ -557,7 +624,7 @@ export class DetectionReportRenderer {
             border-left: 3px solid ${severityColor};
           ">
             <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 4px;">
-              <span style="font-weight: 500; color: var(--text-primary); font-size: 14px;">${finding.title}</span>
+              <span style="font-weight: 500; color: var(--text-primary); font-size: 14px;">${escapeHtml(finding.title)}</span>
               <span style="
                 font-size: 11px;
                 padding: 2px 8px;
@@ -568,13 +635,15 @@ export class DetectionReportRenderer {
               ">${this.getSeverityLabel(finding.severity)}</span>
             </div>
             <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">
-              ${finding.description}
+              ${escapeHtml(finding.description)}
             </div>
             ${this.isUserFinding(item.id, finding.title, finding.description) ? `
               <button
                 class="modern-btn secondary"
                 style="margin-top: 4px; margin-bottom: 4px; font-size: 11px; padding: 4px 12px; display: inline-flex; align-items: center; gap: 4px;"
-                onclick='window.userDisposal?.openFromText(${JSON.stringify((finding.description || finding.title || "")).replace(/'/g, "&#39;")})'>
+                data-report-action="user-disposal"
+                data-item-id="${escapeHtml(item.id)}"
+                data-finding-index="${findingIndex}">
                 <span>处置账号</span>
               </button>
             ` : ''}
@@ -590,7 +659,7 @@ export class DetectionReportRenderer {
                   ${Tips({ theme: 'outline', size: '14', fill: 'var(--text-primary)' })}
                   <span>建议：</span>
                 </div>
-                <div style="color: var(--text-secondary);">${finding.recommendation}</div>
+                <div style="color: var(--text-secondary);">${escapeHtml(finding.recommendation)}</div>
                 <!-- AI解决方案容器包装器，使用相对定位 -->
                 <div id="${uniqueContainerId}-wrapper" style="position: relative; margin-top: 8px;">
                   <div id="${uniqueContainerId}"></div>
@@ -599,7 +668,10 @@ export class DetectionReportRenderer {
                   id="${uniqueContainerId}-btn"
                   class="modern-btn secondary"
                   style="margin-top: 8px; font-size: 11px; padding: 4px 12px; display: inline-flex; align-items: center; gap: 4px;"
-                  onclick="window.quickDetection?.generateAISolutionStream('${finding.title.replace(/'/g, "\\'")}', '${finding.description.replace(/'/g, "\\'")}', '${finding.severity}', '${uniqueContainerId}')">
+                  data-report-action="ai-solution"
+                  data-item-id="${escapeHtml(item.id)}"
+                  data-finding-index="${findingIndex}"
+                  data-container-id="${escapeHtml(uniqueContainerId)}">
                   ${Robot({ theme: 'outline', size: '12', fill: 'currentColor' })}
                   <span>AI 生成解决方案</span>
                 </button>
@@ -615,11 +687,11 @@ export class DetectionReportRenderer {
         <div style="
           margin-top: 8px;
           padding: 12px;
-          background: rgba(34, 197, 94, 0.1);
+          background: var(--sev-success-bg);
           border-radius: var(--border-radius);
-          border-left: 3px solid #22c55e;
+          border-left: 3px solid var(--sev-success-border);
         ">
-          <span style="color: #22c55e; font-size: 14px; display: inline-flex; align-items: center; gap: 4px;">
+          <span style="color: var(--sev-success-fg); font-size: 14px; display: inline-flex; align-items: center; gap: 4px;">
             ${CheckOne({ theme: 'outline', size: '14', fill: '#22c55e' })}
             <span>未发现问题</span>
           </span>
@@ -696,7 +768,7 @@ export class DetectionReportRenderer {
           align-items: center;
         ">
           <div style="display: flex; align-items: center; gap: 8px;">
-            <h3 style="margin: 0; font-size: 16px; font-weight: 600; color: var(--text-primary);">${item.name} - 原始结果</h3>
+            <h3 style="margin: 0; font-size: 16px; font-weight: 600; color: var(--text-primary);">${escapeHtml(item.name)} - 原始结果</h3>
           </div>
           <button class="raw-output-close-btn" style="
             background: none;
@@ -782,22 +854,22 @@ export class DetectionReportRenderer {
     json = json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     return json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, (match) => {
       let cls = 'number';
-      let style = 'color: #f59e0b;'; // number - orange
+      let style = 'color: var(--sev-warn-fg);'; // number - orange
 
       if (/^"/.test(match)) {
         if (/:$/.test(match)) {
           cls = 'key';
-          style = 'color: #3b82f6;'; // key - blue
+          style = 'color: var(--sev-info-fg);'; // key - blue
         } else {
           cls = 'string';
-          style = 'color: #10b981;'; // string - green
+          style = 'color: var(--sev-success-fg);'; // string - green
         }
       } else if (/true|false/.test(match)) {
         cls = 'boolean';
-        style = 'color: #ef4444;'; // boolean - red
+        style = 'color: var(--sev-critical-fg);'; // boolean - red
       } else if (/null/.test(match)) {
         cls = 'null';
-        style = 'color: #6b7280;'; // null - gray
+        style = 'color: var(--text-tertiary);'; // null - gray
       }
       return `<span class="${cls}" style="${style}">${match}</span>`;
     });

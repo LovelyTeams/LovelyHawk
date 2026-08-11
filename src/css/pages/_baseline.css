@@ -299,7 +299,7 @@
 }
 
 .bl-config-item.bl-noncompliant {
-  border-left: 3px solid #f97316;
+  border-left: 3px solid var(--sev-high-fg);
 }
 
 .bl-item-header {
@@ -374,13 +374,13 @@
 }
 
 .bl-value-ok {
-  background: color-mix(in srgb, #22c55e 12%, transparent);
-  color: #22c55e;
+  background: var(--sev-success-bg);
+  color: var(--sev-success-fg);
 }
 
 .bl-value-warn {
-  background: color-mix(in srgb, #f97316 12%, transparent);
-  color: #f97316;
+  background: var(--sev-high-bg);
+  color: var(--sev-high-fg);
 }
 
 .bl-value-recommended {
@@ -536,9 +536,9 @@
 }
 
 .bl-btn-revert:hover {
-  background: color-mix(in srgb, #ef4444 10%, transparent);
-  color: #ef4444;
-  border-color: #ef444440;
+  background: var(--sev-critical-bg);
+  color: var(--sev-critical-fg);
+  border-color: var(--sev-critical-border);
 }
 
 /* ─── Diff Bar ─── */
@@ -563,7 +563,7 @@
 
 .bl-diff-icon {
   display: flex;
-  color: #f97316;
+  color: var(--sev-high-fg);
 }
 
 .bl-diff-title {
@@ -611,7 +611,7 @@
 }
 
 .bl-diff-old {
-  color: #ef4444;
+  color: var(--sev-critical-fg);
   font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
   text-decoration: line-through;
   opacity: 0.8;
@@ -622,7 +622,7 @@
 }
 
 .bl-diff-new {
-  color: #22c55e;
+  color: var(--sev-success-fg);
   font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
   font-weight: 500;
 }
@@ -638,7 +638,7 @@
   margin-left: auto;
 }
 
-.bl-diff-remove:hover { color: #ef4444; }
+.bl-diff-remove:hover { color: var(--sev-critical-fg); }
 
 .bl-diff-actions {
   display: flex;
@@ -670,7 +670,7 @@
   background: var(--primary-color);
   border: none;
   border-radius: var(--border-radius);
-  color: white;
+  color: var(--accent-contrast);
   cursor: pointer;
   font-size: 13px;
   font-weight: 500;
@@ -1067,7 +1067,7 @@
   background: var(--primary-color);
   border: none;
   border-radius: var(--border-radius);
-  color: white;
+  color: var(--accent-contrast);
   font-size: 12px;
   cursor: pointer;
   transition: all 0.15s;

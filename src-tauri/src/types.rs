@@ -47,10 +47,26 @@ pub struct SSHAccountCredential {
     pub auth_type: String,                  // "password", "key", "certificate"
     pub encrypted_password: Option<String>, // AES加密的密码
     pub key_path: Option<String>,
-    pub key_passphrase: Option<String>,     // SSH密钥的密码短语
+    pub key_passphrase: Option<String>, // SSH密钥的密码短语
     pub certificate_path: Option<String>,
-    pub is_default: bool,                   // 是否为默认账号
-    pub description: Option<String>,        // 账号描述（如：超级管理员、数据库管理员等）
+    #[serde(default)]
+    pub agent_identity_fingerprint: Option<String>,
+    pub is_default: bool,            // 是否为默认账号
+    pub description: Option<String>, // 账号描述（如：超级管理员、数据库管理员等）
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SSHJumpHostConfig {
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub auth_type: String,
+    pub encrypted_password: Option<String>,
+    pub key_path: Option<String>,
+    pub key_passphrase: Option<String>,
+    pub certificate_path: Option<String>,
+    pub agent_identity_fingerprint: Option<String>,
+    pub host_key_fingerprint: Option<String>,
 }
 
 /// SSH连接配置
@@ -64,19 +80,33 @@ pub struct SSHConnection {
     #[serde(default)]
     pub username: String,
     #[serde(default)]
-    pub auth_type: String,                  // "password", "key", "certificate"
+    pub auth_type: String, // "password", "key", "certificate"
     pub encrypted_password: Option<String>, // AES加密的密码
     pub key_path: Option<String>,
-    pub key_passphrase: Option<String>,     // SSH密钥的密码短语
+    pub key_passphrase: Option<String>, // SSH密钥的密码短语
     pub certificate_path: Option<String>,
+    #[serde(default)]
+    pub agent_identity_fingerprint: Option<String>,
+    #[serde(default)]
+    pub jump_host: Option<SSHJumpHostConfig>,
     // 新增多账号支持
     #[serde(default)]
     pub accounts: Vec<SSHAccountCredential>, // 多账号列表
-    pub active_account: Option<String>,      // 当前活动的账号用户名
+    pub active_account: Option<String>, // 当前活动的账号用户名
     // 其他字段
     pub is_connected: bool,
     pub last_connected: Option<chrono::DateTime<chrono::Utc>>,
-    pub tags: Option<Vec<String>>,          // 连接标签
+    pub tags: Option<Vec<String>>, // 连接标签
+    #[serde(default)]
+    pub notes: Option<String>,
+    #[serde(default)]
+    pub environment: Option<String>,
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub group: Option<String>,
+    #[serde(default)]
+    pub host_key_fingerprint: Option<String>,
 }
 
 /// SSH命令配置
@@ -175,6 +205,22 @@ pub struct DockerActionResult {
     pub message: String,
     pub updated_state: Option<String>,
     pub updated_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backup_info: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restore_command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verify_command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verify_output: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verified: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restore_verify_command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restore_verify_expected: Option<String>,
 }
 
 /// Docker日志查询参数
@@ -448,11 +494,18 @@ impl Default for SSHConnection {
             key_path: None,
             key_passphrase: None,
             certificate_path: None,
+            agent_identity_fingerprint: None,
+            jump_host: None,
             accounts: Vec::new(),
             active_account: None,
             is_connected: false,
             last_connected: None,
             tags: None,
+            notes: None,
+            environment: None,
+            role: None,
+            group: None,
+            host_key_fingerprint: None,
         }
     }
 }
@@ -469,6 +522,7 @@ impl SSHConnection {
                 key_path: self.key_path.clone(),
                 key_passphrase: self.key_passphrase.clone(),
                 certificate_path: self.certificate_path.clone(),
+                agent_identity_fingerprint: self.agent_identity_fingerprint.clone(),
                 is_default: true,
                 description: Some("默认账号（从旧数据迁移）".to_string()),
             };
@@ -558,4 +612,3 @@ pub struct CommandCompletion {
     pub completions: Vec<String>,
     pub prefix: String,
 }
-

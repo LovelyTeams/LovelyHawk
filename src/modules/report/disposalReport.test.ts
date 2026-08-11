@@ -8,6 +8,7 @@ import {
   type DisposalReportInput,
 } from './disposalReport';
 import type { OperationEntry } from '../core/operationJournal';
+import type { IncidentCase } from '../case/incidentCaseManager';
 
 function entry(over: Partial<OperationEntry> = {}): OperationEntry {
   return {
@@ -29,6 +30,26 @@ const base: DisposalReportInput = {
   server: '10.0.0.1',
   generatedAt: new Date('2026-07-20T12:30:45'),
   entries: [entry()],
+};
+
+const incident: IncidentCase = {
+  id: 'case-1', title: 'WebShell 调查', status: 'open', targetKey: 'target-key',
+  target: { sessionId: 'session-1', hostKeyFingerprint: 'SHA256:key', host: '10.0.0.1', port: 22, username: 'root' },
+  lastTarget: { sessionId: 'session-2', hostKeyFingerprint: 'SHA256:key', host: '10.0.0.1', port: 22, username: 'root' },
+  createdAt: 1, updatedAt: 2,
+  iocs: [{
+    id: 'ioc-1', type: 'path', value: '/var/www/html/x.php', source: 'emergency:suid', addedAt: 2,
+    target: { sessionId: 'session-1', hostKeyFingerprint: 'SHA256:key', host: '10.0.0.1', port: 22, username: 'root' },
+  }],
+  evidence: [{
+    id: 'ev-1', kind: 'finding', label: '可疑文件', source: 'quick-detection:webshell', preview: 'x.php',
+    sha256: 'a'.repeat(64), hashScope: 'stored-preview', collectedAt: 2,
+    target: { sessionId: 'session-1', hostKeyFingerprint: 'SHA256:key', host: '10.0.0.1', port: 22, username: 'root' },
+  }],
+  timeline: [{
+    id: 'event-1', type: 'finding', title: '收集证据：可疑文件', source: 'quick-detection:webshell', timestamp: 2,
+    target: { sessionId: 'session-1', hostKeyFingerprint: 'SHA256:key', host: '10.0.0.1', port: 22, username: 'root' },
+  }],
 };
 
 describe('summarizeEntries', () => {
@@ -117,6 +138,15 @@ describe('buildDisposalMarkdown', () => {
     expect(withDetection).toContain('一、检测结果');
     expect(withDetection).toContain('二、处置记录');
   });
+
+  it('把案件 IOC、证据哈希和精确会话时间线并入交付报告', () => {
+    const md = buildDisposalMarkdown({ ...base, incident });
+    expect(md).toContain('一、案件与证据链');
+    expect(md).toContain('/var/www/html/x.php');
+    expect(md).toContain('a'.repeat(64));
+    expect(md).toContain('会话 session-1');
+    expect(md).toContain('二、处置记录');
+  });
 });
 
 describe('buildDisposalHtml', () => {
@@ -164,6 +194,19 @@ describe('buildDisposalHtml', () => {
   it('空处置记录时给出明确文案而不是空白', () => {
     const html = buildDisposalHtml({ ...base, entries: [] });
     expect(html).toContain('本次未产生任何变更记录');
+  });
+
+  it('案件数据全部转义并显示哈希范围', () => {
+    const hostile: IncidentCase = {
+      ...incident,
+      title: '<img src=x onerror=1>',
+      iocs: [{ ...incident.iocs[0], value: '</td><script>alert(1)</script>' }],
+    };
+    const html = buildDisposalHtml({ ...base, incident: hostile });
+    expect(html).not.toContain('<script>alert(1)</script>');
+    expect(html).not.toContain('<img src=x');
+    expect(html).toContain('&lt;script&gt;');
+    expect(html).toContain('stored-preview');
   });
 });
 

@@ -3,9 +3,10 @@
  * Linux Emergency Response Tool
  */
 
+import { invoke } from '@tauri-apps/api/core';
+
 // 本地化第三方资源(字体 + highlight.js),替代 index.html 中的 CDN 引入,保证离线可用
 import './modules/core/vendorAssets';
-
 import './css/main.css';
 import 'xterm/css/xterm.css';
 
@@ -14,10 +15,11 @@ import type { LovelyResApp } from './modules/core/app';
 import { initNotificationManager } from './modules/ui/notificationManager';
 import { logger, applySavedLogLevel } from './modules/core/logger';
 import { escapeHtml } from './modules/core/htmlEscape';
+import { openSftpWindow } from './modules/remote/sftpWindowBridge';
 
 /**
  * 启动路径上的日志尤其重要：冷启动卡死时用户什么也看不到，而正式包 drop 掉了
- * console，logger 的环形缓冲是唯一线索（设置→工具→诊断日志 可导出）。
+ * console，logger 的环形缓冲是唯一线索（状态栏「日志」按钮可查看并导出）。
  *
  * 级别在这里就恢复，而不是等设置页打开——否则用户调到 debug 重启复现问题时，
  * 启动路径上那段最关键的 debug 日志仍然会被丢掉。
@@ -56,8 +58,8 @@ function showSlowBootWarning(): void {
   btn.className = 'ls-recover-btn';
   btn.textContent = '重新加载';
   btn.style.cssText =
-    'margin-top:8px;padding:8px 22px;background:linear-gradient(90deg,#f9a8d4,#c4b5fd);' +
-    'color:#1e293b;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;';
+    'margin-top:8px;padding:8px 22px;background:linear-gradient(90deg,var(--ls-a,#7dd3fc),var(--ls-b,#3aa0ff));' +
+    'color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;';
   btn.addEventListener('click', () => location.reload());
   content.appendChild(btn);
 }
@@ -193,6 +195,29 @@ function bindPostBootDomListeners(logContextMenu: { showContextMenu(x: number, y
       event.preventDefault();
       event.stopPropagation();
       void openSSHTerminalWindow();
+      return;
+    }
+    const sftpBtn = target.closest('#sftp-title-btn');
+    if (sftpBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      void openSftpWindow();
+      return;
+    }
+    // 状态栏「日志」按钮：状态栏整体会被 replaceWith 重渲染（见 rerenderStatusBar），
+    // 事件只能挂在这里走委托，不能挂在按钮节点上
+    const logBtn = target.closest('#status-log-btn');
+    if (logBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      void import('./modules/ui/logViewerModal').then((m) => m.openLogViewer());
+      return;
+    }
+    const caseBtn = target.closest('#status-case-btn, [data-ui-action="open-case-workspace"]');
+    if (caseBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      void import('./modules/ui/caseWorkspaceModal').then((m) => m.openCaseWorkspace());
     }
   });
 
@@ -320,6 +345,7 @@ async function bootstrapApp(): Promise<void> {
     (window as any).app = app;
     (window as any).lovelyResApp = app;
     (window as any).openSSHTerminalWindow = openSSHTerminalWindow;
+    (window as any).openSftpWindow = openSftpWindow;
 
     setTimeout(() => {
       if (document.getElementById('ssh-terminal-container')) {
@@ -327,7 +353,7 @@ async function bootstrapApp(): Promise<void> {
       }
     }, 1000);
 
-    initGlobalFunctions({ app, settingsPageManager, openSSHTerminalWindow });
+    initGlobalFunctions({ app, settingsPageManager, openSSHTerminalWindow, openSftpWindow });
 
     // 可选模块:此时应用已展示,任一初始化失败都不应中止启动
     // (否则会命中外层 catch → showStartupFailure,把已经可用的界面整个抹掉)。
@@ -345,6 +371,12 @@ async function bootstrapApp(): Promise<void> {
 
     initCommandPalette();
     initKeyboardShortcuts(app);
+
+    try {
+      await invoke('report_frontend_ready');
+    } catch (error) {
+      log.warn('前端就绪状态上报失败:', error);
+    }
 
     log.debug('LovelyRes 启动完成');
   })().catch((error) => {
@@ -372,6 +404,11 @@ async function routeSecondaryWindow(): Promise<boolean> {
   if (which === 'container-terminal') {
     const { bootContainerTerminalWindow } = await import('./entries/containerTerminalEntry');
     bootContainerTerminalWindow();
+    return true;
+  }
+  if (which === 'sftp') {
+    const { bootSftpWindow } = await import('./entries/sftpEntry');
+    bootSftpWindow();
     return true;
   }
   return false;

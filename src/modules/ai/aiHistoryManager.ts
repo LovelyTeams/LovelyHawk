@@ -152,6 +152,7 @@ class AIHistoryManager {
     const sourceLabels: Record<string, string> = {
       'context-menu': '右键菜单', 'emergency': '应急命令', 'detection': '检测',
       'terminal': '终端', 'manual': '手动', 'command-explain': '命令解释',
+      'solution': '解决方案', 'log-explain': '日志解释', 'explain': '智能解释',
     };
 
     container.innerHTML = `

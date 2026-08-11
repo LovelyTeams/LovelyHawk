@@ -3,6 +3,8 @@
  */
 
 import * as IconPark from '@icon-park/svg'
+import { validateEditableRemotePath } from '../baseline/baselineFileEditor'
+import { shq } from '../core/shellEscape'
 import { BaseContextMenu, type MenuAction } from './contextMenu/baseContextMenu'
 
 export class RecentFileContextMenu extends BaseContextMenu {
@@ -136,7 +138,11 @@ export class RecentFileContextMenu extends BaseContextMenu {
   }
 
   protected resolveAction(action: string): MenuAction | null {
-    const filePath = this.currentFile.path || ''
+    let filePath: string
+    try { filePath = validateEditableRemotePath(this.currentFile.path || '') } catch { return null }
+    const quotedPath = shq(filePath)
+    const backupPath = `${filePath}.lovelyres.bak.${Date.now()}`
+    const quarantinePath = `/tmp/lovelyres_quarantine_${Date.now()}`
 
     const actions: Record<string, MenuAction> = {
       'file-details': {
@@ -185,14 +191,18 @@ export class RecentFileContextMenu extends BaseContextMenu {
         actionName: '查看同目录修改'
       },
       'backup-file': {
-        command: `cp -a ${filePath} ${filePath}.bak.$(date +%Y%m%d%H%M%S) && echo '✓ 已备份到 ${filePath}.bak.'$(date +%Y%m%d%H%M%S)`,
+        command: `cp -a -- ${quotedPath} ${shq(backupPath)}`,
         title: `备份 - ${filePath}`,
-        actionName: '备份文件'
+        actionName: '备份文件', mutating: true, dangerous: false,
+        verifyCommand: `test -e ${shq(backupPath)}`,
       },
       'quarantine': {
-        command: `mkdir -p /tmp/quarantine && cp -a ${filePath} /tmp/quarantine/ && chmod 000 ${filePath} && echo '✓ 文件已隔离到 /tmp/quarantine/'`,
+        command: `cp -a -- ${quotedPath} ${shq(quarantinePath)} && chmod 000 -- ${quotedPath}`,
         title: `隔离 - ${filePath}`,
-        actionName: '隔离文件'
+        actionName: '隔离文件', mutating: true, dangerous: true,
+        verifyCommand: `test "$(stat -c '%a' -- ${quotedPath})" = 0`,
+        restoreCommand: `cp -a -- ${shq(quarantinePath)} ${quotedPath}`,
+        restoreVerifyCommand: `cmp -s -- ${shq(quarantinePath)} ${quotedPath}`,
       }
     }
 

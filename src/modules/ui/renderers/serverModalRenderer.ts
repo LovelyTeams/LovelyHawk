@@ -13,13 +13,14 @@ import {
   System,
   Right,
   SettingTwo,
+  TargetTwo,
 } from '@icon-park/svg';
 import { version as APP_VERSION } from '../../../../package.json';
 
 const icon = (fn: any, size = '16', theme = 'outline') =>
   fn({ theme, size, fill: 'currentColor' });
 
-const BRAND_STAR = `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 1.6l2.95 7.0 7.55.62-5.75 4.94 1.74 7.38L12 17.9l-6.49 3.64 1.74-7.38L1.5 9.22l7.55-.62z"/></svg>`;
+const INCIDENT_MARK = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3.5 7.25A2.25 2.25 0 0 1 5.75 5h3l1.6 1.75h7.9A2.25 2.25 0 0 1 20.5 9v8.25a2.25 2.25 0 0 1-2.25 2.25H5.75a2.25 2.25 0 0 1-2.25-2.25v-10Z" fill="currentColor" opacity=".16"/><path d="M3.5 8.25h17M5.75 5h3l1.6 1.75h7.9A2.25 2.25 0 0 1 20.5 9v8.25a2.25 2.25 0 0 1-2.25 2.25H5.75a2.25 2.25 0 0 1-2.25-2.25V7.25A2.25 2.25 0 0 1 5.75 5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="12" cy="13.75" r="3.25" stroke="currentColor" stroke-width="1.5"/><path d="M12 9.5v2M12 16v2M7.75 13.75h2M14.25 13.75h2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
 const EYE_OPEN = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 12S5 5 12 5s10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12z"/><circle cx="12" cy="12" r="3"/></svg>`;
 const EYE_OFF = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l18 18M10.6 10.7a3 3 0 004.2 4.2M9.3 5.3A9.6 9.6 0 0112 5c7 0 10.5 7 10.5 7a17 17 0 01-3.4 4.3M6.1 6.2A17 17 0 001.5 12S5 19 12 19a9.6 9.6 0 003.3-.6"/></svg>`;
 
@@ -35,7 +36,7 @@ export class ServerModalRenderer {
     const history = sorted.length
       ? sorted.map((s, i) => this.renderHistoryItem(s, i === 0, times[s.id])).join('')
       : `<div class="sc-hist-empty">
-           <span class="sc-hist-empty-icon">${icon(Connection, '22')}</span>
+           <span class="sc-hist-empty-icon">${icon(TargetTwo, '22')}</span>
            <p>暂无历史连接<br>在右侧填写信息开始连接</p>
          </div>`;
 
@@ -44,13 +45,13 @@ export class ServerModalRenderer {
         <!-- 左侧：品牌 + 历史连接 -->
         <aside class="sc-left">
           <div class="sc-brand">
-            <span class="sc-brand-star">${BRAND_STAR}</span>
+            <span class="sc-brand-star">${INCIDENT_MARK}</span>
             <span class="sc-brand-name">LovelyRes</span>
           </div>
 
           <div class="sc-hero">
-            <h1 class="sc-hero-title">连接服务器</h1>
-            <p class="sc-hero-sub">建立 SSH 会话，开始 Linux 应急响应</p>
+            <h1 class="sc-hero-title">锁定响应目标</h1>
+            <p class="sc-hero-sub">建立可信 SSH 会话，隔离目标、案件与证据范围</p>
           </div>
 
           <div class="sc-history">
@@ -63,14 +64,14 @@ export class ServerModalRenderer {
             <div class="sc-history-list" id="sc-history-list">${history}</div>
           </div>
 
-          <span class="sc-star-watermark" aria-hidden="true">${BRAND_STAR}</span>
+          <span class="sc-star-watermark" aria-hidden="true">${INCIDENT_MARK}</span>
         </aside>
 
         <!-- 右侧：快速连接表单 -->
         <section class="sc-right">
           <div class="sc-form-wrap">
-            <h2 class="sc-form-h">快速连接</h2>
-            <div class="sc-form-eyebrow">SSH CONNECTION</div>
+            <h2 class="sc-form-h">连接目标</h2>
+            <div class="sc-form-eyebrow">TRUSTED TARGET</div>
 
             <div class="sc-wfield">
               <label for="scw-host">服务器地址</label>
@@ -92,10 +93,13 @@ export class ServerModalRenderer {
 
             <div class="sc-wfield">
               <label>认证方式</label>
-              <div class="sc-seg">
-                <button type="button" class="sc-seg-opt active" data-auth="password" onclick="window.scwSetAuthType?.('password')">密码</button>
-                <button type="button" class="sc-seg-opt" data-auth="key" onclick="window.scwSetAuthType?.('key')">私钥</button>
-              </div>
+              <select id="scw-auth-select" class="sc-underline" data-sc-action="auth-type" data-sc-prefix="scw">
+                <option value="password">密码</option>
+                <option value="key">私钥</option>
+                <option value="certificate">OpenSSH 证书</option>
+                <option value="keyboard-interactive">交互认证 / MFA</option>
+                <option value="agent">SSH Agent</option>
+              </select>
             </div>
 
             <div class="sc-wfield" id="scw-auth-password">
@@ -122,7 +126,45 @@ export class ServerModalRenderer {
                 <label for="scw-keypass">密钥密码（可选）</label>
                 <input id="scw-keypass" class="sc-underline" type="password" placeholder="如果私钥有密码">
               </div>
+              <div class="sc-wfield" id="scw-cert-row" style="display:none;">
+                <label for="scw-certpath">OpenSSH 用户证书</label>
+                <div class="sc-file-row">
+                  <input id="scw-certpath" class="sc-underline" placeholder="选择 *-cert.pub" readonly>
+                  <button type="button" class="sc-mini-btn" data-sc-action="select-key" data-target-id="scw-certpath">选择</button>
+                </div>
+              </div>
             </div>
+
+            <div class="sc-wfield" id="scw-auth-keyboard" style="display:none;">
+              <label>交互认证</label>
+              <div class="sc-form-eyebrow">连接时将按服务端提示安全输入密码、验证码或 MFA 响应，不保存一次性验证码。</div>
+            </div>
+
+            <div class="sc-wfield" id="scw-auth-agent" style="display:none;">
+              <label for="scw-agent-fingerprint">Agent 身份指纹（可选）</label>
+              <input id="scw-agent-fingerprint" class="sc-underline" placeholder="留空则依次尝试 Agent 中的身份">
+            </div>
+
+            <details class="sc-wfield">
+              <summary>堡垒机 / ProxyJump</summary>
+              <label class="sc-remember"><input type="checkbox" id="scw-jump-enabled"><span>通过堡垒机连接</span></label>
+              <div class="sc-field-row">
+                <div class="sc-wfield"><label>堡垒机地址</label><input id="scw-jump-host" class="sc-underline"></div>
+                <div class="sc-wfield"><label>端口</label><input id="scw-jump-port" class="sc-underline" type="number" value="22" min="1" max="65535"></div>
+              </div>
+              <div class="sc-field-row">
+                <div class="sc-wfield"><label>用户名</label><input id="scw-jump-username" class="sc-underline" value="root"></div>
+                <div class="sc-wfield"><label>认证</label><select id="scw-jump-auth-type" class="sc-underline" data-sc-action="jump-auth-type"><option value="password">密码</option><option value="key">私钥</option><option value="certificate">证书</option><option value="keyboard-interactive">交互/MFA</option><option value="agent">Agent</option></select></div>
+              </div>
+              <div id="scw-jump-auth-password" class="sc-wfield"><label>堡垒机密码</label><input id="scw-jump-password" class="sc-underline" type="password"></div>
+              <div id="scw-jump-auth-key" style="display:none;">
+                <div class="sc-wfield"><label>堡垒机私钥</label><div class="sc-file-row"><input id="scw-jump-keypath" class="sc-underline" readonly><button type="button" class="sc-mini-btn" data-sc-action="select-key" data-target-id="scw-jump-keypath">选择</button></div></div>
+                <div class="sc-wfield"><label>私钥口令</label><input id="scw-jump-keypass" class="sc-underline" type="password"></div>
+                <div class="sc-wfield" id="scw-jump-cert-row" style="display:none;"><label>用户证书</label><div class="sc-file-row"><input id="scw-jump-certpath" class="sc-underline" readonly><button type="button" class="sc-mini-btn" data-sc-action="select-key" data-target-id="scw-jump-certpath">选择</button></div></div>
+              </div>
+              <div id="scw-jump-auth-agent" class="sc-wfield" style="display:none;"><label>Agent 指纹（可选）</label><input id="scw-jump-agent-fingerprint" class="sc-underline"></div>
+              <div id="scw-jump-auth-keyboard" class="sc-form-eyebrow" style="display:none;">连接时按堡垒机提示输入交互认证响应。</div>
+            </details>
 
             <label class="sc-remember">
               <input type="checkbox" id="scw-remember" checked>
@@ -130,7 +172,7 @@ export class ServerModalRenderer {
             </label>
 
             <button type="button" class="sc-connect-btn" onclick="window.scConnectForm?.()">
-              <span class="sc-connect-label">连接服务器 ${icon(Right, '16')}</span>
+              <span class="sc-connect-label">锁定并连接 ${icon(Right, '16')}</span>
               <kbd class="sc-kbd">Enter</kbd>
             </button>
 
@@ -204,6 +246,9 @@ export class ServerModalRenderer {
         <div class="sc-card-addr">${this.esc(server.username)}@${this.esc(server.host)}:${server.port}</div>
         <div class="sc-card-tags">
           <span class="sc-tag ${authCls}">${authLabel}</span>
+          ${server.environment ? `<span class="sc-tag">${this.esc(server.environment)}</span>` : ''}
+          ${server.role ? `<span class="sc-tag">${this.esc(server.role)}</span>` : ''}
+          ${(server.tags || []).slice(0, 3).map((tag: string) => `<span class="sc-tag">${this.esc(tag)}</span>`).join('')}
           ${server.accountCount > 0 ? `<span class="sc-tag">${server.accountCount} 账户</span>` : ''}
         </div>
         <div class="sc-card-actions">
@@ -236,19 +281,36 @@ export class ServerModalRenderer {
               <div class="sc-field" style="width:90px;"><label>端口</label><input id="sc-port" type="number" value="${d.port || 22}" min="1" max="65535"></div>
             </div>
             <div class="sc-field"><label>用户名</label><input id="sc-username" placeholder="root" value="${this.esc(d.username || 'root')}"></div>
-            <div class="sc-auth-toggle">
-              <button class="sc-auth-option ${authType === 'password' ? 'active' : ''}" data-auth="password" onclick="window.scSetAuthType?.('password')">密码认证</button>
-              <button class="sc-auth-option ${authType === 'key' ? 'active' : ''}" data-auth="key" onclick="window.scSetAuthType?.('key')">密钥认证</button>
-            </div>
-            <div id="sc-auth-password" style="${authType === 'key' ? 'display:none' : ''}">
+            <div class="sc-field"><label>认证方式</label><select id="sc-auth-select" data-sc-action="auth-type" data-sc-prefix="sc">
+              <option value="password" ${authType === 'password' ? 'selected' : ''}>密码</option><option value="key" ${authType === 'key' ? 'selected' : ''}>私钥</option><option value="certificate" ${authType === 'certificate' ? 'selected' : ''}>OpenSSH 证书</option><option value="keyboard-interactive" ${authType === 'keyboard-interactive' ? 'selected' : ''}>交互认证 / MFA</option><option value="agent" ${authType === 'agent' ? 'selected' : ''}>SSH Agent</option>
+            </select></div>
+            <div id="sc-auth-password" style="${authType === 'password' ? '' : 'display:none'}">
               <div class="sc-field"><label>密码</label><input id="sc-password" type="password" placeholder="SSH 密码"></div>
             </div>
-            <div id="sc-auth-key" style="${authType === 'password' ? 'display:none' : ''}">
+            <div id="sc-auth-key" style="${authType === 'key' || authType === 'certificate' ? '' : 'display:none'}">
               <div class="sc-field"><label>私钥文件</label>
                 <div class="sc-file-row"><input id="sc-keypath" placeholder="选择私钥文件" value="${this.esc(d.keyPath || '')}" readonly><button class="sc-file-btn" onclick="window.selectPrivateKeyFile?.('sc-keypath')">选择</button></div>
               </div>
               <div class="sc-field"><label>密钥密码 (可选)</label><input id="sc-keypass" type="password" placeholder="如果私钥有密码"></div>
+              <div class="sc-field" id="sc-cert-row" style="${authType === 'certificate' ? '' : 'display:none'}"><label>OpenSSH 用户证书</label><div class="sc-file-row"><input id="sc-certpath" placeholder="选择 *-cert.pub" value="${this.esc(d.certificatePath || '')}" readonly><button class="sc-file-btn" data-sc-action="select-key" data-target-id="sc-certpath">选择</button></div></div>
             </div>
+            <div id="sc-auth-keyboard" class="sc-field" style="${authType === 'keyboard-interactive' ? '' : 'display:none'}"><label>交互认证</label><div class="sc-hint">连接时按服务端提示输入密码、验证码或 MFA 响应。</div></div>
+            <div id="sc-auth-agent" class="sc-field" style="${authType === 'agent' ? '' : 'display:none'}"><label>Agent 身份指纹（可选）</label><input id="sc-agent-fingerprint" value="${this.esc(d.agentIdentityFingerprint || '')}" placeholder="留空则依次尝试"></div>
+            <details class="sc-field"><summary>堡垒机 / ProxyJump</summary>
+              <label><input type="checkbox" id="sc-jump-enabled" ${d.jumpHost ? 'checked' : ''}> 通过堡垒机连接</label>
+              <div style="display:flex;gap:10px;"><div class="sc-field" style="flex:1"><label>地址</label><input id="sc-jump-host" value="${this.esc(d.jumpHost?.host || '')}"></div><div class="sc-field" style="width:90px"><label>端口</label><input id="sc-jump-port" type="number" value="${d.jumpHost?.port || 22}"></div></div>
+              <div style="display:flex;gap:10px;"><div class="sc-field" style="flex:1"><label>用户名</label><input id="sc-jump-username" value="${this.esc(d.jumpHost?.username || 'root')}"></div><div class="sc-field" style="flex:1"><label>认证</label><select id="sc-jump-auth-type" data-sc-action="jump-auth-type"><option value="password" ${(!d.jumpHost || d.jumpHost.authType === 'password') ? 'selected' : ''}>密码</option><option value="key" ${d.jumpHost?.authType === 'key' ? 'selected' : ''}>私钥</option><option value="certificate" ${d.jumpHost?.authType === 'certificate' ? 'selected' : ''}>证书</option><option value="keyboard-interactive" ${d.jumpHost?.authType === 'keyboard-interactive' ? 'selected' : ''}>交互/MFA</option><option value="agent" ${d.jumpHost?.authType === 'agent' ? 'selected' : ''}>Agent</option></select></div></div>
+              <div id="sc-jump-auth-password" class="sc-field" style="${!d.jumpHost || d.jumpHost.authType === 'password' ? '' : 'display:none'}"><label>密码</label><input id="sc-jump-password" type="password"></div>
+              <div id="sc-jump-auth-key" style="${d.jumpHost?.authType === 'key' || d.jumpHost?.authType === 'certificate' ? '' : 'display:none'}"><div class="sc-field"><label>私钥</label><div class="sc-file-row"><input id="sc-jump-keypath" value="${this.esc(d.jumpHost?.keyPath || '')}" readonly><button class="sc-file-btn" data-sc-action="select-key" data-target-id="sc-jump-keypath">选择</button></div></div><div class="sc-field"><label>私钥口令</label><input id="sc-jump-keypass" type="password"></div><div class="sc-field" id="sc-jump-cert-row" style="${d.jumpHost?.authType === 'certificate' ? '' : 'display:none'}"><label>用户证书</label><div class="sc-file-row"><input id="sc-jump-certpath" value="${this.esc(d.jumpHost?.certificatePath || '')}" readonly><button class="sc-file-btn" data-sc-action="select-key" data-target-id="sc-jump-certpath">选择</button></div></div></div>
+              <div id="sc-jump-auth-agent" class="sc-field" style="${d.jumpHost?.authType === 'agent' ? '' : 'display:none'}"><label>Agent 指纹（可选）</label><input id="sc-jump-agent-fingerprint" value="${this.esc(d.jumpHost?.agentIdentityFingerprint || '')}"></div>
+              <div id="sc-jump-auth-keyboard" class="sc-hint" style="${d.jumpHost?.authType === 'keyboard-interactive' ? '' : 'display:none'}">连接时按堡垒机提示输入交互认证响应。</div>
+            </details>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
+              <div class="sc-field"><label>环境</label><select id="sc-environment"><option value="">未设置</option>${['production','staging','development','ctf'].map(v => `<option value="${v}" ${d.environment === v ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
+              <div class="sc-field"><label>角色</label><input id="sc-role" placeholder="web / db / k8s" value="${this.esc(d.role || '')}"></div>
+              <div class="sc-field"><label>分组</label><input id="sc-group" placeholder="业务或赛题分组" value="${this.esc(d.group || '')}"></div>
+            </div>
+            <div class="sc-field"><label>标签（逗号分隔）</label><input id="sc-tags" placeholder="linux, internet, critical" value="${this.esc(Array.isArray(d.tags) ? d.tags.join(', ') : d.tags || '')}"></div>
             <div class="sc-field"><label>备注 (可选)</label><input id="sc-notes" placeholder="连接备注" value="${this.esc(d.notes || '')}"></div>
           </div>
           <div class="sc-form-footer">
@@ -283,7 +345,9 @@ export class ServerModalRenderer {
       username: c.username, authType: c.authType || 'password',
       status: c.isConnected ? 'connected' : 'disconnected',
       accounts: c.accounts || [], accountCount: c.accounts?.length || 0,
-      keyPath: c.keyPath || '', notes: c.notes || '', tags: c.tags || '',
+      keyPath: c.keyPath || '', notes: c.notes || '', tags: c.tags || [],
+      environment: c.environment || '', role: c.role || '', group: c.group || '',
+      hostKeyFingerprint: c.hostKeyFingerprint || '',
     }));
   }
 

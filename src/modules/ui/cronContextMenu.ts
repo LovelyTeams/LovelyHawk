@@ -3,7 +3,17 @@
  */
 
 import * as IconPark from '@icon-park/svg'
+import { shq } from '../core/shellEscape'
 import { BaseContextMenu, type MenuAction } from './contextMenu/baseContextMenu'
+
+const CRON_FILE_PREFIXES = ['/etc/cron.d/', '/etc/cron.hourly/', '/etc/cron.daily/', '/etc/cron.weekly/', '/etc/cron.monthly/']
+
+export function isDeletableCronFile(path: string): boolean {
+  return CRON_FILE_PREFIXES.some(prefix => path.startsWith(prefix))
+    && !path.includes('..')
+    && !/[\r\n\u0000]/.test(path)
+    && !path.endsWith('/')
+}
 
 export class CronContextMenu extends BaseContextMenu {
   private currentCron: {
@@ -240,15 +250,10 @@ export class CronContextMenu extends BaseContextMenu {
     }
 
     if (action === 'delete-task-file') {
-      if (source && source.startsWith('/')) {
-        if (source === '/etc/crontab') {
-          this.showModal('错误', '不能删除系统主crontab文件 (/etc/crontab)')
-          return true
-        }
-        // Valid path, let resolveAction handle
+      if (isDeletableCronFile(source)) {
         return false
       } else {
-        this.showModal('提示', '此任务不是通过独立文件配置的，无法通过删除文件来删除任务。\n\n如果是用户任务，请使用"crontab -e"编辑。')
+        this.showModal('提示', '仅允许删除 /etc/cron.{d,hourly,daily,weekly,monthly}/ 下经过校验的独立任务文件。系统主 crontab、用户 crontab 和异常路径已阻止。')
         return true
       }
     }
@@ -271,11 +276,19 @@ export class CronContextMenu extends BaseContextMenu {
           return { command: `echo "=== 用户Crontab: ${u} ==="; echo ""; crontab -u ${u} -l`, title: `用户Crontab - ${u}`, actionName: '查看源文件' }
         }
       },
-      'delete-task-file': {
-        command: `echo "正在删除文件: ${source}"; rm -f "${source}" && echo "删除成功" || echo "删除失败"`,
-        title: `删除任务文件 - ${source}`,
-        actionName: '删除任务文件'
-      },
+      'delete-task-file': (() => {
+        const backup = `/tmp/lovelyres_cron_backup_${Date.now()}`
+        return {
+          command: `test -f ${shq(source)} && cp -a -- ${shq(source)} ${shq(backup)} && rm -f -- ${shq(source)}`,
+          title: `删除任务文件 - ${source}`,
+          actionName: '删除任务文件',
+          mutating: true,
+          dangerous: true,
+          verifyCommand: `test ! -e ${shq(source)}`,
+          restoreCommand: `cp -a -- ${shq(backup)} ${shq(source)}`,
+          restoreVerifyCommand: `test -f ${shq(source)}`,
+        }
+      })(),
 
       // 基本信息
       'details': {
@@ -298,7 +311,9 @@ export class CronContextMenu extends BaseContextMenu {
       'run-now': {
         command: `echo "立即执行计划任务"; echo ""; echo "用户: ${user}"; echo "命令: ${command}"; echo ""; echo "执行中..."; echo ""; ${command}`,
         title: `立即执行 - ${command.substring(0, 120)}...`,
-        actionName: '立即执行任务'
+        actionName: '立即执行任务',
+        mutating: true,
+        dangerous: true,
       },
       'test-command': {
         command: `echo "=== 测试命令 ==="; echo ""; echo "命令: ${command}"; echo ""; echo "检查命令语法..."; bash -n -c "${command}" 2>&1 && echo "语法检查通过" || echo "语法错误"; echo ""; echo "提示：这只是语法检查，实际执行可能需要其他条件"`,

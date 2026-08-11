@@ -6,7 +6,7 @@
 import {
   Log, FileText, Refresh, Search,
   Calendar, Left, Right, Shield, LinkCloud, Export,
-  SettingConfig,
+  SettingConfig, Timeline,
 } from '@icon-park/svg';
 
 const icon = (fn: any, size = '16', theme = 'outline') =>
@@ -44,7 +44,7 @@ export class LogAnalysisRenderer {
     return `
       <div class="la-header">
         <div class="la-header-left">
-          <div class="la-header-icon">${icon(Log, '22', 'filled')}</div>
+          <div class="la-header-icon">${icon(Timeline, '22')}</div>
           <div>
             <h2 class="la-header-title">日志审计</h2>
             <div class="la-header-subtitle">应急响应 · 威胁分析 · 取证溯源</div>
@@ -201,9 +201,14 @@ export class LogAnalysisRenderer {
             <p class="la-section-desc">输入 IP / 域名 / 哈希值，每行一个或逗号分隔，将在 auth.log / syslog / secure / messages / audit.log 中搜索</p>
             <textarea id="ioc-input" class="la-ioc-textarea" rows="8"
               placeholder="192.168.1.100&#10;10.0.0.5&#10;evil.example.com&#10;e99a18c428cb38d5f260853678922e03"></textarea>
-            <button class="modern-btn primary" onclick="window.executeIocSearch()" style="margin-top:8px">
-              ${icon(Search)} 搜索
-            </button>
+            <div style="display:flex;gap:8px;margin-top:8px">
+              <button class="modern-btn primary" data-la-action="execute-ioc-search">
+                ${icon(Search)} 搜索并登记案件
+              </button>
+              <button class="modern-btn secondary" data-la-action="sync-case-ioc">
+                同步案件 IOC
+              </button>
+            </div>
           </div>
           <div class="la-ioc-right" id="ioc-results-container">
             <div class="la-empty-hint">搜索结果将显示在这里</div>

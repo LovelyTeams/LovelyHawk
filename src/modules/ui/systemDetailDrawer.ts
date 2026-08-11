@@ -1,17 +1,21 @@
 /**
  * 系统信息通用「详情侧栏」(System Detail Drawer)
  *
- * 与进程详情抽屉同款的右侧常驻可收缩侧栏，供「系统信息」里除进程外的各 tab 复用：
+ * 与进程详情抽屉同款的右侧可收缩侧栏，供「系统信息」里除进程外的各 tab 复用：
  * 点击表格行后展示该条目的关键信息，并把我们之前为右键菜单设计的大量功能
  * 以按钮形式直接放到侧栏里（复用各 ContextMenu.runAction，命令/结果弹窗/AI 完全一致）。
  *
  * 侧栏 DOM 由 renderSysSide() 注入到 .sys-view 中；行点击 → openSysDetail(tab, row)。
  *
+ * 默认收缩为 44px 竖条（不挤占表格宽度）；点击条目时自动展开。
+ * 展开状态按 tab 记入 sdExpandedTabs（仅会话内有效，不落盘）：
+ * 切 tab / 刷新重渲后保持，应用重启后回到默认收缩。
+ *
  * 「概要」：能直接读出来的关键信息在点开时自动拉取并内联展示（无需再点按钮），
  * 与进程详情的 fetchExtended 同思路；命令均为只读，输出 KEY:value 行。
  */
 
-import { invoke } from '@tauri-apps/api/core';
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH';
 import { escapeHtml as esc } from '../core/htmlEscape';
 
 /** shell 单引号安全包裹（用于把实体值拼进只读命令） */
@@ -386,11 +390,14 @@ const PROVIDERS: Record<string, (row: any) => DetailSpec> = {
 
 // ─────────────────────────── 渲染 ───────────────────────────
 
+/** 各 tab 详情侧栏的展开状态（会话内记忆；默认收缩，点击条目才展开） */
+const sdExpandedTabs = new Set<string>();
+
 /** 侧栏外壳（注入到 .sys-view 中，与进程详情同款） */
 export function renderSysSide(tab: string): string {
-  const collapsed = (() => { try { return localStorage.getItem('sys-side-collapsed') === 'true'; } catch { return false; } })();
+  const collapsed = !sdExpandedTabs.has(tab);
   return `
-    <aside class="sys-side${collapsed ? ' collapsed' : ''}" id="sys-side">
+    <aside class="sys-side${collapsed ? ' collapsed' : ''}" id="sys-side" data-sys-tab="${esc(tab)}">
       <div class="sys-side-head">
         <span class="sys-side-title" id="sys-side-title">${esc(SIDE_TITLE[tab] || '详情')}</span>
         <button class="sys-side-toggle" onclick="window.toggleSysSide && window.toggleSysSide()" title="收起 / 展开详情">${I_CHEV}</button>
@@ -460,11 +467,11 @@ export function openSysDetail(tab: string, row: any): void {
   const foot = document.getElementById('sys-side-foot');
   if (foot) foot.innerHTML = d.foot && d.foot.length ? actionBtns(d.menuKey, d.foot) : '';
 
-  // 自动展开（若用户之前收起）
+  // 点击条目时展开（按 tab 记入会话状态，重渲后保持展开）
+  sdExpandedTabs.add(tab);
   const side = document.getElementById('sys-side');
   if (side?.classList.contains('collapsed')) {
     side.classList.remove('collapsed');
-    try { localStorage.setItem('sys-side-collapsed', 'false'); } catch { /* ignore */ }
   }
 
   // 「概要」：自动拉取可直接展示的只读信息并内联填充
@@ -483,7 +490,7 @@ async function runAutoload(al: NonNullable<DetailSpec['autoload']>, token: numbe
     }
   };
   try {
-    const res = await invoke('ssh_execute_dashboard_command_direct', { command: al.cmd }) as { output?: string };
+    const res = await invokeTargetBoundSSH('ssh_execute_dashboard_command_direct', { command: al.cmd }) as { output?: string };
     fill(res?.output || '');
   } catch {
     fill(''); // 离线 / 无后端：占位改为 -
@@ -494,7 +501,11 @@ function toggleSysSide(): void {
   const side = document.getElementById('sys-side');
   if (!side) return;
   const collapsed = side.classList.toggle('collapsed');
-  try { localStorage.setItem('sys-side-collapsed', collapsed ? 'true' : 'false'); } catch { /* ignore */ }
+  const tab = side.getAttribute('data-sys-tab') || '';
+  if (tab) {
+    if (collapsed) sdExpandedTabs.delete(tab);
+    else sdExpandedTabs.add(tab);
+  }
 }
 
 /** 详情侧栏按钮 → 运行对应右键菜单 action（实体为当前选中行） */
@@ -512,6 +523,8 @@ async function sysDetailRun(menuKey: string, action: string): Promise<void> {
 
 function registerSysDetailHandlers(): void {
   const w = window as any;
+  // 旧键迁移：详情侧栏改为「默认收缩 + 会话内按 tab 记忆」，不再持久化展开状态
+  try { localStorage.removeItem('sys-side-collapsed'); } catch { /* ignore */ }
   w.openSysDetail = openSysDetail;
   w.toggleSysSide = toggleSysSide;
   w.sysDetailRun = sysDetailRun;

@@ -1,58 +1,62 @@
 /* 深色主题 - LovelyRes */
-/* Aligned with LovelySpark dark palette: navy canvas + airy blue accent */
+/* SOC 控制台深色板：深海军蓝画布 + 青蓝主色 + 五级风险色（对齐设计稿） */
 
 [data-theme="dark"] {
   /* 主色调 */
-  --primary-color: #6db3ff;
-  --secondary-color: #818cf8;
-  --accent-color: #6db3ff;
-  --success-color: #4ade80;
+  --primary-color: #3aa0ff;
+  --secondary-color: #38bdf8;
+  --accent-color: #3aa0ff;
+  --success-color: #34d399;
   --warning-color: #fbbf24;
   --error-color: #f87171;
-  --info-color: #6db3ff;
+  --info-color: #60a5fa;
 
   /* 背景色 */
-  --bg-primary: #0c1222;
-  --bg-secondary: #1a2332;
-  --bg-tertiary: #141c2b;
-  --bg-dark: #080d19;
-  --bg-glass: rgba(12, 18, 34, 0.8);
-  --bg-hover: rgba(255, 255, 255, 0.06);
-  --hover-bg: rgba(255, 255, 255, 0.06);
-  --active-bg: rgba(255, 255, 255, 0.10);
+  --bg-primary: #0a0e1a;
+  --bg-secondary: #10182b;
+  --bg-tertiary: #0d1424;
+  --bg-dark: #060a12;
+  --bg-glass: rgba(10, 14, 26, 0.82);
+  --bg-hover: rgba(148, 163, 184, 0.07);
+  --hover-bg: rgba(148, 163, 184, 0.07);
+  --active-bg: rgba(148, 163, 184, 0.12);
 
   /* 文字颜色 */
-  --text-primary: #f8fafc;
-  --text-secondary: #94a3b8;
-  --text-tertiary: #64748b;
-  --text-light: #64748b;
+  --text-primary: #e8eef7;
+  --text-secondary: #8b9bb8;
+  --text-tertiary: #5d7191;
+  --text-light: #5d7191;
   --text-white: #ffffff;
 
   /* 边框和阴影 */
-  --border-color: #283548;
-  --border-color-hover: #3f4f6a;
-  --border-light: rgba(255, 255, 255, 0.06);
+  --border-color: #1e2a44;
+  --border-color-hover: #31435f;
+  --border-light: rgba(148, 163, 184, 0.08);
   --shadow-sm: 0 4px 6px -1px rgba(0, 0, 0, 0.25);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45);
   --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
   --shadow-xl: 0 20px 60px rgba(0, 0, 0, 0.5);
   --shadow-glass: 0 8px 32px rgba(0, 0, 0, 0.37);
-  --glow-primary: rgba(109, 179, 255, 0.32);
+  --glow-primary: rgba(58, 160, 255, 0.32);
 
   /* Extended design tokens (LovelySpark parity) */
-  --surface-primary: #0c1222;
-  --surface-secondary: #1a2332;
-  --surface-tertiary: #141c2b;
-  --primary-glow: rgba(109, 179, 255, 0.18);
+  --surface-primary: #0a0e1a;
+  --surface-secondary: #10182b;
+  --surface-tertiary: #0d1424;
+  --primary-glow: rgba(58, 160, 255, 0.18);
   --accent-contrast: #ffffff;
-  --gradient-accent: linear-gradient(135deg, #4a9eff, #818cf8);
+  --gradient-accent: linear-gradient(135deg, #3aa0ff, #38bdf8);
   --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.25);
   --card-shadow-hover: 0 8px 24px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.25);
   --modal-backdrop: rgba(0, 0, 0, 0.65);
   --modal-shadow: 0 20px 60px rgba(0, 0, 0, 0.50);
-  --glass-bg: rgba(12, 18, 34, 0.8);
-  --glass-border: rgba(255, 255, 255, 0.07);
+  --glass-bg: rgba(10, 14, 26, 0.82);
+  --glass-border: rgba(148, 163, 184, 0.10);
   --glass-blur: 16px;
+
+  /* Brand logo gradient (dark: cyan→azure) */
+  --brand-logo-a: #7dd3fc;
+  --brand-logo-b: #3aa0ff;
 
   /* Brand sparkle palette (dark variant) */
   --brand-glow-amber: rgba(251, 191, 36, 0.28);
@@ -61,87 +65,101 @@
   --brand-spark-core: #f59e0b;
   --brand-spark-accent: #fb7185;
   --brand-spark-neutral: #94a3b8;
-  --brand-wordmark-gradient: linear-gradient(135deg, #f8fafc 0%, #fbbf24 54%, #fb7185 100%);
+  --brand-wordmark-gradient: linear-gradient(135deg, #e8eef7 0%, #fbbf24 54%, #fb7185 100%);
   --brand-dot-color: #fbbf24;
 
   /* Semantic Colors */
-  --status-running: #10b981;
-  --status-stopped: #ef4444;
-  --status-paused: #f59e0b;
-  --accent-blue: #3b82f6;
-  --accent-purple: #8B5CF6;
-  --accent-green: #10b981;
-  --accent-orange: #F59E0B;
+  --status-running: #34d399;
+  --status-stopped: #f87171;
+  --status-paused: #fbbf24;
+  --accent-blue: #3aa0ff;
+  --accent-purple: #a78bfa;
+  --accent-green: #34d399;
+  --accent-orange: #fb923c;
 
   /* Scrollbar */
-  --scrollbar-thumb: #283548;
+  --scrollbar-thumb: #1e2a44;
   --scrollbar-thumb-hover: var(--primary-color);
   --scrollbar-track: transparent;
 
   /* Focus */
   --focus-ring-color: var(--primary-color);
-  --focus-ring-shadow: 0 0 0 3px rgba(109, 179, 255, 0.22);
+  --focus-ring-shadow: 0 0 0 3px rgba(58, 160, 255, 0.22);
 
   /* Selection */
   --selection-bg: var(--primary-color);
-  --selection-text: #0c1222;
+  --selection-text: #0a0e1a;
 
   /* Activity Bar — darkest layer */
-  --activitybar-bg: #080d19;
+  --activitybar-bg: #060a12;
   --activitybar-border: rgba(148, 163, 184, 0.08);
-  --activitybar-icon-active: #f8fafc;
-  --activitybar-icon-inactive: rgba(148, 163, 184, 0.7);
+  --activitybar-icon-active: #e8eef7;
+  --activitybar-icon-inactive: rgba(139, 155, 184, 0.7);
   --activitybar-indicator: var(--primary-color);
 
-  /* Status Bar — low-saturation deep blue→indigo gradient that sits just
-     above bg-primary without becoming a glowing strip. */
-  --statusbar-bg: linear-gradient(135deg, #1c2742, #28284e);
-  --statusbar-text: #94a3b8;
+  /* Status Bar — 低饱和深蓝渐变，贴在画布上方不刺眼 */
+  --statusbar-bg: linear-gradient(135deg, #16203a, #1d2440);
+  --statusbar-text: #8b9bb8;
   --statusbar-border: transparent;
-  --statusbar-border-top: rgba(255, 255, 255, 0.06);
+  --statusbar-border-top: rgba(148, 163, 184, 0.08);
 
   /* Tooltip */
-  --tooltip-bg: #1a2332;
-  --tooltip-text: #f8fafc;
-  --tooltip-border: #283548;
+  --tooltip-bg: #10182b;
+  --tooltip-text: #e8eef7;
+  --tooltip-border: #1e2a44;
 
   /* Sidebar tokens (semantic aliases) */
-  --sidebar-bg: #0f1729;
-  --sidebar-hover-bg: rgba(255, 255, 255, 0.06);
-  --sidebar-active-bg: rgba(109, 179, 255, 0.1);
+  --sidebar-bg: #0c1220;
+  --sidebar-hover-bg: rgba(148, 163, 184, 0.07);
+  --sidebar-active-bg: rgba(58, 160, 255, 0.12);
 
-  /* Severity (dark: pastel fg for contrast on dark surfaces) */
-  --sev-critical-fg: #fca5a5;
-  --sev-critical-bg: rgba(239, 68, 68, 0.08);
-  --sev-critical-bg-hover: rgba(239, 68, 68, 0.18);
-  --sev-critical-border: rgba(239, 68, 68, 0.45);
-  --sev-critical-border-strong: #f87171;
-  --sev-critical-tag-fg: #fee2e2;
+  /* Severity (dark: pastel fg for contrast on dark surfaces)
+     高危 critical / 较高 high / 中危 warn / 低 info / 信息 neutral */
+  --sev-critical-fg: #f87171;
+  --sev-critical-bg: rgba(244, 63, 94, 0.12);
+  --sev-critical-bg-hover: rgba(244, 63, 94, 0.20);
+  --sev-critical-border: rgba(244, 63, 94, 0.45);
+  --sev-critical-border-strong: #ef4444;
+  --sev-critical-tag-fg: #fecaca;
   --sev-critical-tag-bg: rgba(239, 68, 68, 0.30);
 
-  --sev-warn-fg: #fcd34d;
-  --sev-warn-bg: rgba(245, 158, 11, 0.08);
-  --sev-warn-bg-hover: rgba(245, 158, 11, 0.18);
+  --sev-high-fg: #fb923c;
+  --sev-high-bg: rgba(249, 115, 22, 0.12);
+  --sev-high-bg-hover: rgba(249, 115, 22, 0.20);
+  --sev-high-border: rgba(249, 115, 22, 0.45);
+  --sev-high-tag-fg: #fed7aa;
+  --sev-high-tag-bg: rgba(249, 115, 22, 0.30);
+
+  --sev-warn-fg: #fbbf24;
+  --sev-warn-bg: rgba(245, 158, 11, 0.12);
+  --sev-warn-bg-hover: rgba(245, 158, 11, 0.20);
   --sev-warn-border: rgba(245, 158, 11, 0.45);
-  --sev-warn-tag-fg: #fef3c7;
+  --sev-warn-tag-fg: #fde68a;
   --sev-warn-tag-bg: rgba(245, 158, 11, 0.30);
 
-  --sev-success-fg: #86efac;
-  --sev-success-bg: rgba(34, 197, 94, 0.08);
-  --sev-success-bg-hover: rgba(34, 197, 94, 0.18);
-  --sev-success-border: rgba(34, 197, 94, 0.45);
-  --sev-success-tag-fg: #dcfce7;
-  --sev-success-tag-bg: rgba(34, 197, 94, 0.30);
+  --sev-success-fg: #34d399;
+  --sev-success-bg: rgba(52, 211, 153, 0.12);
+  --sev-success-bg-hover: rgba(52, 211, 153, 0.20);
+  --sev-success-border: rgba(52, 211, 153, 0.45);
+  --sev-success-tag-fg: #a7f3d0;
+  --sev-success-tag-bg: rgba(52, 211, 153, 0.30);
 
-  --sev-info-fg: #c7d2fe;
-  --sev-info-bg: rgba(99, 102, 241, 0.06);
-  --sev-info-bg-hover: rgba(99, 102, 241, 0.18);
-  --sev-info-border: rgba(99, 102, 241, 0.45);
-  --sev-info-selected-bg: rgba(99, 102, 241, 0.30);
-  --sev-info-selected-fg: #e0e7ff;
-  --sev-info-selected-border: #818cf8;
+  --sev-info-fg: #60a5fa;
+  --sev-info-bg: rgba(59, 130, 246, 0.12);
+  --sev-info-bg-hover: rgba(59, 130, 246, 0.20);
+  --sev-info-border: rgba(59, 130, 246, 0.45);
+  --sev-info-selected-bg: rgba(59, 130, 246, 0.28);
+  --sev-info-selected-fg: #dbeafe;
+  --sev-info-selected-border: #3b82f6;
 
-  --chip-count-bg: rgba(255, 255, 255, 0.10);
+  --sev-neutral-fg: #94a3b8;
+  --sev-neutral-bg: rgba(148, 163, 184, 0.10);
+  --sev-neutral-bg-hover: rgba(148, 163, 184, 0.18);
+  --sev-neutral-border: rgba(148, 163, 184, 0.35);
+  --sev-neutral-tag-fg: #cbd5e1;
+  --sev-neutral-tag-bg: rgba(148, 163, 184, 0.22);
+
+  --chip-count-bg: rgba(148, 163, 184, 0.12);
 }
 
 /* Dark theme decorative effects */
@@ -153,31 +171,31 @@
 }
 
 [data-theme="dark"] .modern-btn.primary {
-  box-shadow: 0 0 10px rgba(109, 179, 255, 0.28);
+  box-shadow: 0 0 10px rgba(58, 160, 255, 0.28);
 }
 
 [data-theme="dark"] .modern-btn.primary:hover {
-  box-shadow: 0 0 18px rgba(109, 179, 255, 0.4);
+  box-shadow: 0 0 18px rgba(58, 160, 255, 0.4);
 }
 
 /* ── 终端调色板（SSH / 容器终端共用，随主题切换）── */
 [data-theme="dark"] {
-  --term-bg: #0c1222;
-  --term-bg-elevated: #141c2b;
-  --term-fg: #e2e8f0;
-  --term-fg-dim: #94a3b8;
-  --term-cursor: #6db3ff;
-  --term-selection: rgba(109, 179, 255, 0.28);
-  --term-border: #283548;
-  --term-scrollbar-thumb: #283548;
-  --term-scrollbar-thumb-hover: #3f4f6a;
-  --term-accent: #6db3ff;
-  --term-ansi-black: #1a2332;   --term-ansi-red: #f87171;
-  --term-ansi-green: #4ade80;   --term-ansi-yellow: #facc15;
-  --term-ansi-blue: #6db3ff;    --term-ansi-magenta: #c084fc;
-  --term-ansi-cyan: #22d3ee;    --term-ansi-white: #e2e8f0;
-  --term-ansi-bright-black: #64748b;  --term-ansi-bright-red: #fca5a5;
-  --term-ansi-bright-green: #86efac;  --term-ansi-bright-yellow: #fde68a;
+  --term-bg: #0a0e1a;
+  --term-bg-elevated: #0d1424;
+  --term-fg: #dbe4f0;
+  --term-fg-dim: #8b9bb8;
+  --term-cursor: #3aa0ff;
+  --term-selection: rgba(58, 160, 255, 0.28);
+  --term-border: #1e2a44;
+  --term-scrollbar-thumb: #1e2a44;
+  --term-scrollbar-thumb-hover: #31435f;
+  --term-accent: #3aa0ff;
+  --term-ansi-black: #10182b;   --term-ansi-red: #f87171;
+  --term-ansi-green: #34d399;   --term-ansi-yellow: #fbbf24;
+  --term-ansi-blue: #3aa0ff;    --term-ansi-magenta: #c084fc;
+  --term-ansi-cyan: #22d3ee;    --term-ansi-white: #dbe4f0;
+  --term-ansi-bright-black: #5d7191;  --term-ansi-bright-red: #fca5a5;
+  --term-ansi-bright-green: #6ee7b7;  --term-ansi-bright-yellow: #fde68a;
   --term-ansi-bright-blue: #93c5fd;   --term-ansi-bright-magenta: #d8b4fe;
-  --term-ansi-bright-cyan: #67e8f9;   --term-ansi-bright-white: #f8fafc;
+  --term-ansi-bright-cyan: #67e8f9;   --term-ansi-bright-white: #f1f5f9;
 }

@@ -1,15 +1,20 @@
 
 
 import { logger } from '../core/logger';
-/** 正式包 drop 掉 console，诊断信息只有进 logger 才留得下来（设置→工具→诊断日志 可导出） */
+import { activeTargetContext } from '../core/targetContext';
+/** 正式包 drop 掉 console，诊断信息只有进 logger 才留得下来（状态栏「日志」按钮可导出） */
 const log = logger.module('EmergencyModal');
 // EmergencyResultModal - 显示命令执行结果（命令 + 输出 + 搜索高亮）
 
-import { invoke } from '@tauri-apps/api/core'
 import * as IconPark from '@icon-park/svg'
-import { CommandHistoryManager } from '../utils/commandHistoryManager'
+import { CommandHistoryManager, type CommandHistoryItem } from '../utils/commandHistoryManager'
 import { createIconHTML } from './iconMapping'
 import { aiService } from '../ai/aiService'
+import { commandOutputPrompt } from '../ai/aiPrompts'
+import { createAICancelButton, renderAIMarkdown } from '../ai/aiOutput'
+import { deriveMeta } from '../emergency/emergencyView'
+import { executeEmergencyCommand } from '../emergency/commandExecution'
+import { showConfirm } from './confirmDialog'
 
 export class EmergencyResultModal {
   private modal: HTMLElement | null = null;
@@ -222,6 +227,23 @@ export class EmergencyResultModal {
     this.isVisible = true;
   }
 
+  /** 命令历史的唯一重放入口；在展示和执行前再次校验目标与摘要。 */
+  async replayHistoryItem(item: CommandHistoryItem): Promise<boolean> {
+    try {
+      const assessment = await CommandHistoryManager.assessReplay(item);
+      if (!assessment.allowed) {
+        window.showNotification?.(assessment.reason, 'warning');
+        return false;
+      }
+      this.show(item.title, item.command, '准备重新执行已验证的历史命令…');
+      return await this.executeCommand('command-history-replay');
+    } catch (error) {
+      log.error('校验历史命令失败', error);
+      window.showNotification?.(`无法重新执行: ${error}`, 'error');
+      return false;
+    }
+  }
+
   hide(): void {
     if (!this.modal) return;
     this.modal.style.display = 'none';
@@ -315,9 +337,9 @@ export class EmergencyResultModal {
   /**
    * 执行命令
    */
-  private async executeCommand(): Promise<void> {
+  private async executeCommand(source = 'emergency-modal'): Promise<boolean> {
     const commandEl = this.commandEl;
-    if (!commandEl) return;
+    if (!commandEl) return false;
 
     // 如果在编辑模式，先保存
     if (this.isEditMode) {
@@ -327,7 +349,31 @@ export class EmergencyResultModal {
     const command = commandEl.textContent?.trim() || '';
     if (!command) {
       window.showNotification?.('命令不能为空', 'warning');
-      return;
+      return false;
+    }
+
+    const capturedTarget = activeTargetContext.get();
+    if (!capturedTarget) {
+      window.showNotification?.('没有已确认的活动 SSH 目标，请先连接服务器', 'warning');
+      return false;
+    }
+
+    const risk = deriveMeta(command);
+    if (!risk.readonly) {
+      const targetLabel = `${capturedTarget.username}@${capturedTarget.host}:${capturedTarget.port}`;
+      const confirmed = await showConfirm({
+        title: '确认执行可写命令',
+        description: `目标指纹：${capturedTarget.hostKeyFingerprint}`,
+        message: `精确目标：${targetLabel}\n\n命令：\n${command}`,
+        confirmText: '在此目标执行',
+        dangerous: true,
+        defaultFocus: 'cancel',
+      });
+      if (!confirmed) return false;
+      if (!activeTargetContext.matches(capturedTarget)) {
+        window.showNotification?.('确认期间活动目标已变化，已阻止执行', 'error');
+        return false;
+      }
     }
 
     // 显示执行中状态
@@ -338,47 +384,11 @@ export class EmergencyResultModal {
     }
 
     try {
-      // 获取SSH连接
-      const app = (window as any).app;
-      const sshManager = app?.sshManager;
-      const sshConnectionManager = (window as any).sshConnectionManager;
-      const tauriInvoke = (window as any).__TAURI__?.core?.invoke;
-
-      const hasCoordinatorConn = sshManager?.isConnected?.() ?? false;
-      const hasDirectConn = sshConnectionManager?.isConnected?.() ?? false;
-
-      if (!hasCoordinatorConn && !hasDirectConn) {
-        throw new Error('未连接到服务器');
-      }
-
-      let output = '';
-      let displayedCommand = command;
-      let exitCode: number | null | undefined;
-      let timedOut = false;
-
-      if (hasCoordinatorConn && sshManager?.executeCommand) {
-        output = await sshManager.executeCommand(command);
-      } else if (hasDirectConn && tauriInvoke) {
-        const result: any = await tauriInvoke('ssh_execute_command_direct', { command });
-        if (result && typeof result === 'object') {
-          if (typeof result.command === 'string' && result.command.length > 0) {
-            displayedCommand = result.command;
-          }
-          exitCode = typeof result.exit_code === 'number' ? result.exit_code : result.exit_code ?? undefined;
-          timedOut = result.timed_out === true;
-          if (typeof result.output === 'string') {
-            output = result.output;
-          } else if (typeof result.stdout === 'string') {
-            output = result.stdout;
-          } else {
-            output = JSON.stringify(result, null, 2);
-          }
-        } else if (typeof result === 'string') {
-          output = result;
-        } else {
-          output = String(result ?? '');
-        }
-      }
+      const result = await executeEmergencyCommand({ command, timeoutSec: 120 });
+      const output = result.output;
+      const displayedCommand = result.command;
+      const exitCode = result.exit_code;
+      const timedOut = result.timed_out;
 
       // 更新显示
       this.originalOutput = output;
@@ -393,7 +403,7 @@ export class EmergencyResultModal {
       }
 
       // 保存到命令历史
-      CommandHistoryManager.saveCommand(displayedCommand, this.currentTitle, output);
+      await CommandHistoryManager.saveCommand(displayedCommand, this.currentTitle, output, exitCode, source);
 
       if (timedOut) {
         window.showNotification?.('命令执行超时，输出已更新', 'warning');
@@ -402,9 +412,11 @@ export class EmergencyResultModal {
       } else {
         window.showNotification?.('命令执行成功', 'success');
       }
+      return result.success;
     } catch (error) {
       log.error('执行命令失败:', error);
       window.showNotification?.(`执行失败: ${error}`, 'error');
+      return false;
     } finally {
       // 恢复按钮状态
       if (executeBtn) {
@@ -428,94 +440,48 @@ export class EmergencyResultModal {
     aiExplanationEl.style.display = 'block';
     aiContentEl.textContent = 'AI正在分析...';
 
+    // 取消按钮挂在 AI 区域头部；流注册成功后经 onStart 拿到 cancel 句柄
+    const headerEl = aiExplanationEl.querySelector('.em-modal-ai-header');
+    // 清掉上一轮可能残留的取消按钮（header 内唯一的 button 就是它）
+    headerEl?.querySelector('button')?.remove();
+    let cancelBtn: HTMLButtonElement | null = null;
+    const removeCancelBtn = () => {
+      cancelBtn?.remove();
+      cancelBtn = null;
+    };
+
     try {
-      // 获取AI设置
-      const settingsContent = await invoke('read_settings_file') as string;
-      let settings: any = {};
-
-      if (settingsContent) {
-        settings = JSON.parse(settingsContent);
-      }
-
-      // 如果后端设置文件没有AI配置，使用默认AI配置
-      if (!settings.ai) {
-        settings.ai = {
-          currentProvider: 'openai',
-          providers: {
-            openai: {
-              name: 'OpenAI',
-              apiKey: '',
-              model: 'gpt-3.5-turbo',
-              baseUrl: 'https://api.openai.com/v1'
-            }
-          }
-        };
-      }
-
-      if (!settings.ai || !settings.ai.currentProvider) {
-        throw new Error('AI配置异常，请在设置中配置AI');
-      }
-
-      const currentProvider = settings.ai.currentProvider;
-      const providerConfig = settings.ai.providers[currentProvider];
-
-      if (!providerConfig) {
-        throw new Error('AI提供商配置不存在');
-      }
-
-      if (!providerConfig.apiKey && currentProvider !== 'ollama') {
-        throw new Error('请在设置中配置AI API Key');
-      }
-
-      // 构建提示词
-      const systemPrompt = `你是一个Linux系统安全专家，擅长分析命令输出、系统日志等。请用简洁专业的语言解释用户提供的命令和输出，重点关注安全风险和异常情况。
-
-请分析并解释以下信息：
-
-标题：${this.currentTitle}
-
-命令：
-${this.commandText}
-
-输出：
-${this.originalOutput}
-
-请提供：
-1. 命令功能说明
-2. 输出内容解读
-3. 关键发现
-4. 安全评估（如果适用）
-5. 建议操作（如果适用）`;
+      const prompt = commandOutputPrompt(this.currentTitle, this.commandText, this.originalOutput);
 
       // 清空"正在分析"提示
       aiContentEl.textContent = '';
 
-      // 调用AI API，使用真正的流式输出
-      await this.callAIAPI(systemPrompt, providerConfig, (chunk: string) => {
-        // 实时更新UI
-        aiContentEl.textContent += chunk;
-      });
+      const { text } = await aiService.streamOpenAICompatible(
+        prompt,
+        // 流式期间用 textContent 纯文本增量更新（每 chunk 渲染 markdown 太贵）
+        (chunk: string) => {
+          aiContentEl.textContent += chunk;
+        },
+        {
+          onStart: (cancel) => {
+            if (!headerEl) return;
+            cancelBtn = createAICancelButton(cancel);
+            cancelBtn.style.cssText = 'margin-left: auto; font-size: 12px; padding: 4px 8px;';
+            headerEl.appendChild(cancelBtn);
+          },
+        },
+      );
+      log.debug('AI生成的解释:', text);
+      // 完成后一次性渲染 markdown
+      renderAIMarkdown(aiContentEl, text);
     } catch (error) {
-      aiContentEl.textContent = `AI解释失败: ${error}\n\n提示：请在设置中配置AI，或者检查AI服务是否可用。`;
-    }
-  }
-
-  /**
-   * 调用AI API（流式输出）
-   *
-   * 传输统一走 aiService → ai_proxy_stream（Rust 侧发出），webview 内不再有
-   * fetch()，CSP 才能收紧 connect-src。配置来源仍是本模块自己读的
-   * settings.ai.providers[...]，以保留 Ollama 等无 apiKey 的本地提供商。
-   */
-  private async callAIAPI(prompt: string, config: any, onChunk?: (chunk: string) => void): Promise<string> {
-    try {
-      log.debug('调用AI API (流式模式)', { provider: config.name, baseUrl: config.baseUrl });
-      const fullContent = await aiService.streamOpenAICompatible(config, prompt, onChunk);
-      log.debug('AI生成的解释:', fullContent);
-      return fullContent;
-    } catch (error) {
-      log.error('AI API调用失败:', error);
-      throw error;
+      if ((error as Error)?.name === 'AbortError') {
+        aiContentEl.textContent += '\n\n（已取消生成）';
+      } else {
+        aiContentEl.textContent = `AI解释失败: ${error}\n\n提示：请在设置中配置AI，或者检查AI服务是否可用。`;
+      }
+    } finally {
+      removeCancelBtn();
     }
   }
 }

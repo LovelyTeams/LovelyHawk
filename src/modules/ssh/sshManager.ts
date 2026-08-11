@@ -6,9 +6,11 @@
 import { invoke } from '@tauri-apps/api/core';
 import { SSHConfigManager, type SSHConnection } from './connectionManager';
 import { SystemInfoManager, type SystemInfo } from '../system/systemInfoManager';
+import { activeTargetContext } from '../core/targetContext';
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH';
 
 import { logger } from '../core/logger';
-/** 正式包 drop 掉 console，诊断信息只有进 logger 才留得下来（设置→工具→诊断日志 可导出） */
+/** 正式包 drop 掉 console，诊断信息只有进 logger 才留得下来（状态栏「日志」按钮可导出） */
 const log = logger.module('SSHManager');
 
 
@@ -92,23 +94,17 @@ export class SSHManager {
     try {
       log.debug(`正在连接到 ${connection.name} (${connection.host}:${connection.port})`);
 
-      // 调用后端建立SSH连接 (russh)
-      await invoke('ssh_connect_direct', {
-        host: connection.host,
-        port: connection.port,
-        username: connection.username,
-        authType: connection.authType,
-        password: connection.encryptedPassword ? await invoke('decrypt_password', { encryptedPassword: connection.encryptedPassword }) : undefined,
-        keyPath: connection.keyPath,
-        keyPassphrase: connection.keyPassphrase
-      });
+      await this.connectionManager.connect(id);
+      const connected = activeTargetContext.get();
+      if (!connected) throw new Error('SSH 已连接，但活动目标身份未建立');
 
       log.debug(`SSH连接已建立到 ${connection.name}`);
 
       // 更新连接状态
       await this.connectionManager.updateConnection(id, {
         isConnected: true,
-        lastConnected: new Date()
+        lastConnected: new Date(),
+        hostKeyFingerprint: connected.hostKeyFingerprint,
       });
 
       // 后台异步加载系统信息（不阻塞连接流程和SFTP页面）
@@ -138,6 +134,7 @@ export class SSHManager {
 
       // 调用后端断开SSH连接
       await invoke('ssh_disconnect_direct');
+      activeTargetContext.clear();
 
       // 更新连接状态
       await this.connectionManager.updateConnection(id, {
@@ -250,7 +247,7 @@ export class SSHManager {
     }
 
     try {
-      const result = await invoke('ssh_execute_command_direct', { command }) as { output: string; exit_code: number };
+      const result = await invokeTargetBoundSSH('ssh_execute_command_direct', { command }) as { output: string; exit_code: number };
       log.debug(`命令执行成功: ${command}`);
       return result.output;
     } catch (error) {

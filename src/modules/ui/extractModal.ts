@@ -2,6 +2,8 @@
  * 压缩文件解压模态对话框
  */
 
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH';
+
 export class ExtractModal {
   private modal: HTMLElement | null = null;
   private isVisible: boolean = false;
@@ -295,7 +297,7 @@ export class ExtractModal {
 
     try {
       // 调用后端API进行解压
-      await (window as any).__TAURI__.core.invoke('sftp_extract', {
+      await invokeTargetBoundSSH('sftp_extract', {
         archivePath: this.currentArchivePath,
         targetDir: targetDir,
         overwrite: overwrite

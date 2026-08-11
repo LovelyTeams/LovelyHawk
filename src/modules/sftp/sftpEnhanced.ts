@@ -3,7 +3,7 @@
  * 远程文件搜索、批量操作进度追踪
  */
 
-import { invoke } from '@tauri-apps/api/core';
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH';
 
 // ========== 文件搜索 ==========
 
@@ -81,7 +81,7 @@ export async function searchRemoteFiles(options: FileSearchOptions): Promise<Fil
   const findCmd = parts.join(' ');
 
   try {
-    const result: any = await invoke('ssh_execute_command_direct', { command: findCmd });
+    const result: any = await invokeTargetBoundSSH('ssh_execute_command_direct', { command: findCmd });
     const output = result?.output || '';
     const results: FileSearchResult[] = [];
 
@@ -105,7 +105,7 @@ export async function searchRemoteFiles(options: FileSearchOptions): Promise<Fil
     if (contentMatch && results.length < maxResults) {
       const grepCmd = `grep -rl "${contentMatch.replace(/"/g, '\\"')}" "${basePath}" --include="${pattern || '*'}" -m ${maxResults} 2>/dev/null | head -${maxResults}`;
       try {
-        const grepResult: any = await invoke('ssh_execute_command_direct', { command: grepCmd });
+        const grepResult: any = await invokeTargetBoundSSH('ssh_execute_command_direct', { command: grepCmd });
         const grepOutput = grepResult?.output || '';
         for (const filePath of grepOutput.split('\n').filter(Boolean)) {
           if (!results.some(r => r.path === filePath)) {

@@ -3,6 +3,20 @@
  * 支持检测各种 Linux 发行版，包括国产系统
  */
 
+import { invokeTargetBoundSSH } from '../core/targetBoundSSH';
+import {
+  activeTargetContext,
+  stableTargetKey,
+  type TargetIdentity,
+} from '../core/targetContext';
+import { logger } from '../core/logger';
+
+const log = logger.module('SystemDetector');
+
+interface SSHCommandResult {
+  output?: string;
+}
+
 export type SystemType = 
   | 'ubuntu'      // Ubuntu
   | 'debian'      // Debian
@@ -29,53 +43,53 @@ export interface SystemInfo {
 }
 
 export class SystemDetector {
-  private static cachedSystemInfo: SystemInfo | null = null;
+  private static cachedSystemInfo = new Map<string, SystemInfo>();
+
+  private static assertTarget(target: TargetIdentity): void {
+    if (!activeTargetContext.matches(target)) {
+      throw new Error(`系统检测期间活动目标已变化：${target.username}@${target.host}:${target.port}`);
+    }
+  }
 
   /**
    * 检测系统类型
    */
   static async detectSystem(): Promise<SystemInfo> {
-    // 如果已经检测过，直接返回缓存
-    if (this.cachedSystemInfo) {
-      return this.cachedSystemInfo;
-    }
+    const target = activeTargetContext.get();
+    if (!target) return this.getDefaultSystemInfo();
+    const targetKey = stableTargetKey(target);
+    const cached = this.cachedSystemInfo.get(targetKey);
+    if (cached) return { ...cached };
 
     try {
-      // 优先使用后端检测（更高效，一次性完成所有检测）
-      const tauriInvoke = (window as any).__TAURI__?.core?.invoke;
-      if (tauriInvoke) {
-        console.log('开始检测系统类型...');
-        const result = await tauriInvoke('detect_system_type');
-        if (result) {
-          console.log('系统检测完成:', result);
-          this.cachedSystemInfo = result;
-          return result;
-        }
+      const result = await invokeTargetBoundSSH<SystemInfo>('detect_system_type');
+      this.assertTarget(target);
+      if (result) {
+        this.cachedSystemInfo.set(targetKey, { ...result });
+        return { ...result };
       }
     } catch (error) {
-      console.warn('后端系统检测失败，使用前端检测:', error);
+      this.assertTarget(target);
+      log.warn('后端系统检测失败，使用前端检测', error);
     }
 
-    // 如果后端检测失败，回退到前端检测
-    const systemInfo = await this.detectSystemByCommand();
-    this.cachedSystemInfo = systemInfo;
-    return systemInfo;
+    const systemInfo = await this.detectSystemByCommand(target);
+    this.assertTarget(target);
+    this.cachedSystemInfo.set(targetKey, { ...systemInfo });
+    return { ...systemInfo };
   }
 
   /**
    * 通过执行命令检测系统
    */
-  private static async detectSystemByCommand(): Promise<SystemInfo> {
+  private static async detectSystemByCommand(target: TargetIdentity): Promise<SystemInfo> {
     try {
-      const tauriInvoke = (window as any).__TAURI__?.core?.invoke;
-      if (!tauriInvoke) {
-        return this.getDefaultSystemInfo();
-      }
-
       // 读取 /etc/os-release
-      const osReleaseResult = await tauriInvoke('ssh_execute_command_direct', {
+      this.assertTarget(target);
+      const osReleaseResult = await invokeTargetBoundSSH<SSHCommandResult>('ssh_execute_command_direct', {
         command: 'cat /etc/os-release 2>/dev/null || cat /etc/lsb-release 2>/dev/null || echo "ID=generic"'
       });
+      this.assertTarget(target);
 
       const osReleaseContent = osReleaseResult?.output || '';
       
@@ -83,10 +97,10 @@ export class SystemDetector {
       const osInfo = this.parseOsRelease(osReleaseContent);
       
       // 检测包管理器
-      const packageManager = await this.detectPackageManager();
+      const packageManager = await this.detectPackageManager(target);
       
       // 检测 init 系统
-      const initSystem = await this.detectInitSystem();
+      const initSystem = await this.detectInitSystem(target);
 
       return {
         type: osInfo.type,
@@ -97,7 +111,8 @@ export class SystemDetector {
         initSystem
       };
     } catch (error) {
-      console.error('系统检测失败:', error);
+      this.assertTarget(target);
+      log.warn('系统检测失败，使用通用 Linux 信息', error);
       return this.getDefaultSystemInfo();
     }
   }
@@ -201,14 +216,13 @@ export class SystemDetector {
   /**
    * 检测包管理器
    */
-  private static async detectPackageManager(): Promise<SystemInfo['packageManager']> {
+  private static async detectPackageManager(target: TargetIdentity): Promise<SystemInfo['packageManager']> {
     try {
-      const tauriInvoke = (window as any).__TAURI__?.core?.invoke;
-      if (!tauriInvoke) return 'unknown';
-
-      const result = await tauriInvoke('ssh_execute_command_direct', {
+      this.assertTarget(target);
+      const result = await invokeTargetBoundSSH<SSHCommandResult>('ssh_execute_command_direct', {
         command: 'which apt 2>/dev/null && echo "apt" || which yum 2>/dev/null && echo "yum" || which dnf 2>/dev/null && echo "dnf" || which pacman 2>/dev/null && echo "pacman" || which zypper 2>/dev/null && echo "zypper" || which apk 2>/dev/null && echo "apk" || echo "unknown"'
       });
+      this.assertTarget(target);
 
       const output = (result?.output || 'unknown').trim().split('\n').pop() || 'unknown';
       
@@ -221,6 +235,8 @@ export class SystemDetector {
       
       return 'unknown';
     } catch (error) {
+      this.assertTarget(target);
+      log.warn('检测包管理器失败', error);
       return 'unknown';
     }
   }
@@ -228,14 +244,13 @@ export class SystemDetector {
   /**
    * 检测 init 系统
    */
-  private static async detectInitSystem(): Promise<SystemInfo['initSystem']> {
+  private static async detectInitSystem(target: TargetIdentity): Promise<SystemInfo['initSystem']> {
     try {
-      const tauriInvoke = (window as any).__TAURI__?.core?.invoke;
-      if (!tauriInvoke) return 'unknown';
-
-      const result = await tauriInvoke('ssh_execute_command_direct', {
+      this.assertTarget(target);
+      const result = await invokeTargetBoundSSH<SSHCommandResult>('ssh_execute_command_direct', {
         command: 'ps -p 1 -o comm= 2>/dev/null'
       });
+      this.assertTarget(target);
 
       const output = (result?.output || '').trim().toLowerCase();
       
@@ -246,6 +261,8 @@ export class SystemDetector {
       
       return 'unknown';
     } catch (error) {
+      this.assertTarget(target);
+      log.warn('检测 init 系统失败', error);
       return 'unknown';
     }
   }
@@ -267,8 +284,9 @@ export class SystemDetector {
   /**
    * 清除缓存
    */
-  static clearCache(): void {
-    this.cachedSystemInfo = null;
+  static clearCache(target?: TargetIdentity): void {
+    if (target) this.cachedSystemInfo.delete(stableTargetKey(target));
+    else this.cachedSystemInfo.clear();
   }
 
   /**
@@ -294,4 +312,3 @@ export class SystemDetector {
     return names[type] || type;
   }
 }
-
