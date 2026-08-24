@@ -1,0 +1,12 @@
+{
+  "name": "resize-preserves-visible-content",
+  "initial_size": { "columns": 8, "rows": 2 },
+  "steps": [
+    { "output": "abcdef" },
+    { "resize": { "columns": 12, "rows": 4 } }
+  ],
+  "expected": {
+    "size": { "columns": 12, "rows": 4 },
+    "visible_line_prefixes": ["abcdef"]
+  }
+}

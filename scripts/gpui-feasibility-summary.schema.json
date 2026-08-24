@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lovelyres.invalid/schemas/gpui-feasibility-summary-v1.json",
+  "title": "LovelyRes GPUI Windows feasibility release acceptance summary",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "generated_at_utc", "fixture_evidence_allowed", "result_count", "build", "matrix", "special_coverage", "scenarios", "acceptance"],
+  "properties": {
+    "schema": { "const": "lovelyres-feasibility-summary/v1" },
+    "generated_at_utc": { "type": "string", "format": "date-time" },
+    "fixture_evidence_allowed": { "type": "boolean" },
+    "result_count": { "type": "integer", "minimum": 0 },
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256", "app_version", "gpui_version"],
+      "properties": {
+        "sha256": { "type": ["string", "null"] },
+        "app_version": { "type": ["string", "null"] },
+        "gpui_version": { "type": ["string", "null"] }
+      }
+    },
+    "matrix": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": { "$ref": "#/$defs/coverage" }
+    },
+    "special_coverage": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": { "$ref": "#/$defs/coverage" }
+    },
+    "scenarios": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status", "fixture", "source"],
+        "properties": {
+          "id": { "type": "string" },
+          "status": { "enum": ["PASS", "FAIL", "NOT_RUN"] },
+          "fixture": { "type": "boolean" },
+          "source": { "type": "string" }
+        }
+      }
+    },
+    "acceptance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reasons"],
+      "properties": {
+        "status": { "enum": ["PASSED", "FAILED"] },
+        "reasons": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  },
+  "$defs": {
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status", "scenario_ids"],
+      "properties": {
+        "id": { "type": "string" },
+        "status": { "enum": ["PASS", "MISSING"] },
+        "scenario_ids": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

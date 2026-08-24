@@ -1,15 +1,7 @@
-# Logs
-logs
+# Build output and logs
+/target/
+artifacts/
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
-
-node_modules
-dist
-dist-ssr
 *.local
 
 # Editor directories and files
@@ -38,7 +30,9 @@ config/secrets.json
 secrets/
 **/secrets/
 
-# 注意：这里刻意不使用 `**/*token*` / `**/*secret*` 之类的文件名子串通配。
-# 它们挡不住 creds.json，却会误伤源码目录 —— 历史上 `**/*token*` 曾把
-# src/css/tokens/ 整个排除出仓库，导致干净 clone 构建不出正确 UI。
-# 需要额外保障请上 CI secret-scan，不要再加子串通配。
+# Do not add broad filename globs such as `**/*token*` or `**/*secret*`.
+# They miss real credential files and can silently hide legitimate source trees.
+.codex-build-cache/*
+
+.github/workflows/release.yml
+tmp/*

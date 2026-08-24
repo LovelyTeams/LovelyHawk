@@ -1,0 +1,14 @@
+{
+  "name": "alternate-screen-restores-primary-grid",
+  "initial_size": { "columns": 16, "rows": 3 },
+  "steps": [
+    { "output": "primary" },
+    { "output": "\u001b[?1049h", "alternate_screen": true },
+    { "output": "alternate", "alternate_screen": true },
+    { "output": "\u001b[?1049l", "alternate_screen": false }
+  ],
+  "expected": {
+    "size": { "columns": 16, "rows": 3 },
+    "visible_line_prefixes": ["primary"]
+  }
+}

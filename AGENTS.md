@@ -1,159 +1,66 @@
-# LovelyRes Development Guide
+# LovelyRes Native Development Guide
 
-This repository hosts the LovelyRes codebase, a cross-platform Linux Emergency Response Tool built with **Tauri v2** (Rust backend) and **TypeScript + Vite** (Frontend).
+LovelyRes is a native Rust desktop application built with GPUI. The supported application is the root Cargo workspace; do not add an HTML, JavaScript, WebView, CDN, or web-font runtime.
 
-## 🛠 Project Structure
-- **Frontend**: `src/` (TypeScript, Vite)
-  - Entry point: `src/main.ts` — the **only** HTML entry is `index.html`; secondary
-    windows load `index.html?window=xxx` and are dispatched by `routeSecondaryWindow()`
-    to `src/entries/`. Do not add new `.html` files.
-  - Core logic: `src/modules/`
-  - Styles: `src/css/` (entry `main.css` → tokens → themes → base → components → layout → pages)
-- **Backend**: `src-tauri/` (Rust)
-  - Core logic: `src-tauri/src/`
-  - Cargo config: `src-tauri/Cargo.toml`
+## Workspace
 
-> **⚠️ Architecture reality check.** Vue 3 is a dependency, but the app is **not** a Vue
-> application. ~95% of the UI is hand-written HTML strings rendered through
-> `src/modules/ui/modernUIRenderer.ts` and wired with `window.*` globals + event delegation.
-> Only `src/components/SSHTerminal.vue` is a real SFC, and it is used solely by the
-> standalone terminal windows. Do not assume reactivity, SFCs, or a component tree exist.
-> `renderMainWorkspace()` replaces `.main-workspace` via `outerHTML` on every page switch —
-> there is no diffing, and DOM listeners inside it die with the old node.
+- `crates/lovelyres-core`: UI-independent domain services, SSH/SFTP actors, portable stores, target guards, operation planning, audit, and recovery contracts.
+- `crates/lovelyres-terminal`: terminal model, transport adapter, input, selection, search, layout, and GPUI terminal view.
+- `crates/lovelyres-gpui`: application composition root, GPUI entities/views, native windows, page lifecycle, dialogs, themes, and embedded assets.
+- `docs/`: current compatibility, release, validation, and unresolved-feature documentation.
+- `scripts/`: source, dependency, quality, feasibility, and portable-release gates.
 
-## 🚀 Build & Test Commands
+The workspace uses Rust 2024 and Rust 1.93.1. Keep dependency versions centralized in the root `Cargo.toml` and keep `Cargo.lock` committed.
 
-### Prerequisites
-- Node.js (v18+) & pnpm/npm
-- Rust (stable)
+## Commands
 
-### Commands
-| Action | Command | Description |
-|--------|---------|-------------|
-| **Dev** | `npm run tauri dev` | Start frontend & backend in dev mode |
-| **Build** | `npm run tauri build` | Build production application |
-| **Lint** | `npm run build` | Runs `vue-tsc` (Type check) & Vite build |
-| **Test** | `npm test` | Vitest (`vitest run`) |
+```powershell
+# Run and build
+cargo run --locked --package lovelyres-gpui --bin lovelyres
+cargo build --locked --package lovelyres-gpui --bin lovelyres
+cargo build --release --locked --package lovelyres-gpui --bin lovelyres
 
-> **Note on Tests**: Vitest is configured and running. Coverage is concentrated on the
-> security boundaries — anything that builds a shell command or inserts untrusted
-> remote data into HTML:
->
-> - `src/modules/core/shellEscape.test.ts` — `shq()` and the `isValid*` whitelists
-> - `src/modules/core/htmlEscape.test.ts` — escaping, incl. attribute-context injection
-> - `src/modules/baseline/quickActionCommands.test.ts` — generated root commands vs. malicious input
-> - `src/modules/core/logger.test.ts`, `src/modules/report/disposalReport.test.ts`,
->   `src/modules/remote/terminalManager.test.ts`, `src/modules/emergency/*.test.ts`
->
-> Tests run in the **node** environment (no jsdom). Stub `localStorage`/DOM if needed
-> rather than pulling in a DOM environment. For Rust use `#[cfg(test)]` + `cargo test`.
->
-> **Anything reading `window`/`document`/`localStorage` outside a `try` must guard
-> with `typeof x === 'undefined'`** — `reportError()` is called from `catch` blocks,
-> so an unguarded `window` read there throws a `ReferenceError` that *replaces* the
-> original error.
-
-### 🔒 Ratchet gates (`tests/gates/`)
-
-Four source-scanning tests run as part of `npm test` and enforce the non-negotiables
-below. Each compares per-file violation counts against a committed baseline in
-`tests/gates/baselines/`:
-
-| Gate | Counts | Current |
-|---|---|---|
-| `shellInterpolation` | `${}` in shell commands not wrapped in `shq()` | 43 files / 1062 |
-| `inlineHandlers` | inline `onclick=` etc. in HTML strings | 32 files / 232 |
-| `errorSwallowing` | empty `catch {}` or console-only `catch` | 60 files / 116 |
-| `destructiveActions` | destructive commands in files with no `showConfirm`/journal | 18 files / 100 |
-
-**It is a ratchet, not a wall.** Existing debt is accepted; the counts can only go
-down. Adding a violation fails the build and names the file. Removing one also fails,
-telling you to re-tighten the baseline — so run:
-
-```
-UPDATE_GATE_BASELINE=1 npm test
+# Required checks
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --all-targets --locked
+pwsh -File ./scripts/gpui-source-gate.ps1 -ManifestPath ./Cargo.toml
+pwsh -File ./scripts/gpui-dependency-gate.ps1 -ManifestPath ./Cargo.toml
 ```
 
-and commit `tests/gates/baselines/`. Per-site opt-outs, when the gate is genuinely
-wrong, are inline comments: `/* shell-safe: … */`, `/* intentional: … */`,
-`/* destructive-ok: … */`.
+Use `#[cfg(test)]` unit tests near domain rules and integration tests for cross-crate or protocol behavior. Tests requiring a real Linux/SSH target stay `#[ignore]` until run by the applicable release gate; never report an ignored or `NOT_RUN` scenario as passing.
 
-No ESLint on purpose — 151 files with no lint history would produce thousands of
-day-one errors and get ignored. These three rules are the ones that actually matter.
+## Architecture rules
 
-## 🎨 Code Style & Conventions
+- Put business rules and remote effects in `lovelyres-core`. Core APIs should accept typed values and return bounded typed results; they must not depend on GPUI.
+- Put terminal protocol/model behavior in `lovelyres-terminal`. Keep transport events bounded and preserve cancellation, resize, backpressure, and stale-session behavior.
+- Keep `lovelyres-gpui` focused on entities, views, native dialogs/windows, and translating user intent into typed core calls.
+- The composition root creates shared services and state once. Do not create parallel stores, SSH actors, Tokio runtimes, or target state inside individual pages.
+- Every remote async request captures a complete `TargetGuard { identity, generation }` and validates it before dispatch and before applying results.
+- Page state must support explicit activation/deactivation. Register a new page in the centralized `PageId`/descriptor registry and wire its entity, lifecycle, render branch, and tests together.
+- Native secondary windows share typed entities or intents with the main window. Do not introduce stringly-typed event buses or hidden persistence as a navigation channel.
+- Treat all remote text as hostile plain text. Do not reinterpret it as markup, a resource path, an action identifier, or a command.
 
-### General
-- **Indentation**: 2 spaces (Frontend), 4 spaces (Rust).
-- **Line Endings**: LF.
-- **File Naming**:
-  - TS/JS: `camelCase.ts` (e.g., `stateManager.ts`)
-  - Vue: `PascalCase.vue` (e.g., `SSHTerminal.vue`)
-  - Rust: `snake_case.rs`
-- **Comments**: minimal, explanatory "why" comments. Use JSDoc/RustDoc for public APIs.
+## Safety rules
 
-### Frontend (Vue/TS)
-- **Framework**: Vue 3 Composition API (`<script setup lang="ts">`).
-- **Imports**:
-  - Group imports: External (vue, tauri) -> Internal Modules -> Styles.
-  - Avoid circular dependencies in `src/modules/`.
-- **Typing**: Strict TypeScript. Avoid `any` where possible (though legacy code uses it).
-  - Define interfaces in `src/types.ts` or local module files.
-- **State Management**: use `StateManager` class pattern (observable/reactive) or Vue's `ref/reactive`.
-- **UI Components**: Manual DOM manipulation is present in legacy code (e.g., `document.createElement`), but prefer Vue components for new features.
-- **Async/Await**: Always use async/await for Tauri commands (`invoke`).
+- No CDN, remote image/font/style/script, or online-only UI dependency. Add distributable assets under `crates/lovelyres-gpui/assets/` and load them through the embedded asset source.
+- Never interpolate user or remote data into a shell program. Prefer closed enums and validated value types; otherwise use the core shell-escaping boundary.
+- Dangerous mutations require an immutable plan, exact dangerous confirmation, journal entry, independent verification, and a restore path when the action is reversible.
+- Remote paths must use validated path types and managed namespaces. Uploads, downloads, backups, and restores must reject traversal, overwrite races, and stale target/session state.
+- Secrets remain in core-owned credential types, are encrypted at rest, zeroized where practical, and never appear in logs, debug output, exports, or GPUI state snapshots.
+- Bound output size, item count, concurrency, and event queues for attacker-controlled targets. Long-running work must be cancellable and late results must fail closed.
+- Log through the native tracing setup. Do not swallow errors or reduce a production failure to debug-only output.
+- Destructive remote one-liners and recovery flows require real Linux VM validation before release.
 
-### Backend (Rust)
-- **Crates**: `tauri`, `russh` (SSH), `tokio` (Async), `serde` (JSON).
-- **Error Handling**: Use `anyhow` or `thiserror`. Return `Result<T, String>` for Tauri commands to handle errors gracefully in frontend.
-- **Async**: Heavy usage of `tokio` for async SSH and I/O.
+## Code style and change discipline
 
-### 🛡 Safety & Security
-- **Secrets**: NEVER commit `.env`, private keys, or credentials.
-- **Tauri Commands**: Validate all inputs from frontend in Rust.
-- **Permissions**: Check `capabilities` in `src-tauri/capabilities/` when adding new plugins.
-  `tauri.conf.json` 的 `security.capabilities` 是显式白名单——新建 capability 文件后必须把它的
-  identifier 加进那个数组，否则整份文件被忽略（典型症状：`event.listen not allowed on window "xxx"`）。
+- Use four-space Rust indentation, `snake_case` modules/functions, and `PascalCase` types.
+- Prefer small, explicit changes. Reuse existing typed services and shared entities before adding abstractions.
+- Document why a safety boundary exists; avoid comments that only restate code.
+- Do not use `unsafe` unless the platform integration requires it, its invariant is documented, and a narrow test or gate covers the boundary.
+- Add tests for security-sensitive parsing, shell/path construction, target lifecycle, attacker-controlled text, persistence, and recovery behavior.
+- If an implemented module cannot be wired into its page or native window in the same change, record its crate path, owner, missing wiring, and acceptance test in `docs/UNWIRED_FEATURES.md`.
 
-## 🤖 Agent Instructions
-- **Modifying UI**: Check `src/modules/ui/` for existing renderers (e.g., `modernUIRenderer.ts`) before creating new ones.
-- **Adding Features**:
-  1. Define Rust command in `src-tauri/src/lib.rs` (or modules).
-  2. Expose via `invoke` in the relevant manager.
-  3. Update UI to trigger the command.
-- **Adding a page** — there are **four** registration points; missing any one of them
-  silently falls through to `default:` (this is exactly how the quick-detection page was
-  lost for three months in commit `04f6819`):
-  1. `ui/modernUIRenderer.ts` — `navGroups` entry **and** a `case` in `renderWorkspaceContent()`
-  2. `ui/globalFunctions.ts` — lazy-init branch in `switchPage()`
-  3. `core/app.ts` — add the id to the `AppState['currentPage']` union
-  4. `css/pages/_index.css` — `@import` the page stylesheet
-- **Don't leave features unwired.** If you write a module but don't hook up its UI,
-  register it in `docs/UNWIRED_FEATURES.md` so it isn't lost.
-- **Refactoring**: Be careful with global window objects (`(window as any).app`). Legacy code relies heavily on them.
-- **AI 功能**：
-  - 配置唯一来源是后端 settings 文件（`settings.ai.providers`），一律经 `src/modules/ai/aiConfig.ts`
-    的 `loadAIConfig()` 解析；不要新写读 settings 或 localStorage 的 AI 配置代码。
-  - API Key 以 `enc:v1:` 密文落盘（`crypto.rs`，AES-256-GCM）；前端不接触明文——调
-    `ai_proxy_request`/`ai_proxy_stream` 时把密文作 `apiKey` 传给后端，由后端解密并注入认证头。
-  - 提示词集中在 `src/modules/ai/aiPrompts.ts`，AI 输出统一用 `src/modules/ai/aiOutput.ts` 的
-    `renderAIMarkdown()` 渲染；aiHistory 由 aiService 统一记录，调用点不要再自己写。
-  - 流式请求必须带 `streamId`（事件按 id 过滤，支持 `ai_proxy_stream_cancel` 取消）。
+## Portable data and releases
 
-## 🔒 Non-negotiables
-
-These come from the offline-competition use case; breaking them causes real damage:
-
-- **No CDN / no web fonts / no online-only features.** Everything ships in the bundle.
-  Third-party assets go through `src/modules/core/vendorAssets.ts`.
-- **Escape everything that reaches a shell.** Use `shq()` from `core/shellEscape.ts`;
-  prefer whitelist validation (`isValidUsername` / `isValidIpOrCidr` / `isValidPort` / `isValidPid`)
-  for values with a fixed shape. Never interpolate raw input into a command string.
-- **Escape everything that reaches `innerHTML`.** Use `escapeHtml()` from `core/htmlEscape.ts`.
-  The target machine is attacker-controlled; the webview can `invoke` 120+ backend commands.
-- **Destructive actions go through `showConfirm({ dangerous: true })`** and, if reversible,
-  record to `core/operationJournal.ts` with a `restoreCommand`.
-- **Log through `core/logger.ts`, report failures through `utils/errorHandler.ts`.**
-  Production builds strip every `console.*` call (`esbuild.drop` in `vite.config.ts`),
-  so a bare `console.error` in a `catch` means a completely silent failure.
-- **Destructive one-liners must be tested on a real Linux VM** before shipping.
+Runtime state belongs under the executable-adjacent `data/` root via the versioned portable stores. Do not write application state to browser storage or silently fall back to a user profile directory. Release artifacts must pass the source/resource gate, dependency gate, platform smoke checks, and the real-environment matrices described in `docs/`.

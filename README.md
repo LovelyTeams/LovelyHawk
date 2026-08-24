@@ -1,158 +1,111 @@
 <div align="center">
-  <img src="public/logo.png" alt="LovelyERes Logo" width="250" height="250">
+  <img src="crates/lovelyres-gpui/assets/logo.png" alt="LovelyRes Logo" width="250" height="250">
 
   # LovelyERes
-  
+
   **Linux 应急响应工具**
-  
-  一款专为快速服务器管理和应急响应设计的现代化、高性能 SSH 终端及诊断工具箱。
 
-  [![Tauri](https://img.shields.io/badge/Tauri-v2.0-24C8DB?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app)
-  [![Vue](https://img.shields.io/badge/Vue.js-v3.5-4FC08D?style=flat-square&logo=vue.js&logoColor=white)](https://vuejs.org)
-  [![Rust](https://img.shields.io/badge/Rust-Backend-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org)
-  [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
-  [![License](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
+  面向应急响应、攻防演练与日常运维的原生 SSH / SFTP 诊断工作台。
 
-  [功能特性](#-功能特性) • [技术栈](#-技术栈) • [快速开始](#-快速开始) • [开发计划](#-开发计划)
+  [![Rust](https://img.shields.io/badge/Rust-1.93.1-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org)
+  [![GPUI](https://img.shields.io/badge/GPUI-0.2.2-6B5BFF?style=flat-square)](https://www.gpui.rs/)
+  [![License](https://img.shields.io/badge/License-AGPLv3-yellow.svg?style=flat-square)](LICENSE)
 </div>
 
 ---
 
-## 📖 简介
+## 简介
 
-**LovelyERes** (Lovely Emergency Response) 是一款专为应急响应、CTF 比赛和日常运维设计的多功能桌面应用。与标准的 SSH 客户端不同，LovelyERes 专为 **应急响应场景和攻防演练** 优化，提供了一个稳健、安全且高效的环境，用于快速诊断、修复 Linux 服务器问题，同时也能胜任日常运维管理工作。
+LovelyERes（Lovely Emergency Response）是一个以 Rust 和 GPUI 构建的跨平台原生桌面应用。当前主线只有 Cargo workspace，不依赖浏览器内核或前端运行时。应用把 SSH、SFTP、终端、诊断与处置能力组织在同一套目标绑定模型中，适合在离线比赛环境中携带和启动。
 
-基于 **Tauri v2** 框架构建，它结合了轻量级的原生占用和 **Vue 3** 带来的现代化 UI 体验。
+主要能力包括：
 
-## 支持
+- 原生多窗口 SSH 终端、SFTP 文件管理和容器终端；
+- 系统信息、Docker、Kubernetes、快速检测、安全速查、日志分析、抓包与完整性检查；
+- 防火墙、快照、基线加固、数据库、Java 更新与多机批量工作流；
+- 调查笔记、命令历史、AI 历史和处置报告；
+- 目标代际校验、危险操作确认、操作日志、执行后验证与可恢复流程。
 
+尚未开放或仍需实机验收的能力记录在 [未接线功能清单](docs/UNWIRED_FEATURES.md)。
 
-## ✨ 功能截图
+## 技术栈
 
-### 仪表盘界面
-<img width="1498" height="1014" alt="image" src="https://github.com/user-attachments/assets/b787eca7-37dc-4494-bf10-9becb811c176" />
+| 层 | 技术 | 职责 |
+|---|---|---|
+| 原生界面 | GPUI 0.2.2、gpui-component 0.5.1 | 主窗口、原生窗口、实体、视图和交互 |
+| 核心服务 | Rust 2024、Tokio | SSH/SFTP、诊断、存储、审计和强类型安全边界 |
+| 终端 | alacritty_terminal、GPUI | 终端模型、传输、输入、搜索、选择和渲染 |
+| SSH/SFTP | russh、russh-sftp | 目标绑定的远程会话与文件传输 |
+| 本地资源 | rust-embed | 字体、图标、Logo 与安全速查数据随二进制分发 |
 
-### 系统信息
-<img width="1312" height="928" alt="image" src="https://github.com/user-attachments/assets/180f5f83-0561-4b55-86d8-64cb52b4d48d" />
-<img width="1312" height="928" alt="image" src="https://github.com/user-attachments/assets/b101b779-f4b2-4ffb-9110-eb6db33dd6d2" />
+依赖版本由根目录 `Cargo.toml` 与已提交的 `Cargo.lock` 固定。发布工具链固定为 Rust 1.93.1。
 
-### SFTP管理
-<img width="1312" height="928" alt="image" src="https://github.com/user-attachments/assets/dbd1fc4f-f053-44f5-bfa3-97bb5284e701" />
+## 项目结构
 
-### Docker容器管理
-<img width="1312" height="928" alt="image" src="https://github.com/user-attachments/assets/d179cc53-bcee-43a1-8c2e-56e23b9130a4" />
-
-### 常用命令快速执行
-<img width="1312" height="928" alt="image" src="https://github.com/user-attachments/assets/2d38d720-b1b2-476d-92ed-a994cf8ca40d" />
-<img width="1312" height="928" alt="image" src="https://github.com/user-attachments/assets/5c61e064-43ec-4f9e-8673-782936bd85d8" />
-
-### 快速检测
-<img width="1312" height="928" alt="image" src="https://github.com/user-attachments/assets/9d6e238a-52fd-40d4-9de9-891edcaa6d86" />
-
-### AI分析功能
-<img width="1312" height="928" alt="image" src="https://github.com/user-attachments/assets/1650a489-252e-4f0a-9bb3-25e4aad38a21" />
-
-### SSH终端
-<img width="1002" height="702" alt="image" src="https://github.com/user-attachments/assets/3f34bb35-67f5-4179-828b-ade436ffcc7f" />
-
-<img width="1002" height="702" alt="image" src="https://github.com/user-attachments/assets/55178d80-74ae-4427-a26c-acf27205d165" />
-
-<img width="1002" height="702" alt="image" src="https://github.com/user-attachments/assets/6bc24c96-b3f5-4109-802b-158f0bef3534" />
-
-
-
-
-
-## 🛠 技术栈
-
-| 组件 | 技术 | 说明 |
-|-----------|------------|-------------|
-| **核心框架** | [Tauri v2](https://tauri.app) | 构建轻量级、快速的二进制应用框架 |
-| **前端框架** | [Vue 3](https://vuejs.org) | 响应式 UI 框架 |
-| **构建工具** | [Vite](https://vitejs.dev) | 下一代前端构建工具 |
-| **开发语言** | [TypeScript](https://www.typescriptlang.org) | 类型安全的 JavaScript |
-| **后端逻辑** | [Rust](https://www.rust-lang.org) | 用于核心逻辑的系统级编程语言 |
-| **终端组件** | [xterm.js](https://xtermjs.org) | 全功能终端组件 |
-| **图标库** | [IconPark](https://iconpark.bytedance.com) | 丰富的图标资源库 |
-
-## 📂 项目结构
-
-```bash
+```text
 LovelyRes/
-├── index.html                # 唯一的 HTML 入口（辅助窗口用 ?window=xxx 复用）
-├── src/                      # 前端源码 (TypeScript + Vite)
-│   ├── main.ts               # 入口：引导主应用 / 分流辅助窗口
-│   ├── entries/              # SSH 终端、容器终端等独立窗口入口
-│   ├── modules/              # 业务逻辑（按领域分目录）
-│   │   ├── core/             # 状态、日志、操作日志、转义等基础设施
-│   │   ├── ui/               # 渲染器、右键菜单、模态框
-│   │   ├── detection/        # 快速检测与一键修复
-│   │   ├── emergency/        # 应急命令库
-│   │   ├── secfix/           # 安全速查（离线修复片段库）
-│   │   └── ...               # docker / kubernetes / baseline / firewall / snapshot 等
-│   ├── components/           # Vue SFC（仅终端窗口使用）
-│   └── css/                  # main.css → tokens → themes → base → components → layout → pages
-├── src-tauri/                # 后端源码 (Rust)
-│   ├── src/
-│   │   ├── ssh_manager_russh.rs   # SSH / SFTP（russh 实现）
-│   │   ├── detection_manager.rs   # 检测逻辑
-│   │   ├── commands/              # Tauri command 分组
-│   │   └── ...
-│   ├── capabilities/         # Tauri 权限配置
-│   └── tauri.conf.json
-├── public/                   # 静态资源 (Logos, Icons)
-└── docs/                     # 开发文档
+├── Cargo.toml                    # Cargo workspace 与统一依赖版本
+├── Cargo.lock                    # 锁定的可复现依赖图
+├── crates/
+│   ├── lovelyres-core/           # 与 UI 无关的领域服务、安全契约和便携存储
+│   ├── lovelyres-terminal/       # 原生终端模型、传输、视图与一致性测试
+│   └── lovelyres-gpui/           # GPUI 应用壳、页面、窗口和内嵌资源
+│       └── assets/               # 本地字体、Logo、图标和安全速查数据
+├── docs/                         # 原生应用、兼容性与发布文档
+└── scripts/                      # 源码、依赖、质量与便携发布门禁
 ```
 
-> 说明：项目虽然依赖 Vue 3，但 UI **不是** Vue 应用——绝大部分界面由
-> `src/modules/ui/modernUIRenderer.ts` 生成 HTML 字符串并配合事件委托驱动，
-> 只有终端窗口使用了 Vue SFC。参与开发前请先读 [AGENTS.md](AGENTS.md)。
+开发入口是 `crates/lovelyres-gpui/src/main.rs`，应用组合根位于 `crates/lovelyres-gpui/src/app.rs`。业务规则应进入 `lovelyres-core`；终端协议和渲染基础应进入 `lovelyres-terminal`；窗口与页面交互留在 `lovelyres-gpui`。
 
-## 🚀 快速开始
+## 快速开始
 
 ### 环境要求
 
-- **Node.js** (v18+)
-- **Rust** (最新稳定版)
-- **Visual Studio Code** (推荐) 配合 Rust Analyzer & Volar 插件
+- Rust 1.93.1，包含 `rustfmt` 与 `clippy`；
+- 对应平台的原生 Rust 构建工具链；
+- PowerShell 7.2+（仅运行仓库内的 PowerShell 门禁与 Windows 打包脚本时需要）。
 
-### 安装步骤
+### 开发运行
 
-1. **克隆仓库**
-   ```bash
-   git clone https://github.com/Tokeii0/LovelyERes.git
-   cd lovelyres
-   ```
+```powershell
+cargo run --locked --package lovelyres-gpui --bin lovelyres
+```
 
-2. **安装依赖**
-   ```bash
-   npm install
-   ```
+### 构建
 
-3. **运行开发模式**
-   该命令将启动前端开发服务器和 Tauri Rust 后端。
-   ```bash
-   npm run tauri dev
-   ```
+```powershell
+cargo build --locked --package lovelyres-gpui --bin lovelyres
+cargo build --release --locked --package lovelyres-gpui --bin lovelyres
+```
 
-4. **构建生产版本**
-   ```bash
-   npm run tauri build
-   ```
+### 测试与质量检查
 
-## 🤝 贡献指南
+```powershell
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --all-targets --locked
+pwsh -File ./scripts/gpui-source-gate.ps1 -ManifestPath ./Cargo.toml
+pwsh -File ./scripts/gpui-dependency-gate.ps1 -ManifestPath ./Cargo.toml
+```
 
-欢迎提交 Pull Request 来参与贡献！
+完整发布门禁与便携包格式见 [GPUI 便携发布与门禁](docs/GPUI_PORTABLE_RELEASE.md)，SSH 实机覆盖要求见 [SSH 兼容性与安全策略](docs/SSH_COMPATIBILITY.md)。
 
-1. Fork 本项目
-2. 创建您的特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交您的更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 开启一个 Pull Request
+## 离线与安全约束
 
-## 📜 开源协议
+- UI 字体、图标、Logo 和速查数据全部位于 `crates/lovelyres-gpui/assets/` 并嵌入程序；不从 CDN、网络字体或远程 UI 资源加载。
+- 运行数据写入可执行文件同级的 `data/`，便携包不依赖用户配置目录。
+- 所有远端操作都必须绑定目标身份与代次；切换目标后，迟到结果不得应用。
+- 用户输入或远端返回值不得直接形成 shell 命令。固定形状输入使用白名单类型，必要参数由核心层统一转义。
+- 危险写操作必须使用不可变计划、精确确认、journal、verify，并在可恢复时提供 restore。
+- 密钥与凭据不得进入日志、UI 状态快照或导出文件。
 
-本项目基于 AGPLv3 协议开源。详情请参阅 `LICENSE` 文件。
+## 贡献
+
+提交修改前请阅读 [AGENTS.md](AGENTS.md)，并至少运行与修改范围相称的格式检查、Clippy 和测试。新增功能若尚未挂入页面或窗口，必须登记到 [docs/UNWIRED_FEATURES.md](docs/UNWIRED_FEATURES.md)。
+
+## 开源协议
+
+本项目基于 AGPLv3 协议开源，详情见 [LICENSE](LICENSE)。
 
 ---
 

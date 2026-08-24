@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-图标生成脚本 - 从logo.png生成Tauri应用所需的所有图标素材
+图标生成脚本 - 从 logo.png 生成 LovelyRes 原生应用图标素材
 """
 
 import os
@@ -100,11 +100,11 @@ def create_icns_file(source_image, output_path):
         print(f"⚠ ICNS生成失败: {e}")
 
 def main():
-    parser = argparse.ArgumentParser(description='从logo.png生成Tauri应用所需的图标素材')
-    parser.add_argument('--source', '-s', default='src-tauri/icons/logo.png',
-                       help='源图标文件路径 (默认: src-tauri/icons/logo.png)')
-    parser.add_argument('--output-dir', '-o', default='src-tauri/icons',
-                       help='输出目录 (默认: src-tauri/icons)')
+    parser = argparse.ArgumentParser(description='从 logo.png 生成 LovelyRes 原生应用图标素材')
+    parser.add_argument('--source', '-s', default='crates/lovelyres-gpui/assets/logo.png',
+                       help='源图标文件路径 (默认: crates/lovelyres-gpui/assets/logo.png)')
+    parser.add_argument('--output-dir', '-o', default='crates/lovelyres-gpui/assets/generated-icons',
+                       help='输出目录 (默认: crates/lovelyres-gpui/assets/generated-icons)')
     parser.add_argument('--max-upscale', '-m', type=int, default=0,
                        help='最大放大倍数，0表示无限制 (默认: 0)')
     parser.add_argument('--skip-large', action='store_true',

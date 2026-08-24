@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lovelyres.invalid/schemas/gpui-feasibility-manual-v1.json",
+  "title": "LovelyRes GPUI Windows feasibility manual evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "scenario_id", "binary_sha256", "operator", "recorded_at_utc", "checks"],
+  "properties": {
+    "schema": { "const": "lovelyres-feasibility-manual/v1" },
+    "scenario_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$" },
+    "binary_sha256": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" },
+    "operator": { "type": "string", "minLength": 1 },
+    "recorded_at_utc": { "type": "string", "format": "date-time" },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 14,
+      "items": { "$ref": "#/$defs/check" }
+    }
+  },
+  "$defs": {
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status", "evidence"],
+      "properties": {
+        "id": {
+          "enum": [
+            "d3d11_gpu_driver",
+            "custom_titlebar",
+            "native_multi_window",
+            "chinese_ime",
+            "clipboard",
+            "file_dialog",
+            "folder_dialog",
+            "theme_switch",
+            "virtual_large_table",
+            "mixed_dpi",
+            "rdp",
+            "virtual_machine",
+            "integrated_gpu",
+            "offline_startup"
+          ]
+        },
+        "status": { "enum": ["PASS", "FAIL", "NOT_RUN"] },
+        "evidence": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

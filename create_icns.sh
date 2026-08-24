@@ -3,9 +3,9 @@
 
 set -e
 
-SOURCE_PNG="src-tauri/icons/icon.png"
-ICONSET_DIR="src-tauri/icons/icon.iconset"
-OUTPUT_ICNS="src-tauri/icons/icon.icns"
+SOURCE_PNG="crates/lovelyres-gpui/assets/logo.png"
+ICONSET_DIR="crates/lovelyres-gpui/assets/icon.iconset"
+OUTPUT_ICNS="crates/lovelyres-gpui/assets/app.icns"
 
 # 检查源文件
 if [ ! -f "$SOURCE_PNG" ]; then

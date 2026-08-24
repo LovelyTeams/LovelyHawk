@@ -1,0 +1,343 @@
+name: GPUI Portable Release
+
+on:
+  push:
+    tags: ['gpui-v1.0.0']
+  workflow_dispatch:
+    inputs:
+      build_preview_platforms:
+        description: 'After the Windows gate, also build provisional Linux x64 and macOS universal archives'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: gpui-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RELEASE_VERSION: '1.0.0'
+  RELEASE_TAG: 'gpui-v1.0.0'
+
+jobs:
+  quality:
+    name: GPUI quality and dependency gate
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The frozen test baseline verifies its source tag locally.
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.93.1'
+          targets: x86_64-pc-windows-msvc
+          components: rustfmt, clippy
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+
+      - name: Format, clippy, tests, and forbidden dependency gate
+        shell: pwsh
+        run: ./scripts/gpui-quality-gates.ps1 -ManifestPath ./Cargo.toml -ExpectedVersion $env:RELEASE_VERSION
+
+  windows-portable:
+    name: Windows x64 portable release gate
+    needs: quality
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.93.1'
+          targets: x86_64-pc-windows-msvc
+          components: llvm-tools-preview
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+
+      - name: Create explicit artifact directory
+        shell: pwsh
+        run: New-Item -ItemType Directory -Path ./artifacts -Force | Out-Null
+
+      - name: Build Windows x64 with the static CRT
+        shell: pwsh
+        env:
+          RUSTFLAGS: '-C target-feature=+crt-static'
+          CARGO_INCREMENTAL: '0'
+        run: cargo build --release --locked --package lovelyres-gpui --bin lovelyres --target x86_64-pc-windows-msvc
+
+      - name: Verify PE architecture and static CRT imports
+        shell: pwsh
+        run: ./scripts/gpui-verify-windows-binary.ps1 -BinaryPath ./target/x86_64-pc-windows-msvc/release/lovelyres.exe
+
+      - name: Generate locked third-party notice bundle
+        shell: pwsh
+        run: >-
+          ./scripts/gpui-third-party-notices.ps1
+          -ManifestPath ./Cargo.toml
+          -ProjectNoticePath ./crates/lovelyres-terminal/THIRD_PARTY_NOTICES.md
+          -GpuiNoticePath ./crates/lovelyres-gpui/THIRD_PARTY_NOTICES.md
+          -OutputPath ./artifacts/THIRD_PARTY_NOTICES.txt
+
+      - name: Prepare GPUI-only SBOM input
+        shell: pwsh
+        run: >-
+          ./scripts/gpui-prepare-sbom-input.ps1
+          -ManifestPath ./Cargo.toml
+          -OutputDirectory ./target/gpui-sbom-input-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Generate CycloneDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: target/gpui-sbom-input-${{ github.run_id }}-${{ github.run_attempt }}
+          format: cyclonedx-json
+          output-file: artifacts/LovelyRes-1.0.0-windows-x64.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Validate CycloneDX SBOM contents
+        shell: pwsh
+        run: ./scripts/gpui-validate-sbom.ps1 -SbomPath ./artifacts/LovelyRes-1.0.0-windows-x64.cdx.json
+
+      - name: Assemble portable ZIP and SHA-256
+        shell: pwsh
+        run: >-
+          ./scripts/gpui-package-windows.ps1
+          -Version $env:RELEASE_VERSION
+          -BinaryPath ./target/x86_64-pc-windows-msvc/release/lovelyres.exe
+          -OutputDirectory ./artifacts
+          -LicensePath ./LICENSE
+          -NoticesPath ./artifacts/THIRD_PARTY_NOTICES.txt
+          -SbomPath ./artifacts/LovelyRes-1.0.0-windows-x64.cdx.json
+
+      - name: Unicode path startup and portable persistence smoke
+        shell: pwsh
+        run: >-
+          ./scripts/gpui-portable-smoke.ps1
+          -Version $env:RELEASE_VERSION
+          -ArchivePath ./artifacts/LovelyRes-1.0.0-windows-x64.zip
+          -ScratchDirectory $env:RUNNER_TEMP
+          -TimeoutSeconds 30
+
+      - name: Attest Windows archive build provenance
+        uses: actions/attest@v4
+        with:
+          subject-path: artifacts/LovelyRes-1.0.0-windows-x64.zip
+
+      - name: Bind the CycloneDX SBOM to the Windows archive
+        uses: actions/attest@v4
+        with:
+          subject-path: artifacts/LovelyRes-1.0.0-windows-x64.zip
+          sbom-path: artifacts/LovelyRes-1.0.0-windows-x64.cdx.json
+
+      - name: Upload verified Windows release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: LovelyRes-1.0.0-windows-x64
+          if-no-files-found: error
+          path: |
+            artifacts/LovelyRes-1.0.0-windows-x64.zip
+            artifacts/LovelyRes-1.0.0-windows-x64.zip.sha256
+            artifacts/LovelyRes-1.0.0-windows-x64.cdx.json
+
+      - name: Attach Windows artifacts to the draft GPUI release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}
+          name: LovelyRes GPUI v1.0.0
+          draft: true
+          prerelease: false
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/LovelyRes-1.0.0-windows-x64.zip
+            artifacts/LovelyRes-1.0.0-windows-x64.zip.sha256
+            artifacts/LovelyRes-1.0.0-windows-x64.cdx.json
+
+  linux-x64-preview:
+    name: Linux x64 portable preview
+    needs: windows-portable
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_preview_platforms }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.93.1'
+          targets: x86_64-unknown-linux-gnu
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+
+      - name: Install GPUI and archive build dependencies
+        run: >-
+          sudo apt-get update &&
+          sudo apt-get install -y
+          clang cmake libasound2-dev libfontconfig1-dev libssl-dev
+          libwayland-dev libx11-xcb-dev libxkbcommon-dev libxkbcommon-x11-dev zstd
+
+      - name: Build Linux x64 binary
+        env:
+          CARGO_INCREMENTAL: '0'
+        run: cargo build --release --locked --package lovelyres-gpui --bin lovelyres --target x86_64-unknown-linux-gnu
+
+      - name: Create artifact directory and notices
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path ./artifacts -Force | Out-Null
+          ./scripts/gpui-third-party-notices.ps1 -ManifestPath ./Cargo.toml -ProjectNoticePath ./crates/lovelyres-terminal/THIRD_PARTY_NOTICES.md -GpuiNoticePath ./crates/lovelyres-gpui/THIRD_PARTY_NOTICES.md -OutputPath ./artifacts/THIRD_PARTY_NOTICES.txt
+          ./scripts/gpui-prepare-sbom-input.ps1 -ManifestPath ./Cargo.toml -OutputDirectory ./target/gpui-sbom-input-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Generate CycloneDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: target/gpui-sbom-input-${{ github.run_id }}-${{ github.run_attempt }}
+          format: cyclonedx-json
+          output-file: artifacts/LovelyRes-1.0.0-linux-x64.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Validate CycloneDX SBOM contents
+        shell: pwsh
+        run: ./scripts/gpui-validate-sbom.ps1 -SbomPath ./artifacts/LovelyRes-1.0.0-linux-x64.cdx.json
+
+      - name: Assemble Linux tar.zst and SHA-256
+        run: >-
+          bash ./scripts/gpui-package-linux.sh
+          --version "$RELEASE_VERSION"
+          --binary ./target/x86_64-unknown-linux-gnu/release/lovelyres
+          --output-dir ./artifacts
+          --license ./LICENSE
+          --notices ./artifacts/THIRD_PARTY_NOTICES.txt
+          --sbom ./artifacts/LovelyRes-1.0.0-linux-x64.cdx.json
+
+      - name: Attest Linux archive build provenance
+        uses: actions/attest@v4
+        with:
+          subject-path: artifacts/LovelyRes-1.0.0-linux-x64.tar.zst
+
+      - name: Bind the CycloneDX SBOM to the Linux archive
+        uses: actions/attest@v4
+        with:
+          subject-path: artifacts/LovelyRes-1.0.0-linux-x64.tar.zst
+          sbom-path: artifacts/LovelyRes-1.0.0-linux-x64.cdx.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LovelyRes-1.0.0-linux-x64-preview
+          if-no-files-found: error
+          path: |
+            artifacts/LovelyRes-1.0.0-linux-x64.tar.zst
+            artifacts/LovelyRes-1.0.0-linux-x64.tar.zst.sha256
+            artifacts/LovelyRes-1.0.0-linux-x64.cdx.json
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          draft: true
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/LovelyRes-1.0.0-linux-x64.tar.zst
+            artifacts/LovelyRes-1.0.0-linux-x64.tar.zst.sha256
+            artifacts/LovelyRes-1.0.0-linux-x64.cdx.json
+
+  macos-universal-preview:
+    name: macOS universal portable preview
+    needs: windows-portable
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_preview_platforms }}
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.93.1'
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+
+      - name: Build both macOS architectures
+        env:
+          CARGO_INCREMENTAL: '0'
+        run: |
+          cargo build --release --locked --package lovelyres-gpui --bin lovelyres --target aarch64-apple-darwin
+          cargo build --release --locked --package lovelyres-gpui --bin lovelyres --target x86_64-apple-darwin
+          mkdir -p artifacts
+          lipo -create \
+            target/aarch64-apple-darwin/release/lovelyres \
+            target/x86_64-apple-darwin/release/lovelyres \
+            -output artifacts/LovelyRes-universal
+
+      - name: Generate locked third-party notice bundle
+        shell: pwsh
+        run: |
+          ./scripts/gpui-third-party-notices.ps1 -ManifestPath ./Cargo.toml -ProjectNoticePath ./crates/lovelyres-terminal/THIRD_PARTY_NOTICES.md -GpuiNoticePath ./crates/lovelyres-gpui/THIRD_PARTY_NOTICES.md -OutputPath ./artifacts/THIRD_PARTY_NOTICES.txt
+          ./scripts/gpui-prepare-sbom-input.ps1 -ManifestPath ./Cargo.toml -OutputDirectory ./target/gpui-sbom-input-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Generate CycloneDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: target/gpui-sbom-input-${{ github.run_id }}-${{ github.run_attempt }}
+          format: cyclonedx-json
+          output-file: artifacts/LovelyRes-1.0.0-macos-universal.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Validate CycloneDX SBOM contents
+        shell: pwsh
+        run: ./scripts/gpui-validate-sbom.ps1 -SbomPath ./artifacts/LovelyRes-1.0.0-macos-universal.cdx.json
+
+      - name: Assemble universal app.zip and SHA-256
+        run: >-
+          bash ./scripts/gpui-package-macos.sh
+          --version "$RELEASE_VERSION"
+          --binary ./artifacts/LovelyRes-universal
+          --output-dir ./artifacts
+          --license ./LICENSE
+          --notices ./artifacts/THIRD_PARTY_NOTICES.txt
+          --sbom ./artifacts/LovelyRes-1.0.0-macos-universal.cdx.json
+
+      - name: Attest macOS archive build provenance
+        uses: actions/attest@v4
+        with:
+          subject-path: artifacts/LovelyRes-1.0.0-macos-universal.app.zip
+
+      - name: Bind the CycloneDX SBOM to the macOS archive
+        uses: actions/attest@v4
+        with:
+          subject-path: artifacts/LovelyRes-1.0.0-macos-universal.app.zip
+          sbom-path: artifacts/LovelyRes-1.0.0-macos-universal.cdx.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LovelyRes-1.0.0-macos-universal-preview
+          if-no-files-found: error
+          path: |
+            artifacts/LovelyRes-1.0.0-macos-universal.app.zip
+            artifacts/LovelyRes-1.0.0-macos-universal.app.zip.sha256
+            artifacts/LovelyRes-1.0.0-macos-universal.cdx.json
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          draft: true
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/LovelyRes-1.0.0-macos-universal.app.zip
+            artifacts/LovelyRes-1.0.0-macos-universal.app.zip.sha256
+            artifacts/LovelyRes-1.0.0-macos-universal.cdx.json
