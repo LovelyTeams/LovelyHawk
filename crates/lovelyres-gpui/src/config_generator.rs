@@ -47,6 +47,7 @@ use lovelyres_core::{
         LineConfigDialect, LineConfigNodeId, LineConfigNodeKind, LineConfigOutput, LineConfigRow,
         LineConfigVisualDocument,
     },
+    middleware::MiddlewareProduct,
     nginx_config::{
         GeneratedNginxConfig, NginxForbiddenPath, NginxForbiddenPathRule, NginxForbiddenPathScope,
         NginxListenPort, NginxServerNames, NginxSiteConfig, NginxSiteKind, NginxSiteTarget,
@@ -76,11 +77,16 @@ const MAX_VISUAL_SEARCH_CHARS: usize = 128;
 const MAX_VISUAL_ROW_LABEL_CHARS: usize = 128;
 const MAX_VISUAL_ROW_PREVIEW_CHARS: usize = 192;
 const MAX_DATABASE_GOAL_CHOICES: usize = 24;
+const MAX_CATALOG_PRODUCT_SEARCH_CHARS: usize = 64;
 const REDACTED_SCHEMA_VALUE: &str = "[sensitive value redacted]";
 const LOCAL_DRAFT_SCOPE_NOTICE: &str = "未经过目标校验，不能应用/部署";
 const LOCAL_DRAFT_SAVE_LABEL: &str = "另存本地草稿";
 const DOCUMENTED_DEFAULT_STATUS_LABEL: &str =
     "官方文档默认（只读元数据；不是当前值、推荐值或自动填充值）";
+const WEB_MIDDLEWARE_PRODUCTS: [MiddlewareProduct; 2] =
+    [MiddlewareProduct::Nginx, MiddlewareProduct::ApacheHttpd];
+const APPLICATION_MIDDLEWARE_PRODUCTS: [MiddlewareProduct; 1] = [MiddlewareProduct::Tomcat];
+const CACHE_MIDDLEWARE_PRODUCTS: [MiddlewareProduct; 1] = [MiddlewareProduct::Redis];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct VisualWorkspaceLayout {
@@ -1982,6 +1988,7 @@ struct ConfigGeneratorModel {
     active: bool,
     activation_generation: u64,
     mode: ConfigGeneratorMode,
+    selected_goal_subject: ConfigurationGoalSubject,
     kind: NginxSiteKind,
     security_headers: bool,
     forbidden_path_enabled: bool,
@@ -2005,6 +2012,7 @@ impl ConfigGeneratorModel {
             active: false,
             activation_generation: 0,
             mode: ConfigGeneratorMode::Quick,
+            selected_goal_subject: ConfigurationGoalSubject::Middleware(MiddlewareProduct::Nginx),
             kind: NginxSiteKind::ReverseProxy,
             security_headers: true,
             forbidden_path_enabled: false,
@@ -2262,6 +2270,18 @@ fn preflight_database_parameter_assignment_document(
     )
 }
 
+fn unique_goal_subject_for_query(raw_query: &str) -> Option<ConfigurationGoalSubject> {
+    let results = search_configuration_goals(raw_query).ok()?;
+    let mut subjects = results.matches().iter().map(|matched| matched.subject());
+    let first = subjects.next()?;
+    subjects.all(|subject| subject == first).then_some(first)
+}
+
+fn catalog_product_matches(query: &str, label: &str) -> bool {
+    let query = query.trim();
+    query.is_empty() || label.to_lowercase().contains(&query.to_lowercase())
+}
+
 pub struct ConfigGeneratorPage {
     services: Arc<BackendServices>,
     tokio: Arc<TokioBridge>,
@@ -2272,6 +2292,7 @@ pub struct ConfigGeneratorPage {
     static_root_input: Entity<InputState>,
     upstream_input: Entity<InputState>,
     nginx_goal_search_input: Entity<InputState>,
+    catalog_product_search_input: Entity<InputState>,
     forbidden_path_input: Entity<InputState>,
     visual_search_input: Entity<InputState>,
     database_assignment_value_input: Entity<InputState>,
@@ -2325,6 +2346,11 @@ impl ConfigGeneratorPage {
             InputState::new(window, cx)
                 .placeholder("例如：/admin 外部访问全部返回 403")
                 .validate(|value, _| value.chars().count() <= MAX_VISUAL_SEARCH_CHARS)
+        });
+        let catalog_product_search_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("搜索中间件或数据库")
+                .validate(|value, _| value.chars().count() <= MAX_CATALOG_PRODUCT_SEARCH_CHARS)
         });
         let forbidden_path_input = cx.new(|cx| {
             InputState::new(window, cx)
@@ -2392,6 +2418,15 @@ impl ConfigGeneratorPage {
             },
         ));
         subscriptions.push(cx.subscribe_in(
+            &catalog_product_search_input,
+            window,
+            |_, _, event: &InputEvent, _, cx| {
+                if matches!(event, InputEvent::Change) {
+                    cx.notify();
+                }
+            },
+        ));
+        subscriptions.push(cx.subscribe_in(
             &visual_search_input,
             window,
             |page, _, event: &InputEvent, window, cx| {
@@ -2431,6 +2466,7 @@ impl ConfigGeneratorPage {
             static_root_input,
             upstream_input,
             nginx_goal_search_input,
+            catalog_product_search_input,
             forbidden_path_input,
             visual_search_input,
             database_assignment_value_input,
@@ -2503,6 +2539,30 @@ impl ConfigGeneratorPage {
             NginxSiteKind::ReverseProxy => &self.upstream_input,
         };
         input.update(cx, |input, cx| input.focus(window, cx));
+        cx.notify();
+    }
+
+    fn select_goal_subject(
+        &mut self,
+        subject: ConfigurationGoalSubject,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.model.selected_goal_subject = subject;
+        self.nginx_goal_search_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.error = None;
+        self.notice = None;
+        cx.notify();
+    }
+
+    fn reset_goal_catalog_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.nginx_goal_search_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.nginx_goal_search_input
+            .update(cx, |input, cx| input.focus(window, cx));
+        self.error = None;
+        self.notice = None;
         cx.notify();
     }
 
@@ -2739,10 +2799,32 @@ impl ConfigGeneratorPage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let resolution = {
+        let (raw_query, resolution) = {
             let input = self.nginx_goal_search_input.read(cx);
-            resolve_database_parameter_assignment(input.value().as_ref())
+            let raw_query = input.value().to_string();
+            let resolution = resolve_database_parameter_assignment(&raw_query);
+            (raw_query, resolution)
         };
+        let inferred_subject = match &resolution {
+            DatabaseParameterAssignmentResolution::Ready(assignment) => Some(
+                ConfigurationGoalSubject::Database(assignment.target().schema().binding.product),
+            ),
+            DatabaseParameterAssignmentResolution::Ambiguous(ambiguity) => {
+                let mut subjects = ambiguity.candidates().iter().map(|target| {
+                    ConfigurationGoalSubject::Database(target.schema().binding.product)
+                });
+                subjects
+                    .next()
+                    .and_then(|first| subjects.all(|subject| subject == first).then_some(first))
+            }
+            DatabaseParameterAssignmentResolution::NotAssignment => {
+                unique_goal_subject_for_query(&raw_query)
+            }
+            DatabaseParameterAssignmentResolution::Rejected(_) => None,
+        };
+        if let Some(subject) = inferred_subject {
+            self.model.selected_goal_subject = subject;
+        }
         self.advance_database_assignment_generation();
         let state = match resolution {
             DatabaseParameterAssignmentResolution::NotAssignment => {
@@ -3548,6 +3630,11 @@ impl ConfigGeneratorPage {
     }
 
     fn choose_import_path(&mut self, cx: &mut Context<Self>) {
+        let kind = self.model.visual_document.kind();
+        self.choose_import_path_for_kind(kind, cx);
+    }
+
+    fn choose_import_path_for_kind(&mut self, kind: VisualDocumentKind, cx: &mut Context<Self>) {
         if self.importing || self.saving || !self.model.active {
             return;
         }
@@ -3556,7 +3643,6 @@ impl ConfigGeneratorPage {
         }
         self.importing = true;
         self.error = None;
-        let kind = self.model.visual_document.kind();
         let label = kind.label();
         let artifact_label = kind.artifact_label();
         self.notice = Some(format!("等待选择本地 {label} · {artifact_label} 文件…").into());
@@ -3638,7 +3724,7 @@ impl ConfigGeneratorPage {
             let _ = cx.update(|cx| {
                 if let Some(page) = page.upgrade() {
                     page.update(cx, |page, cx| {
-                        page.start_import(activation_generation, selected, cx)
+                        page.start_import(activation_generation, kind, selected, cx)
                     });
                 }
             });
@@ -3650,6 +3736,7 @@ impl ConfigGeneratorPage {
     fn start_import(
         &mut self,
         activation_generation: u64,
+        kind: VisualDocumentKind,
         source: PathBuf,
         cx: &mut Context<Self>,
     ) {
@@ -3657,7 +3744,6 @@ impl ConfigGeneratorPage {
             return;
         }
         self.notice = Some(format!("正在导入：{}", source.display()).into());
-        let kind = self.model.visual_document.kind();
         let task = self.tokio.spawn(async move {
             VisualDocument::read_local(kind, &source).map(|document| (source, document))
         });
@@ -4390,16 +4476,250 @@ impl ConfigGeneratorPage {
         }
     }
 
+    fn render_goal_subject_button(
+        &self,
+        id: SharedString,
+        subject: ConfigurationGoalSubject,
+        _tokens: ThemeTokens,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        crate::buttons::button(id)
+            .label(subject.label())
+            .small()
+            .ghost()
+            .w_full()
+            .justify_start()
+            .selected(self.model.selected_goal_subject == subject)
+            .on_click(
+                cx.listener(move |page, _, window, cx| {
+                    page.select_goal_subject(subject, window, cx)
+                }),
+            )
+            .into_any_element()
+    }
+
+    fn render_goal_product_catalog(
+        &self,
+        tokens: ThemeTokens,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let query = self
+            .catalog_product_search_input
+            .read(cx)
+            .value()
+            .to_string();
+        let web_products = WEB_MIDDLEWARE_PRODUCTS
+            .into_iter()
+            .filter(|product| catalog_product_matches(&query, product.label()))
+            .collect::<Vec<_>>();
+        let application_products = APPLICATION_MIDDLEWARE_PRODUCTS
+            .into_iter()
+            .filter(|product| catalog_product_matches(&query, product.label()))
+            .collect::<Vec<_>>();
+        let cache_products = CACHE_MIDDLEWARE_PRODUCTS
+            .into_iter()
+            .filter(|product| catalog_product_matches(&query, product.label()))
+            .collect::<Vec<_>>();
+        let database_products = DATABASE_CONFIG_PRODUCTS
+            .iter()
+            .filter(|definition| catalog_product_matches(&query, definition.label))
+            .collect::<Vec<_>>();
+        let visible_count = web_products.len()
+            + application_products.len()
+            + cache_products.len()
+            + database_products.len();
+
+        div()
+            .id("config-generator-goal-product-catalog")
+            .debug_selector(|| "config-generator-goal-product-catalog".to_owned())
+            .w(px(240.0))
+            .h_full()
+            .flex_none()
+            .min_h_0()
+            .rounded_lg()
+            .border_1()
+            .border_color(tokens.border)
+            .bg(tokens.surface)
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .flex_none()
+                    .p_3()
+                    .border_b_1()
+                    .border_color(tokens.border)
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(div().font_semibold().child("1. 选择中间件（树结构）"))
+                    .child(Input::new(&self.catalog_product_search_input).small()),
+            )
+            .child(
+                div()
+                    .id("config-generator-goal-product-list")
+                    .debug_selector(|| "config-generator-goal-product-list".to_owned())
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scrollbar()
+                    .p_2()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .when(!web_products.is_empty(), |list| {
+                        list.child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .px_2()
+                                        .py_1()
+                                        .text_xs()
+                                        .font_semibold()
+                                        .text_color(tokens.text)
+                                        .child("⌄  反向代理 / Web 服务器"),
+                                )
+                                .child(div().ml_3().flex().flex_col().gap_1().children(
+                                    web_products.into_iter().map(|product| {
+                                        self.render_goal_subject_button(
+                                            SharedString::from(format!(
+                                                "config-generator-goal-product-{product:?}"
+                                            )),
+                                            ConfigurationGoalSubject::Middleware(product),
+                                            tokens,
+                                            cx,
+                                        )
+                                    }),
+                                )),
+                        )
+                    })
+                    .when(!application_products.is_empty(), |list| {
+                        list.child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .px_2()
+                                        .py_1()
+                                        .text_xs()
+                                        .font_semibold()
+                                        .child("⌄  应用服务器"),
+                                )
+                                .child(div().ml_3().flex().flex_col().gap_1().children(
+                                    application_products.into_iter().map(|product| {
+                                        self.render_goal_subject_button(
+                                            SharedString::from(format!(
+                                                "config-generator-goal-product-{product:?}"
+                                            )),
+                                            ConfigurationGoalSubject::Middleware(product),
+                                            tokens,
+                                            cx,
+                                        )
+                                    }),
+                                )),
+                        )
+                    })
+                    .when(!cache_products.is_empty(), |list| {
+                        list.child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .px_2()
+                                        .py_1()
+                                        .text_xs()
+                                        .font_semibold()
+                                        .child("⌄  缓存"),
+                                )
+                                .child(div().ml_3().flex().flex_col().gap_1().children(
+                                    cache_products.into_iter().map(|product| {
+                                        self.render_goal_subject_button(
+                                            SharedString::from(format!(
+                                                "config-generator-goal-product-{product:?}"
+                                            )),
+                                            ConfigurationGoalSubject::Middleware(product),
+                                            tokens,
+                                            cx,
+                                        )
+                                    }),
+                                )),
+                        )
+                    })
+                    .when(!database_products.is_empty(), |list| {
+                        list.child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .px_2()
+                                        .py_1()
+                                        .text_xs()
+                                        .font_semibold()
+                                        .child("⌄  数据库"),
+                                )
+                                .child(div().ml_3().flex().flex_col().gap_1().children(
+                                    database_products.into_iter().map(|definition| {
+                                        self.render_goal_subject_button(
+                                            SharedString::from(format!(
+                                                "config-generator-goal-product-{}",
+                                                definition.key
+                                            )),
+                                            ConfigurationGoalSubject::Database(definition.product),
+                                            tokens,
+                                            cx,
+                                        )
+                                    }),
+                                )),
+                        )
+                    })
+                    .when(visible_count == 0, |list| {
+                        list.child(
+                            div()
+                                .p_3()
+                                .text_xs()
+                                .text_color(tokens.muted)
+                                .child("没有匹配的已登记产品。"),
+                        )
+                    }),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .px_3()
+                    .py_2()
+                    .border_t_1()
+                    .border_color(tokens.border)
+                    .text_xs()
+                    .text_color(tokens.muted)
+                    .child(format!("已登记产品 · {visible_count}")),
+            )
+            .into_any_element()
+    }
+
     fn render_quick_workspace(&self, tokens: ThemeTokens, cx: &mut Context<Self>) -> AnyElement {
         let kind = self.model.kind;
         let security_headers = self.model.security_headers;
         let forbidden_path_enabled = self.model.forbidden_path_enabled;
         let forbidden_path_scope = self.model.forbidden_path_scope;
+        let selected_goal_subject = self.model.selected_goal_subject;
         let database_assignment_recognized = self.database_assignment_recognized();
         let goal_query = if database_assignment_recognized {
             String::new()
         } else {
-            bounded_visual_search_query(self.nginx_goal_search_input.read(cx).value().as_ref())
+            let query =
+                bounded_visual_search_query(self.nginx_goal_search_input.read(cx).value().as_ref());
+            if query.trim().is_empty() {
+                selected_goal_subject.label().to_owned()
+            } else {
+                query
+            }
         };
         let goal_results = if database_assignment_recognized {
             None
@@ -4412,7 +4732,9 @@ impl ConfigGeneratorPage {
             .flat_map(|results| results.matches())
             .filter_map(|goal| match *goal {
                 ConfigurationGoalMatch::Recipe(recipe)
-                    if recipe.action != ConfigurationGoalRecipeAction::NginxForbiddenPath403 =>
+                    if recipe.subject == selected_goal_subject
+                        && recipe.action
+                            != ConfigurationGoalRecipeAction::NginxForbiddenPath403 =>
                 {
                     Some(recipe)
                 }
@@ -4424,14 +4746,16 @@ impl ConfigGeneratorPage {
             })
             .collect::<Vec<_>>();
         let forbidden_goal_matches = goal_results.as_ref().is_some_and(|results| {
-            results.matches().iter().any(|goal| {
-                matches!(
-                    goal,
-                    ConfigurationGoalMatch::Recipe(recipe)
-                        if recipe.action
-                            == ConfigurationGoalRecipeAction::NginxForbiddenPath403
-                )
-            })
+            selected_goal_subject == ConfigurationGoalSubject::Middleware(MiddlewareProduct::Nginx)
+                && results.matches().iter().any(|goal| {
+                    matches!(
+                        goal,
+                        ConfigurationGoalMatch::Recipe(recipe)
+                            if recipe.subject == selected_goal_subject
+                                && recipe.action
+                                == ConfigurationGoalRecipeAction::NginxForbiddenPath403
+                    )
+                })
         });
         let database_bundle_goal_matches = goal_results
             .as_ref()
@@ -4442,9 +4766,12 @@ impl ConfigGeneratorPage {
                     goal,
                     product,
                     version,
-                } => Some((goal, product, version)),
+                } if selected_goal_subject == ConfigurationGoalSubject::Database(product) => {
+                    Some((goal, product, version))
+                }
                 ConfigurationGoalMatch::Recipe(_)
                 | ConfigurationGoalMatch::DatabaseArtifact { .. }
+                | ConfigurationGoalMatch::DatabaseGoal { .. }
                 | ConfigurationGoalMatch::DatabaseParameter { .. }
                 | ConfigurationGoalMatch::UnavailableSubject { .. } => None,
             })
@@ -4455,8 +4782,14 @@ impl ConfigGeneratorPage {
             .into_iter()
             .flat_map(|results| results.matches())
             .filter_map(|matched| match *matched {
-                ConfigurationGoalMatch::DatabaseArtifact { artifact } => Some(artifact),
+                ConfigurationGoalMatch::DatabaseArtifact { artifact }
+                    if selected_goal_subject
+                        == ConfigurationGoalSubject::Database(artifact.product) =>
+                {
+                    Some(artifact)
+                }
                 ConfigurationGoalMatch::Recipe(_)
+                | ConfigurationGoalMatch::DatabaseArtifact { .. }
                 | ConfigurationGoalMatch::DatabaseGoal { .. }
                 | ConfigurationGoalMatch::DatabaseParameter { .. }
                 | ConfigurationGoalMatch::UnavailableSubject { .. } => None,
@@ -4471,10 +4804,15 @@ impl ConfigGeneratorPage {
                 ConfigurationGoalMatch::DatabaseParameter {
                     schema,
                     parameter_index,
-                } => Some((schema, parameter_index)),
+                } if selected_goal_subject
+                    == ConfigurationGoalSubject::Database(schema.binding.product) =>
+                {
+                    Some((schema, parameter_index))
+                }
                 ConfigurationGoalMatch::Recipe(_)
                 | ConfigurationGoalMatch::DatabaseArtifact { .. }
                 | ConfigurationGoalMatch::DatabaseGoal { .. }
+                | ConfigurationGoalMatch::DatabaseParameter { .. }
                 | ConfigurationGoalMatch::UnavailableSubject { .. } => None,
             })
             .take(24)
@@ -4484,13 +4822,16 @@ impl ConfigGeneratorPage {
             .into_iter()
             .flat_map(|results| results.matches())
             .filter_map(|goal| match *goal {
-                ConfigurationGoalMatch::UnavailableSubject { coverage, gap } => {
+                ConfigurationGoalMatch::UnavailableSubject { coverage, gap }
+                    if coverage.subject == selected_goal_subject =>
+                {
                     Some((coverage, gap))
                 }
                 ConfigurationGoalMatch::Recipe(_)
                 | ConfigurationGoalMatch::DatabaseArtifact { .. }
                 | ConfigurationGoalMatch::DatabaseGoal { .. }
-                | ConfigurationGoalMatch::DatabaseParameter { .. } => None,
+                | ConfigurationGoalMatch::DatabaseParameter { .. }
+                | ConfigurationGoalMatch::UnavailableSubject { .. } => None,
             })
             .take(8)
             .collect::<Vec<_>>();
@@ -4504,33 +4845,108 @@ impl ConfigGeneratorPage {
             && database_bundle_goal_matches.is_empty()
             && database_goal_matches.is_empty()
             && unavailable_goal_subjects.is_empty();
-        let generated = self.model.generated.clone();
+        let nginx_subject_selected =
+            selected_goal_subject == ConfigurationGoalSubject::Middleware(MiddlewareProduct::Nginx);
+        let generated = nginx_subject_selected
+            .then(|| self.model.generated.clone())
+            .flatten();
+        let current_configuration_label = if nginx_subject_selected {
+            if forbidden_path_enabled {
+                "禁止指定路径（HTTP 403）".to_owned()
+            } else {
+                kind.label().to_owned()
+            }
+        } else {
+            format!("{} · 请选择配置", selected_goal_subject.label())
+        };
         let saving = self.saving;
         div()
             .flex_1()
             .min_h_0()
             .flex()
-            .gap_4()
+            .items_start()
+            .gap_2()
+            .child(self.render_goal_product_catalog(tokens, cx))
             .child(
                 div()
-                    .w(px(390.0))
-                    .flex_none()
+                    .id("config-generator-goal-configuration-list")
+                    .debug_selector(|| "config-generator-goal-configuration-list".to_owned())
+                    .flex_1()
+                    .h_full()
+                    .min_w_0()
                     .min_h_0()
-                    .overflow_y_scrollbar()
                     .rounded_lg()
                     .border_1()
                     .border_color(tokens.border)
                     .bg(tokens.surface)
-                    .p_4()
                     .flex()
                     .flex_col()
-                    .gap_4()
-                    .child(input_field(
-                        "我想实现什么（全部产品）",
-                        "例如：/admin 返回 403、PostgreSQL 提高最大连接数、MySQL 开启慢查询；只展示已审配方或参数依据。",
-                        &self.nginx_goal_search_input,
-                        tokens,
-                    ))
+                    .child(
+                        div()
+                            .flex_none()
+                            .p_3()
+                            .border_b_1()
+                            .border_color(tokens.border)
+                            .font_semibold()
+                            .child("2. 选择配置"),
+                    )
+                    .child(
+                        div()
+                            .id("config-generator-goal-configuration-scroll")
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_y_scrollbar()
+                            .p_3()
+                            .flex()
+                            .flex_col()
+                            .gap_3()
+                            .child(input_field(
+                                "搜索配置",
+                                "搜索配置名称、含义或目标关键词；结果限定为已审配方和静态参数依据。",
+                                &self.nginx_goal_search_input,
+                                tokens,
+                            ))
+                            .child(
+                                div()
+                            .flex()
+                            .flex_wrap()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .rounded_md()
+                                    .border_1()
+                                    .border_color(tokens.border)
+                                    .bg(tokens.surface_alt)
+                                    .px_2()
+                                    .py_1()
+                                    .text_xs()
+                                    .child("内容：已审配置"),
+                            )
+                            .child(
+                                div()
+                                    .rounded_md()
+                                    .border_1()
+                                    .border_color(tokens.border)
+                                    .bg(tokens.surface_alt)
+                                    .px_2()
+                                    .py_1()
+                                    .text_xs()
+                                    .child(format!(
+                                        "适用产品：{}",
+                                        selected_goal_subject.label()
+                                    )),
+                            )
+                            .child(div().flex_1())
+                            .child(
+                                crate::buttons::button("config-generator-reset-goal-search")
+                                    .label("重置")
+                                    .small()
+                                    .on_click(cx.listener(|page, _, window, cx| {
+                                        page.reset_goal_catalog_search(window, cx)
+                                    })),
+                            ),
+                            )
                     .when_some(
                         self.render_database_assignment_card(tokens, cx),
                         |panel, card| panel.child(card),
@@ -5030,109 +5446,108 @@ impl ConfigGeneratorPage {
                                 ),
                         )
                     })
-                    .child(
-                        div().child(section_label("站点类型", tokens)).child(
-                            div().mt_2().flex().gap_2().children(
-                                NginxSiteKind::ALL.into_iter().map(|option| {
-                                    crate::buttons::button(SharedString::from(format!(
-                                        "config-generator-kind-{option:?}"
-                                    )))
-                                    .label(option.label())
-                                    .small()
-                                    .selected(kind == option)
-                                    .on_click(cx.listener(move |page, _, window, cx| {
-                                        page.select_kind(option, window, cx)
-                                    }))
-                                }),
-                            ),
-                        ),
-                    )
-                    .child(input_field(
-                        "域名",
-                        "快捷模板接受一个精确 DNS 名称；本地无损草稿可处理任意 Nginx 语法节点，但不能应用/部署。",
-                        &self.server_name_input,
-                        tokens,
-                    ))
-                    .child(input_field(
-                        "监听端口",
-                        "范围 1 - 65535。",
-                        &self.listen_port_input,
-                        tokens,
-                    ))
-                    .child(match kind {
-                        NginxSiteKind::Static => input_field(
-                            "站点目录",
-                            "绝对 POSIX 路径；拒绝遍历、空格和 Nginx 元字符。",
-                            &self.static_root_input,
-                            tokens,
-                        ),
-                        NginxSiteKind::ReverseProxy => input_field(
-                            "上游地址",
-                            "仅支持 http/https origin，例如 http://127.0.0.1:3000。",
-                            &self.upstream_input,
-                            tokens,
-                        ),
-                    })
-                    .child(
-                        crate::buttons::button("config-generator-security-headers")
-                            .label(if security_headers {
-                                "安全基础项：已启用"
-                            } else {
-                                "安全基础项：未启用"
+                    .when(nginx_subject_selected, |panel| {
+                        panel
+                            .child(
+                                div().child(section_label("站点参数", tokens)).child(
+                                    div().mt_2().flex().gap_2().children(
+                                        NginxSiteKind::ALL.into_iter().map(|option| {
+                                            crate::buttons::button(SharedString::from(format!(
+                                                "config-generator-kind-{option:?}"
+                                            )))
+                                            .label(option.label())
+                                            .small()
+                                            .selected(kind == option)
+                                            .on_click(cx.listener(move |page, _, window, cx| {
+                                                page.select_kind(option, window, cx)
+                                            }))
+                                        }),
+                                    ),
+                                ),
+                            )
+                            .child(input_field(
+                                "域名",
+                                "快捷模板接受一个精确 DNS 名称；本地无损草稿可处理任意 Nginx 语法节点，但不能应用/部署。",
+                                &self.server_name_input,
+                                tokens,
+                            ))
+                            .child(input_field(
+                                "监听端口",
+                                "范围 1 - 65535。",
+                                &self.listen_port_input,
+                                tokens,
+                            ))
+                            .child(match kind {
+                                NginxSiteKind::Static => input_field(
+                                    "站点目录",
+                                    "绝对 POSIX 路径；拒绝遍历、空格和 Nginx 元字符。",
+                                    &self.static_root_input,
+                                    tokens,
+                                ),
+                                NginxSiteKind::ReverseProxy => input_field(
+                                    "上游地址",
+                                    "仅支持 http/https origin，例如 http://127.0.0.1:3000。",
+                                    &self.upstream_input,
+                                    tokens,
+                                ),
                             })
-                            .small()
-                            .selected(security_headers)
-                            .on_click(cx.listener(|page, _, _, cx| {
-                                page.toggle_security_headers(cx)
-                            })),
-                    )
-                    .child(
-                        div()
-                            .rounded_md()
-                            .bg(tokens.surface_alt)
-                            .p_3()
-                            .text_xs()
-                            .text_color(tokens.muted)
-                            .child("安全基础项仅加入固定的版本隐藏与响应头；部署前仍需在目标机运行 nginx -t。"),
-                    )
-                    .child(
-                        crate::buttons::button("config-generator-regenerate")
-                            .label("重新生成")
-                            .small()
-                            .on_click(cx.listener(|page, _, _, cx| page.regenerate(cx))),
-                    ),
+                            .child(
+                                crate::buttons::button("config-generator-security-headers")
+                                    .label(if security_headers {
+                                        "安全基础项：已启用"
+                                    } else {
+                                        "安全基础项：未启用"
+                                    })
+                                    .small()
+                                    .selected(security_headers)
+                                    .on_click(cx.listener(|page, _, _, cx| {
+                                        page.toggle_security_headers(cx)
+                                    })),
+                            )
+                            .child(
+                                div()
+                                    .rounded_md()
+                                    .bg(tokens.surface_alt)
+                                    .p_3()
+                                    .text_xs()
+                                    .text_color(tokens.muted)
+                                    .child("安全基础项仅加入固定的版本隐藏与响应头；部署前仍需在目标机运行 nginx -t。"),
+                            )
+                            .child(
+                                crate::buttons::button("config-generator-regenerate")
+                                    .label("重新生成")
+                                    .small()
+                                    .on_click(cx.listener(|page, _, _, cx| page.regenerate(cx))),
+                            )
+                    }),
+                ),
             )
             .child(
                 div()
+                    .id("config-generator-goal-preview-panel")
+                    .debug_selector(|| "config-generator-goal-preview-panel".to_owned())
                     .flex_1()
+                    .h_full()
                     .min_w_0()
                     .min_h_0()
                     .rounded_lg()
                     .border_1()
                     .border_color(tokens.border)
                     .bg(tokens.surface)
-                    .p_4()
+                    .p_3()
                     .flex()
                     .flex_col()
                     .gap_3()
                     .child(
                         div()
                             .flex()
+                            .flex_wrap()
                             .items_center()
                             .gap_2()
                             .child(
                                 div()
                                     .flex_1()
-                                    .child(section_label("Nginx 配置预览", tokens)),
-                            )
-                            .child(
-                                crate::buttons::button("config-generator-load-visual")
-                                    .label("载入本地草稿")
-                                    .small()
-                                    .disabled(generated.is_none() || saving || self.importing)
-                                    .on_click(cx.listener(|page, _, window, cx| {
-                                        page.load_quick_into_visual(window, cx)
-                                    })),
+                                    .child(section_label("3. 配置预览", tokens)),
                             )
                             .child(
                                 crate::buttons::button("config-generator-copy")
@@ -5140,6 +5555,27 @@ impl ConfigGeneratorPage {
                                     .small()
                                     .disabled(generated.is_none())
                                     .on_click(cx.listener(|page, _, _, cx| page.copy_current(cx))),
+                            )
+                            .child(
+                                crate::buttons::button("config-generator-load-visual")
+                                    .label(if self.importing {
+                                        "正在导入…"
+                                    } else {
+                                        "导入本地草稿"
+                                    })
+                                    .small()
+                                    .disabled(
+                                        !nginx_subject_selected
+                                            || saving
+                                            || self.importing
+                                            || self.model.visual_dirty,
+                                    )
+                                    .on_click(cx.listener(|page, _, _, cx| {
+                                        page.choose_import_path_for_kind(
+                                            VisualDocumentKind::Nginx,
+                                            cx,
+                                        )
+                                    })),
                             )
                             .child(
                                 crate::buttons::button("config-generator-save")
@@ -5155,7 +5591,46 @@ impl ConfigGeneratorPage {
                                     })),
                             ),
                     )
-                    .child(config_preview(generated.as_ref(), tokens)),
+                    .child(
+                        div()
+                            .flex_none()
+                            .rounded_md()
+                            .border_1()
+                            .border_color(tokens.border)
+                            .bg(tokens.surface_alt)
+                            .px_3()
+                            .py_2()
+                            .text_xs()
+                            .child(format!(
+                                "当前类型：{current_configuration_label}"
+                            )),
+                    )
+                    .child(config_preview(generated.as_ref(), tokens))
+                    .child(
+                        div()
+                            .flex_none()
+                            .flex()
+                            .justify_end()
+                            .gap_2()
+                            .child(
+                                crate::buttons::button("config-generator-preview-draft")
+                                    .label("预览草稿")
+                                    .small()
+                                    .selected(generated.is_some())
+                                    .disabled(true)
+                                    .tooltip("右侧已显示实时草稿预览"),
+                            )
+                            .child(
+                                crate::buttons::button("config-generator-generate-local-draft")
+                                    .label("生成本地草稿")
+                                    .small()
+                                    .primary()
+                                    .disabled(generated.is_none() || saving || self.importing)
+                                    .on_click(cx.listener(|page, _, window, cx| {
+                                        page.load_quick_into_visual(window, cx)
+                                    })),
+                            ),
+                    ),
             )
             .into_any_element()
     }
@@ -6348,12 +6823,12 @@ impl Render for ConfigGeneratorPage {
                     .child(
                         div()
                             .flex_1()
-                            .child(div().text_2xl().mb_2().child("配置生成与本地无损草稿"))
+                            .child(div().text_2xl().mb_2().child("配置生成"))
                             .child(
                                 div()
                                     .text_sm()
                                     .text_color(tokens.muted)
-                                    .child("Nginx 按目标生成与多产品通用语法树只用于本地无损草稿、预览、复制、导入或另存；未经过目标校验，不能应用/部署。"),
+                                    .child("从已登记的中间件与数据库中搜索已审配置、查看含义并生成本地草稿；支持预览、复制、导入或另存，未经过目标校验，不能应用/部署。"),
                             ),
                     )
                     .child(
@@ -6547,31 +7022,63 @@ fn config_preview(config: Option<&GeneratedNginxConfig>, tokens: ThemeTokens) ->
             .into_any_element();
     };
     let (lines, truncated) = bounded_preview_lines(config.contents());
+    let line_count = preview_total_line_count(config.contents());
     div()
         .flex_1()
         .min_h_0()
-        .overflow_scrollbar()
         .rounded_md()
         .bg(colors.background)
-        .p_3()
+        .flex()
+        .flex_col()
         .font_family("Cascadia Mono")
         .text_xs()
         .text_color(colors.code_text)
-        .children(lines.into_iter().map(|line| {
-            div().child(if line.is_empty() {
-                " ".to_owned()
-            } else {
-                line
-            })
-        }))
-        .when(truncated, |preview| {
-            preview.child(
-                div()
-                    .mt_2()
-                    .text_color(tokens.warning)
-                    .child("预览已截断；复制和保存仍使用完整配置。"),
-            )
-        })
+        .child(
+            div()
+                .flex_1()
+                .min_h_0()
+                .overflow_scrollbar()
+                .p_3()
+                .children(lines.into_iter().enumerate().map(|(index, line)| {
+                    div()
+                        .flex()
+                        .whitespace_nowrap()
+                        .child(
+                            div()
+                                .w(px(34.0))
+                                .flex_none()
+                                .pr_3()
+                                .text_right()
+                                .child((index + 1).to_string()),
+                        )
+                        .child(if line.is_empty() {
+                            " ".to_owned()
+                        } else {
+                            line
+                        })
+                }))
+                .when(truncated, |preview| {
+                    preview.child(
+                        div()
+                            .mt_2()
+                            .text_color(tokens.warning)
+                            .child("预览已截断；复制和保存仍使用完整配置。"),
+                    )
+                }),
+        )
+        .child(
+            div()
+                .flex_none()
+                .border_t_1()
+                .border_color(tokens.border)
+                .px_3()
+                .py_2()
+                .flex()
+                .justify_between()
+                .gap_3()
+                .child("语言：nginx")
+                .child(format!("共 {line_count} 行 · 自动换行：关")),
+        )
         .into_any_element()
 }
 
@@ -6651,6 +7158,10 @@ fn bounded_preview_lines(text: &str) -> (Vec<String>, bool) {
         lines.push(String::new());
     }
     (lines, truncated)
+}
+
+fn preview_total_line_count(text: &str) -> usize {
+    text.lines().count().max(1)
 }
 
 #[cfg(test)]
@@ -6868,6 +7379,91 @@ mod tests {
             .iter()
             .filter_map(|index| rows.get(*index).and_then(VisualRow::name))
             .collect()
+    }
+
+    #[test]
+    fn goal_catalog_product_search_and_subject_inference_are_bounded_and_exact() {
+        assert!(catalog_product_matches("nginx", "Nginx"));
+        assert!(catalog_product_matches("达梦", "DM / 达梦"));
+        assert!(!catalog_product_matches("Kafka", "Nginx"));
+        assert_eq!(
+            unique_goal_subject_for_query("Nginx 反向代理"),
+            Some(ConfigurationGoalSubject::Middleware(
+                MiddlewareProduct::Nginx
+            ))
+        );
+        assert_eq!(
+            unique_goal_subject_for_query("PostgreSQL max_connections"),
+            Some(ConfigurationGoalSubject::Database(
+                DatabaseConfigProduct::PostgreSql
+            ))
+        );
+    }
+
+    #[test]
+    fn goal_catalog_middleware_groups_cover_the_registered_products_exactly_once() {
+        let grouped = WEB_MIDDLEWARE_PRODUCTS
+            .into_iter()
+            .chain(APPLICATION_MIDDLEWARE_PRODUCTS)
+            .chain(CACHE_MIDDLEWARE_PRODUCTS)
+            .collect::<Vec<_>>();
+        assert_eq!(grouped.len(), MiddlewareProduct::ALL.len());
+        assert_eq!(
+            grouped.iter().copied().collect::<HashSet<_>>(),
+            MiddlewareProduct::ALL.into_iter().collect::<HashSet<_>>()
+        );
+    }
+
+    #[gpui::test]
+    fn goal_catalog_reference_viewport_keeps_three_columns_visible_and_non_overlapping(
+        cx: &mut TestAppContext,
+    ) {
+        let root = std::env::temp_dir().join(format!(
+            "lovelyres-config-generator-catalog-layout-{}",
+            Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let services =
+            Arc::new(BackendServices::new(PortableStore::prepare(root.clone()).unwrap()).unwrap());
+        let tokio = TokioBridge::new().unwrap();
+
+        cx.update(gpui_component::init);
+        let cx = cx.add_empty_window();
+        let page = cx.update(|window, cx| {
+            let shared = cx.new(|_| SharedAppState::default());
+            cx.new(|cx| ConfigGeneratorPage::new(services, tokio, shared, window, cx))
+        });
+        let viewport = size(px(1_200.0), px(800.0));
+        cx.draw(point(px(0.0), px(0.0)), viewport, |_, _| {
+            app_shell_scroll_mount(page.clone())
+        });
+
+        let products = cx
+            .debug_bounds("config-generator-goal-product-catalog")
+            .expect("product catalog bounds");
+        let configurations = cx
+            .debug_bounds("config-generator-goal-configuration-list")
+            .expect("configuration list bounds");
+        let preview = cx
+            .debug_bounds("config-generator-goal-preview-panel")
+            .expect("preview panel bounds");
+        assert!(products.size.width >= px(230.0));
+        assert!(products.origin.x + products.size.width <= configurations.origin.x);
+        assert!(configurations.origin.x + configurations.size.width <= preview.origin.x);
+        assert!(preview.origin.x + preview.size.width <= viewport.width);
+        assert_eq!(products.origin.y, configurations.origin.y);
+        assert_eq!(configurations.origin.y, preview.origin.y);
+        assert!(products.size.height > px(500.0));
+        assert!(configurations.size.height > px(500.0));
+        assert!(preview.size.height > px(500.0));
+        let page_scroll = page.update(cx, |page, _| page.page_scroll.clone());
+        assert_eq!(
+            page_scroll.max_offset().height,
+            px(0.0),
+            "the reference viewport must keep scrolling inside the three panels"
+        );
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -7128,6 +7724,52 @@ mod tests {
                     notice.contains("仍会标识 Apache") && notice.contains("不是独立安全控制")
                 }));
             });
+        });
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[gpui::test]
+    fn nginx_import_result_replaces_a_stale_apache_visual_document(cx: &mut TestAppContext) {
+        let root = std::env::temp_dir().join(format!(
+            "lovelyres-config-generator-nginx-import-{}",
+            Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let source = root.join("nginx.conf");
+        let contents = b"events {}\nhttp { server { listen 80; } }\n";
+        fs::write(&source, contents).unwrap();
+        let services =
+            Arc::new(BackendServices::new(PortableStore::prepare(root.clone()).unwrap()).unwrap());
+        let tokio = TokioBridge::new().unwrap();
+
+        cx.update(gpui_component::init);
+        let cx = cx.add_empty_window();
+        let page = cx.update(|window, cx| {
+            let shared = cx.new(|_| SharedAppState::default());
+            cx.new(|cx| ConfigGeneratorPage::new(services, tokio, shared, window, cx))
+        });
+        let imported = VisualDocument::read_local(VisualDocumentKind::Nginx, &source).unwrap();
+        page.update(cx, |page, cx| {
+            page.model.activate();
+            page.model.replace_visual_document(
+                VisualDocument::competition_skeleton(VisualDocumentKind::Apache).unwrap(),
+            );
+            page.model.mode = ConfigGeneratorMode::Quick;
+            page.importing = true;
+            let activation_generation = page.model.activation_generation;
+
+            page.finish_import(
+                activation_generation,
+                Ok(Ok((source.clone(), imported))),
+                cx,
+            );
+
+            assert_eq!(page.model.mode, ConfigGeneratorMode::Visual);
+            assert_eq!(page.model.visual_document.kind(), VisualDocumentKind::Nginx);
+            assert_eq!(page.model.visual_document.raw_bytes(), contents);
+            assert!(!page.model.visual_dirty);
+            assert!(!page.importing);
         });
 
         let _ = fs::remove_dir_all(root);
@@ -10857,5 +11499,7 @@ gbaseserver onsoctcp 192.0.2.10 9088 g=g_cluster_1\n",
         assert_eq!(lines.len(), MAX_PREVIEW_LINES);
         assert!(truncated);
         assert_eq!(lines[0], "<script>0</script>");
+        assert_eq!(preview_total_line_count(&long), 600);
+        assert_eq!(preview_total_line_count(""), 1);
     }
 }
