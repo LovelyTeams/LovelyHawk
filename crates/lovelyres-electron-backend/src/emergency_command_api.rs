@@ -108,12 +108,33 @@ impl EmergencyCommandApi {
         let (session, scope) = self.capture_binding(binding_handle)?;
         let _permit = self.begin_load(&scope)?;
         let entries = self.services.commands().catalog();
-        let family = timeout(
+        // A host under investigation is often a host under load, and the one
+        // that will not answer a probe in time is the one an operator most
+        // needs a catalogue for. Fall back to the portable command set rather
+        // than handing back an empty page.
+        let family = match timeout(
             DETECTION_DEADLINE,
             self.services.commands().detect_system(&session),
         )
         .await
-        .map_err(|_| EmergencyCommandApiError::Deadline)??;
+        {
+            Ok(Ok(family)) => family,
+            Ok(Err(error)) => {
+                tracing::warn!(
+                    operation = "detect target system family",
+                    error = %error,
+                    "falling back to the portable command set"
+                );
+                SystemFamily::Other
+            }
+            Err(_) => {
+                tracing::warn!(
+                    operation = "detect target system family",
+                    "probe exceeded its deadline; falling back to the portable command set"
+                );
+                SystemFamily::Other
+            }
+        };
         self.validate_binding(&scope)?;
 
         let now = Instant::now();
@@ -982,6 +1003,31 @@ mod tests {
 
     /// The shipped catalog grew well past the original slice; every bound it
     /// crosses has to hold for the real entries, not just for fixtures.
+    /// A host under investigation is often a host under load. Losing the whole
+    /// catalogue because the one-line os-release probe was slow leaves the
+    /// operator with nothing exactly when they need something.
+    #[test]
+    fn a_slow_probe_falls_back_to_the_portable_catalogue() {
+        let source = include_str!("emergency_command_api.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap();
+        assert!(production.contains("Ok(Err(error)) => {"));
+        assert!(production.contains("Err(_) => {"));
+        // Both arms land on the portable set rather than an error.
+        assert_eq!(production.matches("SystemFamily::Other").count(), 2);
+        assert!(production.contains("falling back to the portable command set"));
+        // Every family, including the portable one, still builds a catalogue
+        // that fits the boundary.
+        let entries = lovelyres_core::command_workbench::shipped_catalog();
+        let (_, dto) = build_catalog(
+            scope("binding", "identity", 0),
+            SystemFamily::Other,
+            entries,
+            Instant::now(),
+        )
+        .unwrap();
+        assert!(dto.commands.len() >= 140);
+    }
+
     #[test]
     fn shipped_catalog_fits_every_boundary_limit() {
         for family in [

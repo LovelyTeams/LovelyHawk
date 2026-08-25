@@ -2,7 +2,10 @@
 // are reached on the VM's own address instead.
 import { execFileSync } from "node:child_process";
 
-const PORTS = { ubuntu: 2222, alpine: 2223 };
+export const LAB_PORTS = {
+  ubuntu: 2222, alpine: 2223, debian: 2224, rocky: 2225, alma: 2226,
+  openeuler: 2227, anolis: 2228, deepin: 2229, suse: 2230,
+};
 
 export function labTarget(which = process.env.LAB ?? "ubuntu") {
   const output = execFileSync(
@@ -11,7 +14,9 @@ export function labTarget(which = process.env.LAB ?? "ubuntu") {
     { encoding: "utf8" },
   );
   const address = output.split("\0").join("").trim().split(/\s+/u)[0];
-  const port = PORTS[which];
-  if (port === undefined) throw new Error(`unknown lab: ${which}`);
+  const port = LAB_PORTS[which];
+  if (port === undefined) {
+    throw new Error(`unknown lab: ${which} (have ${Object.keys(LAB_PORTS).join(", ")})`);
+  }
   return { host: address, port, username: "root", password: "LabRoot#2026" };
 }

