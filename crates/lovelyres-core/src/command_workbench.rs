@@ -514,7 +514,7 @@ static CATALOG: &[CommandDefinition] = &[
         Permissions,
         "受保护属性文件",
         "查找被加上不可修改或只可追加属性的文件，攻击者常用它锁住后门。",
-        "command -v lsattr >/dev/null 2>&1 && lsattr -Ra /etc /root /var/spool/cron 2>/dev/null | awk '$1 ~ /[ai]/ {print}' | head -n 200 || echo 'lsattr 不可用'"
+        "command -v lsattr >/dev/null 2>&1 && lsattr -Ra /etc /root /var/spool/cron 2>/dev/null | awk 'NF==2 && substr($2,1,1)==\"/\" && $1 ~ /^[-a-zA-Z]+$/ && $1 ~ /[ai]/ {print}' | head -n 200 || echo 'lsattr 不可用'"
     )
     .with_timeout(60)
     .flagging(command_findings::locked_attribute),

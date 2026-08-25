@@ -86,7 +86,7 @@ const STANDARD_SUID: [&str; 40] = [
 ];
 
 /// Set-group-ID programs a stock distribution ships.
-const STANDARD_SGID: [&str; 22] = [
+const STANDARD_SGID: [&str; 23] = [
     "at",
     "bsd-write",
     "cgexec",
@@ -106,6 +106,9 @@ const STANDARD_SGID: [&str; 22] = [
     "ssh-agent",
     "ssh-keysign",
     "tmux",
+    // Ubuntu ships a second PAM helper beside unix_chkpwd for the extrausers
+    // NSS module; without it every Ubuntu host reports a false SGID finding.
+    "pam_extrausers_chkpwd",
     "unix_chkpwd",
     "utempter",
     "wall",
@@ -208,11 +211,18 @@ fn looks_like_mode(field: &str) -> bool {
 
 /// `ls -l` puts the mode first; `find -ls` puts it in the third column.
 fn mode_field(fields: &[&str]) -> Option<usize> {
-    [0usize, 2].into_iter().find(|index| {
+    let index = [0usize, 2].into_iter().find(|index| {
         fields
             .get(*index)
             .is_some_and(|field| looks_like_mode(field))
-    })
+    })?;
+    // A symbolic link always lists as lrwxrwxrwx; those bits describe the link,
+    // not what it points at, so reading them flags /bin -> usr/bin as
+    // world-writable and teaches the operator to ignore the highlight.
+    if fields[index].starts_with('l') {
+        return None;
+    }
+    Some(index)
 }
 
 fn granted(mode: &str, offset: usize) -> bool {
@@ -348,9 +358,20 @@ pub fn acl_grant(line: &str) -> bool {
 
 /// A file locked with the immutable or append-only attribute.
 pub fn locked_attribute(line: &str) -> bool {
-    line.split_whitespace()
-        .next()
-        .is_some_and(|attributes| attributes.contains('i') || attributes.contains('a'))
+    // lsattr -R also prints bare `path:` headers, and a path is very likely to
+    // contain an "a" or an "i". Only a real attribute column counts: it is the
+    // first of two fields and holds nothing but attribute letters and dashes.
+    let mut fields = line.split_whitespace();
+    let (Some(attributes), Some(path)) = (fields.next(), fields.next()) else {
+        return false;
+    };
+    if fields.next().is_some() || !path.starts_with('/') {
+        return false;
+    }
+    attributes
+        .chars()
+        .all(|value| value == '-' || value.is_ascii_alphabetic())
+        && (attributes.contains('i') || attributes.contains('a'))
 }
 
 /// A sudo rule that skips authentication.
@@ -863,11 +884,25 @@ pub fn remote_session(line: &str) -> bool {
 /// A privileged group that has picked up members.
 pub fn privileged_group_listing(line: &str) -> bool {
     let name = line.split(':').next().unwrap_or("");
-    [
+    if ![
         "root", "wheel", "sudo", "admin", "adm", "docker", "lxd", "disk", "shadow",
     ]
     .contains(&name)
-        && privileged_group_member(line)
+    {
+        return false;
+    }
+    let members = line.split(':').nth(3).unwrap_or("").trim();
+    if members.is_empty() {
+        return false;
+    }
+    // Debian and Ubuntu ship syslog in adm so the logger can read its own
+    // files. Reporting it on every host trains the operator to skip the line
+    // that matters, so only the shipped pairing is excused.
+    members
+        .split(',')
+        .map(str::trim)
+        .filter(|member| !member.is_empty())
+        .any(|member| !matches!((name, member), ("adm", "syslog")))
 }
 
 /// Every authorised key is a way in and has to be accounted for.
@@ -1338,6 +1373,58 @@ pub fn reason_for(rule: LineRule) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
+    /// `lsattr -R` prints bare `path:` headers between its listings, and almost
+    /// any path contains an "a" or an "i". Reading the attribute column instead
+    /// of the whole line is what separates a real finding from all of /etc.
+    #[test]
+    fn locked_attribute_reads_the_attribute_column_not_the_path() {
+        assert!(super::locked_attribute(
+            "----i---------e----- /etc/backdoor.conf"
+        ));
+        assert!(super::locked_attribute(
+            "-----a--------e----- /var/log/audit.log"
+        ));
+        assert!(!super::locked_attribute("--------------e----- /etc/passwd"));
+        // Directory headers and error lines carry no attribute column.
+        assert!(!super::locked_attribute("/etc/profile.d:"));
+        assert!(!super::locked_attribute("/etc/apt/sources.list.d:"));
+        assert!(!super::locked_attribute("lsattr: Operation not supported"));
+        assert!(!super::locked_attribute(""));
+    }
+
+    /// Debian and Ubuntu ship syslog in adm. Flagging it on every host is the
+    /// kind of standing false positive that gets the highlight ignored.
+    #[test]
+    fn privileged_group_listing_excuses_only_the_shipped_pairing() {
+        assert!(!super::privileged_group_listing("adm:x:4:syslog"));
+        assert!(!super::privileged_group_listing("sudo:x:27:"));
+        assert!(super::privileged_group_listing("sudo:x:27:deploy"));
+        assert!(super::privileged_group_listing("docker:x:998:www-data"));
+        // An extra member beside syslog is still a finding.
+        assert!(super::privileged_group_listing("adm:x:4:syslog,attacker"));
+        assert!(!super::privileged_group_listing("audio:x:29:"));
+    }
+
+    /// A symbolic link always lists as lrwxrwxrwx. Those bits belong to the
+    /// link, so every permission rule has to skip them or /bin -> usr/bin reads
+    /// as world-writable on a healthy host.
+    #[test]
+    fn permission_rules_ignore_symbolic_link_modes() {
+        assert!(!super::shared_writable_directory(
+            "lrwxrwxrwx 1 root root 8 Aug 10 14:50 /sbin -> usr/sbin"
+        ));
+        assert!(!super::world_writable_directory(
+            "lrwxrwxrwx 1 root root 7 Aug 10 14:50 /bin -> usr/bin"
+        ));
+        // A real world-writable directory still counts.
+        assert!(super::world_writable_directory(
+            "drwxrwxrwx 2 root root 4096 Aug 25 14:51 /usr/local/lib/pyshared"
+        ));
+        assert!(super::shared_writable_directory(
+            "drwxrwx--- 2 root staff 4096 Aug 25 14:51 /opt/shared"
+        ));
+    }
+
     use super::*;
 
     #[test]

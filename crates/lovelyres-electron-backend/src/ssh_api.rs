@@ -515,6 +515,9 @@ impl Registry {
         if attempt.run_id != run_id || !matches!(attempt.state, AttemptState::Running) {
             return;
         }
+        // The renderer only ever sees a fixed message, so without this the
+        // operator has nothing to diagnose a refused connection with.
+        tracing::warn!(operation = "ssh connect attempt", error = %error, "SSH attempt failed");
         let state = match error {
             CoreError::SshHostKeyConfirmationRequired {
                 role,

@@ -4613,7 +4613,19 @@ fn map_connect_error(
             expected,
             observed,
         },
-        Err(CoreError::Ssh { message, .. }) => CoreError::ssh("connect", message),
+        Err(CoreError::Ssh { message, .. }) => {
+            // A still-pending verification means the host-key callback never
+            // ran, so the transport error is the real cause. Reporting a host
+            // key problem instead sends the operator after the wrong thing.
+            if matches!(
+                verification_state(verification),
+                HostKeyVerification::Pending
+            ) {
+                CoreError::ssh("connect", error.to_string())
+            } else {
+                CoreError::ssh("connect", message)
+            }
+        }
         _ => CoreError::ssh("connect", error.to_string()),
     }
 }
