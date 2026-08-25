@@ -89,7 +89,7 @@
   display: flex;
   min-width: 0;
   min-height: 0;
-  flex: 1 1 52%;
+  flex: 1 1 47%;
   flex-direction: column;
   gap: 8px;
 }
@@ -264,13 +264,118 @@
   opacity: 0.6;
 }
 
+/* Terminal chrome: a floating toolbar over the output, nothing above it. */
+
+.ssh-window-terminal .terminal-surface {
+  position: relative;
+  display: block;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: var(--term-bg);
+}
+
+.terminal-surface-tools {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.terminal-tool {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--term-border);
+  border-radius: 7px;
+  color: var(--term-muted);
+  background: var(--term-panel);
+  cursor: pointer;
+}
+
+.terminal-tool:hover:not(:disabled) {
+  border-color: var(--term-accent);
+  color: var(--term-accent);
+}
+
+.terminal-tool:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.terminal-surface-tools .terminal-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--term-border);
+  border-radius: 8px;
+  background: var(--term-panel);
+}
+
+.terminal-surface-tools .terminal-search input[type="search"] {
+  width: 150px;
+  min-height: 22px;
+  padding: 2px 8px;
+  border: 1px solid var(--term-border);
+  border-radius: 6px;
+  color: var(--term-text);
+  background: var(--term-bg);
+  font: inherit;
+  font-size: 12px;
+}
+
+.terminal-surface-tools .terminal-search label {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--term-muted);
+  font-size: 11px;
+}
+
+.terminal-surface-tools .terminal-search button {
+  min-height: 22px;
+  padding: 2px 8px;
+  border: 1px solid var(--term-border);
+  border-radius: 6px;
+  color: var(--term-text);
+  background: var(--term-bg);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.ssh-window-terminal .terminal-xterm-host {
+  height: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 0;
+}
+
+.ssh-window-terminal .terminal-error {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  left: 12px;
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
 /* File panel ------------------------------------------------------------- */
 
 .ssh-window-files {
   display: flex;
   min-width: 0;
   min-height: 0;
-  flex: 1 1 48%;
+  flex: 1 1 53%;
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--border-strong);
@@ -286,42 +391,4 @@
   flex-direction: column;
   margin: 0;
   padding: 12px;
-}
-
-/* The panel is far narrower than a page, so the browser stacks instead. */
-.ssh-window-files .sftp-browser-workbench {
-  display: flex;
-  min-height: 0;
-  flex: 1;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.ssh-window-files .sftp-browser-list {
-  min-height: 0;
-  max-height: none;
-  flex: 1 1 45%;
-}
-
-.ssh-window-files .sftp-browser-detail {
-  min-height: 0;
-  flex: 1;
-  overflow: auto;
-}
-
-.ssh-window-files .sftp-browser-toolbar {
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.ssh-window-files .sftp-browser-status,
-.ssh-window-files .sftp-browser-empty,
-.ssh-window-files .sftp-browser-error {
-  min-height: 110px;
-}
-
-@media (max-width: 1000px) {
-  .ssh-window-body { flex-direction: column; }
-  .ssh-window-shell,
-  .ssh-window-files { flex: 1 1 auto; }
 }

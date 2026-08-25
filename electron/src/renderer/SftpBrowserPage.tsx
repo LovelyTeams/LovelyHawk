@@ -10,6 +10,13 @@ import {
   type SftpTextPreview,
 } from "../shared/sftp-browser-contract";
 import {
+  DownloadGlyph,
+  FolderPlusGlyph,
+  RefreshGlyph,
+  TrashGlyph,
+  UploadGlyph,
+} from "./sftp-browser-icons";
+import {
   displaySftpBytes,
   displaySftpModifiedAt,
   filterSftpBrowserEntries,
@@ -219,19 +226,20 @@ export function SftpBrowserPage({
       <div className="sftp-browser-actions" role="toolbar" aria-label="文件操作">
         <button type="button" className="sftp-browser-action" disabled={busy || directory === null}
           onClick={() => directory !== null && requestDirectory(directory.directoryHandle)}>
-          {visibleState.directoryStatus === "loading" ? "读取中…" : "刷新"}
+          <RefreshGlyph />{visibleState.directoryStatus === "loading" ? "读取中" : "刷新"}
         </button>
-        <button type="button" className="sftp-browser-action" disabled={busy}
-          onClick={() => setReopenVersion((value) => value + 1)}>
-          根目录
+        <button type="button" className="sftp-browser-action is-upload" disabled title={PENDING_WRITE}>
+          <UploadGlyph />上传
         </button>
-        <span className="sftp-browser-action-divider" aria-hidden="true" />
-        {["上传", "下载", "删除", "新建文件夹"].map((label) => (
-          <button type="button" key={label} className="sftp-browser-action is-pending" disabled
-            title="写操作尚未接入：核心已有计划-确认-执行模型，Electron 边界还没开放。">
-            {label}
-          </button>
-        ))}
+        <button type="button" className="sftp-browser-action is-download" disabled title={PENDING_WRITE}>
+          <DownloadGlyph />下载
+        </button>
+        <button type="button" className="sftp-browser-action is-danger" disabled title={PENDING_WRITE}>
+          <TrashGlyph />删除
+        </button>
+        <button type="button" className="sftp-browser-action" disabled title={PENDING_WRITE}>
+          <FolderPlusGlyph />新建文件夹
+        </button>
       </div>
 
       {visibleState.directoryStatus === "loading" && directory === null ? (
@@ -244,66 +252,89 @@ export function SftpBrowserPage({
         <>
           {visibleState.directoryStatus === "error" && <SftpBrowserError
             message={visibleState.directoryError ?? "目录读取失败。"} compact />}
-          <div className="sftp-browser-toolbar">
-            <div className="sftp-browser-navigation" aria-label="SFTP 目录导航">
-              <button type="button" disabled={busy || directory.parentDirectoryHandle === null}
-                onClick={() => directory.parentDirectoryHandle !== null && requestDirectory(directory.parentDirectoryHandle)}>
-                上一级
-              </button>
-              <button type="button" disabled={busy || visibleState.rootDirectoryHandle === null ||
-                directory.directoryHandle === visibleState.rootDirectoryHandle}
-                onClick={() => visibleState.rootDirectoryHandle !== null &&
-                  requestDirectory(visibleState.rootDirectoryHandle)}>
-                根目录
-              </button>
-              <strong>{directory.directoryLabel}</strong>
-            </div>
-            <label>搜索
-              <input value={visibleState.search} maxLength={256} placeholder="本地筛选名称"
-                onChange={(event) => {
-                  setPendingPreview(null);
-                  dispatch({ type: "search-changed", value: event.currentTarget.value });
-                }} />
-            </label>
-            <label>类型
-              <select value={visibleState.kind}
-                onChange={(event) => updateFilter(event.currentTarget.value as SftpBrowserKindFilter)}>
-                <option value="all">全部</option>
-                {sftpBrowserEntryKinds.map((kind) => <option key={kind} value={kind}>
-                  {sftpBrowserKindLabel(kind)}
-                </option>)}
-              </select>
-            </label>
-            <span>{entries.length}/{directory.displayedEntryCount} 可见 · 能力约 {
-              Math.max(1, Math.ceil(directory.expiresInSeconds / 60))} 分钟内有效</span>
+          <div className="sftp-browser-panes">
+            <section className="sftp-browser-pane is-local" aria-label="本地文件">
+              <header className="sftp-browser-pane-head">
+                <strong>本地文件</strong>
+              </header>
+              <div className="sftp-browser-pathbar">
+                <span className="sftp-browser-path-value is-muted">尚未接入</span>
+              </div>
+              <div className="sftp-browser-pane-body">
+                <div className="sftp-browser-rows">
+                  <div className="sftp-browser-table-head" aria-hidden="true">
+                    <span>名称</span><span>大小</span><span>修改时间</span>
+                  </div>
+                  <SftpBrowserEmpty title="本地文件浏览尚未接入"
+                    detail="渲染层还没有本地文件能力，接入后这里会列出本机目录。" compact />
+                </div>
+              </div>
+              <footer className="sftp-browser-pane-foot"><span>—</span></footer>
+            </section>
+
+            <section className="sftp-browser-pane" aria-label="远程文件">
+              <header className="sftp-browser-pane-head">
+                <strong>远程文件</strong>
+                <label className="sftp-browser-filter">
+                  <span className="terminal-sr-only">筛选名称</span>
+                  <input value={visibleState.search} maxLength={256} placeholder="筛选名称"
+                    onChange={(event) => {
+                      setPendingPreview(null);
+                      dispatch({ type: "search-changed", value: event.currentTarget.value });
+                    }} />
+                </label>
+                <select aria-label="类型" value={visibleState.kind}
+                  onChange={(event) => updateFilter(event.currentTarget.value as SftpBrowserKindFilter)}>
+                  <option value="all">全部</option>
+                  {sftpBrowserEntryKinds.map((kind) => <option key={kind} value={kind}>
+                    {sftpBrowserKindLabel(kind)}
+                  </option>)}
+                </select>
+              </header>
+              <div className="sftp-browser-pathbar">
+                <button type="button" title="上一级" disabled={busy || directory.parentDirectoryHandle === null}
+                  onClick={() => directory.parentDirectoryHandle !== null &&
+                    requestDirectory(directory.parentDirectoryHandle)}>
+                  上一级
+                </button>
+                <button type="button" title="回到根目录" disabled={busy ||
+                  visibleState.rootDirectoryHandle === null ||
+                  directory.directoryHandle === visibleState.rootDirectoryHandle}
+                  onClick={() => visibleState.rootDirectoryHandle !== null &&
+                    requestDirectory(visibleState.rootDirectoryHandle)}>
+                  根目录
+                </button>
+                <span className="sftp-browser-path-value">{directory.directoryLabel}</span>
+              </div>
+              <div className="sftp-browser-pane-body">
+                <SftpBrowserTable entries={entries} selectedHandle={visibleState.selectedEntryHandle}
+                  search={visibleState.search} busy={busy} onSelect={selectEntry}
+                  onBrowse={(entryHandle) => requestDirectory(entryHandle)} />
+              </div>
+              <footer className="sftp-browser-pane-foot">
+                <span>
+                  {directory.displayedEntryCount} 个项目（
+                  {entries.filter((item) => item.kind === "directory").length} 个文件夹，
+                  {entries.filter((item) => item.kind !== "directory").length} 个文件）
+                </span>
+                <span>能力约 {Math.max(1, Math.ceil(directory.expiresInSeconds / 60))} 分钟内有效</span>
+              </footer>
+            </section>
           </div>
           {directory.truncated && <p className="sftp-browser-warning" role="status">
             目录共有 {directory.observedEntryCount} 项，当前只显示前 {directory.displayedEntryCount} 项。
           </p>}
-          {directory.directoryLabelTruncated && <p className="sftp-browser-warning" role="status">
-            当前目录显示名称已按字节上限截断。
-          </p>}
-          <div className="sftp-browser-summary">
-            <span>
-              {directory.displayedEntryCount} 个项目（
-              {entries.filter((item) => item.kind === "directory").length} 个文件夹，
-              {entries.filter((item) => item.kind !== "directory").length} 个文件）
-            </span>
-            <span>能力约 {Math.max(1, Math.ceil(directory.expiresInSeconds / 60))} 分钟内有效</span>
-          </div>
-          <SftpBrowserWorkbench
-            entries={entries}
+
+          <SftpBrowserDetail
             selected={selected}
-            selectedHandle={visibleState.selectedEntryHandle}
             previewStatus={visibleState.previewStatus}
             preview={visibleState.preview}
             previewError={visibleState.previewError}
-            search={visibleState.search}
             busy={busy}
-            onSelect={selectEntry}
             onBrowse={(entryHandle) => requestDirectory(entryHandle)}
             onPreview={requestPreview}
           />
+
           <section className="sftp-browser-queue" aria-label="传输队列">
             <header>
               <strong>传输队列</strong>
@@ -316,76 +347,121 @@ export function SftpBrowserPage({
   );
 }
 
-export function SftpBrowserWorkbench({
+const PENDING_WRITE = "写操作尚未接入：核心已有计划-确认-执行模型，Electron 边界还没开放。";
+
+/** One row per entry: name, size, modified — the columns the design asks for. */
+export function SftpBrowserTable({
   entries,
-  selected,
   selectedHandle,
-  previewStatus,
-  preview,
-  previewError,
   search,
   busy,
   onSelect,
   onBrowse,
-  onPreview,
 }: {
   entries: SftpBrowserEntry[];
-  selected: SftpBrowserEntry | null;
   selectedHandle: string | null;
-  previewStatus: SftpBrowserLoadStatus;
-  preview: SftpTextPreview | null;
-  previewError: string | null;
   search: string;
   busy: boolean;
   onSelect: (entryHandle: string) => void;
   onBrowse: (entryHandle: string) => void;
-  onPreview: () => void;
 }) {
   return (
-    <section className="sftp-browser-workbench" aria-label="SFTP 目录内容">
-      <aside className="sftp-browser-list">
-        {entries.length === 0 ? <SftpBrowserEmpty
-          title={search.trim() === "" ? "目录为空" : "没有匹配条目"}
-          detail={search.trim() === "" ? "当前目录没有条目。" : "调整本地筛选条件。"}
-          compact /> : entries.map((entry) => (
-            <button type="button" key={entry.entryHandle}
-              className={entry.entryHandle === selectedHandle ? "sftp-browser-entry is-selected" : "sftp-browser-entry"}
-              onClick={() => onSelect(entry.entryHandle)}>
-              <span className={`sftp-browser-entry-kind is-${entry.kind}`}>{sftpBrowserKindLabel(entry.kind)}</span>
-              <strong>{entry.name}</strong>
-              <small>{displaySftpBytes(entry.sizeBytes)} · {sftpBrowserActionLabel(entry)}</small>
-              {entry.nameTruncated && <em>名称已截断</em>}
-            </button>
-          ))}
-      </aside>
-      <div className="sftp-browser-detail">
-        {selected === null ? <SftpBrowserEmpty title="未选择条目" detail="从左侧选择一个条目。" /> : (
-          <>
-            <header className="sftp-browser-detail-header">
-              <div>
-                <span>{sftpBrowserKindLabel(selected.kind)} · {sftpBrowserActionLabel(selected)}</span>
-                <h2>{selected.name}</h2>
-                <p>{displaySftpBytes(selected.sizeBytes)} · {displaySftpModifiedAt(selected.modifiedAt)}</p>
-              </div>
-              {selected.action === "browse" && <button type="button" disabled={busy}
-                onClick={() => onBrowse(selected.entryHandle)}>打开目录</button>}
-              {selected.action === "preview" && <button type="button" disabled={busy}
-                onClick={onPreview}>{previewStatus === "loading" ? "读取中…" : "预览文本"}</button>}
-            </header>
-            {selected.nameTruncated && <p className="sftp-browser-warning">此显示名称已按字节上限截断。</p>}
-            {selected.action === "none" ? <SftpBrowserEmpty
-              title={selected.kind === "symlink" ? "符号链接不会跟随" : "此条目不可打开"}
-              detail="该条目不是目录，也不是可预览的文本文件。" compact /> :
-              selected.action === "browse" ? <SftpBrowserEmpty title="目录"
-                detail="打开后查看下一层目录。" compact /> :
-                previewStatus === "loading" ? <SftpBrowserStatus label="正在读取文本…" compact /> :
-                  previewStatus === "error" ? <SftpBrowserError message={previewError ?? "文本预览不可用。"} compact /> :
-                    preview === null ? <SftpBrowserEmpty title="尚未读取文本"
-                      detail="手动预览后，纯文本结果会显示在这里。" compact /> :
-                      <SftpTextPreviewView preview={preview} />}
-          </>
-        )}
+    <div className="sftp-browser-rows" role="list">
+      <div className="sftp-browser-table-head" aria-hidden="true">
+        <span>名称</span><span>大小</span><span>修改时间</span>
       </div>
+      {entries.length === 0 ? (
+        <SftpBrowserEmpty
+          title={search.trim() === "" ? "目录为空" : "没有匹配条目"}
+          detail={search.trim() === "" ? "当前目录没有条目。" : "调整筛选条件。"}
+          compact
+        />
+      ) : entries.map((entry) => (
+        <button
+          type="button"
+          role="listitem"
+          key={entry.entryHandle}
+          className={entry.entryHandle === selectedHandle
+            ? "sftp-browser-row is-selected"
+            : "sftp-browser-row"}
+          disabled={busy}
+          aria-pressed={entry.entryHandle === selectedHandle}
+          onClick={() => onSelect(entry.entryHandle)}
+          onDoubleClick={() => entry.action === "browse" && onBrowse(entry.entryHandle)}
+        >
+          <span className="sftp-browser-row-name">
+            <span className={`sftp-browser-row-kind is-${entry.kind}`} aria-hidden="true" />
+            <span className="sftp-browser-row-label">{entry.name}</span>
+            {entry.nameTruncated ? <em>名称已截断</em> : null}
+          </span>
+          <span className="sftp-browser-row-size">
+            {entry.kind === "directory" ? "—" : displaySftpBytes(entry.sizeBytes)}
+          </span>
+          <span className="sftp-browser-row-time">{displaySftpModifiedAt(entry.modifiedAt)}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** What the operator can do with the selected entry, and its preview. */
+export function SftpBrowserDetail({
+  selected,
+  previewStatus,
+  preview,
+  previewError,
+  busy,
+  onBrowse,
+  onPreview,
+}: {
+  selected: SftpBrowserEntry | null;
+  previewStatus: SftpBrowserLoadStatus;
+  preview: SftpTextPreview | null;
+  previewError: string | null;
+  busy: boolean;
+  onBrowse: (entryHandle: string) => void;
+  onPreview: () => void;
+}) {
+  if (selected === null) {
+    return (
+      <section className="sftp-browser-detail" aria-label="条目详情">
+        <SftpBrowserEmpty title="未选择条目" detail="选择一个条目查看详情。" compact />
+      </section>
+    );
+  }
+  return (
+    <section className="sftp-browser-detail" aria-label="条目详情">
+      <header className="sftp-browser-detail-header">
+        <div>
+          <span>{sftpBrowserKindLabel(selected.kind)} · {sftpBrowserActionLabel(selected)}</span>
+          <h2>{selected.name}</h2>
+          <p>{displaySftpBytes(selected.sizeBytes)} · {displaySftpModifiedAt(selected.modifiedAt)}</p>
+        </div>
+        {selected.action === "browse" ? (
+          <button type="button" disabled={busy} onClick={() => onBrowse(selected.entryHandle)}>
+            打开目录
+          </button>
+        ) : null}
+        {selected.action === "preview" ? (
+          <button type="button" disabled={busy} onClick={onPreview}>
+            {previewStatus === "loading" ? "读取中…" : "预览文本"}
+          </button>
+        ) : null}
+      </header>
+      {selected.nameTruncated ? (
+        <p className="sftp-browser-warning">此显示名称已按字节上限截断。</p>
+      ) : null}
+      {selected.action === "none" ? (
+        <SftpBrowserEmpty
+          title={selected.kind === "symlink" ? "符号链接不会跟随" : "此条目不可打开"}
+          detail="该条目不是目录，也不是可预览的文本文件。"
+          compact
+        />
+      ) : selected.action === "browse" ? null
+        : previewStatus === "loading" ? <SftpBrowserStatus label="正在读取文本…" compact />
+          : previewStatus === "error"
+            ? <SftpBrowserError message={previewError ?? "文本预览不可用。"} compact />
+            : preview === null ? null : <SftpTextPreviewView preview={preview} />}
     </section>
   );
 }

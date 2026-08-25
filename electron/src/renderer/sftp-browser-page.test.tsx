@@ -13,7 +13,8 @@ import {
   SftpBrowserError,
   SftpBrowserPage,
   SftpBrowserStatus,
-  SftpBrowserWorkbench,
+  SftpBrowserDetail,
+  SftpBrowserTable,
   SftpTextPreviewView,
 } from "./SftpBrowserPage";
 
@@ -54,21 +55,40 @@ describe("SftpBrowserPage", () => {
   });
 
   it("renders hostile entry names only as escaped text and exposes only capability-derived actions", () => {
-    const fileHtml = renderToStaticMarkup(<SftpBrowserWorkbench entries={entries} selected={entries[1]!}
-      selectedHandle="opaque-file" previewStatus="idle" preview={null} previewError={null} search="" busy={false}
-      onSelect={() => undefined} onBrowse={() => undefined} onPreview={() => undefined} />);
-    expect(fileHtml).toContain("&lt;script&gt;steal()&lt;img src=x onerror=steal()&gt;");
-    expect(fileHtml).not.toContain("<script>");
-    expect(fileHtml).not.toContain("<img src=x");
+    const rows = renderToStaticMarkup(<SftpBrowserTable entries={entries} selectedHandle="opaque-file"
+      search="" busy={false} onSelect={() => undefined} onBrowse={() => undefined} />);
+    expect(rows).toContain("&lt;script&gt;steal()&lt;img src=x onerror=steal()&gt;");
+    expect(rows).not.toContain("<script>");
+    expect(rows).not.toContain("<img src=x");
+    // The row is a name/size/time record, not an action surface.
+    expect(rows).not.toContain("预览文本");
+    expect(rows).not.toContain("打开目录");
+
+    const fileHtml = renderToStaticMarkup(<SftpBrowserDetail selected={entries[1]!} previewStatus="idle"
+      preview={null} previewError={null} busy={false} onBrowse={() => undefined} onPreview={() => undefined} />);
     expect(fileHtml).toContain("预览文本");
     expect(fileHtml).not.toContain("打开目录</button>");
 
-    const symlinkHtml = renderToStaticMarkup(<SftpBrowserWorkbench entries={entries} selected={entries[2]!}
-      selectedHandle="opaque-link" previewStatus="idle" preview={null} previewError={null} search="" busy={false}
-      onSelect={() => undefined} onBrowse={() => undefined} onPreview={() => undefined} />);
+    const symlinkHtml = renderToStaticMarkup(<SftpBrowserDetail selected={entries[2]!} previewStatus="idle"
+      preview={null} previewError={null} busy={false} onBrowse={() => undefined} onPreview={() => undefined} />);
     expect(symlinkHtml).toContain("符号链接不会跟随");
     expect(symlinkHtml).not.toContain("预览文本</button>");
     expect(symlinkHtml).not.toContain("打开目录</button>");
+  });
+
+  /** The design asks for a table; every column has to come from the contract. */
+  it("lists entries as name, size and modified time", () => {
+    const rows = renderToStaticMarkup(<SftpBrowserTable entries={entries} selectedHandle={null}
+      search="" busy={false} onSelect={() => undefined} onBrowse={() => undefined} />);
+    expect(rows).toContain("sftp-browser-row-name");
+    expect(rows).toContain("sftp-browser-row-size");
+    expect(rows).toContain("sftp-browser-row-time");
+    // A directory has no meaningful byte count, so it shows none.
+    expect(rows).toContain("—");
+
+    const empty = renderToStaticMarkup(<SftpBrowserTable entries={[]} selectedHandle={null}
+      search="" busy={false} onSelect={() => undefined} onBrowse={() => undefined} />);
+    expect(empty).toContain("目录为空");
   });
 
   it("renders hostile preview content as escaped pre text without hiding anything", () => {

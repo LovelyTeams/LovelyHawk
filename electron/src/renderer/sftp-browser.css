@@ -354,3 +354,40 @@
 .sftp-browser-queue header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; }
 .sftp-browser-queue strong { color: var(--text); font-size: 13px; }
 .sftp-browser-queue span { color: var(--muted); font-size: 12px; }
+
+/* Dual-pane file manager ------------------------------------------------- */
+.sftp-browser-page { font-size: 13px; --sftp-columns: minmax(0, 1fr) 62px 104px; }
+.sftp-browser-page h1 { font-size: 17px; }
+.sftp-browser-header { display: flex; flex: none; align-items: center; gap: 10px; margin: 0 0 10px; }
+.sftp-browser-panes { display: flex; min-height: 0; flex: 1 1 58%; gap: 8px; }
+.sftp-browser-pane { display: flex; min-width: 0; min-height: 0; flex: 1 1 0; flex-direction: column; border: 1px solid var(--border-strong); border-radius: 9px; overflow: hidden; background: var(--surface); }
+
+.sftp-browser-pane-head { display: flex; flex: none; align-items: center; gap: 6px; padding: 6px 9px; border-bottom: 1px solid var(--border); background: var(--surface-alt); }
+.sftp-browser-pane-head strong { flex: none; font-size: 12px; }
+.sftp-browser-filter { min-width: 0; flex: 1; }
+.sftp-browser-filter input { width: 100%; min-height: 24px; padding: 2px 8px; border: 1px solid var(--border-strong); border-radius: 6px; color: var(--text); background: var(--surface); font: inherit; font-size: 12px; }
+.sftp-browser-pane-head select { min-height: 24px; padding: 2px 6px; border: 1px solid var(--border-strong); border-radius: 6px; color: var(--text); background: var(--surface); font: inherit; font-size: 12px; }
+.sftp-browser-pathbar { display: flex; flex: none; align-items: center; gap: 6px; padding: 5px 9px; border-bottom: 1px solid var(--border); }
+.sftp-browser-pathbar button { min-height: 22px; padding: 1px 8px; border: 1px solid var(--border-strong); border-radius: 6px; color: var(--text); background: var(--surface); font: inherit; font-size: 11px; cursor: pointer; }
+.sftp-browser-pathbar button:disabled { cursor: not-allowed; opacity: 0.5; }
+.sftp-browser-path-value { min-width: 0; flex: 1; overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; font-family: "Cascadia Mono", Consolas, monospace; font-size: 12px; }
+.sftp-browser-path-value.is-muted { color: var(--muted); font-family: inherit; }
+.sftp-browser-table-head { position: sticky; top: 0; z-index: 1; display: grid; flex: none; grid-template-columns: var(--sftp-columns); gap: 6px; padding: 4px 9px; border-bottom: 1px solid var(--border); color: var(--muted); background: var(--surface-alt); font-size: 11px; }
+.sftp-browser-pane-body { min-width: 0; min-height: 0; flex: 1; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
+.sftp-browser-rows { display: flex; flex-direction: column; }
+.sftp-browser-rows .sftp-browser-row { display: grid; width: 100%; margin: 0; flex: none; grid-template-columns: var(--sftp-columns); align-items: center; gap: 6px; padding: 5px 9px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.sftp-browser-rows .sftp-browser-row:hover:not(:disabled) { background: var(--surface-hover); }
+.sftp-browser-rows .sftp-browser-row.is-selected { background: var(--info-soft); box-shadow: inset 3px 0 var(--accent); }
+.sftp-browser-row-name { display: flex; min-width: 0; align-items: center; gap: 7px; }
+.sftp-browser-row-label { overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
+.sftp-browser-row-name em { flex: none; color: var(--warning-text); font-size: 11px; font-style: normal; }
+.sftp-browser-row-kind { width: 14px; height: 14px; flex: none; border-radius: 3px; background: var(--border-strong); }
+.sftp-browser-row-kind.is-directory { background: var(--accent); }
+.sftp-browser-row-kind.is-file { background: var(--success); }
+.sftp-browser-row-kind.is-symlink { background: var(--warning); }
+.sftp-browser-row-size, .sftp-browser-row-time { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.sftp-browser-pane-foot { display: flex; flex: none; flex-wrap: wrap; justify-content: space-between; gap: 6px; padding: 4px 9px; border-top: 1px solid var(--border); color: var(--muted); background: var(--surface-alt); font-size: 11px; }
+.sftp-browser-page .sftp-browser-detail { flex: 0 1 auto; max-height: 38%; margin-top: 8px; overflow: auto; }
+.sftp-browser-page .sftp-browser-detail-header h2 { font-size: 15px; }
+
+.sftp-browser-pane .sftp-browser-empty { min-width: 0; min-height: 90px; padding: 12px; border: 0; }

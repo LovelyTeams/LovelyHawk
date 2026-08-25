@@ -82,7 +82,7 @@ describe("SSH window shell", () => {
     expect(page).toContain("文件管理 (SFTP)");
     for (const label of ["上传", "下载", "删除", "新建文件夹"]) expect(page).toContain(label);
     // They are rendered disabled with the reason, and nothing fakes progress.
-    expect(page).toContain('className="sftp-browser-action is-pending" disabled');
+    expect((page.match(/disabled title=\{PENDING_WRITE\}/gu) ?? [])).toHaveLength(4);
     expect(page).toContain("写操作尚未接入");
     expect(page).not.toContain("MB/s");
     expect(page).not.toContain("传输速度");

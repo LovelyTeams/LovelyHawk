@@ -98,6 +98,7 @@ export function TerminalSurface({
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const searchGenerationRef = useRef(0);
   const [status, setStatus] = useState("正在打开绑定终端…");
+  const [searchOpen, setSearchOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState("远程终端");
   const [query, setQuery] = useState("");
@@ -285,36 +286,53 @@ export function TerminalSurface({
 
   return (
     <section className="terminal-surface" aria-labelledby="terminal-surface-title">
-      <header className="terminal-surface-header">
-        <div>
-          <p>SSH 终端</p>
-          <h2 id="terminal-surface-title">{title}</h2>
-        </div>
+      <h2 id="terminal-surface-title" className="terminal-sr-only">SSH 终端 · {title}</h2>
+      <p className="terminal-sr-only">支持输入法组合输入、键盘操作、文本选择与搜索。</p>
+
+      <div className="terminal-surface-tools">
+        {searchOpen ? (
+          <form className="terminal-search" role="search" onSubmit={submitSearch}>
+            <label>
+              <span className="terminal-sr-only">搜索终端输出</span>
+              <input
+                type="search"
+                value={query}
+                maxLength={TERMINAL_LIMITS.maximumSearchQueryBytes}
+                placeholder="搜索输出"
+                onChange={(event) => setQuery(event.target.value)}
+              />
+            </label>
+            <label title="区分大小写">
+              <input type="checkbox" checked={caseSensitive}
+                onChange={(event) => setCaseSensitive(event.target.checked)} />Aa
+            </label>
+            <label title="正则表达式">
+              <input type="checkbox" checked={regex}
+                onChange={(event) => setRegex(event.target.checked)} />.*
+            </label>
+            <button type="button" title="上一个" onClick={() => void search("previous")}>上一个</button>
+            <button type="submit" title="下一个">下一个</button>
+          </form>
+        ) : null}
         <button
           type="button"
+          className="terminal-tool"
+          aria-expanded={searchOpen}
+          title="搜索终端输出"
+          onClick={() => setSearchOpen((open) => !open)}
+        >
+          <SearchGlyph /><span className="terminal-sr-only">搜索终端输出</span>
+        </button>
+        <button
+          type="button"
+          className="terminal-tool"
           disabled={!hasSelection || writeClipboard === undefined}
+          title="复制选区"
           onClick={() => void copySelection()}
         >
-          复制选区
+          <CopyGlyph /><span className="terminal-sr-only">复制选区</span>
         </button>
-      </header>
-
-      <form className="terminal-search" role="search" onSubmit={submitSearch}>
-        <label>
-          <span className="terminal-sr-only">搜索终端输出</span>
-          <input
-            type="search"
-            value={query}
-            maxLength={TERMINAL_LIMITS.maximumSearchQueryBytes}
-            placeholder="搜索终端输出"
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        </label>
-        <label><input type="checkbox" checked={caseSensitive} onChange={(event) => setCaseSensitive(event.target.checked)} />区分大小写</label>
-        <label><input type="checkbox" checked={regex} onChange={(event) => setRegex(event.target.checked)} />正则</label>
-        <button type="button" onClick={() => void search("previous")}>上一个</button>
-        <button type="submit">下一个</button>
-      </form>
+      </div>
 
       <div
         ref={hostRef}
@@ -323,9 +341,39 @@ export function TerminalSurface({
         aria-label="SSH 终端输出与输入"
         onMouseDown={() => terminalRef.current?.focus()}
       />
-      <p className="terminal-ime-note">支持输入法组合输入、键盘操作、文本选择与搜索。</p>
-      <p className="terminal-status" role="status" aria-live="polite">{status}</p>
-      {error === null ? null : <p className="terminal-error" role="alert">{error}</p>}
+      {error === null ? <p className="terminal-sr-only" role="status" aria-live="polite">{status}</p> : (
+        <p className="terminal-error" role="alert">{error}</p>
+      )}
     </section>
+  );
+}
+
+const GLYPH_PROPS = {
+  viewBox: "0 0 16 16",
+  width: 14,
+  height: 14,
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 1.5,
+  strokeLinecap: "round" as const,
+  strokeLinejoin: "round" as const,
+  "aria-hidden": true,
+};
+
+function SearchGlyph() {
+  return (
+    <svg {...GLYPH_PROPS}>
+      <circle cx="7.2" cy="7.2" r="4.4" />
+      <path d="m10.5 10.5 2.6 2.6" />
+    </svg>
+  );
+}
+
+function CopyGlyph() {
+  return (
+    <svg {...GLYPH_PROPS}>
+      <rect x="5.4" y="5.4" width="8.2" height="8.2" rx="1.4" />
+      <path d="M10.6 5.4V3.8a1.4 1.4 0 0 0-1.4-1.4H3.8a1.4 1.4 0 0 0-1.4 1.4v5.4a1.4 1.4 0 0 0 1.4 1.4h1.6" />
+    </svg>
   );
 }
