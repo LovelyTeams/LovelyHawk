@@ -5,9 +5,11 @@ import {
   ArchiveIcon,
   DownloadIcon,
   FolderIcon,
+  InfoIcon,
   NewFolderIcon,
   PermissionIcon,
   PreviewIcon,
+  RenameIcon,
   TrashIcon,
 } from "./file-icons";
 
@@ -19,7 +21,8 @@ export type SftpMenuAction =
   | "chmod"
   | "archive"
   | "remove"
-  | "create-directory";
+  | "create-directory"
+  | "properties";
 
 export interface SftpContextMenuProps {
   /** Where the menu was summoned, in client coordinates. */
@@ -109,10 +112,11 @@ export function menuItems(entry: SftpBrowserEntry | null): MenuItem[] {
   if (entry.kind === "file") {
     items.push({ action: "download", label: "下载", icon: <DownloadIcon /> });
   }
-  items.push({ action: "rename", label: "重命名", icon: <PermissionIcon /> });
+  items.push({ action: "rename", label: "重命名", icon: <RenameIcon /> });
   items.push({ action: "chmod", label: "设置权限", icon: <PermissionIcon /> });
   items.push({ action: "archive", label: "打包", icon: <ArchiveIcon /> });
   items.push({ action: "create-directory", label: "新建文件夹", icon: <NewFolderIcon /> });
   items.push({ action: "remove", label: "删除", icon: <TrashIcon />, dangerous: true });
+  items.push({ action: "properties", label: "属性", icon: <InfoIcon /> });
   return items;
 }

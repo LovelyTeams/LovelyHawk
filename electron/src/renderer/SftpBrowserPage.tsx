@@ -20,6 +20,7 @@ import type { LocalBrowserApi } from "../shared/local-browser-contract";
 import { LocalFilePane } from "./LocalFilePane";
 import { SftpContextMenu, type SftpMenuAction } from "./SftpContextMenu";
 import { SftpOperationDialog, type SftpOperationDraft } from "./SftpOperationDialog";
+import { SftpPropertiesDialog } from "./SftpPropertiesDialog";
 import {
   ArchiveIcon,
   DownloadIcon,
@@ -88,6 +89,7 @@ export function SftpBrowserPage({
   const [receipt, setReceipt] = useState<SftpOperationReceipt | null>(null);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [operationBusy, setOperationBusy] = useState(false);
+  const [properties, setProperties] = useState<SftpBrowserEntry | null>(null);
   const operationInFlight = useRef(false);
   const requestRef = useRef(0);
   const scope = connection === null ? null : sftpBrowserScope(connection);
@@ -273,12 +275,18 @@ export function SftpBrowserPage({
     if (action === "open" && entry !== null) return requestDirectory(entry.entryHandle);
     if (action === "preview") return requestPreview();
     if (action === "download") return void downloadSelected();
+    if (action === "properties") {
+      if (entry !== null) setProperties(entry);
+      return;
+    }
     if (action === "open") return;
     const subject = entry === null ? (directory?.directoryLabel ?? "当前目录") : entry.name;
-    const rename = action === "rename" ? entry?.name : undefined;
-    setDraft(rename === undefined
-      ? { kind: action, subject }
-      : { kind: action, subject, name: rename });
+    const next: SftpOperationDraft = { kind: action, subject };
+    if (action === "rename" && entry !== null) next.name = entry.name;
+    // Adjust the mode the server reported rather than typing one from memory.
+    if (action === "chmod" && entry !== null && entry.mode !== null) next.mode = entry.mode;
+    setProperties(null);
+    setDraft(next);
   }
 
   async function buildPlan(next: SftpOperationDraft): Promise<void> {
@@ -505,7 +513,14 @@ export function SftpBrowserPage({
               onDismiss={() => setMenu(null)}
             />
           )}
-          {draft === null ? null : (
+          {properties === null ? null : (
+        <SftpPropertiesDialog
+          entry={properties}
+          onChmod={() => startOperation("chmod", properties)}
+          onClose={() => setProperties(null)}
+        />
+      )}
+      {draft === null ? null : (
             <SftpOperationDialog
               draft={draft}
               plan={plan}

@@ -533,6 +533,12 @@ pub(crate) struct SftpBrowserEntryDto {
     pub(crate) action: SftpBrowserEntryAction,
     pub(crate) size_bytes: String,
     pub(crate) modified_at: Option<String>,
+    /// The permission bits as four octal digits, when the server reports them.
+    pub(crate) mode: Option<String>,
+    /// Numeric owner and group. Names need a passwd lookup this slice does not
+    /// make, so the numbers are reported as they arrive.
+    pub(crate) owner_id: Option<u32>,
+    pub(crate) group_id: Option<u32>,
 }
 
 /// What a finished transfer moved, in capability terms only.
@@ -585,6 +591,16 @@ struct StoredNode {
     name_truncated: bool,
     size_bytes: String,
     modified_at: Option<String>,
+    mode: Option<String>,
+    owner_id: Option<u32>,
+    group_id: Option<u32>,
+}
+
+/// The permission bits an operator reads and types, as four octal digits.
+/// Only the low twelve bits mean anything here: the file type lives in the
+/// kind, and reporting it twice would just invite a wrong chmod.
+fn octal_mode(permissions: u32) -> String {
+    format!("{:04o}", permissions & 0o7777)
 }
 
 impl StoredNode {
@@ -596,6 +612,7 @@ impl StoredNode {
             .saturating_add(self.display_name.len())
             .saturating_add(self.size_bytes.len())
             .saturating_add(self.modified_at.as_ref().map_or(0, String::len))
+            .saturating_add(self.mode.as_ref().map_or(0, String::len))
     }
 
     fn dto(&self) -> SftpBrowserEntryDto {
@@ -607,6 +624,9 @@ impl StoredNode {
             action: self.action.dto(),
             size_bytes: self.size_bytes.clone(),
             modified_at: self.modified_at.clone(),
+            mode: self.mode.clone(),
+            owner_id: self.owner_id,
+            group_id: self.group_id,
         }
     }
 }
@@ -643,6 +663,9 @@ impl BrowserSnapshot {
             name_truncated: false,
             size_bytes: "0".to_owned(),
             modified_at: None,
+            mode: None,
+            owner_id: None,
+            group_id: None,
         };
         let mut nodes = HashMap::new();
         nodes.insert(root_handle.clone(), root);
@@ -726,6 +749,9 @@ impl BrowserSnapshot {
                 name_truncated,
                 size_bytes: entry.metadata.size.to_string(),
                 modified_at: entry.metadata.modified_at.map(|value| value.to_rfc3339()),
+                mode: entry.metadata.permissions.map(octal_mode),
+                owner_id: entry.metadata.uid,
+                group_id: entry.metadata.gid,
             });
         }
 

@@ -12,6 +12,11 @@ export interface SftpBrowserEntry {
   action: SftpBrowserEntryAction;
   sizeBytes: string;
   modifiedAt: string | null;
+  /** Permission bits as four octal digits, when the server reports them. */
+  mode: string | null;
+  /** Numeric owner and group, reported as they arrive. */
+  ownerId: number | null;
+  groupId: number | null;
 }
 
 export interface SftpDirectorySnapshot {
@@ -171,14 +176,27 @@ function timestampOrNull(value: unknown): value is string | null {
     Number.isFinite(Date.parse(value));
 }
 
+/** Four octal digits, or nothing: anything else is not a mode we can show. */
+function modeOrNull(value: unknown): value is string | null {
+  return value === null || typeof value === "string" && /^[0-7]{4}$/u.test(value);
+}
+
+/** A POSIX id fits in 32 bits and is never negative. */
+function idOrNull(value: unknown): value is number | null {
+  return value === null ||
+    typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 4_294_967_295;
+}
+
 function entry(value: unknown): value is SftpBrowserEntry {
   if (!record(value) || !exact(value, [
     "entryHandle", "name", "nameTruncated", "kind", "action", "sizeBytes", "modifiedAt",
+    "mode", "ownerId", "groupId",
   ]) || !isSftpBrowserOpaqueHandle(value.entryHandle) ||
     !safeName(value.name, value.nameTruncated, 256) ||
     typeof value.kind !== "string" || !kindSet.has(value.kind) ||
     typeof value.action !== "string" || !actionSet.has(value.action) ||
-    !u64String(value.sizeBytes) || !timestampOrNull(value.modifiedAt)) return false;
+    !u64String(value.sizeBytes) || !timestampOrNull(value.modifiedAt) ||
+    !modeOrNull(value.mode) || !idOrNull(value.ownerId) || !idOrNull(value.groupId)) return false;
   if (value.kind === "file") return value.action === "preview";
   if (value.kind === "directory") return value.action === "browse" || value.action === "none";
   return value.action === "none";

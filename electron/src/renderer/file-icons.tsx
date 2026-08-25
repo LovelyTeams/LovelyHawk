@@ -132,6 +132,27 @@ export function PermissionIcon({ size }: { size?: number }) {
   );
 }
 
+export function InfoIcon({ size }: { size?: number }) {
+  return icon(
+    <>
+      <circle cx="8" cy="8" r="6.1" />
+      <path d="M8 7.2v4" />
+      <path d="M8 4.8v.1" />
+    </>,
+    size,
+  );
+}
+
+export function RenameIcon({ size }: { size?: number }) {
+  return icon(
+    <>
+      <path d="M9.6 3.4l3 3-6.2 6.2-3.5.5.5-3.5Z" />
+      <path d="M8.6 4.4l3 3" />
+    </>,
+    size,
+  );
+}
+
 export function PreviewIcon({ size }: { size?: number }) {
   return icon(
     <>

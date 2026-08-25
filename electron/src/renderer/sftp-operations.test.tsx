@@ -8,6 +8,7 @@ import type {
 } from "../shared/sftp-browser-contract";
 import { menuItems, SftpContextMenu } from "./SftpContextMenu";
 import { SftpOperationDialog, type SftpOperationDraft } from "./SftpOperationDialog";
+import { SftpPropertiesDialog, specialBits, symbolicMode } from "./SftpPropertiesDialog";
 
 const hostile = "<script>steal()</script>";
 
@@ -125,6 +126,9 @@ describe("sftp context menu", () => {
       action: "preview",
       sizeBytes: "128",
       modifiedAt: null,
+      mode: "0644",
+      ownerId: 1_000,
+      groupId: 1_000,
       ...overrides,
     };
   }
@@ -183,5 +187,86 @@ describe("sftp context menu", () => {
     const disabled = markup.match(/disabled=""/gu) ?? [];
     expect(buttons.length).toBeGreaterThan(0);
     expect(disabled).toHaveLength(buttons.length);
+  });
+});
+
+describe("sftp properties", () => {
+  function entry(overrides: Partial<SftpBrowserEntry> = {}): SftpBrowserEntry {
+    return {
+      entryHandle: "opaque-entry",
+      name: "upload.php",
+      nameTruncated: false,
+      kind: "file",
+      action: "preview",
+      sizeBytes: "128",
+      modifiedAt: "2026-08-24T10:00:00Z",
+      mode: "0644",
+      ownerId: 1_000,
+      groupId: 1_000,
+      ...overrides,
+    };
+  }
+
+  function render(value: SftpBrowserEntry): string {
+    return renderToStaticMarkup(
+      <SftpPropertiesDialog entry={value} onChmod={() => undefined} onClose={() => undefined} />,
+    );
+  }
+
+  /** The bits an operator actually reads off a listing during triage. */
+  it("renders permission bits the way ls does", () => {
+    expect(symbolicMode("0644")).toBe("rw-r--r--");
+    expect(symbolicMode("0755")).toBe("rwxr-xr-x");
+    expect(symbolicMode("0000")).toBe("---------");
+    expect(symbolicMode("0777")).toBe("rwxrwxrwx");
+    // The set-ID and sticky bits ride on the execute slot, upper case when
+    // execute itself is off, so nothing about the mode disappears.
+    expect(symbolicMode("4755")).toBe("rwsr-xr-x");
+    expect(symbolicMode("4644")).toBe("rwSr--r--");
+    expect(symbolicMode("2755")).toBe("rwxr-sr-x");
+    expect(symbolicMode("1777")).toBe("rwxrwxrwt");
+    expect(symbolicMode("1666")).toBe("rw-rw-rwT");
+    expect(symbolicMode("6755")).toBe("rwsr-sr-x");
+    // Anything that is not a mode renders as nothing rather than as a guess.
+    expect(symbolicMode("644")).toBe("");
+    expect(symbolicMode("0888")).toBe("");
+  });
+
+  it("calls out the bits worth hunting", () => {
+    expect(specialBits("4755")).toEqual(["set-user-ID"]);
+    expect(specialBits("2755")).toEqual(["set-group-ID"]);
+    expect(specialBits("1777")).toEqual(["粘滞位", "其他用户可写"]);
+    expect(specialBits("0644")).toEqual([]);
+    expect(specialBits("0646")).toEqual(["其他用户可写"]);
+  });
+
+  it("shows the whole entry, and says so when the server reported nothing", () => {
+    const markup = render(entry({ mode: "4755" }));
+    expect(markup).toContain("upload.php");
+    expect(markup).toContain("文件");
+    expect(markup).toContain("128 字节");
+    expect(markup).toContain("4755");
+    expect(markup).toContain("rwsr-xr-x");
+    expect(markup).toContain("set-user-ID");
+    expect(markup).toContain("1000 / 1000");
+
+    const bare = render(entry({ mode: null, ownerId: null, groupId: null, modifiedAt: null }));
+    expect(bare.match(/服务器未提供/gu)).toHaveLength(3);
+    expect(bare).not.toContain("null");
+  });
+
+  /** The name comes from the target, so it stays text. */
+  it("keeps a hostile name inert", () => {
+    const markup = render(entry({ name: hostile }));
+    expect(markup).toContain("&lt;script&gt;");
+    expect(markup).not.toContain("<script>");
+  });
+
+  /** Reading properties must not be able to change anything by itself. */
+  it("offers the permission flow without running it", () => {
+    const markup = render(entry());
+    expect(markup).toContain("设置权限");
+    expect(markup).not.toContain("sftp-operation-execute");
+    expect(markup).not.toContain("生成计划");
   });
 });

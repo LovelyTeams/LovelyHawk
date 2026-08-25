@@ -22,13 +22,13 @@ const directory: SftpDirectorySnapshot = {
   truncated: false,
   entries: [
     { entryHandle: "opaque-dir", name: "etc", nameTruncated: false,
-      kind: "directory", action: "browse", sizeBytes: "4096", modifiedAt: "2026-08-24T10:00:00+00:00" },
+      kind: "directory", action: "browse", sizeBytes: "4096", modifiedAt: "2026-08-24T10:00:00+00:00", mode: "0755", ownerId: 0, groupId: 0 },
     { entryHandle: "opaque-file", name: "<script>evidence()", nameTruncated: false,
-      kind: "file", action: "preview", sizeBytes: "42", modifiedAt: null },
+      kind: "file", action: "preview", sizeBytes: "42", modifiedAt: null, mode: "0644", ownerId: 1000, groupId: 1000 },
     { entryHandle: "opaque-link", name: "latest", nameTruncated: false,
-      kind: "symlink", action: "none", sizeBytes: "12", modifiedAt: null },
+      kind: "symlink", action: "none", sizeBytes: "12", modifiedAt: null, mode: "0777", ownerId: 0, groupId: 0 },
     { entryHandle: "opaque-secret-name", name: "[SENSITIVE NAME REDACTED]",
-      nameTruncated: false, kind: "other", action: "none", sizeBytes: "0", modifiedAt: null },
+      nameTruncated: false, kind: "other", action: "none", sizeBytes: "0", modifiedAt: null, mode: null, ownerId: null, groupId: null },
   ],
 };
 

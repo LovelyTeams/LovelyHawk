@@ -143,6 +143,33 @@ describe("SSH window shell", () => {
     expect(preload).not.toContain("localPath");
   });
 
+  /**
+   * The chmod flow used to ask for a mode with nothing on screen to base it on,
+   * so the operator had to remember or guess what the file already was.
+   */
+  it("shows an entry's own bits before offering to change them", () => {
+    const menu = source("SftpContextMenu.tsx");
+    expect(menu).toContain('{ action: "properties", label: "属性"');
+
+    const page = source("SftpBrowserPage.tsx");
+    // Properties is a read: it opens its own panel and never builds a plan.
+    expect(page).toContain('if (action === "properties") {');
+    expect(page).toContain("setProperties(entry);");
+    // Asking for permissions starts from what the server reported.
+    expect(page).toContain(
+      'if (action === "chmod" && entry !== null && entry.mode !== null) next.mode = entry.mode;',
+    );
+
+    // The bits reach the window in the first place.
+    const contract = readFileSync(
+      new URL("../shared/sftp-browser-contract.ts", import.meta.url), "utf8",
+    );
+    for (const field of ["mode: string | null", "ownerId: number | null", "groupId: number | null"]) {
+      expect(contract).toContain(field);
+    }
+    expect(contract).toContain('/^[0-7]{4}$/u.test(value)');
+  });
+
   /** Nothing changes a target without a plan the operator read and approved. */
   it("routes every write through plan, confirm and execute", () => {
     const page = source("SftpBrowserPage.tsx");

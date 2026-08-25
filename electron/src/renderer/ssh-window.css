@@ -613,3 +613,11 @@
   font-size: 12px;
   font-weight: 650;
 }
+
+.sftp-properties-dialog h2 { display: inline-flex; align-items: center; gap: 7px; }
+.sftp-properties-list { display: grid; margin: 0; gap: 0; border: 1px solid var(--border); border-radius: 9px; }
+.sftp-properties-list > div { display: grid; align-items: baseline; grid-template-columns: 92px minmax(0, 1fr); gap: 12px; padding: 7px 11px; border-bottom: 1px solid var(--border); }
+.sftp-properties-list > div:last-child { border-bottom: 0; }
+.sftp-properties-list dt { color: var(--muted); font-size: 12px; }
+.sftp-properties-list dd { margin: 0; color: var(--text); font-family: "Cascadia Mono", monospace; font-size: 12.5px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.sftp-properties-flag { display: block; margin-top: 3px; color: var(--danger-text); font-family: inherit; font-size: 11.5px; font-style: normal; font-weight: 700; }

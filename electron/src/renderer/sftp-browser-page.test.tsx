@@ -36,11 +36,11 @@ const api: SftpBrowserApi & LocalBrowserApi = {
 const hostileName = "<script>steal()<img src=x onerror=steal()>";
 const entries: SftpBrowserEntry[] = [
   { entryHandle: "opaque-directory", name: "配置目录", nameTruncated: false,
-    kind: "directory", action: "browse", sizeBytes: "4096", modifiedAt: null },
+    kind: "directory", action: "browse", sizeBytes: "4096", modifiedAt: null, mode: "0755", ownerId: 0, groupId: 0 },
   { entryHandle: "opaque-file", name: hostileName, nameTruncated: true,
-    kind: "file", action: "preview", sizeBytes: "42", modifiedAt: "2026-08-24T10:00:00Z" },
+    kind: "file", action: "preview", sizeBytes: "42", modifiedAt: "2026-08-24T10:00:00Z", mode: "0644", ownerId: 1000, groupId: 1000 },
   { entryHandle: "opaque-link", name: "latest", nameTruncated: false,
-    kind: "symlink", action: "none", sizeBytes: "7", modifiedAt: null },
+    kind: "symlink", action: "none", sizeBytes: "7", modifiedAt: null, mode: "0777", ownerId: 0, groupId: 0 },
 ];
 
 const hostileText = "</pre><script>steal()</script><img src=x onerror=steal()>";
