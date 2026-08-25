@@ -49,4 +49,12 @@ node tools/lab/probe-logs.mjs       # 日志源发现、auth.log 解析、IOC �
 node tools/lab/probe-one.mjs "SUID 可执行" ...   # 逐行看某条命令命中了什么
 ```
 
+```bash
+node tools/lab/probe-sftp.mjs      # 浏览 + plan/confirm/execute/verify 全链路
+node tools/lab/probe-system.mjs    # 系统信息摘要与 25 个标签页、核查审计
+node tools/lab/probe-switch.mjs    # 切换目标后旧能力必须全部失效
+node tools/lab/probe-markers.mjs   # 全量扫一遍，确认没有任何遮蔽 marker
+LAB=alpine node tools/lab/probe-commands.mjs   # 同样的命令跑 busybox 靶机
+```
+
 `probe-one.mjs` 会用 `!!` 标出被规则命中的行，是判断误报最快的方式。
