@@ -873,7 +873,7 @@ for lr_name do
     lr_original=$(sed -n 's/^# LR_ORIGINAL_SHA256=//p' "$lr_path" | head -n 1)
     lr_wrapper=$(sha256sum -- "$lr_path" 2>/dev/null | awk '{{print $1}}')
     printf 'LR_AUDIT_CMD|%s|INSTRUMENTED|%s|%s|%s|%s\n' "$lr_name64" "$lr_path64" "$lr_backup" "$lr_original" "$lr_wrapper"
-  elif file -- "$lr_path" 2>/dev/null | grep -qE 'script|text|ASCII'; then
+  elif [ "$(head -c 2 -- "$lr_path" 2>/dev/null)" = '#!' ] || {{ command -v file >/dev/null 2>&1 && file -- "$lr_path" 2>/dev/null | grep -qE 'script|text|ASCII'; }}; then
     printf 'LR_AUDIT_CMD|%s|FOREIGN_SCRIPT|%s|||\n' "$lr_name64" "$lr_path64"
   else
     lr_original=$(sha256sum -- "$lr_path" 2>/dev/null | awk '{{print $1}}')
@@ -1826,6 +1826,24 @@ mod tests {
                 STANDARD.encode(backup)
             },
         )
+    }
+
+    /// A command replaced by a shell wrapper is the classic way an intruder
+    /// hides an implant from `find` or `ps`. The probe used to decide this with
+    /// `file(1)`, which minimal Debian, Ubuntu and Alpine images do not ship —
+    /// and with `file` absent the branch fell through to ORIGINAL, so a
+    /// trojaned command reported as pristine on exactly the hosts most likely
+    /// to be running one.
+    #[test]
+    fn foreign_script_detection_does_not_depend_on_file_being_installed() {
+        let command = build_status_command(&["find".to_owned()]);
+        // The worker is shell-quoted into the outer command, so match on the
+        // parts that survive quoting rather than the whole clause.
+        assert!(command.contains("head -c 2 -- "));
+        assert!(command.contains("= "));
+        // file(1) may still refine the answer, but only when it is present.
+        assert!(command.contains("command -v file >/dev/null 2>&1 && file --"));
+        assert!(command.contains("FOREIGN_SCRIPT"));
     }
 
     #[test]
