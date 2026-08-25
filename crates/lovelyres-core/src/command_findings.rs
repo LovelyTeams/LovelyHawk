@@ -703,6 +703,16 @@ pub fn planted_file(line: &str) -> bool {
 
 /// A link aimed at an account or authentication file.
 pub fn sensitive_symlink(line: &str) -> bool {
+    // Links every distribution ships. /etc/mtab -> /proc/mounts in particular
+    // is on every Linux host, so reporting it just costs the operator a look.
+    const SHIPPED: [&str; 3] = [
+        "/etc/mtab -> /proc/mounts",
+        "/etc/mtab -> /proc/self/mounts",
+        "/etc/localtime -> /usr/share/zoneinfo",
+    ];
+    if SHIPPED.iter().any(|shipped| line.contains(shipped)) {
+        return false;
+    }
     mentions(
         line,
         &["-> /etc/", "-> /root", "-> /var/spool/cron", "-> /proc"],
@@ -1408,6 +1418,21 @@ mod tests {
         assert!(!super::locked_attribute("/etc/apt/sources.list.d:"));
         assert!(!super::locked_attribute("lsattr: Operation not supported"));
         assert!(!super::locked_attribute(""));
+    }
+
+    /// /etc/mtab -> /proc/mounts is on every Linux host.
+    #[test]
+    fn sensitive_symlink_excuses_the_links_every_distribution_ships() {
+        assert!(!super::sensitive_symlink(
+            "lrwxrwxrwx 1 root root 12 Aug 25 14:51 /etc/mtab -> /proc/mounts"
+        ));
+        // A link into /etc or /root that nobody shipped is still a finding.
+        assert!(super::sensitive_symlink(
+            "lrwxrwxrwx 1 root root 12 Aug 25 14:51 /tmp/.cache/x -> /etc/shadow"
+        ));
+        assert!(super::sensitive_symlink(
+            "lrwxrwxrwx 1 root root 12 Aug 25 14:51 /home/deploy/k -> /root/.ssh"
+        ));
     }
 
     /// arp_filter ends with rp_filter, so a suffix match read the kernel's own
