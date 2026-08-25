@@ -11,7 +11,6 @@ import {
 } from "./log-analysis-read-contract";
 
 const hostile = "</pre><script>steal()</script><img src=x onerror=steal()>";
-const redacted = "[SENSITIVE LOG LINE REDACTED]";
 const threatSummary = {
   bruteForceCount: 0,
   successfulLoginCount: 0,
@@ -54,7 +53,6 @@ const fileEntry = {
   highlighted: true,
   sourceHandle: null,
   sourceName: null,
-  redacted: false,
   textTruncated: false,
 };
 
@@ -67,10 +65,11 @@ describe("log analysis read strict boundary", () => {
       ...snapshot,
       sources: [{ ...snapshot.sources[0], path: "/etc/shadow" }],
     })).toBe(false);
+    // A path that happens to read like a credential is still just a path.
     expect(isLogSourceSnapshot({
       ...snapshot,
       sources: [{ ...snapshot.sources[0], displayLocation: "/var/log/token=secret-value" }],
-    })).toBe(false);
+    })).toBe(true);
     expect(isLogSourceSnapshot({
       ...snapshot,
       sources: [snapshot.sources[0], snapshot.sources[0]],
@@ -105,11 +104,12 @@ describe("log analysis read strict boundary", () => {
       indicators: Array.from({ length: 9 }, (_, index) => `ioc-${index}`),
     })).toBe(false);
     expect(isLogIocSearchInput({ sourceHandles: ["source-1"], indicators: ["token\nleak"] })).toBe(false);
-    expect(isLogIocSearchInput({ sourceHandles: ["source-1"], indicators: ["token=secret-value"] })).toBe(false);
+    // Hunting for a token string is a legitimate search, so it is accepted.
+    expect(isLogIocSearchInput({ sourceHandles: ["source-1"], indicators: ["token=secret-value"] })).toBe(true);
     expect(isLogIocSearchInput({ sourceHandles: ["source-1"], indicators: ["same", "same"] })).toBe(false);
   });
 
-  it("validates paged entries, threat counts and full-line redaction semantics", () => {
+  it("validates paged entries and threat counts without judging their content", () => {
     const result = {
       snapshotHandle: "snapshot-1",
       sourceHandle: "source-file-1",
@@ -121,29 +121,28 @@ describe("log analysis read strict boundary", () => {
       hasMore: false,
       entries: [fileEntry, {
         ...fileEntry,
-        message: redacted,
-        rawText: redacted,
+        message: "authorization: Bearer abc",
+        rawText: "authorization: Bearer abc",
         highlighted: false,
-        redacted: true,
       }],
       threatSummary,
-      redactedCount: 1,
       truncated: false,
     };
     expect(isLogSourceReadResult(result)).toBe(true);
     expect(isLogSourceReadResult({ ...result, command: "journalctl" })).toBe(false);
     expect(isLogSourceReadResult({ ...result, entryCount: 1 })).toBe(false);
+    // A username or a line that mentions a password is the finding, not a leak.
     expect(isLogSourceReadResult({
       ...result,
       threatSummary: {
         ...threatSummary,
         topTargetUsers: [{ username: "password:user-secret", count: 1, successCount: 0, failCount: 1 }],
       },
-    })).toBe(false);
+    })).toBe(true);
     expect(isLogSourceReadResult({
       ...result,
       entries: [fileEntry, { ...result.entries[1], rawText: "password=visible" }],
-    })).toBe(false);
+    })).toBe(true);
   });
 
   it("maps correlated entries only to the selected opaque source set", () => {
@@ -154,7 +153,6 @@ describe("log analysis read strict boundary", () => {
       totalObserved: 1,
       entries: [{ ...fileEntry, sourceHandle: "source-1", sourceName: hostile }],
       threatSummary,
-      redactedCount: 0,
       truncated: false,
     };
     expect(isLogCorrelationResult(result)).toBe(true);
@@ -165,7 +163,7 @@ describe("log analysis read strict boundary", () => {
     expect(isLogCorrelationResult({ ...result, coverage: "complete" })).toBe(false);
   });
 
-  it("bounds IOC result pairs, samples, totals and redaction", () => {
+  it("bounds IOC result pairs, samples and totals", () => {
     const result = {
       snapshotHandle: "snapshot-1",
       results: [{
@@ -173,23 +171,19 @@ describe("log analysis read strict boundary", () => {
         sourceHandle: "source-1",
         sourceName: hostile,
         count: 2,
-        sampleLines: [hostile, redacted],
-        samplesRedacted: true,
+        sampleLines: [hostile, "password=visible"],
         textTruncated: false,
       }],
       totalMatches: 2,
-      redactedSampleCount: 1,
       truncated: false,
     };
     expect(isLogIocSearchResult(result)).toBe(true);
     expect(isLogIocSearchResult({ ...result, path: "/var/log/auth.log" })).toBe(false);
-    expect(isLogIocSearchResult({ ...result, redactedSampleCount: 0 })).toBe(false);
     expect(isLogIocSearchResult({ ...result, totalMatches: 3 })).toBe(false);
     expect(isLogIocSearchResult({
       ...result,
       results: [result.results[0], result.results[0]],
       totalMatches: 4,
-      redactedSampleCount: 2,
     })).toBe(false);
   });
 });

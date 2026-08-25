@@ -426,8 +426,10 @@ packaged 验收不足而继续为 `Pending` 的切片。每一条都必须按其
   总量 4 MiB、每快照 3 个并发读取，发现限全局 2 个且每 binding 1 个；文件源限 100 个并可附加 1 个
   journal capability。单页限 200 行/512 KiB；关联限 2–8 个文件源、每源 200 行、观察 1,600 行、返回
   1,000 行/1 MiB；IOC 限 1–8 个文件源、16 个 indicator、64 个 source/indicator 组合、64 个结果、
-  每结果 3 个样本且总文本 512 KiB。过期、淘汰、目标切换及晚到结果均失败关闭，疑似 credential 行整行
-  遮蔽。BackendState 已注册 exact4 固定 RPC，main/preload/aggregate contract 只公开
+  每结果 3 个样本且总文本 512 KiB。过期、淘汰、目标切换及晚到结果均失败关闭。按“可信条件下不做主动隐藏”
+  的约定，日志行一律原样返回，只保留控制字符净化与体积截断：原先按 credential 形态整行遮蔽的实现
+  会吞掉 auth.log 里正要看的证据，已移除。页面已按命令工作台改造为工具栏 + 日志源树 + 详情三段式，
+  行号沟槽与命令输出同构。BackendState 已注册 exact4 固定 RPC，main/preload/aggregate contract 只公开
   `discoverLogSources`、`readLogSource`、`correlateLogSources`、`searchLogIocs`；main 对请求与响应作严格
   exact-object 验证，unknown/forged 参数固定失败且不回显。`App`/`LogAnalysisPage` 只接收 opaque
   `bindingHandle`，不接 target identity、connection/session metadata；SSH disconnect 在实际断连前 eager

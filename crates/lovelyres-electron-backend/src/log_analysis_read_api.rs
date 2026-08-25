@@ -56,7 +56,6 @@ const MAX_ENTRY_RAW_BYTES: usize = 16 * 1024;
 const MAX_PUBLIC_U64: u64 = 9_007_199_254_740_991;
 const MIN_ITEM_TEXT_BYTES: usize = 128;
 const SNAPSHOT_TTL: Duration = Duration::from_secs(5 * 60);
-const REDACTED_LOG_LINE: &str = "[SENSITIVE LOG LINE REDACTED]";
 
 #[derive(Clone)]
 pub(crate) struct LogAnalysisReadApi {
@@ -668,7 +667,6 @@ impl LogIocSearchInput {
             if value.is_empty()
                 || value.len() > MAX_IOC_BYTES
                 || value.chars().any(char::is_control)
-                || contains_sensitive_material(value)
                 || !seen.insert(value)
             {
                 return Err(LogAnalysisReadApiError::InvalidQuery);
@@ -713,7 +711,6 @@ pub(crate) struct LogSourceReadDto {
     has_more: bool,
     entries: Vec<PublicLogEntryDto>,
     threat_summary: ThreatSummaryDto,
-    redacted_count: usize,
     truncated: bool,
 }
 
@@ -728,7 +725,6 @@ struct PublicLogEntryDto {
     highlighted: bool,
     source_handle: Option<String>,
     source_name: Option<String>,
-    redacted: bool,
     text_truncated: bool,
 }
 
@@ -772,7 +768,6 @@ pub(crate) struct LogCorrelationDto {
     total_observed: usize,
     entries: Vec<PublicLogEntryDto>,
     threat_summary: ThreatSummaryDto,
-    redacted_count: usize,
     truncated: bool,
 }
 
@@ -782,7 +777,6 @@ pub(crate) struct LogIocSearchDto {
     snapshot_handle: String,
     results: Vec<LogIocMatchDto>,
     total_matches: usize,
-    redacted_sample_count: usize,
     truncated: bool,
 }
 
@@ -794,7 +788,6 @@ struct LogIocMatchDto {
     source_name: String,
     count: usize,
     sample_lines: Vec<String>,
-    samples_redacted: bool,
     text_truncated: bool,
 }
 
@@ -997,9 +990,9 @@ fn build_source_snapshot(
             return Err(LogAnalysisReadApiError::SnapshotStale);
         }
         let source_handle = unique_map_handle(&sources)?;
-        let (display_name, name_truncated) = budget.take(public_text(&file.name), 256);
-        let (display_location, location_truncated) = budget.take(public_text(&file.path), 4 * 1024);
-        let (modified, modified_truncated) = budget.take(public_text(&file.modified), 64);
+        let (display_name, name_truncated) = budget.take(&file.name, 256);
+        let (display_location, location_truncated) = budget.take(&file.path, 4 * 1024);
+        let (modified, modified_truncated) = budget.take(&file.modified, 64);
         let source = StoredSource::File {
             path: file.path,
             display_name: display_name.clone(),
@@ -1095,7 +1088,6 @@ fn project_read_result(
         .ok_or(LogAnalysisReadApiError::SnapshotStale)?;
     let mut budget = TextBudget::new(MAX_READ_TEXT_BYTES);
     let mut entries = Vec::new();
-    let mut redacted_count = 0;
     let mut projection_truncated = false;
     let source_len = result.entries.len();
     for entry in result.entries {
@@ -1103,7 +1095,6 @@ fn project_read_result(
             break;
         }
         let projected = project_entry(entry, None, None, &mut budget);
-        redacted_count += usize::from(projected.redacted);
         projection_truncated |= projected.text_truncated;
         entries.push(projected);
     }
@@ -1121,7 +1112,6 @@ fn project_read_result(
         has_more: result.total_count == page_size,
         entries,
         threat_summary,
-        redacted_count,
         truncated: source_len > projected_len
             || projection_truncated
             || threat_truncated
@@ -1141,7 +1131,6 @@ fn project_correlation_result(
     let source_len = result.entries.len();
     let mut budget = TextBudget::new(MAX_CORRELATION_TEXT_BYTES);
     let mut entries = Vec::new();
-    let mut redacted_count = 0;
     let mut projection_truncated = false;
     for entry in result.entries.into_iter().take(MAX_CORRELATION_ENTRIES) {
         if budget.remaining() < MIN_ITEM_TEXT_BYTES {
@@ -1160,7 +1149,6 @@ fn project_correlation_result(
             Some(source_name.as_str()),
             &mut budget,
         );
-        redacted_count += usize::from(projected.redacted);
         projection_truncated |= projected.text_truncated;
         entries.push(projected);
     }
@@ -1176,7 +1164,6 @@ fn project_correlation_result(
         total_observed: source_len,
         entries,
         threat_summary,
-        redacted_count,
         truncated: source_len > MAX_CORRELATION_ENTRIES
             || source_len > projected_len
             || projection_truncated
@@ -1209,7 +1196,6 @@ fn project_ioc_result(
     }
     let mut budget = TextBudget::new(MAX_IOC_TEXT_BYTES);
     let mut results = Vec::new();
-    let mut redacted_sample_count = 0;
     let mut projection_truncated = false;
     let mut seen_pairs = HashSet::new();
     for item in result.results.into_iter().take(MAX_IOC_RESULTS) {
@@ -1229,19 +1215,10 @@ fn project_ioc_result(
         let (indicator, indicator_truncated) = budget.take(&item.indicator, MAX_IOC_BYTES);
         let (source_name, source_name_truncated) = budget.take(source_name, 256);
         let mut samples = Vec::new();
-        let mut samples_redacted = false;
         let mut samples_truncated = false;
         for sample in item.sample_lines {
-            let sensitive = contains_sensitive_material(&sample);
-            let value = if sensitive {
-                REDACTED_LOG_LINE
-            } else {
-                &sample
-            };
-            let (sample, truncated) = budget.take(value, 4 * 1024);
-            samples_redacted |= sensitive;
+            let (sample, truncated) = budget.take(&sample, 4 * 1024);
             samples_truncated |= truncated;
-            redacted_sample_count += usize::from(sensitive);
             samples.push(sample);
         }
         let text_truncated = indicator_truncated || source_name_truncated || samples_truncated;
@@ -1252,7 +1229,6 @@ fn project_ioc_result(
             source_name,
             count: item.count,
             sample_lines: samples,
-            samples_redacted,
             text_truncated,
         });
     }
@@ -1261,7 +1237,6 @@ fn project_ioc_result(
         snapshot_handle: snapshot_handle.to_owned(),
         results,
         total_matches: result.total_matches,
-        redacted_sample_count,
         truncated: source_len > MAX_IOC_RESULTS
             || source_len > projected_len
             || projection_truncated
@@ -1275,46 +1250,14 @@ fn project_entry(
     source_name: Option<&str>,
     budget: &mut TextBudget,
 ) -> PublicLogEntryDto {
-    let sensitive = [
-        entry.timestamp.as_str(),
-        entry.level.as_str(),
-        entry.service.as_str(),
-        entry.message.as_str(),
-        entry.raw.as_str(),
-        source_name.unwrap_or_default(),
-    ]
-    .iter()
-    .any(|value| contains_sensitive_material(value));
-    let timestamp = if sensitive {
-        REDACTED_LOG_LINE
-    } else {
-        &entry.timestamp
-    };
-    let level = if sensitive {
-        REDACTED_LOG_LINE
-    } else {
-        &entry.level
-    };
-    let service = if sensitive {
-        REDACTED_LOG_LINE
-    } else {
-        &entry.service
-    };
-    let message = if sensitive {
-        REDACTED_LOG_LINE
-    } else {
-        &entry.message
-    };
-    let raw_text = if sensitive {
-        REDACTED_LOG_LINE
-    } else {
-        &entry.raw
-    };
-    let (timestamp, timestamp_truncated) = budget.take(timestamp, MAX_ENTRY_TIMESTAMP_BYTES);
-    let (level, level_truncated) = budget.take(level, MAX_ENTRY_LEVEL_BYTES);
-    let (service, service_truncated) = budget.take(service, MAX_ENTRY_SERVICE_BYTES);
-    let (message, message_truncated) = budget.take(message, MAX_ENTRY_MESSAGE_BYTES);
-    let (raw_text, raw_truncated) = budget.take(raw_text, MAX_ENTRY_RAW_BYTES);
+    // Every field is shown as the target wrote it. Filtering on credential-like
+    // shapes used to blank the whole line, which threw away the auth.log
+    // evidence an operator is reading the page for.
+    let (timestamp, timestamp_truncated) = budget.take(&entry.timestamp, MAX_ENTRY_TIMESTAMP_BYTES);
+    let (level, level_truncated) = budget.take(&entry.level, MAX_ENTRY_LEVEL_BYTES);
+    let (service, service_truncated) = budget.take(&entry.service, MAX_ENTRY_SERVICE_BYTES);
+    let (message, message_truncated) = budget.take(&entry.message, MAX_ENTRY_MESSAGE_BYTES);
+    let (raw_text, raw_truncated) = budget.take(&entry.raw, MAX_ENTRY_RAW_BYTES);
     let (source_name, source_name_truncated) = source_name
         .map(|name| budget.take(name, 256))
         .map_or((None, false), |(name, truncated)| (Some(name), truncated));
@@ -1327,7 +1270,6 @@ fn project_entry(
         highlighted: entry.highlighted,
         source_handle: source_handle.map(str::to_owned),
         source_name,
-        redacted: sensitive,
         text_truncated: timestamp_truncated
             || level_truncated
             || service_truncated
@@ -1370,10 +1312,9 @@ fn project_threat_summary(
         .top_source_ips
         .into_iter()
         .map(|item| {
-            let (ip, ip_truncated) = bounded_text(public_text(&item.ip), 64);
-            let (last_seen, last_seen_truncated) = bounded_text(public_text(&item.last_seen), 128);
-            let (action_type, action_type_truncated) =
-                bounded_text(public_text(&item.action_type), 64);
+            let (ip, ip_truncated) = bounded_text(&item.ip, 64);
+            let (last_seen, last_seen_truncated) = bounded_text(&item.last_seen, 128);
+            let (action_type, action_type_truncated) = bounded_text(&item.action_type, 64);
             text_truncated |= ip_truncated || last_seen_truncated || action_type_truncated;
             ThreatIpDto {
                 ip,
@@ -1387,7 +1328,7 @@ fn project_threat_summary(
         .top_target_users
         .into_iter()
         .map(|item| {
-            let (username, username_truncated) = bounded_text(public_text(&item.username), 64);
+            let (username, username_truncated) = bounded_text(&item.username, 64);
             text_truncated |= username_truncated;
             ThreatUserDto {
                 username,
@@ -1448,42 +1389,6 @@ fn bounded_text(value: &str, maximum_bytes: usize) -> (String, bool) {
         end -= 1;
     }
     (value[..end].to_owned(), true)
-}
-
-fn contains_sensitive_material(value: &str) -> bool {
-    let lower = value.to_ascii_lowercase();
-    [
-        "password=",
-        "password:",
-        "passwd=",
-        "passphrase=",
-        "passphrase:",
-        "secret=",
-        "secret:",
-        "token=",
-        "token:",
-        "authorization=",
-        "authorization:",
-        "api_key=",
-        "apikey=",
-        "private_key=",
-        "credential=",
-        "cookie:",
-        "set-cookie:",
-        "session_id=",
-        "bearer ",
-    ]
-    .iter()
-    .any(|marker| lower.contains(marker))
-        || (lower.contains("://") && lower.contains('@'))
-}
-
-fn public_text(value: &str) -> &str {
-    if contains_sensitive_material(value) {
-        REDACTED_LOG_LINE
-    } else {
-        value
-    }
 }
 
 fn validate_optional_text(
@@ -1656,8 +1561,10 @@ mod tests {
         let value = serde_json::to_value(&dto).unwrap();
         assert_eq!(value["sources"].as_array().unwrap().len(), 3);
         assert!(value.to_string().contains("/var/log/auth.log"));
-        assert!(value.to_string().contains(REDACTED_LOG_LINE));
-        assert!(!value.to_string().contains("path-secret"));
+        // A path that happens to contain a credential word is still a path the
+        // operator has to see to know which file this row is.
+        assert!(value.to_string().contains("/var/log/token=path-secret"));
+        // Unreadable files are dropped at discovery, so this one never appears.
         assert!(!value.to_string().contains("/var/log/secure"));
         assert!(!value.to_string().contains("session-server"));
         assert!(!value.to_string().contains("generation"));
@@ -1801,7 +1708,7 @@ mod tests {
     }
 
     #[test]
-    fn read_projection_preserves_hostile_text_but_redacts_likely_credentials() {
+    fn read_projection_preserves_hostile_text_and_every_logged_line() {
         let hostile = "</pre><script>steal()</script>";
         let mut metadata_secret = entry("safe raw text", None);
         metadata_secret.service = "token=service-secret".to_owned();
@@ -1830,12 +1737,13 @@ mod tests {
         .unwrap();
         let json = serde_json::to_string(&dto).unwrap();
         assert!(json.contains(hostile));
-        assert!(json.contains(REDACTED_LOG_LINE));
-        assert!(!json.contains("secret-value"));
-        assert!(!json.contains("service-secret"));
-        assert!(!json.contains("summary-secret"));
-        assert!(!json.contains("user-secret"));
-        assert_eq!(dto.redacted_count, 2);
+        // An auth.log line that mentions a bearer token is the evidence, not a
+        // leak: blanking it threw away what the page exists to show.
+        assert!(json.contains("authorization: Bearer secret-value"));
+        assert!(json.contains("token=service-secret"));
+        assert!(json.contains("token=summary-secret"));
+        assert!(json.contains("password:user-secret"));
+        // Size limits still apply; only the credential filter is gone.
         assert!(dto.truncated);
         assert!(json.len() <= MAX_READ_TEXT_BYTES + 16 * 1024);
     }
@@ -1880,9 +1788,7 @@ mod tests {
             project_ioc_result("snapshot-1", &index, &["192.0.2.1".to_owned()], result).unwrap();
         let json = serde_json::to_string(&dto).unwrap();
         assert!(json.contains("source-1"));
-        assert!(json.contains(REDACTED_LOG_LINE));
-        assert!(!json.contains("remote-secret"));
-        assert_eq!(dto.redacted_sample_count, 1);
+        assert!(json.contains("password=remote-secret"));
     }
 
     #[test]

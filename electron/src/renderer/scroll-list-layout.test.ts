@@ -20,6 +20,7 @@ const SCROLL_LISTS: Record<string, string> = {
   ".notes-list": ".note-row",
   ".connection-list": ".connection-list-row",
   ".sftp-operation-dialog": ".sftp-operation-dialog > *",
+  ".log-analysis-list": ".log-analysis-group",
 };
 
 function rule(css: string, selector: string): string {
@@ -64,7 +65,8 @@ describe("scrolling list layout", () => {
       }
     }
     // A new scrolling list must be added to SCROLL_LISTS above with a pinned row.
-    const known = [...Object.keys(SCROLL_LISTS), ".emergency-command-detail"];
+    const known = [...Object.keys(SCROLL_LISTS), ".emergency-command-detail",
+      ".log-analysis-detail"];
     expect(found.sort()).toEqual(known.sort());
   });
 });

@@ -2,6 +2,7 @@ import {
   isLogCalendarDay,
   isLogSourceReadInput,
   type LogSource,
+  type LogSourceKind,
   type LogSourceReadInput,
   type LogThreatLevel,
 } from "../shared/log-analysis-read-contract";
@@ -29,6 +30,23 @@ export function logThreatLevelLabel(level: LogThreatLevel): string {
     case "high": return "高";
     case "critical": return "严重";
   }
+}
+
+export function logSourceKindLabel(kind: LogSourceKind): string {
+  return kind === "journal" ? "systemd journal" : "文件日志";
+}
+
+/** One branch per kind, files first, so the tree reads the same way every time. */
+export interface LogSourceGroup {
+  kind: LogSourceKind;
+  sources: LogSource[];
+}
+
+export function groupLogSources(sources: readonly LogSource[]): LogSourceGroup[] {
+  const order: LogSourceKind[] = ["file", "journal"];
+  return order
+    .map((kind) => ({ kind, sources: sources.filter((source) => source.kind === kind) }))
+    .filter((group) => group.sources.length > 0);
 }
 
 export function formatLogSourceSize(sizeBytes: number | null): string {

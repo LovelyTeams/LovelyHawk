@@ -31,7 +31,6 @@ const entry: PublicLogEntry = {
   highlighted: true,
   sourceHandle: "source-1",
   sourceName: hostile,
-  redacted: false,
   textTruncated: true,
 };
 
@@ -71,7 +70,7 @@ describe("LogAnalysisPage", () => {
     expect(html).not.toContain("<script>");
   });
 
-  it("renders IOC samples, redaction and truncation as bounded evidence", () => {
+  it("renders IOC samples and truncation as bounded evidence", () => {
     const result: LogIocSearchResult = {
       snapshotHandle: "snapshot-1",
       results: [{
@@ -79,22 +78,22 @@ describe("LogAnalysisPage", () => {
         sourceHandle: "source-1",
         sourceName: hostile,
         count: 2,
-        sampleLines: [hostile, "[SENSITIVE LOG LINE REDACTED]"],
-        samplesRedacted: true,
+        sampleLines: [hostile, "password=visible"],
         textTruncated: true,
       }],
       totalMatches: 2,
-      redactedSampleCount: 1,
       truncated: true,
     };
     const html = renderToStaticMarkup(<LogIocResultsView result={result} />);
-    expect(html).toContain("匹配总数：2");
-    expect(html).toContain("样本包含整行遮蔽");
-    expect(html).toContain("IOC 结果已按安全边界截断");
+    expect(html).toContain("匹配总数 2");
+    // A sample that mentions a password is the match, shown as it was logged.
+    expect(html).toContain("password=visible");
+    expect(html).toContain("样本文本已截断");
+    expect(html).toContain("IOC 结果已按大小上限截断");
     expect(html).not.toContain("<script>");
   });
 
-  it("exposes explicit loading, empty and redacted error states", () => {
+  it("exposes explicit loading, empty and error states", () => {
     const html = [
       renderToStaticMarkup(<StatusPanel label="正在读取日志…" />),
       renderToStaticMarkup(<EmptyPanel title="没有匹配" detail="有界空结果" compact />),
@@ -103,6 +102,52 @@ describe("LogAnalysisPage", () => {
     expect(html).toContain("aria-live=\"polite\"");
     expect(html).toContain("有界空结果");
     expect(html).toContain("role=\"alert\"");
+  });
+
+  /**
+   * The page reads like the command workbench: one compact toolbar, a source
+   * tree on the left, and everything about the selected source on the right.
+   */
+  it("is laid out as a workbench rather than a header, a banner and tabs", () => {
+    const source = readFileSync(new URL("./LogAnalysisPage.tsx", import.meta.url), "utf8");
+    expect(source).toContain('className="log-analysis-toolbar"');
+    expect(source).toContain('className="log-analysis-workbench"');
+    expect(source).toContain('className="log-analysis-list"');
+    expect(source).toContain('className="log-analysis-detail"');
+    // The view switcher sits in the toolbar, not on a row of its own.
+    const toolbar = source.slice(
+      source.indexOf('className="log-analysis-toolbar"'),
+      source.indexOf('className="log-analysis-workbench"'),
+    );
+    expect(toolbar).toContain('className="log-analysis-views"');
+    expect(toolbar).toContain('className="log-analysis-search"');
+    expect(toolbar).toContain('className="log-analysis-reload"');
+    // The old chrome is gone.
+    expect(source).not.toContain("log-analysis-header");
+    expect(source).not.toContain("log-analysis-readonly-banner");
+    expect(source).not.toContain("log-analysis-tabs");
+    expect(source).not.toContain("log-analysis-sources");
+    expect(source).not.toContain("log-analysis-selector");
+    // One source list serves all three views: analysis modes select in it.
+    expect(source).toContain('{ type: "analysis-source-toggled", handle }');
+    expect(source).toContain('{ type: "source-selected", handle }');
+  });
+
+  /** Log lines are numbered like command output, and nothing is blanked. */
+  it("shows every log line as the target wrote it", () => {
+    const html = renderToStaticMarkup(
+      <LogEntriesView entries={[entry, { ...entry, highlighted: false, rawText: "password=visible" }]}
+        empty="没有日志" />,
+    );
+    expect(html).toContain('class="log-analysis-output"');
+    expect(html).toContain('class="log-analysis-gutter"');
+    // The highlighted line is marked in both the gutter and the text.
+    expect((html.match(/is-abnormal/gu) ?? [])).toHaveLength(2);
+    // A credential-shaped line is evidence, not something to hide.
+    expect(html).toContain("password=visible");
+
+    const source = readFileSync(new URL("./LogAnalysisPage.tsx", import.meta.url), "utf8");
+    for (const gone of ["redacted", "遮蔽", "SENSITIVE"]) expect(source).not.toContain(gone);
   });
 
   it("keeps phase one free of AI, rule mutation, exports, file entrypoints, terminals and generic execution", () => {

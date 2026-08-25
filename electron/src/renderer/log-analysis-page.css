@@ -1,86 +1,46 @@
 .log-analysis-page {
+  display: flex;
   min-height: 100%;
+  height: 100%;
+  flex-direction: column;
+  box-sizing: border-box;
+  padding: 20px 24px 24px;
   color: var(--text);
-  background: var(--bg);
+  background: var(--surface-alt);
+}
+
+.log-analysis-page *,
+.log-analysis-page *::before,
+.log-analysis-page *::after {
+  box-sizing: border-box;
 }
 
 .log-analysis-page button,
 .log-analysis-page input,
 .log-analysis-page textarea {
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface);
   font: inherit;
 }
 
-.log-analysis-page button:focus-visible,
-.log-analysis-page input:focus-visible,
-.log-analysis-page textarea:focus-visible,
-.log-analysis-page summary:focus-visible {
-  outline: 3px solid var(--accent-strong);
-  outline-offset: 2px;
-}
-
-.log-analysis-header,
-.log-analysis-view-header,
-.log-analysis-entry-list article > header,
-.log-analysis-ioc-results article > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.log-analysis-header {
-  padding: 24px 28px 18px;
-  border-bottom: 1px solid var(--border-strong);
-  background: var(--surface);
-}
-
-.log-analysis-header h1,
-.log-analysis-view-header h2,
-.log-analysis-threat-detail h3 {
-  margin: 0;
-  color: var(--text);
-}
-
-.log-analysis-header h1 {
-  font-size: 27px;
-  letter-spacing: -0.02em;
-}
-
-.log-analysis-kicker,
-.log-analysis-target,
-.log-analysis-header-actions,
-.log-analysis-view-header p,
-.log-analysis-muted {
-  margin: 4px 0 0;
-  color: var(--muted);
-}
-
-.log-analysis-kicker {
-  color: var(--accent-text);
-  font-size: 13px;
-  font-weight: 750;
-  letter-spacing: 0.08em;
-}
-
-.log-analysis-header-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 13px;
-}
-
 .log-analysis-page button {
-  border: 1px solid var(--border-strong);
-  border-radius: 9px;
-  padding: 8px 12px;
-  color: var(--text);
-  background: var(--surface-inset);
+  min-height: 36px;
+  padding: 8px 13px;
   cursor: pointer;
 }
 
 .log-analysis-page button:hover:not(:disabled) {
-  border-color: var(--accent);
-  background: var(--surface-inset);
+  border-color: var(--accent-strong);
+  background: var(--info-soft);
+}
+
+.log-analysis-page button:focus-visible,
+.log-analysis-page input:focus-visible,
+.log-analysis-page textarea:focus-visible {
+  outline: 3px solid var(--console-accent);
+  outline-offset: 2px;
 }
 
 .log-analysis-page button:disabled {
@@ -88,475 +48,773 @@
   opacity: 0.62;
 }
 
-.log-analysis-page .log-analysis-primary {
-  border-color: var(--accent-strong);
-  color: var(--on-accent);
-  background: var(--accent);
-}
-
-.log-analysis-page .log-analysis-primary:hover:not(:disabled) {
-  background: var(--accent-strong);
-}
-
-.log-analysis-readonly-banner {
-  margin: 16px 28px 0;
-  border: 1px solid var(--console-accent);
-  border-radius: 10px;
-  padding: 10px 13px;
-  color: var(--info-text);
-  background: var(--info-soft);
-  line-height: 1.5;
-}
-
-.log-analysis-tabs {
-  display: flex;
-  gap: 6px;
-  overflow-x: auto;
-  margin: 18px 28px 0;
-}
-
-.log-analysis-tabs button {
+.log-analysis-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
   white-space: nowrap;
-  background: var(--surface);
 }
 
-.log-analysis-tabs button.is-active {
-  border-color: var(--accent);
-  color: var(--on-accent);
-  background: var(--accent);
+/* Toolbar --------------------------------------------------------------- */
+
+.log-analysis-toolbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 12px;
 }
 
-.log-analysis-layout {
-  display: grid;
-  grid-template-columns: minmax(220px, 290px) minmax(0, 1fr);
-  gap: 18px;
-  padding: 20px 28px 32px;
+.log-analysis-toolbar h1 {
+  flex: none;
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
 }
 
-.log-analysis-sources,
-.log-analysis-workspace,
-.log-analysis-threat,
-.log-analysis-selector,
-.log-analysis-ioc-results > article {
+.log-analysis-views {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  padding: 2px;
   border: 1px solid var(--border-strong);
-  border-radius: 11px;
-  color: var(--text);
-  background: var(--surface);
+  border-radius: 9px;
+  background: var(--surface-inset);
 }
 
-.log-analysis-sources {
-  align-self: start;
-  padding: 13px;
-}
-
-.log-analysis-sources > label,
-.log-analysis-query label,
-.log-analysis-ioc-input {
-  display: grid;
-  gap: 6px;
-  color: var(--muted);
+.log-analysis-views button {
+  min-height: 30px;
+  padding: 4px 12px;
+  border-color: transparent;
+  border-radius: 7px;
+  background: transparent;
   font-size: 13px;
   font-weight: 650;
 }
 
-.log-analysis-page input,
-.log-analysis-page textarea {
-  min-width: 0;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  padding: 9px 10px;
-  color: var(--text);
+.log-analysis-views button.is-active {
+  border-color: var(--border-strong);
+  color: var(--accent);
   background: var(--surface);
 }
 
-.log-analysis-page textarea {
-  resize: vertical;
-  line-height: 1.45;
+.log-analysis-search {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
 }
 
-.log-analysis-source-list {
-  display: grid;
-  gap: 8px;
-  margin-top: 12px;
+.log-analysis-search > svg {
+  position: absolute;
+  left: 11px;
+  color: var(--muted);
+  pointer-events: none;
 }
 
-.log-analysis-page .log-analysis-source-list button {
-  display: grid;
+.log-analysis-search input {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 12px 8px 33px;
+}
+
+.log-analysis-search input::placeholder {
+  color: var(--muted);
+}
+
+.log-analysis-toolbar-meta {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.log-analysis-toolbar-meta > span {
+  display: inline-flex;
+  align-items: center;
   gap: 5px;
-  min-width: 0;
-  padding: 11px;
-  text-align: left;
-  background: var(--surface);
-  overflow-wrap: anywhere;
+  white-space: nowrap;
 }
 
-.log-analysis-page .log-analysis-source-list button.is-selected {
+.log-analysis-reload {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+/* Workbench ------------------------------------------------------------- */
+
+.log-analysis-workbench {
+  display: grid;
+  flex: 1;
+  min-height: 360px;
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.log-analysis-list {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  overflow: auto;
+  border-right: 1px solid var(--border-strong);
+  background: var(--surface-inset);
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+/* Source branch --------------------------------------------------------- */
+
+.log-analysis-group {
+  flex: none;
+}
+
+.log-analysis-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.log-analysis-list .log-analysis-group-toggle {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-color: transparent;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+}
+
+.log-analysis-group-toggle svg:first-child {
+  flex: none;
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+
+.log-analysis-group-toggle svg.is-open {
+  transform: rotate(90deg);
+}
+
+.log-analysis-group-toggle strong {
+  overflow: hidden;
+  flex: 1;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.log-analysis-group-count {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--surface);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.log-analysis-group-note {
+  flex: none;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.log-analysis-group-items {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 3px 0 7px 12px;
+}
+
+.log-analysis-group-items button {
+  display: flex;
+  min-height: 0;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 10px;
+  border-color: transparent;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+}
+
+.log-analysis-group-items button.is-selected {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus-ring) 30%, transparent);
   background: var(--info-soft);
 }
 
-.log-analysis-source-list span,
-.log-analysis-source-list small {
-  color: var(--muted);
-}
-
-.log-analysis-source-list small {
-  white-space: pre-wrap;
-}
-
-.log-analysis-workspace {
-  min-width: 0;
-  padding: 18px;
-}
-
-.log-analysis-view-header {
-  margin-bottom: 15px;
-}
-
-.log-analysis-view-header h2 {
-  font-size: 20px;
-  overflow-wrap: anywhere;
-}
-
-.log-analysis-view-header p {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.log-analysis-query {
-  display: grid;
-  grid-template-columns: minmax(160px, 1fr) minmax(145px, 0.5fr) minmax(150px, 0.7fr) auto;
-  align-items: end;
-  gap: 10px;
-  margin-bottom: 14px;
-}
-
-.log-analysis-threat {
-  margin: 14px 0;
-  padding: 13px;
-  border-left: 4px solid var(--border-strong);
-}
-
-.log-analysis-threat.level-low { border-left-color: var(--success); }
-.log-analysis-threat.level-medium { border-left-color: var(--warning); }
-.log-analysis-threat.level-high { border-left-color: var(--warning); }
-.log-analysis-threat.level-critical { border-left-color: var(--danger); }
-
-.log-analysis-threat-metrics {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(105px, 1fr));
-  gap: 8px;
-}
-
-.log-analysis-threat-metrics article {
-  display: grid;
-  gap: 3px;
-  border-radius: 8px;
-  padding: 10px;
-  color: var(--text);
-  background: var(--surface-inset);
-}
-
-.log-analysis-threat-metrics strong {
-  font-size: 20px;
-}
-
-.log-analysis-threat-metrics span,
-.log-analysis-threat details,
-.log-analysis-threat-detail p {
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.log-analysis-threat details {
-  margin-top: 10px;
-}
-
-.log-analysis-threat summary {
-  cursor: pointer;
-  font-weight: 700;
-}
-
-.log-analysis-threat-detail {
-  display: grid;
-  gap: 10px;
-  margin-top: 10px;
-}
-
-.log-analysis-threat-detail section {
-  border-top: 1px solid var(--border);
-  padding-top: 9px;
-}
-
-.log-analysis-threat-detail h3 {
-  font-size: 13px;
-}
-
-.log-analysis-threat-detail p {
-  margin: 5px 0 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.log-analysis-entry-list {
-  display: grid;
-  gap: 10px;
-}
-
-.log-analysis-entry-list article {
-  border: 1px solid var(--border-strong);
-  border-radius: 9px;
-  padding: 12px;
-  color: var(--text);
-  background: var(--surface);
-  overflow: hidden;
-}
-
-.log-analysis-entry-list article.is-highlighted {
-  border-color: var(--warning);
-  background: var(--warning-soft);
-}
-
-.log-analysis-entry-list article > header,
-.log-analysis-ioc-results article > header {
-  justify-content: flex-start;
-  flex-wrap: wrap;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.log-analysis-entry-list article > header span,
-.log-analysis-ioc-results article > header span {
-  border-radius: 99px;
-  padding: 2px 7px;
-  color: var(--text);
-  background: var(--surface-inset);
-}
-
-.log-analysis-entry-list article > p {
-  margin: 10px 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.log-analysis-entry-list pre,
-.log-analysis-ioc-results pre {
-  overflow: auto;
-  max-height: 280px;
-  margin: 8px 0 0;
-  border: 1px solid var(--console-border);
-  border-radius: 8px;
-  padding: 10px;
-  color: var(--console-text);
-  background: var(--console-bg);
-  font: 13px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.log-analysis-entry-list small,
-.log-analysis-ioc-results small {
-  display: block;
-  margin-top: 7px;
-  color: var(--warning-text);
-}
-
-.log-analysis-pagination {
-  display: flex;
+.log-analysis-check {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  flex: none;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  margin-top: 15px;
-  color: var(--muted);
-  font-size: 13px;
+  margin-top: 2px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  color: var(--accent);
+  background: var(--surface);
 }
 
-.log-analysis-selector {
+.log-analysis-check svg {
+  width: 11px;
+  height: 11px;
+}
+
+.log-analysis-source-body {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 8px;
-  margin: 0 0 14px;
-  padding: 12px;
+  min-width: 0;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 8px;
 }
 
-.log-analysis-selector legend {
-  padding: 0 5px;
-  color: var(--text);
-  font-weight: 700;
-}
-
-.log-analysis-selector label {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 3px 8px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 9px;
-  overflow-wrap: anywhere;
-}
-
-.log-analysis-selector input {
-  grid-row: 1 / span 2;
-  align-self: start;
-  margin: 2px 0 0;
-}
-
-.log-analysis-selector small {
-  color: var(--muted);
-  white-space: pre-wrap;
-}
-
-.log-analysis-ioc-input {
-  margin: 14px 0;
-}
-
-.log-analysis-ioc-results {
-  display: grid;
-  gap: 10px;
-  margin-top: 14px;
-}
-
-.log-analysis-ioc-results > p {
-  margin: 0;
-  color: var(--muted);
-}
-
-.log-analysis-ioc-results > article {
-  padding: 12px;
+.log-analysis-source-body strong {
   overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 650;
 }
 
-.log-analysis-ioc-results article > header strong {
-  overflow-wrap: anywhere;
+.log-analysis-source-body > span {
+  color: var(--muted);
+  font-size: 11.5px;
+  white-space: nowrap;
 }
 
-.log-analysis-coverage {
-  border-radius: 8px;
-  padding: 9px 11px;
+.log-analysis-source-location {
+  overflow: hidden;
+  grid-column: 1 / -1;
+  color: var(--faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "Cascadia Mono", monospace;
+  font-size: 11px;
+}
+
+.log-analysis-icon {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
   color: var(--info-text);
   background: var(--info-soft);
 }
 
-.log-analysis-warning {
-  margin: 14px 28px 0;
-  border: 1px solid var(--warning);
-  border-radius: 9px;
-  padding: 9px 11px;
-  color: var(--warning-text);
-  background: var(--warning-soft);
+.log-analysis-icon.is-journal {
+  color: var(--success-text);
+  background: var(--success-soft);
 }
 
-.log-analysis-workspace > .log-analysis-warning,
-.log-analysis-ioc-results > .log-analysis-warning {
-  margin-right: 0;
-  margin-left: 0;
+.log-analysis-icon svg {
+  width: 14px;
+  height: 14px;
 }
 
-.log-analysis-inline-error {
-  color: var(--danger-text);
+/* Detail ---------------------------------------------------------------- */
+
+.log-analysis-detail {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px 18px;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
-.log-analysis-status,
-.log-analysis-empty,
-.log-analysis-error,
-.log-analysis-disconnected {
-  display: grid;
-  place-items: center;
-  gap: 8px;
-  min-height: 150px;
-  margin: 20px 28px;
-  border: 1px dashed var(--border-strong);
-  border-radius: 12px;
-  padding: 22px;
+.log-analysis-detail > * {
+  flex: none;
+}
+
+.log-analysis-detail > header {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+}
+
+.log-analysis-detail > header .log-analysis-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+}
+
+.log-analysis-detail > header .log-analysis-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.log-analysis-detail > header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.log-analysis-detail > header p {
+  margin: 3px 0 0;
   color: var(--muted);
-  background: var(--surface);
-  text-align: center;
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
 }
 
-.log-analysis-disconnected {
-  min-height: 280px;
-}
-
-.log-analysis-disconnected h1,
-.log-analysis-empty strong {
+.log-analysis-facts {
+  display: grid;
   margin: 0;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+}
+
+.log-analysis-facts > div {
+  padding: 8px 11px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-inset);
+}
+
+.log-analysis-facts dt {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.log-analysis-facts dd {
+  margin: 3px 0 0;
   color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
 }
 
-.log-analysis-empty p,
-.log-analysis-disconnected p {
-  margin: 0;
+.log-analysis-run {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 7px;
+  border-color: var(--accent);
+  color: var(--on-accent);
+  background: var(--accent);
+  font-weight: 700;
 }
 
-.log-analysis-status.is-compact,
-.log-analysis-empty.is-compact,
-.log-analysis-error.is-compact,
-.log-analysis-workspace > .log-analysis-status {
-  min-height: 110px;
-  margin: 12px 0;
+.log-analysis-run:hover:not(:disabled) {
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
 }
 
-.log-analysis-error {
-  border-style: solid;
-  border-color: var(--danger-border);
+/* Query form ------------------------------------------------------------ */
+
+.log-analysis-query {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-inset);
+}
+
+.log-analysis-query label,
+.log-analysis-ioc-input {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.log-analysis-query input {
+  min-height: 34px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.log-analysis-ioc-input textarea {
+  padding: 8px 10px;
+  color: var(--text);
+  font-family: "Cascadia Mono", monospace;
+  font-size: 12.5px;
+  resize: vertical;
+}
+
+/* Output ---------------------------------------------------------------- */
+
+.log-analysis-output {
+  display: flex;
+  max-height: 460px;
+  overflow: auto;
+  border: 1px solid var(--console-border);
+  border-radius: 10px;
+  background: var(--console-bg);
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.log-analysis-gutter {
+  position: sticky;
+  left: 0;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  padding: 10px 8px;
+  border-right: 1px solid var(--console-border);
+  color: var(--console-muted);
+  background: var(--console-bg);
+  text-align: right;
+  font-family: "Cascadia Mono", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  user-select: none;
+}
+
+.log-analysis-gutter span.is-abnormal {
   color: var(--danger-text);
+  font-weight: 700;
+}
+
+.log-analysis-lines {
+  flex: none;
+  padding: 10px 12px;
+}
+
+.log-analysis-lines p {
+  display: flex;
+  margin: 0;
+  align-items: baseline;
+  gap: 10px;
+  color: var(--console-text);
+  font-family: "Cascadia Mono", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.log-analysis-lines p.is-abnormal {
+  color: var(--danger-text);
+}
+
+.log-analysis-line-meta {
+  display: inline-flex;
+  flex: none;
+  gap: 8px;
+  color: var(--console-muted);
+  white-space: nowrap;
+}
+
+.log-analysis-lines p.is-abnormal .log-analysis-line-meta {
+  color: var(--danger-text);
+}
+
+.log-analysis-line-meta em {
+  font-style: normal;
+  font-weight: 700;
+}
+
+/* A wrapped line would slide out from under its own number, so lines do not
+   wrap: the block scrolls sideways and the gutter stays pinned to it. */
+.log-analysis-line-text {
+  flex: none;
+  white-space: pre;
+}
+
+.log-analysis-lines small {
+  margin-left: 8px;
+  color: var(--warning-text);
+  font-family: inherit;
+  font-size: 11px;
+}
+
+.log-analysis-output pre {
+  flex: none;
+  margin: 0;
+  padding: 10px 12px;
+  color: var(--console-text);
+  font-family: "Cascadia Mono", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre;
+}
+
+/* Threat summary -------------------------------------------------------- */
+
+.log-analysis-threat {
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-inset);
+}
+
+.log-analysis-threat.level-high,
+.log-analysis-threat.level-critical {
+  border-color: var(--danger-border);
   background: var(--danger-soft);
 }
 
+.log-analysis-threat.level-medium {
+  border-color: var(--warning-border);
+  background: var(--warning-soft);
+}
+
+.log-analysis-threat-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 8px;
+}
+
+.log-analysis-threat-metrics article {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.log-analysis-threat-metrics strong {
+  color: var(--text);
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.log-analysis-threat-metrics span {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.log-analysis-threat.level-high .log-analysis-threat-level strong,
+.log-analysis-threat.level-critical .log-analysis-threat-level strong {
+  color: var(--danger-text);
+}
+
+.log-analysis-threat details {
+  margin-top: 9px;
+}
+
+.log-analysis-threat summary {
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.log-analysis-threat-detail {
+  display: grid;
+  margin-top: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.log-analysis-threat-detail h3 {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 650;
+}
+
+.log-analysis-threat-detail p {
+  margin: 0 0 3px;
+  color: var(--text);
+  font-family: "Cascadia Mono", monospace;
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+
+/* IOC results ----------------------------------------------------------- */
+
+.log-analysis-ioc-results {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.log-analysis-ioc-results article {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-inset);
+}
+
+.log-analysis-ioc-results header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.log-analysis-ioc-results header strong {
+  color: var(--text);
+  font-family: "Cascadia Mono", monospace;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.log-analysis-ioc-results header span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.log-analysis-ioc-count {
+  margin-left: auto;
+  font-weight: 650;
+}
+
+.log-analysis-ioc-results small {
+  color: var(--warning-text);
+  font-size: 11.5px;
+}
+
+/* Pagination and notices ------------------------------------------------ */
+
+.log-analysis-pagination {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.log-analysis-coverage {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.log-analysis-muted {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.log-analysis-warning {
+  margin: 0;
+  padding: 7px 11px;
+  border: 1px solid var(--warning-border);
+  border-radius: 9px;
+  color: var(--warning-text);
+  background: var(--warning-soft);
+  font-size: 12.5px;
+}
+
+.log-analysis-inline-error {
+  margin: 0;
+  color: var(--danger-text);
+  font-size: 12.5px;
+}
+
+.log-analysis-status {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--muted);
+  background: var(--surface-inset);
+  font-size: 13px;
+}
+
 .log-analysis-status span {
-  width: 18px;
-  height: 18px;
+  width: 13px;
+  height: 13px;
   border: 2px solid var(--border-strong);
   border-top-color: var(--accent);
   border-radius: 50%;
-  animation: log-analysis-spin 0.8s linear infinite;
+  animation: log-analysis-spin 0.9s linear infinite;
 }
 
 @keyframes log-analysis-spin {
-  to { transform: rotate(360deg); }
-}
-
-@media (max-width: 900px) {
-  .log-analysis-layout {
-    grid-template-columns: 1fr;
-  }
-
-  .log-analysis-query {
-    grid-template-columns: 1fr 1fr;
+  to {
+    transform: rotate(360deg);
   }
 }
 
-@media (max-width: 640px) {
-  .log-analysis-header,
-  .log-analysis-view-header,
-  .log-analysis-header-actions {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .log-analysis-header,
-  .log-analysis-layout {
-    padding-right: 16px;
-    padding-left: 16px;
-  }
-
-  .log-analysis-tabs,
-  .log-analysis-readonly-banner,
-  .log-analysis-warning,
-  .log-analysis-status,
-  .log-analysis-empty,
-  .log-analysis-error {
-    margin-right: 16px;
-    margin-left: 16px;
-  }
-
-  .log-analysis-query {
-    grid-template-columns: 1fr;
-  }
+.log-analysis-error {
+  padding: 14px 16px;
+  border: 1px solid var(--danger-border);
+  border-radius: 10px;
+  background: var(--danger-soft);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .log-analysis-status span { animation: none; }
+.log-analysis-error strong {
+  color: var(--danger-text);
+  font-size: 13px;
 }
-.log-analysis-disconnected h1, .log-analysis-disconnected h2, .log-analysis-disconnected strong { color: var(--text); }
+
+.log-analysis-error p {
+  margin: 4px 0 0;
+  color: var(--danger-text);
+  font-size: 12.5px;
+}
+
+.log-analysis-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 26px 18px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 10px;
+  text-align: center;
+}
+
+.log-analysis-empty.is-compact {
+  padding: 16px;
+}
+
+.log-analysis-empty strong {
+  color: var(--text);
+  font-size: 13.5px;
+}
+
+.log-analysis-empty p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+/* Disconnected ---------------------------------------------------------- */
+
+.log-analysis-disconnected {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.log-analysis-disconnected h1 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.log-analysis-disconnected p {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 13.5px;
+}

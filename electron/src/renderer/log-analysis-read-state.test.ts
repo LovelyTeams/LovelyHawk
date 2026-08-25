@@ -73,7 +73,6 @@ function readResult(sourceHandle = "journal-a", page = 1): LogSourceReadResult {
     hasMore: false,
     entries: [],
     threatSummary,
-    redactedCount: 0,
     truncated: false,
   };
 }
@@ -149,7 +148,6 @@ describe("log analysis read reducer", () => {
       totalObserved: 0,
       entries: [],
       threatSummary,
-      redactedCount: 0,
       truncated: false,
     };
     state = logAnalysisReadReducer(state, { type: "correlation-started", scope: "scope-a", request });
@@ -177,11 +175,9 @@ describe("log analysis read reducer", () => {
         sourceName: "auth.log",
         count: 1,
         sampleLines: [],
-        samplesRedacted: false,
         textTruncated: false,
       }],
       totalMatches: 1,
-      redactedSampleCount: 0,
       truncated: false,
     };
     state = logAnalysisReadReducer(state, { type: "ioc-started", scope: "scope-a", request });

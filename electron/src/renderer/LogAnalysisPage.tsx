@@ -8,7 +8,9 @@ import {
   isLogSourceReadResult,
   isLogSourceSnapshot,
   type LogAnalysisReadApi,
+  type LogCorrelationResult,
   type LogIocSearchResult,
+  type LogSourceKind,
   type LogSource,
   type LogSourceReadResult,
   type LogThreatSummary,
@@ -18,11 +20,25 @@ import {
   buildLogReadInput,
   filterLogSources,
   formatLogSourceSize,
+  groupLogSources,
   logAnalysisScope,
   logAnalysisTabLabel,
+  logSourceKindLabel,
   logThreatLevelLabel,
   parseIocIndicators,
+  type LogSourceGroup,
 } from "./log-analysis-read-helpers";
+import {
+  CheckIcon,
+  ChevronIcon,
+  ClockIcon,
+  LockIcon,
+  PlayIcon,
+  RefreshIcon,
+  SearchIcon,
+  TagIcon,
+} from "./emergency-command-icons";
+import { LogSourceIcon } from "./log-source-icon";
 import {
   createLogAnalysisReadState,
   logAnalysisReadReducer,
@@ -48,6 +64,8 @@ export function LogAnalysisPage({ bindingHandle, api }: LogAnalysisPageProps) {
   const [queryError, setQueryError] = useState<string | null>(null);
   const [iocDraft, setIocDraft] = useState("");
   const [iocInputError, setIocInputError] = useState<string | null>(null);
+  // Collapsing a branch is view state, so it lives with the view.
+  const [collapsedKinds, setCollapsedKinds] = useState<readonly LogSourceKind[]>([]);
   const requestRef = useRef(0);
   const scope = bindingHandle === null ? null : logAnalysisScope(bindingHandle);
   const activeScopeRef = useRef<string | null>(scope);
@@ -206,56 +224,82 @@ export function LogAnalysisPage({ bindingHandle, api }: LogAnalysisPageProps) {
     });
   };
 
+  const sources = state.snapshot?.sources ?? [];
+  const visible = filterLogSources(sources, state.sourceFilter);
+  const groups = groupLogSources(visible);
+  const analysing = state.tab !== "browse";
+  const busy = state.readStatus === "loading" || state.correlationStatus === "loading" ||
+    state.iocStatus === "loading";
+
   return (
     <main className="log-analysis-page">
-      <header className="log-analysis-header">
-        <div>
-          <p className="log-analysis-kicker">只读</p>
-          <h1>日志分析</h1>
-          <p className="log-analysis-target">当前 SSH 绑定的只读短期快照</p>
-        </div>
-        <div className="log-analysis-header-actions">
-          {state.snapshot !== null && <span>快照约 {Math.max(1, Math.ceil(state.snapshot.expiresInSeconds / 60))} 分钟有效</span>}
-          <button type="button" disabled={!stateIsCurrent || state.snapshotStatus === "loading"} onClick={() => setSnapshotVersion((value) => value + 1)}>
-            {state.snapshotStatus === "loading" ? "刷新中…" : "刷新日志源"}
+      <div className="log-analysis-toolbar">
+        <h1>日志分析</h1>
+        <nav className="log-analysis-views" aria-label="日志分析视图">
+          {tabs.map((tab) => (
+            <button key={tab} type="button" className={state.tab === tab ? "is-active" : ""}
+              aria-current={state.tab === tab ? "page" : undefined}
+              onClick={() => dispatch({ type: "tab-selected", tab })}>
+              {logAnalysisTabLabel(tab)}
+            </button>
+          ))}
+        </nav>
+        <label className="log-analysis-search">
+          <SearchIcon />
+          <span className="log-analysis-sr-only">筛选日志源</span>
+          <input value={state.sourceFilter} maxLength={256} placeholder="筛选日志源"
+            onChange={(event) => dispatch({ type: "source-filter-changed", value: event.target.value })} />
+        </label>
+        <div className="log-analysis-toolbar-meta">
+          {state.snapshot !== null && <span>{visible.length === sources.length ?
+            `共 ${sources.length} 个日志源` : `${visible.length}/${sources.length} 个日志源`}</span>}
+          {state.snapshot !== null && <span className="log-analysis-expiry"><ClockIcon />快照约 {
+            Math.max(1, Math.ceil(state.snapshot.expiresInSeconds / 60))} 分钟有效</span>}
+          <button type="button" className="log-analysis-reload"
+            disabled={!stateIsCurrent || state.snapshotStatus === "loading" || busy}
+            onClick={() => setSnapshotVersion((value) => value + 1)}>
+            <RefreshIcon />{state.snapshotStatus === "loading" ? "刷新中…" : "刷新日志源"}
           </button>
         </div>
-      </header>
-      <p className="log-analysis-readonly-banner">
-        本页只读取已发现并绑定到短期快照的日志源；不会将展示位置作为后续读取参数。
-      </p>
+      </div>
       {!stateIsCurrent || state.snapshotStatus === "loading" && state.snapshot === null ? (
         <StatusPanel label="正在发现可读日志源…" />
       ) : state.snapshotStatus === "error" ? (
         <ErrorPanel message={state.snapshotError ?? "日志源发现失败。"} />
-      ) : state.snapshot === null || state.snapshot.sources.length === 0 ? (
+      ) : state.snapshot === null || sources.length === 0 ? (
         <EmptyPanel title="没有可读日志源" detail="当前目标没有返回文件日志或 journal 探测结果。" />
       ) : (
-        <>
-          {(state.snapshot.partial || state.snapshot.truncated) && (
-            <p className="log-analysis-warning" role="status">
-              {state.snapshot.partial ? "部分日志源探测失败。" : ""} {state.snapshot.truncated ? "日志源清单已按安全边界截断。" : ""}
-            </p>
-          )}
-          <nav className="log-analysis-tabs" aria-label="日志分析视图">
-            {tabs.map((tab) => (
-              <button key={tab} type="button" className={state.tab === tab ? "is-active" : ""}
-                aria-current={state.tab === tab ? "page" : undefined}
-                onClick={() => dispatch({ type: "tab-selected", tab })}>
-                {logAnalysisTabLabel(tab)}
-              </button>
+        <div className="log-analysis-workbench">
+          <aside className="log-analysis-list" aria-label="可读日志源">
+            {(state.snapshot.partial || state.snapshot.truncated) && (
+              <p className="log-analysis-warning" role="status">
+                {state.snapshot.partial ? "部分日志源探测失败。" : ""}
+                {state.snapshot.truncated ? "日志源清单已按安全边界截断。" : ""}
+              </p>
+            )}
+            {groups.length === 0 ? <EmptyPanel title="没有匹配的日志源"
+              detail="调整上方的筛选条件。" compact /> : groups.map((group) => (
+              <LogSourceBranch
+                key={group.kind}
+                group={group}
+                collapsed={collapsedKinds.includes(group.kind)}
+                selecting={analysing}
+                selectedHandle={state.selectedSourceHandle}
+                checked={state.analysisSourceHandles}
+                busy={busy}
+                onToggle={() => setCollapsedKinds((current) => current.includes(group.kind)
+                  ? current.filter((kind) => kind !== group.kind)
+                  : [...current, group.kind])}
+                onSelect={(handle) => dispatch(analysing
+                  ? { type: "analysis-source-toggled", handle }
+                  : { type: "source-selected", handle })}
+              />
             ))}
-          </nav>
-          <div className="log-analysis-layout">
-            <SourceSidebar
-              sources={state.snapshot.sources}
-              selectedHandle={state.selectedSourceHandle}
-              filter={state.sourceFilter}
-              onFilter={(value) => dispatch({ type: "source-filter-changed", value })}
-              onSelect={(handle) => dispatch({ type: "source-selected", handle })}
-            />
-            <section className="log-analysis-workspace">
-              {state.tab === "browse" && selectedSource !== null && (
+          </aside>
+          <section className="log-analysis-detail">
+            {state.tab === "browse" ? (
+              selectedSource === null ? <EmptyPanel title="未选择日志源"
+                detail="从左侧选择一个文件日志或 journal 单元。" /> : (
                 <BrowseView
                   source={selectedSource}
                   draftFilter={draftFilter}
@@ -275,62 +319,84 @@ export function LogAnalysisPage({ bindingHandle, api }: LogAnalysisPageProps) {
                   page={state.page}
                   onPage={(page) => dispatch({ type: "page-selected", page })}
                 />
-              )}
-              {state.tab === "correlation" && (
-                <CorrelationView
-                  sources={state.snapshot.sources}
-                  selected={state.analysisSourceHandles}
-                  onToggle={(handle) => dispatch({ type: "analysis-source-toggled", handle })}
-                  status={state.correlationStatus}
-                  error={state.correlationError}
-                  result={state.correlation}
-                  onRun={runCorrelation}
-                />
-              )}
-              {state.tab === "ioc" && (
-                <IocView
-                  sources={state.snapshot.sources}
-                  selected={state.analysisSourceHandles}
-                  onToggle={(handle) => dispatch({ type: "analysis-source-toggled", handle })}
-                  draft={iocDraft}
-                  onDraft={setIocDraft}
-                  inputError={iocInputError}
-                  status={state.iocStatus}
-                  error={state.iocError}
-                  result={state.ioc}
-                  onRun={runIocSearch}
-                />
-              )}
-            </section>
-          </div>
-        </>
+              )
+            ) : state.tab === "correlation" ? (
+              <CorrelationView
+                selected={state.analysisSourceHandles}
+                status={state.correlationStatus}
+                error={state.correlationError}
+                result={state.correlation}
+                onRun={runCorrelation}
+              />
+            ) : (
+              <IocView
+                selected={state.analysisSourceHandles}
+                draft={iocDraft}
+                onDraft={setIocDraft}
+                inputError={iocInputError}
+                status={state.iocStatus}
+                error={state.iocError}
+                result={state.ioc}
+                onRun={runIocSearch}
+              />
+            )}
+          </section>
+        </div>
       )}
     </main>
   );
 }
 
-function SourceSidebar({ sources, selectedHandle, filter, onFilter, onSelect }: {
-  sources: readonly LogSource[];
+/**
+ * One kind of log source: a collapsible branch with its own count. In the two
+ * analysis views the same rows become a multi-selection, so the operator never
+ * has to find the source list twice.
+ */
+function LogSourceBranch({ group, collapsed, selecting, selectedHandle, checked, busy, onToggle, onSelect }: {
+  group: LogSourceGroup;
+  collapsed: boolean;
+  selecting: boolean;
   selectedHandle: string | null;
-  filter: string;
-  onFilter(value: string): void;
+  checked: readonly string[];
+  busy: boolean;
+  onToggle(): void;
   onSelect(handle: string): void;
 }) {
-  const visible = filterLogSources(sources, filter);
+  const label = logSourceKindLabel(group.kind);
   return (
-    <aside className="log-analysis-sources">
-      <label>筛选日志源<input value={filter} maxLength={256} onChange={(event) => onFilter(event.target.value)} /></label>
-      <div className="log-analysis-source-list">
-        {visible.length === 0 ? <p className="log-analysis-muted">没有匹配的日志源。</p> : visible.map((source) => (
-          <button key={source.sourceHandle} type="button" className={selectedHandle === source.sourceHandle ? "is-selected" : ""}
-            aria-pressed={selectedHandle === source.sourceHandle} onClick={() => onSelect(source.sourceHandle)}>
-            <strong>{source.displayName || "（未命名日志源）"}</strong>
-            <span>{source.kind === "journal" ? "Journal" : "文件"} · {formatLogSourceSize(source.sizeBytes)}</span>
-            <small>{source.displayLocation || "—"}</small>
-          </button>
-        ))}
+    <div className="log-analysis-group">
+      <div className="log-analysis-group-header">
+        <button type="button" className="log-analysis-group-toggle" aria-expanded={!collapsed} onClick={onToggle}>
+          <ChevronIcon open={!collapsed} />
+          <LogSourceIcon kind={group.kind} />
+          <strong>{label}</strong>
+          <span className="log-analysis-group-count">{group.sources.length}</span>
+        </button>
+        {selecting && group.kind === "journal" && <span className="log-analysis-group-note">不参与关联</span>}
       </div>
-    </aside>
+      {!collapsed && <div className="log-analysis-group-items">
+        {group.sources.map((source) => {
+          const excluded = selecting && source.kind === "journal";
+          const active = selecting
+            ? checked.includes(source.sourceHandle)
+            : selectedHandle === source.sourceHandle;
+          return (
+            <button type="button" key={source.sourceHandle} className={active ? "is-selected" : ""}
+              aria-pressed={active} disabled={busy || excluded}
+              onClick={() => onSelect(source.sourceHandle)}>
+              {selecting && <span className="log-analysis-check" aria-hidden="true">
+                {active ? <CheckIcon /> : null}
+              </span>}
+              <span className="log-analysis-source-body">
+                <strong>{source.displayName || "（未命名日志源）"}</strong>
+                <span>{formatLogSourceSize(source.sizeBytes)}</span>
+                <span className="log-analysis-source-location">{source.displayLocation || "—"}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>}
+    </div>
   );
 }
 
@@ -348,30 +414,55 @@ function BrowseView({ source, draftFilter, onDraftFilter, queryError, onApply, s
 }) {
   return (
     <>
-      <div className="log-analysis-view-header"><div><h2>{source.displayName || "日志源"}</h2><p>{source.displayLocation || "—"}</p></div></div>
+      <header>
+        <LogSourceIcon kind={source.kind} />
+        <div>
+          <h2>{source.displayName || "日志源"}</h2>
+          <p>{source.displayLocation || "—"}</p>
+        </div>
+      </header>
+      <dl className="log-analysis-facts">
+        <div>
+          <dt><TagIcon />类型</dt>
+          <dd>{logSourceKindLabel(source.kind)}</dd>
+        </div>
+        <div>
+          <dt><ClockIcon />大小</dt>
+          <dd>{formatLogSourceSize(source.sizeBytes)}</dd>
+        </div>
+        <div>
+          <dt><LockIcon />读取方式</dt>
+          <dd>只读，按页读取</dd>
+        </div>
+      </dl>
       <form className="log-analysis-query" onSubmit={(event) => { event.preventDefault(); onApply(); }}>
         <label>关键词<input value={draftFilter.keyword} maxLength={256} placeholder="可选，单行文本"
           onChange={(event) => onDraftFilter({ ...draftFilter, keyword: event.target.value })} /></label>
         <label>日期<input type="date" value={draftFilter.date}
           onChange={(event) => onDraftFilter({ ...draftFilter, date: event.target.value })} /></label>
-        {source.kind === "journal" && <label>Journal 单元<input value={draftFilter.journalUnit} maxLength={128} placeholder="例如 ssh.service"
+        {source.kind === "journal" && <label>Journal 单元<input value={draftFilter.journalUnit} maxLength={128}
+          placeholder="例如 ssh.service"
           onChange={(event) => onDraftFilter({ ...draftFilter, journalUnit: event.target.value })} /></label>}
-        <button className="log-analysis-primary" type="submit" disabled={status === "loading"}>{status === "loading" ? "读取中…" : "应用并读取"}</button>
+        <button className="log-analysis-run" type="submit" disabled={status === "loading"}>
+          <PlayIcon />{status === "loading" ? "读取中…" : "读取日志"}
+        </button>
       </form>
       {queryError !== null && <p className="log-analysis-inline-error" role="alert">{queryError}</p>}
       {status === "loading" && result === null ? <StatusPanel label="正在读取日志…" /> :
         status === "error" ? <ErrorPanel message={error ?? "日志读取失败。"} compact /> : result === null ?
-          <EmptyPanel title="等待日志结果" detail="应用查询后读取当前源。" compact /> : (
+          <EmptyPanel title="尚未读取" detail="结果将在这里以纯文本逐行显示。" compact /> : (
             <>
               <LogThreatCards summary={result.threatSummary} />
               <LogEntriesView entries={result.entries} empty="当前页没有匹配日志。" />
               <div className="log-analysis-pagination">
-                <button type="button" disabled={page <= 1 || status === "loading"} onClick={() => onPage(page - 1)}>上一页</button>
+                <button type="button" disabled={page <= 1 || status === "loading"}
+                  onClick={() => onPage(page - 1)}>上一页</button>
                 <span>第 {page} 页 · {result.entryCount} 条</span>
-                <button type="button" disabled={!result.hasMore || status === "loading" || page >= 10_000} onClick={() => onPage(page + 1)}>下一页</button>
+                <button type="button" disabled={!result.hasMore || status === "loading" || page >= 10_000}
+                  onClick={() => onPage(page + 1)}>下一页</button>
               </div>
-              {(result.truncated || result.redactedCount > 0) && <p className="log-analysis-warning" role="status">
-                {result.truncated ? "本页文本已按安全边界截断。" : ""} {result.redactedCount > 0 ? `${result.redactedCount} 条疑似敏感日志已整行遮蔽。` : ""}
+              {result.truncated && <p className="log-analysis-warning" role="status">
+                本页文本已按大小上限截断。
               </p>}
             </>
           )}
@@ -379,29 +470,49 @@ function BrowseView({ source, draftFilter, onDraftFilter, queryError, onApply, s
   );
 }
 
-function CorrelationView({ sources, selected, onToggle, status, error, result, onRun }: {
-  sources: readonly LogSource[];
+function CorrelationView({ selected, status, error, result, onRun }: {
   selected: readonly string[];
-  onToggle(handle: string): void;
   status: LogAnalysisStatus;
   error: string | null;
-  result: import("../shared/log-analysis-read-contract").LogCorrelationResult | null;
+  result: LogCorrelationResult | null;
   onRun(): void;
 }) {
   return (
     <>
-      <div className="log-analysis-view-header"><div><h2>多源关联</h2><p>选择 2–8 个文件日志源；每源最多观察 200 行。</p></div>
-        <button className="log-analysis-primary" type="button" disabled={selected.length < 2 || status === "loading"} onClick={onRun}>{status === "loading" ? "关联中…" : "运行关联"}</button></div>
-      <AnalysisSourceSelector sources={sources} selected={selected} onToggle={onToggle} />
+      <header>
+        <LogSourceIcon kind="file" />
+        <div>
+          <h2>多源关联</h2>
+          <p>在左侧勾选 2–8 个文件日志源；每源最多观察 200 行。</p>
+        </div>
+      </header>
+      <dl className="log-analysis-facts">
+        <div>
+          <dt><TagIcon />已选日志源</dt>
+          <dd>{selected.length} / 8</dd>
+        </div>
+        <div>
+          <dt><ClockIcon />每源观察上限</dt>
+          <dd>200 行</dd>
+        </div>
+        <div>
+          <dt><LockIcon />读取方式</dt>
+          <dd>只读，一次性关联</dd>
+        </div>
+      </dl>
+      <button className="log-analysis-run" type="button" disabled={selected.length < 2 || status === "loading"}
+        onClick={onRun}>
+        <PlayIcon />{status === "loading" ? "关联中…" : "运行关联"}
+      </button>
       {status === "loading" ? <StatusPanel label="正在关联所选日志源…" /> : status === "error" ?
         <ErrorPanel message={error ?? "多源关联失败。"} compact /> : result === null ?
-          <EmptyPanel title="尚未运行关联" detail="选择至少两个文件日志源后运行。" compact /> : (
+          <EmptyPanel title="尚未运行关联" detail="在左侧勾选至少两个文件日志源后运行。" compact /> : (
             <>
               <p className="log-analysis-coverage">已观察 {result.totalObserved} 条</p>
               <LogThreatCards summary={result.threatSummary} />
               <LogEntriesView entries={result.entries} empty="没有可展示的关联日志。" />
-              {(result.truncated || result.redactedCount > 0) && <p className="log-analysis-warning" role="status">
-                关联结果不代表未读取范围。{result.redactedCount > 0 ? ` ${result.redactedCount} 条已整行遮蔽。` : ""}
+              {result.truncated && <p className="log-analysis-warning" role="status">
+                关联结果不代表未读取范围。
               </p>}
             </>
           )}
@@ -409,10 +520,8 @@ function CorrelationView({ sources, selected, onToggle, status, error, result, o
   );
 }
 
-function IocView({ sources, selected, onToggle, draft, onDraft, inputError, status, error, result, onRun }: {
-  sources: readonly LogSource[];
+function IocView({ selected, draft, onDraft, inputError, status, error, result, onRun }: {
   selected: readonly string[];
-  onToggle(handle: string): void;
   draft: string;
   onDraft(value: string): void;
   inputError: string | null;
@@ -423,80 +532,140 @@ function IocView({ sources, selected, onToggle, draft, onDraft, inputError, stat
 }) {
   return (
     <>
-      <div className="log-analysis-view-header"><div><h2>IOC 搜索</h2><p>1–8 个文件日志源，最多 16 个 IOC，组合上限 64。</p></div>
-        <button className="log-analysis-primary" type="button" disabled={selected.length < 1 || status === "loading"} onClick={onRun}>{status === "loading" ? "搜索中…" : "搜索 IOC"}</button></div>
-      <AnalysisSourceSelector sources={sources} selected={selected} onToggle={onToggle} />
-      <label className="log-analysis-ioc-input">IOC（每行一个）<textarea value={draft} rows={6} maxLength={4_111}
-        onChange={(event) => onDraft(event.target.value)} /></label>
+      <header>
+        <LogSourceIcon kind="file" />
+        <div>
+          <h2>IOC 搜索</h2>
+          <p>在左侧勾选 1–8 个文件日志源，最多 16 个 IOC，组合上限 64。</p>
+        </div>
+      </header>
+      <dl className="log-analysis-facts">
+        <div>
+          <dt><TagIcon />已选日志源</dt>
+          <dd>{selected.length} / 8</dd>
+        </div>
+        <div>
+          <dt><ClockIcon />IOC 上限</dt>
+          <dd>16 个</dd>
+        </div>
+        <div>
+          <dt><LockIcon />读取方式</dt>
+          <dd>只读，逐源匹配</dd>
+        </div>
+      </dl>
+      <label className="log-analysis-ioc-input">IOC（每行一个）
+        <textarea value={draft} rows={5} maxLength={4_111} onChange={(event) => onDraft(event.target.value)} />
+      </label>
       {inputError !== null && <p className="log-analysis-inline-error" role="alert">{inputError}</p>}
+      <button className="log-analysis-run" type="button" disabled={selected.length < 1 || status === "loading"}
+        onClick={onRun}>
+        <PlayIcon />{status === "loading" ? "搜索中…" : "搜索 IOC"}
+      </button>
       {status === "loading" ? <StatusPanel label="正在搜索 IOC…" /> : status === "error" ?
         <ErrorPanel message={error ?? "IOC 搜索失败。"} compact /> : result === null ?
-          <EmptyPanel title="尚未搜索 IOC" detail="输入 IOC 并选择至少一个文件日志源。" compact /> :
+          <EmptyPanel title="尚未搜索 IOC" detail="输入 IOC 并在左侧勾选至少一个文件日志源。" compact /> :
           <LogIocResultsView result={result} />}
     </>
   );
-}
-
-function AnalysisSourceSelector({ sources, selected, onToggle }: {
-  sources: readonly LogSource[];
-  selected: readonly string[];
-  onToggle(handle: string): void;
-}) {
-  const files = sources.filter((source) => source.kind === "file");
-  return <fieldset className="log-analysis-selector"><legend>文件日志源（已选 {selected.length}/8）</legend>
-    {files.length === 0 ? <p className="log-analysis-muted">没有可用于此调查的文件日志源。</p> : files.map((source) => (
-      <label key={source.sourceHandle}><input type="checkbox" checked={selected.includes(source.sourceHandle)}
-        disabled={!selected.includes(source.sourceHandle) && selected.length >= 8}
-        onChange={() => onToggle(source.sourceHandle)} /><span>{source.displayName || "（未命名）"}</span><small>{source.displayLocation}</small></label>
-    ))}
-  </fieldset>;
 }
 
 export function LogThreatCards({ summary }: { summary: LogThreatSummary }) {
   return (
     <section className={`log-analysis-threat level-${summary.threatLevel}`} aria-label="威胁摘要">
       <div className="log-analysis-threat-metrics">
-        <article><strong>{logThreatLevelLabel(summary.threatLevel)}</strong><span>威胁等级</span></article>
+        <article className="log-analysis-threat-level">
+          <strong>{logThreatLevelLabel(summary.threatLevel)}</strong><span>威胁等级</span>
+        </article>
         <article><strong>{summary.bruteForceCount}</strong><span>暴力尝试</span></article>
         <article><strong>{summary.successfulLoginCount}</strong><span>成功登录</span></article>
         <article><strong>{summary.privilegeEscalationCount}</strong><span>提权活动</span></article>
         <article><strong>{summary.suspiciousActivityCount}</strong><span>可疑活动</span></article>
       </div>
-      <details><summary>来源、用户与小时分布</summary>
+      <details>
+        <summary>来源、用户与小时分布</summary>
         <div className="log-analysis-threat-detail">
-          <section><h3>来源 IP</h3>{summary.topSourceIps.length === 0 ? <p>无</p> : summary.topSourceIps.map((item, index) => <p key={`${item.ip}\0${index}`}>{item.ip || "—"} · {item.count} · {item.actionType || "—"} · {item.lastSeen || "—"}</p>)}</section>
-          <section><h3>目标用户</h3>{summary.topTargetUsers.length === 0 ? <p>无</p> : summary.topTargetUsers.map((item, index) => <p key={`${item.username}\0${index}`}>{item.username || "—"} · {item.count}（成功 {item.successCount} / 失败 {item.failCount}）</p>)}</section>
-          <section><h3>小时分布</h3><p>{summary.hourlyDistribution.map((count, hour) => `${String(hour).padStart(2, "0")}:00 ${count}`).join(" · ")}</p></section>
+          <section>
+            <h3>来源 IP</h3>
+            {summary.topSourceIps.length === 0 ? <p>无</p> : summary.topSourceIps.map((item, index) => (
+              <p key={`${item.ip}\0${index}`}>{item.ip || "—"} · {item.count} · {item.actionType || "—"} · {
+                item.lastSeen || "—"}</p>
+            ))}
+          </section>
+          <section>
+            <h3>目标用户</h3>
+            {summary.topTargetUsers.length === 0 ? <p>无</p> : summary.topTargetUsers.map((item, index) => (
+              <p key={`${item.username}\0${index}`}>{item.username || "—"} · {item.count}（成功 {
+                item.successCount} / 失败 {item.failCount}）</p>
+            ))}
+          </section>
+          <section>
+            <h3>小时分布</h3>
+            <p>{summary.hourlyDistribution.map((count, hour) =>
+              `${String(hour).padStart(2, "0")}:00 ${count}`).join(" · ")}</p>
+          </section>
         </div>
       </details>
     </section>
   );
 }
 
+/**
+ * Numbered lines with a pinned gutter, the same shape the command workbench
+ * uses for command output. Highlighted entries are marked rather than hidden,
+ * and the raw line is shown as the target wrote it.
+ */
 export function LogEntriesView({ entries, empty }: { entries: readonly PublicLogEntry[]; empty: string }) {
-  if (entries.length === 0) return <EmptyPanel title={empty} detail="空结果不代表未调查范围没有事件。" compact />;
-  return <div className="log-analysis-entry-list">{entries.map((entry, index) => (
-    <article className={entry.highlighted ? "is-highlighted" : ""} key={`${entry.timestamp}\0${index}`}>
-      <header><time>{entry.timestamp || "—"}</time><span>{entry.level || "—"}</span><span>{entry.service || "—"}</span>{entry.sourceName !== null && <span>{entry.sourceName}</span>}</header>
-      <p>{entry.message || "—"}</p>
-      <pre>{entry.rawText}</pre>
-      {(entry.redacted || entry.textTruncated) && <small>{entry.redacted ? "疑似敏感整行已遮蔽。" : ""} {entry.textTruncated ? "文本已截断。" : ""}</small>}
-    </article>
-  ))}</div>;
+  if (entries.length === 0) {
+    return <EmptyPanel title={empty} detail="空结果不代表未调查范围没有事件。" compact />;
+  }
+  return (
+    <div className="log-analysis-output">
+      <span className="log-analysis-gutter" aria-hidden="true">
+        {entries.map((entry, index) => <span key={`${entry.timestamp}\0${index}`}
+          className={entry.highlighted ? "is-abnormal" : undefined}>{index + 1}</span>)}
+      </span>
+      <div className="log-analysis-lines">
+        {entries.map((entry, index) => (
+          <p key={`${entry.timestamp}\0${index}`} className={entry.highlighted ? "is-abnormal" : undefined}>
+            <span className="log-analysis-line-meta">
+              <time>{entry.timestamp || "—"}</time>
+              <em>{entry.level || "—"}</em>
+              <span>{entry.service || "—"}</span>
+              {entry.sourceName !== null && <span>{entry.sourceName}</span>}
+            </span>
+            <span className="log-analysis-line-text">{entry.rawText || entry.message || "—"}</span>
+            {entry.textTruncated && <small>文本已截断。</small>}
+          </p>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export function LogIocResultsView({ result }: { result: LogIocSearchResult }) {
   return (
     <section className="log-analysis-ioc-results">
-      <p>匹配总数：{result.totalMatches}</p>
-      {result.results.length === 0 ? <EmptyPanel title="没有 IOC 匹配" detail="本次搜索没有返回匹配。" compact /> : result.results.map((item, index) => (
+      <p className="log-analysis-coverage">匹配总数 {result.totalMatches}</p>
+      {result.results.length === 0 ? <EmptyPanel title="没有 IOC 匹配"
+        detail="本次搜索没有返回匹配。" compact /> : result.results.map((item, index) => (
         <article key={`${item.indicator}\0${item.sourceHandle}\0${index}`}>
-          <header><strong>{item.indicator}</strong><span>{item.sourceName || "—"}</span><span>{item.count} 次</span></header>
-          {item.sampleLines.length === 0 ? <p className="log-analysis-muted">没有返回样本行。</p> : item.sampleLines.map((line, lineIndex) => <pre key={lineIndex}>{line}</pre>)}
-          {(item.samplesRedacted || item.textTruncated) && <small>{item.samplesRedacted ? "样本包含整行遮蔽。" : ""} {item.textTruncated ? "样本文本已截断。" : ""}</small>}
+          <header>
+            <strong>{item.indicator}</strong>
+            <span>{item.sourceName || "—"}</span>
+            <span className="log-analysis-ioc-count">{item.count} 次</span>
+          </header>
+          {item.sampleLines.length === 0 ? <p className="log-analysis-muted">没有返回样本行。</p> : (
+            <div className="log-analysis-output">
+              <span className="log-analysis-gutter" aria-hidden="true">
+                {item.sampleLines.map((_line, lineIndex) => <span key={lineIndex}>{lineIndex + 1}</span>)}
+              </span>
+              <pre>{item.sampleLines.join("\n")}</pre>
+            </div>
+          )}
+          {item.textTruncated && <small>样本文本已截断。</small>}
         </article>
       ))}
-      {result.truncated && <p className="log-analysis-warning" role="status">IOC 结果已按安全边界截断。</p>}
+      {result.truncated && <p className="log-analysis-warning" role="status">IOC 结果已按大小上限截断。</p>}
     </section>
   );
 }
@@ -506,9 +675,16 @@ export function StatusPanel({ label }: { label: string }) {
 }
 
 export function ErrorPanel({ message, compact = false }: { message: string; compact?: boolean }) {
-  return <div className={compact ? "log-analysis-error is-compact" : "log-analysis-error"} role="alert">{message}</div>;
+  return <div className={compact ? "log-analysis-error is-compact" : "log-analysis-error"}
+    role="alert"><strong>操作失败</strong><p>{message}</p></div>;
 }
 
-export function EmptyPanel({ title, detail, compact = false }: { title: string; detail: string; compact?: boolean }) {
-  return <div className={compact ? "log-analysis-empty is-compact" : "log-analysis-empty"}><strong>{title}</strong><p>{detail}</p></div>;
+export function EmptyPanel({ title, detail, compact = false }: {
+  title: string;
+  detail: string;
+  compact?: boolean;
+}) {
+  return <div className={compact ? "log-analysis-empty is-compact" : "log-analysis-empty"}>
+    <strong>{title}</strong><p>{detail}</p>
+  </div>;
 }

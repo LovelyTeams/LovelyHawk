@@ -45,7 +45,6 @@ export interface PublicLogEntry {
   highlighted: boolean;
   sourceHandle: string | null;
   sourceName: string | null;
-  redacted: boolean;
   textTruncated: boolean;
 }
 
@@ -85,7 +84,6 @@ export interface LogSourceReadResult {
   hasMore: boolean;
   entries: PublicLogEntry[];
   threatSummary: LogThreatSummary;
-  redactedCount: number;
   truncated: boolean;
 }
 
@@ -96,7 +94,6 @@ export interface LogCorrelationResult {
   totalObserved: number;
   entries: PublicLogEntry[];
   threatSummary: LogThreatSummary;
-  redactedCount: number;
   truncated: boolean;
 }
 
@@ -106,7 +103,6 @@ export interface LogIocMatch {
   sourceName: string;
   count: number;
   sampleLines: string[];
-  samplesRedacted: boolean;
   textTruncated: boolean;
 }
 
@@ -114,7 +110,6 @@ export interface LogIocSearchResult {
   snapshotHandle: string;
   results: LogIocMatch[];
   totalMatches: number;
-  redactedSampleCount: number;
   truncated: boolean;
 }
 
@@ -140,7 +135,6 @@ export interface LogAnalysisReadApi {
 
 type JsonRecord = Record<string, unknown>;
 const encoder = new TextEncoder();
-const redactedLine = "[SENSITIVE LOG LINE REDACTED]";
 const sourceKinds = new Set<LogSourceKind>(["file", "journal"]);
 const threatLevels = new Set<LogThreatLevel>(["none", "low", "medium", "high", "critical"]);
 
@@ -175,17 +169,13 @@ function noControls(value: string): boolean {
   return !/[\u0000-\u001f\u007f]/u.test(value);
 }
 
-function containsSensitiveMaterial(value: string): boolean {
-  const lower = value.toLocaleLowerCase();
-  return [
-    "password=", "password:", "passwd=", "passphrase=", "passphrase:", "secret=", "secret:",
-    "token=", "token:", "authorization=", "authorization:", "api_key=", "apikey=", "private_key=",
-    "credential=", "cookie:", "set-cookie:", "session_id=", "bearer ",
-  ].some((marker) => lower.includes(marker)) || lower.includes("://") && lower.includes("@");
-}
-
+/**
+ * Bounded, control-character-free text. It deliberately does not judge the
+ * content: a log line that mentions a token is the evidence, and refusing it
+ * here would reject the whole response rather than just that line.
+ */
 function publicText(value: unknown, maximumBytes: number, allowEmpty = true): value is string {
-  return text(value, maximumBytes, allowEmpty) && !containsSensitiveMaterial(value);
+  return text(value, maximumBytes, allowEmpty);
 }
 
 export function isLogAnalysisOpaqueHandle(value: unknown): value is string {
@@ -234,8 +224,7 @@ export function isLogIocSearchInput(value: unknown): value is LogIocSearchInput 
     !uniqueHandles(value.sourceHandles, 1, 8) || !Array.isArray(value.indicators) ||
     value.indicators.length === 0 || value.indicators.length > 16 ||
     value.indicators.length * value.sourceHandles.length > 64) return false;
-  return value.indicators.every((indicator) => optionalQueryText(indicator, 256) && indicator !== null &&
-    !containsSensitiveMaterial(indicator)) &&
+  return value.indicators.every((indicator) => optionalQueryText(indicator, 256) && indicator !== null) &&
     new Set(value.indicators).size === value.indicators.length;
 }
 
@@ -266,15 +255,15 @@ export function isLogSourceSnapshot(value: unknown): value is LogSourceSnapshot 
 function logEntry(value: unknown): value is PublicLogEntry {
   if (!record(value) || !exact(value, [
     "timestamp", "level", "service", "message", "rawText", "highlighted", "sourceHandle",
-    "sourceName", "redacted", "textTruncated",
+    "sourceName", "textTruncated",
   ]) || !publicText(value.timestamp, 128) || !publicText(value.level, 32) ||
     !publicText(value.service, 256) || !publicText(value.message, 8 * 1_024) ||
     !publicText(value.rawText, 16 * 1_024) ||
-    typeof value.highlighted !== "boolean" || typeof value.redacted !== "boolean" ||
+    typeof value.highlighted !== "boolean" ||
     typeof value.textTruncated !== "boolean") return false;
   const sourceValid = value.sourceHandle === null && value.sourceName === null ||
     isLogAnalysisOpaqueHandle(value.sourceHandle) && publicText(value.sourceName, 256);
-  return sourceValid && (!value.redacted || value.message === redactedLine && value.rawText === redactedLine);
+  return sourceValid;
 }
 
 function threatIp(value: unknown, maximum: number): value is ThreatIp {
@@ -319,64 +308,58 @@ function entryTextBudget(entries: PublicLogEntry[], maximumBytes: number): boole
 export function isLogSourceReadResult(value: unknown): value is LogSourceReadResult {
   if (!record(value) || !exact(value, [
     "snapshotHandle", "sourceHandle", "sourceKind", "page", "pageSize", "entryCount",
-    "highlightedCount", "hasMore", "entries", "threatSummary", "redactedCount", "truncated",
+    "highlightedCount", "hasMore", "entries", "threatSummary", "truncated",
   ]) || !isLogAnalysisOpaqueHandle(value.snapshotHandle) || !isLogAnalysisOpaqueHandle(value.sourceHandle) ||
     !isLogSourceKind(value.sourceKind) || !unsigned(value.page, 10_000) || value.page === 0 ||
     !unsigned(value.pageSize, 200) || value.pageSize === 0 || !Array.isArray(value.entries) ||
     value.entries.length > 200 || !value.entries.every(logEntry) ||
     !unsigned(value.entryCount, 200) || value.entryCount !== value.entries.length ||
     !unsigned(value.highlightedCount, 200) || typeof value.hasMore !== "boolean" ||
-    !threatSummary(value.threatSummary, 200) || !unsigned(value.redactedCount, 200) ||
+    !threatSummary(value.threatSummary, 200) ||
     typeof value.truncated !== "boolean") return false;
   const entries = value.entries as PublicLogEntry[];
   return entries.every((entry) => entry.sourceHandle === null && entry.sourceName === null) &&
     value.highlightedCount === entries.filter((entry) => entry.highlighted).length &&
-    value.redactedCount === entries.filter((entry) => entry.redacted).length &&
     entryTextBudget(entries, 512 * 1_024);
 }
 
 export function isLogCorrelationResult(value: unknown): value is LogCorrelationResult {
   if (!record(value) || !exact(value, [
     "snapshotHandle", "sourceHandles", "coverage", "totalObserved", "entries", "threatSummary",
-    "redactedCount", "truncated",
+    "truncated",
   ]) || !isLogAnalysisOpaqueHandle(value.snapshotHandle) || !uniqueHandles(value.sourceHandles, 2, 8) ||
     value.coverage !== "bounded-best-effort" || !unsigned(value.totalObserved, 1_600) ||
     !Array.isArray(value.entries) || value.entries.length > 1_000 || !value.entries.every(logEntry) ||
     value.entries.length > value.totalObserved || !threatSummary(value.threatSummary, 1_600) ||
-    !unsigned(value.redactedCount, 1_000) || typeof value.truncated !== "boolean") return false;
+    typeof value.truncated !== "boolean") return false;
   const handles = new Set(value.sourceHandles as string[]);
   const entries = value.entries as PublicLogEntry[];
   return entries.every((entry) => entry.sourceHandle !== null && handles.has(entry.sourceHandle) &&
-    entry.sourceName !== null) && value.redactedCount === entries.filter((entry) => entry.redacted).length &&
+    entry.sourceName !== null) &&
     entryTextBudget(entries, 1_024 * 1_024);
 }
 
 function iocMatch(value: unknown): value is LogIocMatch {
   if (!record(value) || !exact(value, [
-    "indicator", "sourceHandle", "sourceName", "count", "sampleLines", "samplesRedacted", "textTruncated",
+    "indicator", "sourceHandle", "sourceName", "count", "sampleLines", "textTruncated",
   ]) || !optionalQueryText(value.indicator, 256) || value.indicator === null ||
-    containsSensitiveMaterial(value.indicator) ||
     !isLogAnalysisOpaqueHandle(value.sourceHandle) || !publicText(value.sourceName, 256) ||
     !unsigned(value.count, 1_000_000) || !Array.isArray(value.sampleLines) || value.sampleLines.length > 3 ||
-    !value.sampleLines.every((line) => publicText(line, 4 * 1_024)) || typeof value.samplesRedacted !== "boolean" ||
+    !value.sampleLines.every((line) => publicText(line, 4 * 1_024)) ||
     typeof value.textTruncated !== "boolean") return false;
-  const redacted = value.sampleLines.filter((line) => line === redactedLine).length;
-  return value.samplesRedacted ? redacted > 0 : redacted === 0;
+  return true;
 }
 
 export function isLogIocSearchResult(value: unknown): value is LogIocSearchResult {
   if (!record(value) || !exact(value, [
-    "snapshotHandle", "results", "totalMatches", "redactedSampleCount", "truncated",
+    "snapshotHandle", "results", "totalMatches", "truncated",
   ]) || !isLogAnalysisOpaqueHandle(value.snapshotHandle) || !Array.isArray(value.results) ||
     value.results.length > 64 || !value.results.every(iocMatch) || !unsigned(value.totalMatches, 64_000_000) ||
-    !unsigned(value.redactedSampleCount, 192) || typeof value.truncated !== "boolean") return false;
+    typeof value.truncated !== "boolean") return false;
   const results = value.results as LogIocMatch[];
   const pairs = results.map((item) => `${item.indicator}\0${item.sourceHandle}`);
   const displayedMatches = results.reduce((total, item) => total + item.count, 0);
-  const redactedSamples = results.flatMap((item) => item.sampleLines)
-    .filter((line) => line === redactedLine).length;
   return new Set(pairs).size === pairs.length && displayedMatches <= value.totalMatches &&
     (!value.truncated ? displayedMatches === value.totalMatches : true) &&
-    redactedSamples === value.redactedSampleCount &&
     withinTextBudget(results.flatMap((item) => [item.indicator, item.sourceName, ...item.sampleLines]), 512 * 1_024);
 }
