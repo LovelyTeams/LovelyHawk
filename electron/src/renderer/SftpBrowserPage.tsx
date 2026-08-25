@@ -3,6 +3,7 @@ import { useEffect, useReducer, useRef, useState } from "react";
 import {
   isSftpDirectorySnapshot,
   isSftpTextPreview,
+  isSftpTransferResult,
   sftpBrowserEntryKinds,
   type SftpBrowserApi,
   type SftpBrowserEntry,
@@ -12,12 +13,16 @@ import {
 import type { LocalBrowserApi } from "../shared/local-browser-contract";
 import { LocalFilePane } from "./LocalFilePane";
 import {
-  DownloadGlyph,
-  FolderPlusGlyph,
-  RefreshGlyph,
-  TrashGlyph,
-  UploadGlyph,
-} from "./sftp-browser-icons";
+  ArchiveIcon,
+  DownloadIcon,
+  EntryKindIcon,
+  HomeIcon,
+  NewFolderIcon,
+  RefreshIcon,
+  TrashIcon,
+  UpIcon,
+  UploadIcon,
+} from "./file-icons";
 import {
   displaySftpBytes,
   displaySftpModifiedAt,
@@ -65,6 +70,8 @@ export function SftpBrowserPage({
   const [reopenVersion, setReopenVersion] = useState(0);
   const [pendingDirectory, setPendingDirectory] = useState<PendingDirectory | null>(null);
   const [pendingPreview, setPendingPreview] = useState<PendingPreview | null>(null);
+  const [transferNotice, setTransferNotice] = useState<string | null>(null);
+  const transferInFlight = useRef(false);
   const requestRef = useRef(0);
   const scope = connection === null ? null : sftpBrowserScope(connection);
   const enabled = active && connection !== null;
@@ -214,6 +221,27 @@ export function SftpBrowserPage({
     dispatch({ type: "entry-selected", entryHandle });
   }
 
+  async function downloadSelected(): Promise<void> {
+    // A second click while the dialog is open would open a second dialog.
+    if (transferInFlight.current) return;
+    const browserHandle = visibleState.directory?.browserHandle ?? null;
+    const fileHandle = visibleState.selectedEntryHandle;
+    if (browserHandle === null || fileHandle === null) return;
+    transferInFlight.current = true;
+    setTransferNotice(null);
+    try {
+      const value = await api.downloadSftpEntry(browserHandle, fileHandle);
+      if (!isSftpTransferResult(value)) throw new Error();
+      setTransferNotice(value.saved
+        ? `已保存为 ${value.fileName}（${displaySftpBytes(value.bytes ?? "0")}）。`
+        : "已取消保存。");
+    } catch {
+      setTransferNotice("下载失败；文件可能已变化，或所选位置不可写。");
+    } finally {
+      transferInFlight.current = false;
+    }
+  }
+
   function updateFilter(kind: SftpBrowserKindFilter) {
     setPendingPreview(null);
     dispatch({ type: "kind-selected", kind });
@@ -228,19 +256,22 @@ export function SftpBrowserPage({
       <div className="sftp-browser-actions" role="toolbar" aria-label="文件操作">
         <button type="button" className="sftp-browser-action" disabled={busy || directory === null}
           onClick={() => directory !== null && requestDirectory(directory.directoryHandle)}>
-          <RefreshGlyph />{visibleState.directoryStatus === "loading" ? "读取中" : "刷新"}
+          <RefreshIcon />{visibleState.directoryStatus === "loading" ? "读取中" : "刷新"}
         </button>
         <button type="button" className="sftp-browser-action is-upload" disabled title={PENDING_WRITE}>
-          <UploadGlyph />上传
+          <UploadIcon />上传
         </button>
         <button type="button" className="sftp-browser-action is-download" disabled title={PENDING_WRITE}>
-          <DownloadGlyph />下载
+          <DownloadIcon />下载
         </button>
         <button type="button" className="sftp-browser-action is-danger" disabled title={PENDING_WRITE}>
-          <TrashGlyph />删除
+          <TrashIcon />删除
         </button>
         <button type="button" className="sftp-browser-action" disabled title={PENDING_WRITE}>
-          <FolderPlusGlyph />新建文件夹
+          <NewFolderIcon />新建文件夹
+        </button>
+        <button type="button" className="sftp-browser-action" disabled title={PENDING_WRITE}>
+          <ArchiveIcon />打包
         </button>
       </div>
 
@@ -277,17 +308,18 @@ export function SftpBrowserPage({
                 </select>
               </header>
               <div className="sftp-browser-pathbar">
-                <button type="button" title="上一级" disabled={busy || directory.parentDirectoryHandle === null}
+                <button type="button" title="上一级" aria-label="上一级"
+                  disabled={busy || directory.parentDirectoryHandle === null}
                   onClick={() => directory.parentDirectoryHandle !== null &&
                     requestDirectory(directory.parentDirectoryHandle)}>
-                  上一级
+                  <UpIcon />
                 </button>
-                <button type="button" title="回到根目录" disabled={busy ||
+                <button type="button" title="回到根目录" aria-label="回到根目录" disabled={busy ||
                   visibleState.rootDirectoryHandle === null ||
                   directory.directoryHandle === visibleState.rootDirectoryHandle}
                   onClick={() => visibleState.rootDirectoryHandle !== null &&
                     requestDirectory(visibleState.rootDirectoryHandle)}>
-                  根目录
+                  <HomeIcon />
                 </button>
                 <span className="sftp-browser-path-value">{directory.directoryLabel}</span>
               </div>
@@ -311,6 +343,8 @@ export function SftpBrowserPage({
           </p>}
 
           <SftpBrowserDetail
+            onDownload={() => void downloadSelected()}
+            transferNotice={transferNotice}
             selected={selected}
             previewStatus={visibleState.previewStatus}
             preview={visibleState.preview}
@@ -375,7 +409,9 @@ export function SftpBrowserTable({
           onDoubleClick={() => entry.action === "browse" && onBrowse(entry.entryHandle)}
         >
           <span className="sftp-browser-row-name">
-            <span className={`sftp-browser-row-kind is-${entry.kind}`} aria-hidden="true" />
+            <span className={`sftp-browser-row-kind is-${entry.kind}`}>
+              <EntryKindIcon kind={entry.kind} />
+            </span>
             <span className="sftp-browser-row-label">{entry.name}</span>
             {entry.nameTruncated ? <em>名称已截断</em> : null}
           </span>
@@ -398,6 +434,8 @@ export function SftpBrowserDetail({
   busy,
   onBrowse,
   onPreview,
+  onDownload,
+  transferNotice = null,
 }: {
   selected: SftpBrowserEntry | null;
   previewStatus: SftpBrowserLoadStatus;
@@ -406,6 +444,8 @@ export function SftpBrowserDetail({
   busy: boolean;
   onBrowse: (entryHandle: string) => void;
   onPreview: () => void;
+  onDownload?: () => void;
+  transferNotice?: string | null;
 }) {
   if (selected === null) {
     return (
@@ -432,7 +472,13 @@ export function SftpBrowserDetail({
             {previewStatus === "loading" ? "读取中…" : "预览文本"}
           </button>
         ) : null}
+        {selected.kind === "file" && onDownload !== undefined ? (
+          <button type="button" disabled={busy} onClick={onDownload}>下载</button>
+        ) : null}
       </header>
+      {transferNotice === null ? null : (
+        <p className="sftp-browser-transfer" role="status">{transferNotice}</p>
+      )}
       {selected.nameTruncated ? (
         <p className="sftp-browser-warning">此显示名称已按字节上限截断。</p>
       ) : null}

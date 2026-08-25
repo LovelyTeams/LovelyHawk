@@ -20,6 +20,7 @@ const api: TerminalApi = {
   openSftpBrowser: vi.fn(async () => ({})),
   listSftpDirectory: vi.fn(async () => ({})),
   readSftpText: vi.fn(async () => ({})),
+  downloadSftpEntry: vi.fn(async () => ({})),
   openLocalBrowser: vi.fn(async () => ({})),
   listLocalDirectory: vi.fn(async () => ({})),
 };

@@ -1241,6 +1241,7 @@ $expectedTerminalBindings = [ordered]@{
     openSftpBrowser = 'lovelyres:terminal:sftp:open'
     listSftpDirectory = 'lovelyres:terminal:sftp:directory:list'
     readSftpText = 'lovelyres:terminal:sftp:text:read'
+    downloadSftpEntry = 'lovelyres:terminal:sftp:download'
     openLocalBrowser = 'lovelyres:terminal:local:open'
     listLocalDirectory = 'lovelyres:terminal:local:list'
 }
@@ -1250,7 +1251,7 @@ if (-not $terminalPreloadMatch.Success) {
     $terminalPreloadBody = $terminalPreloadMatch.Groups['body'].Value
     $terminalNames = @([regex]::Matches($terminalPreloadBody, '(?m)^\s{2}(?<name>[A-Za-z_$][A-Za-z0-9_$]*)\s*:') | ForEach-Object { $_.Groups['name'].Value })
     if (($terminalNames -join "`n") -cne (@($expectedTerminalBindings.Keys) -join "`n")) {
-        Add-GateViolation 'electron/src/preload/terminal.ts API keys must be exactly [open, poll, input, resize, search, copySelection, close, openSftpBrowser, listSftpDirectory, readSftpText, openLocalBrowser, listLocalDirectory]'
+        Add-GateViolation 'electron/src/preload/terminal.ts API keys must be exactly [open, poll, input, resize, search, copySelection, close, openSftpBrowser, listSftpDirectory, readSftpText, downloadSftpEntry, openLocalBrowser, listLocalDirectory]'
     }
     foreach ($binding in $expectedTerminalBindings.GetEnumerator()) {
         $pattern = '(?s)\b{0}\s*:.{{0,400}}?=>.{{0,400}}?ipcRenderer\.invoke\s*\(\s*["'']{1}["'']' -f [regex]::Escape($binding.Key), [regex]::Escape($binding.Value)
@@ -1261,8 +1262,8 @@ if (-not $terminalPreloadMatch.Success) {
             Add-GateViolation "electron/src/main/index.ts must register dedicated terminal channel $($binding.Value)"
         }
     }
-    if ([regex]::Matches($terminalPreloadBody, '\bipcRenderer\.invoke\s*\(').Count -ne 12) {
-        Add-GateViolation 'electron/src/preload/terminal.ts contains an IPC call outside the exact twelve-method allowlist'
+    if ([regex]::Matches($terminalPreloadBody, '\bipcRenderer\.invoke\s*\(').Count -ne 13) {
+        Add-GateViolation 'electron/src/preload/terminal.ts contains an IPC call outside the exact thirteen-method allowlist'
     }
 }
 if ([regex]::Matches($terminalPreloadText, '\bcontextBridge\.exposeInMainWorld\s*\(').Count -ne 1 -or
@@ -3440,8 +3441,8 @@ if (-not $terminalApiMatch.Success) {
     Add-GateViolation 'electron/src/shared/terminal-contract.ts is missing TerminalApi'
 } else {
     $terminalApiNames = @([regex]::Matches($terminalApiMatch.Groups['body'].Value, '(?m)^\s{2}(?<name>[A-Za-z_$][A-Za-z0-9_$]*)\s*\(') | ForEach-Object { $_.Groups['name'].Value })
-    if (($terminalApiNames -join "`n") -cne (@('open', 'poll', 'input', 'resize', 'search', 'copySelection', 'close', 'openSftpBrowser', 'listSftpDirectory', 'readSftpText', 'openLocalBrowser', 'listLocalDirectory') -join "`n")) {
-        Add-GateViolation 'electron/src/shared/terminal-contract.ts TerminalApi must expose exactly twelve methods'
+    if (($terminalApiNames -join "`n") -cne (@('open', 'poll', 'input', 'resize', 'search', 'copySelection', 'close', 'openSftpBrowser', 'listSftpDirectory', 'readSftpText', 'downloadSftpEntry', 'openLocalBrowser', 'listLocalDirectory') -join "`n")) {
+        Add-GateViolation 'electron/src/shared/terminal-contract.ts TerminalApi must expose exactly thirteen methods'
     }
     # The browser capabilities are opaque, window-scoped handles; target
     # identity stays forbidden.

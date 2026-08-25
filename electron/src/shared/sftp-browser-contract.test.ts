@@ -108,16 +108,23 @@ describe("sftp browser standalone contract", () => {
     }
   });
 
-  it("keeps the future public surface at exactly three finite methods", () => {
+  /**
+   * Reading, plus the one transfer that needs no plan. Everything that changes
+   * the target has to arrive through the plan/confirm pipeline instead, so
+   * those names stay forbidden here until that pipeline exists.
+   */
+  it("keeps the public surface at exactly four finite methods", () => {
     const source = readFileSync(new URL("./sftp-browser-contract.ts", import.meta.url), "utf8");
     const api = source.split("export interface SftpBrowserApi")[1]!.split("}")[0]!;
     expect([...api.matchAll(/^\s{2}([A-Za-z0-9]+)\(/gmu)].map((match) => match[1])).toEqual([
-      "openSftpBrowser", "listSftpDirectory", "readSftpText",
+      "openSftpBrowser", "listSftpDirectory", "readSftpText", "downloadSftpEntry",
     ]);
+    // The download names a capability, never a path: main owns the save dialog.
+    expect(api).toContain("downloadSftpEntry(browserHandle: string, fileHandle: string)");
     for (const forbidden of [
       "sessionId:", "guard:", "generation:", "remotePath:", "localPath:", "command:",
-      ["download", "Sftp"].join(""), ["upload", "Sftp"].join(""), ["delete", "Sftp"].join(""),
-      ["open", "Terminal"].join(""), ["export", "Sftp"].join(""),
+      ["upload", "Sftp"].join(""), ["delete", "Sftp"].join(""), ["rename", "Sftp"].join(""),
+      ["chmod", "Sftp"].join(""), ["open", "Terminal"].join(""), ["export", "Sftp"].join(""),
     ]) expect(api).not.toContain(forbidden);
   });
 });

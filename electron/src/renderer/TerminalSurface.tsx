@@ -10,6 +10,7 @@ import {
   TERMINAL_LIMITS,
   type TerminalApi,
 } from "../shared/terminal-contract";
+import { CopyIcon, SearchIcon } from "./file-icons";
 import { TerminalController } from "./terminal-controller";
 import { terminalXtermTheme } from "./terminal-theme";
 import "./terminal-surface.css";
@@ -321,7 +322,7 @@ export function TerminalSurface({
           title="搜索终端输出"
           onClick={() => setSearchOpen((open) => !open)}
         >
-          <SearchGlyph /><span className="terminal-sr-only">搜索终端输出</span>
+          <SearchIcon /><span className="terminal-sr-only">搜索终端输出</span>
         </button>
         <button
           type="button"
@@ -330,7 +331,7 @@ export function TerminalSurface({
           title="复制选区"
           onClick={() => void copySelection()}
         >
-          <CopyGlyph /><span className="terminal-sr-only">复制选区</span>
+          <CopyIcon /><span className="terminal-sr-only">复制选区</span>
         </button>
       </div>
 
@@ -348,32 +349,3 @@ export function TerminalSurface({
   );
 }
 
-const GLYPH_PROPS = {
-  viewBox: "0 0 16 16",
-  width: 14,
-  height: 14,
-  fill: "none",
-  stroke: "currentColor",
-  strokeWidth: 1.5,
-  strokeLinecap: "round" as const,
-  strokeLinejoin: "round" as const,
-  "aria-hidden": true,
-};
-
-function SearchGlyph() {
-  return (
-    <svg {...GLYPH_PROPS}>
-      <circle cx="7.2" cy="7.2" r="4.4" />
-      <path d="m10.5 10.5 2.6 2.6" />
-    </svg>
-  );
-}
-
-function CopyGlyph() {
-  return (
-    <svg {...GLYPH_PROPS}>
-      <rect x="5.4" y="5.4" width="8.2" height="8.2" rx="1.4" />
-      <path d="M10.6 5.4V3.8a1.4 1.4 0 0 0-1.4-1.4H3.8a1.4 1.4 0 0 0-1.4 1.4v5.4a1.4 1.4 0 0 0 1.4 1.4h1.6" />
-    </svg>
-  );
-}

@@ -308,6 +308,7 @@ const REQUEST_TIMEOUT_MS = 15_000;
 const EMERGENCY_COMMAND_CATALOG_TIMEOUT_MS = 20_000;
 const EMERGENCY_COMMAND_RUN_TIMEOUT_MS = 45_000;
 const SFTP_BROWSER_TIMEOUT_MS = 30_000;
+const SFTP_TRANSFER_TIMEOUT_MS = 190_000;
 const PACKET_CAPTURE_LIST_TIMEOUT_MS = 20_000;
 const PACKET_CAPTURE_START_TIMEOUT_MS = 40_000;
 const PACKET_CAPTURE_POLL_TIMEOUT_MS = 20_000;
@@ -381,6 +382,7 @@ export const SFTP_BROWSER_RPC_METHODS = Object.freeze({
   open: "sftp-browser.open",
   listDirectory: "sftp-browser.directory.list",
   readText: "sftp-browser.text.read",
+  download: "sftp-browser.download",
 } as const);
 
 export const PACKET_CAPTURE_LIVE_RPC_METHODS = Object.freeze({
@@ -2278,6 +2280,33 @@ export class BackendClient {
       throw new Error("The backend returned an invalid SFTP preview.");
     }
     return value;
+  }
+
+  async downloadSftpEntry(
+    bindingHandle: string,
+    browserHandle: string,
+    fileHandle: string,
+    localPath: string,
+  ): Promise<{ bytes: string }> {
+    if (![bindingHandle, browserHandle, fileHandle].every(isSftpBrowserOpaqueHandle)) {
+      throw new Error("The SFTP download request is invalid.");
+    }
+    const value = await this.#request(SFTP_BROWSER_RPC_METHODS.download, {
+      bindingHandle,
+      browserHandle,
+      fileHandle,
+      localPath,
+    }, SFTP_TRANSFER_TIMEOUT_MS);
+    if (
+      typeof value !== "object" || value === null ||
+      !isSftpBrowserOpaqueHandle((value as Record<string, unknown>).browserHandle) ||
+      (value as Record<string, unknown>).browserHandle !== browserHandle ||
+      (value as Record<string, unknown>).fileHandle !== fileHandle ||
+      typeof (value as Record<string, unknown>).bytes !== "string"
+    ) {
+      throw new Error("The backend returned an invalid SFTP transfer result.");
+    }
+    return { bytes: (value as { bytes: string }).bytes };
   }
 
   #request(

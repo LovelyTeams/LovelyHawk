@@ -41,10 +41,20 @@ export interface SftpTextPreview {
  * target, so the binding is implicit: main resolves it from the calling window
  * and the renderer never holds it.
  */
+export interface SftpTransferResult {
+  /** False when the operator dismissed the save dialog. */
+  saved: boolean;
+  /** The name the file was written under, for the operator's confirmation. */
+  fileName: string | null;
+  bytes: string | null;
+}
+
 export interface SftpBrowserApi {
   openSftpBrowser(): Promise<unknown>;
   listSftpDirectory(browserHandle: string, directoryHandle: string): Promise<unknown>;
   readSftpText(browserHandle: string, fileHandle: string): Promise<unknown>;
+  /** Asks main for a save location, then copies the file there. */
+  downloadSftpEntry(browserHandle: string, fileHandle: string): Promise<unknown>;
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -147,6 +157,13 @@ function textLines(value: string, displayedLineCount: number): string[] | null {
   if (value.length === 0) return displayedLineCount === 0 ? [] : displayedLineCount === 1 ? [""] : null;
   const lines = value.split("\n");
   return lines.length === displayedLineCount ? lines : null;
+}
+
+export function isSftpTransferResult(value: unknown): value is SftpTransferResult {
+  if (!record(value) || !exact(value, ["saved", "fileName", "bytes"]) ||
+    typeof value.saved !== "boolean") return false;
+  if (!value.saved) return value.fileName === null && value.bytes === null;
+  return safeName(value.fileName, false, 256) && u64String(value.bytes);
 }
 
 export function isSftpTextPreview(value: unknown): value is SftpTextPreview {

@@ -7,12 +7,14 @@
 use std::{
     collections::{HashMap, HashSet},
     fmt,
+    path::Path,
     sync::{Arc, Mutex, MutexGuard},
     time::{Duration, Instant},
 };
 
 use lovelyres_core::{
     BackendServices, CoreError,
+    path_guard::PathGuard,
     sftp::{BoundSftpSession, MAX_DIRECTORY_ENTRIES, RemotePath, SftpEntry, SftpFileKind},
     ssh::BoundSshSession,
     target::TargetGuard,
@@ -44,6 +46,7 @@ const BROWSER_TTL: Duration = Duration::from_secs(5 * 60);
 const BIND_DEADLINE: Duration = Duration::from_secs(15);
 const LIST_DEADLINE: Duration = Duration::from_secs(20);
 const READ_DEADLINE: Duration = Duration::from_secs(20);
+const TRANSFER_DEADLINE: Duration = Duration::from_secs(180);
 // Names and file text cross the boundary as the target has them. Blanking a
 // file called "secret_key" or a config line containing "password=" removes the
 // very thing the operator opened the browser to look at.
@@ -54,6 +57,8 @@ pub(crate) struct SftpBrowserApi {
     services: BackendServices,
     ssh_api: Arc<SshApi>,
     registry: Arc<Mutex<SftpBrowserRegistry>>,
+    /// Owns which local paths a transfer may touch; the renderer never sees one.
+    paths: Arc<PathGuard>,
 }
 
 impl fmt::Debug for SftpBrowserApi {
@@ -82,11 +87,51 @@ impl fmt::Debug for SftpBrowserApi {
 
 impl SftpBrowserApi {
     pub(crate) fn new(services: BackendServices, ssh_api: Arc<SshApi>) -> Self {
+        let staging = services.store().root().join("sftp-staging");
+        let paths = PathGuard::new(staging, [])
+            .expect("the portable store root is always writable at startup");
         Self {
             services,
             ssh_api,
             registry: Arc::new(Mutex::new(SftpBrowserRegistry::default())),
+            paths: Arc::new(paths),
         }
+    }
+
+    /// Copies one remote file to a local path the operator picked in the save
+    /// dialog. The path arrives from main, never from the renderer, and the
+    /// core refuses anything outside what a save dialog can produce.
+    pub(crate) async fn download_entry(
+        &self,
+        binding_handle: &str,
+        browser_handle: &str,
+        file_handle: &str,
+        local_path: &Path,
+    ) -> Result<SftpTransferDto, SftpBrowserApiError> {
+        validate_handle(browser_handle)?;
+        validate_handle(file_handle)?;
+        let (_, scope) = self.capture_binding(binding_handle)?;
+        let (access, _permit) =
+            self.begin_operation(&scope, browser_handle, file_handle, EntryAction::Preview)?;
+        let session = self.bind_sftp(&scope).await?;
+        self.validate_binding(&scope)?;
+        self.verify_operation(&access)?;
+        let receipt = timeout(
+            TRANSFER_DEADLINE,
+            self.services
+                .sftp()
+                .download_new(&session, &self.paths, &access.node.path, local_path),
+        )
+        .await
+        .map_err(|_| SftpBrowserApiError::Deadline)??;
+        self.validate_binding(&scope)?;
+        validate_sftp_session(&scope, &session)?;
+        self.verify_operation(&access)?;
+        Ok(SftpTransferDto {
+            browser_handle: access.browser_handle.clone(),
+            file_handle: access.node.handle.clone(),
+            bytes: receipt.bytes.to_string(),
+        })
     }
 
     pub(crate) async fn open_sftp_browser(
@@ -466,6 +511,16 @@ pub(crate) struct SftpBrowserEntryDto {
     pub(crate) action: SftpBrowserEntryAction,
     pub(crate) size_bytes: String,
     pub(crate) modified_at: Option<String>,
+}
+
+/// What a finished transfer moved, in capability terms only.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SftpTransferDto {
+    pub(crate) browser_handle: String,
+    pub(crate) file_handle: String,
+    /// A byte count as a decimal string, because it can exceed 2^53.
+    pub(crate) bytes: String,
 }
 
 #[derive(Serialize)]
@@ -1548,10 +1603,13 @@ mod tests {
         assert!(production.contains("self.services.sftp().list("));
         assert!(production.contains("self.services.sftp().read_text("));
         assert!(production.contains("RemotePath::new(\"/\")"));
+        // The one transfer that exists goes through the core call that checks
+        // the local target against the path guard.
+        assert!(production.contains(".download_new(&session, &self.paths,"));
+        assert!(production.contains("&self.paths,"));
         for forbidden in [
             [".ssh()", ".sftp("].concat(),
             ["Sftp", "Request"].concat(),
-            ["download", "_new"].concat(),
             ["upload", "_staged"].concat(),
             ["open_directory", "_terminal"].concat(),
             ["plan", "_extract"].concat(),

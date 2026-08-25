@@ -25,6 +25,7 @@ const api: SftpBrowserApi & LocalBrowserApi = {
   openSftpBrowser: async () => { throw new Error(); },
   listSftpDirectory: async () => { throw new Error(); },
   readSftpText: async () => { throw new Error(); },
+  downloadSftpEntry: async () => { throw new Error(); },
 };
 
 const hostileName = "<script>steal()<img src=x onerror=steal()>";
@@ -128,7 +129,7 @@ describe("SftpBrowserPage", () => {
     for (const forbidden of [
       "dangerouslySetInnerHTML", "contentEditable", "<textarea", "setInterval", "window.open",
       "remotePath", "localPath", "sessionId:", "guard:", "generation:", "fingerprint:", "shellCommand",
-      ["download", "Sftp"].join(""), ["upload", "Sftp"].join(""), ["rename", "Sftp"].join(""),
+      ["upload", "Sftp"].join(""), ["rename", "Sftp"].join(""),
       ["delete", "Sftp"].join(""), ["open", "Terminal"].join(""), ["export", "Sftp"].join(""),
       ["plan", "Mutation"].join(""), ["run", "Command"].join(""),
     ]) expect(source).not.toContain(forbidden);

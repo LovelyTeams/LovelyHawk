@@ -6,6 +6,7 @@ import {
   type LocalBrowserEntry,
   type LocalDirectorySnapshot,
 } from "../shared/local-browser-contract";
+import { EntryKindIcon, HomeIcon, UpIcon } from "./file-icons";
 import { displaySftpBytes, displaySftpModifiedAt } from "./sftp-browser-helpers";
 import { SftpBrowserEmpty, SftpBrowserError, SftpBrowserStatus } from "./SftpBrowserPage";
 
@@ -72,16 +73,16 @@ export function LocalFilePane({ api, active = true }: LocalFilePaneProps) {
     <section className="sftp-browser-pane is-local" aria-label="本地文件">
       <header className="sftp-browser-pane-head">
         <strong>本地文件</strong>
-        <button type="button" disabled={busy}
+        <button type="button" disabled={busy} title="回到主目录" aria-label="回到主目录"
           onClick={() => setRequest((current) => ({ token: current.token + 1, directoryHandle: null }))}>
-          主目录
+          <HomeIcon />
         </button>
       </header>
       <div className="sftp-browser-pathbar">
-        <button type="button" title="上一级"
+        <button type="button" title="上一级" aria-label="上一级"
           disabled={busy || directory === null || directory.parentDirectoryHandle === null}
           onClick={() => directory?.parentDirectoryHandle != null && navigate(directory.parentDirectoryHandle)}>
-          上一级
+          <UpIcon />
         </button>
         <span className="sftp-browser-path-value">
           {directory === null ? "读取中…" : directory.directoryLabel}
@@ -141,7 +142,9 @@ function LocalRow({ entry, selected, busy, onSelect, onOpen }: {
       onDoubleClick={onOpen}
     >
       <span className="sftp-browser-row-name">
-        <span className={`sftp-browser-row-kind is-${entry.kind}`} aria-hidden="true" />
+        <span className={`sftp-browser-row-kind is-${entry.kind}`}>
+          <EntryKindIcon kind={entry.kind} />
+        </span>
         <span className="sftp-browser-row-label">{entry.name}</span>
         {entry.nameTruncated ? <em>名称已截断</em> : null}
       </span>

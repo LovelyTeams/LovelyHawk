@@ -32,6 +32,7 @@ function createApi(overrides: Partial<TerminalApi> = {}): TerminalApi {
   openSftpBrowser: vi.fn(async () => ({})),
   listSftpDirectory: vi.fn(async () => ({})),
   readSftpText: vi.fn(async () => ({})),
+    downloadSftpEntry: vi.fn(async () => ({})),
   openLocalBrowser: vi.fn(async () => ({})),
   listLocalDirectory: vi.fn(async () => ({})),
     poll: vi.fn(async (): Promise<TerminalPoll> => ({

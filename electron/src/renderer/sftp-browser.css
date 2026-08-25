@@ -381,13 +381,16 @@
 .sftp-browser-row-name { display: flex; min-width: 0; align-items: center; gap: 7px; }
 .sftp-browser-row-label { overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
 .sftp-browser-row-name em { flex: none; color: var(--warning-text); font-size: 11px; font-style: normal; }
-.sftp-browser-row-kind { width: 14px; height: 14px; flex: none; border-radius: 3px; background: var(--border-strong); }
-.sftp-browser-row-kind.is-directory { background: var(--accent); }
-.sftp-browser-row-kind.is-file { background: var(--success); }
-.sftp-browser-row-kind.is-symlink { background: var(--warning); }
+.sftp-browser-row-kind { display: inline-flex; flex: none; align-items: center; color: var(--muted); }
+.sftp-browser-row-kind.is-directory { color: var(--accent); }
+.sftp-browser-row-kind.is-file { color: var(--success-text); }
+.sftp-browser-row-kind.is-symlink { color: var(--warning-text); }
+.sftp-browser-action svg, .sftp-browser-pathbar svg { flex: none; }
+.sftp-browser-pathbar button { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; }
 .sftp-browser-row-size, .sftp-browser-row-time { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .sftp-browser-pane-foot { display: flex; flex: none; flex-wrap: wrap; justify-content: space-between; gap: 6px; padding: 4px 9px; border-top: 1px solid var(--border); color: var(--muted); background: var(--surface-alt); font-size: 11px; }
 .sftp-browser-page .sftp-browser-detail { flex: 0 1 auto; max-height: 38%; margin-top: 8px; overflow: auto; }
 .sftp-browser-page .sftp-browser-detail-header h2 { font-size: 15px; }
 
 .sftp-browser-pane .sftp-browser-empty { min-width: 0; min-height: 90px; padding: 12px; border: 0; }
+.sftp-browser-transfer { margin: 6px 0 0; padding: 6px 10px; border: 1px solid var(--info-border); border-radius: 8px; color: var(--info-text); background: var(--info-soft); font-size: 12px; }

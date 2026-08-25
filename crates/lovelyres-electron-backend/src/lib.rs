@@ -966,6 +966,22 @@ impl BackendState {
                     Err(failure) => Err(failure),
                 }
             }
+            RpcMethod::SftpBrowserDownload => {
+                match parse_params::<SftpBrowserDownloadParams>(request.params) {
+                    Ok(params) => self
+                        .sftp_browser
+                        .download_entry(
+                            &params.binding_handle,
+                            &params.browser_handle,
+                            &params.file_handle,
+                            std::path::Path::new(&params.local_path),
+                        )
+                        .await
+                        .map(to_value)
+                        .map_err(sftp_browser_failure),
+                    Err(failure) => Err(failure),
+                }
+            }
             RpcMethod::PacketCaptureInterfacesList => {
                 match parse_params::<PacketCaptureBindingParams>(request.params) {
                     Ok(params) => self
@@ -1822,6 +1838,8 @@ enum RpcMethod {
     SftpBrowserDirectoryList,
     #[serde(rename = "sftp-browser.text.read")]
     SftpBrowserTextRead,
+    #[serde(rename = "sftp-browser.download")]
+    SftpBrowserDownload,
     #[serde(rename = "packet-capture.interfaces.list")]
     PacketCaptureInterfacesList,
     #[serde(rename = "packet-capture.start")]
@@ -2259,6 +2277,16 @@ struct SftpBrowserDirectoryParams {
     binding_handle: String,
     browser_handle: String,
     directory_handle: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SftpBrowserDownloadParams {
+    binding_handle: String,
+    browser_handle: String,
+    file_handle: String,
+    /// Chosen by the operator in the native save dialog and forwarded by main.
+    local_path: String,
 }
 
 #[derive(Deserialize)]

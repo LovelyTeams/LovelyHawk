@@ -92,12 +92,34 @@ describe("SSH window shell", () => {
     expect(main).toContain("fs.lstat(full)");
   });
 
+  /** Download is the one transfer that needs no plan; the path is main's. */
+  it("downloads through the save dialog and never lets the renderer pick a path", () => {
+    const page = source("SftpBrowserPage.tsx");
+    expect(page).toContain("api.downloadSftpEntry(browserHandle, fileHandle)");
+    expect(page).toContain("isSftpTransferResult(value)");
+    // A second click while the dialog is open would open a second dialog.
+    expect(page).toContain("if (transferInFlight.current) return;");
+    expect(page).toContain("已取消保存。");
+
+    const main = source("../main/index.ts");
+    const handler = main.slice(main.indexOf('ipcMain.handle("lovelyres:terminal:sftp:download"'));
+    expect(handler.slice(0, 1_800)).toContain("dialog.showSaveDialog(window");
+    expect(handler.slice(0, 1_800)).toContain("path.isAbsolute(selection.filePath)");
+    expect(handler.slice(0, 1_800)).toContain("context.bindingHandle");
+    // The renderer sends two capabilities and nothing else.
+    expect(handler.slice(0, 1_800)).toContain('hasOnlyKeys(value, ["browserHandle", "fileHandle"])');
+
+    const preload = source("../preload/terminal.ts");
+    expect(preload).toContain("lovelyres:terminal:sftp:download");
+    expect(preload).not.toContain("localPath");
+  });
+
   it("keeps write actions visibly unavailable instead of pretending", () => {
     const page = source("SftpBrowserPage.tsx");
     expect(page).toContain("文件管理 (SFTP)");
-    for (const label of ["上传", "下载", "删除", "新建文件夹"]) expect(page).toContain(label);
+    for (const label of ["上传", "下载", "删除", "新建文件夹", "打包"]) expect(page).toContain(label);
     // They are rendered disabled with the reason, and nothing fakes progress.
-    expect((page.match(/disabled title=\{PENDING_WRITE\}/gu) ?? [])).toHaveLength(4);
+    expect((page.match(/disabled title=\{PENDING_WRITE\}/gu) ?? [])).toHaveLength(5);
     expect(page).toContain("写操作尚未接入");
     expect(page).not.toContain("MB/s");
     expect(page).not.toContain("传输速度");

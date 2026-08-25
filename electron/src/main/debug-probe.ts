@@ -5785,15 +5785,16 @@ async function probeUnauthorizedTerminalRenderer(
     assert(
       Array.isArray(initial.apiMethods) &&
         initial.apiMethods.join(",") ===
-          "close,copySelection,input,listLocalDirectory,listSftpDirectory,open,openLocalBrowser," +
-            "openSftpBrowser,poll,readSftpText,resize,search",
-      "terminal preload is not the exact twelve-method surface",
+          "close,copySelection,downloadSftpEntry,input,listLocalDirectory,listSftpDirectory,open," +
+            "openLocalBrowser,openSftpBrowser,poll,readSftpText,resize,search",
+      "terminal preload is not the exact thirteen-method surface",
     );
     assert(
       JSON.stringify(initial.apiArities) ===
         JSON.stringify({
           close: 0,
           copySelection: 0,
+          downloadSftpEntry: 0,
           input: 0,
           listLocalDirectory: 0,
           listSftpDirectory: 0,

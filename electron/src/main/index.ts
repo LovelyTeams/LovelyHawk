@@ -2104,6 +2104,39 @@ function registerIpc(): void {
   });
   // The SFTP browser answers only the terminal window, whose binding main
   // resolves from the calling window; the renderer never sends target identity.
+  ipcMain.handle("lovelyres:terminal:sftp:download", async (event, ...values: unknown[]) => {
+    const context = terminalContextFor(event);
+    const value = values[0];
+    if (
+      values.length !== 1 ||
+      !isRecord(value) ||
+      !hasOnlyKeys(value, ["browserHandle", "fileHandle"]) ||
+      !isSftpBrowserOpaqueHandle(value.browserHandle) ||
+      !isSftpBrowserOpaqueHandle(value.fileHandle)
+    ) {
+      throw new Error("Invalid SFTP download request.");
+    }
+    // The operator picks where the bytes land; the renderer never names a path.
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (window === null) throw new Error("The SFTP download window is not available.");
+    const selection = await dialog.showSaveDialog(window, {
+      title: "保存远程文件",
+      buttonLabel: "保存",
+    });
+    if (selection.canceled || selection.filePath === undefined) {
+      return { saved: false, fileName: null, bytes: null };
+    }
+    if (!path.isAbsolute(selection.filePath)) {
+      throw new Error("The selected download path is invalid.");
+    }
+    const transfer = await backend.downloadSftpEntry(
+      context.bindingHandle,
+      value.browserHandle,
+      value.fileHandle,
+      selection.filePath,
+    );
+    return { saved: true, fileName: path.basename(selection.filePath), bytes: transfer.bytes };
+  });
   ipcMain.handle("lovelyres:terminal:local:open", async (event, ...values: unknown[]) => {
     terminalContextFor(event);
     if (values.length !== 0) throw new Error("Invalid local browser request.");
