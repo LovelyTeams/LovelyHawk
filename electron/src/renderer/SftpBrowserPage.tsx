@@ -124,7 +124,7 @@ export function SftpBrowserPage({
         type: "directory-failed",
         scope,
         request,
-        error: "无法从服务器根目录打开只读 SFTP 浏览器；绑定、权限或固定入口可能不可用。",
+        error: "无法从服务器根目录打开 SFTP 浏览器；绑定、权限或固定入口可能不可用。",
       });
     });
     return () => {
@@ -185,8 +185,8 @@ export function SftpBrowserPage({
   if (connection === null) {
     return (
       <main className="sftp-browser-page sftp-browser-disconnected">
-        <h1>SFTP 只读浏览器</h1>
-        <p>连接 SSH 目标后，可浏览服务器目录并预览 UTF-8 文本文件。</p>
+        <h1>文件管理 (SFTP)</h1>
+        <p>连接 SSH 目标后，可浏览服务器目录、预览 UTF-8 文本，并在确认计划后传输和管理文件。</p>
       </main>
     );
   }
@@ -369,7 +369,6 @@ export function SftpBrowserPage({
     <main className="sftp-browser-page">
       <header className="sftp-browser-header">
         <h1>文件管理 (SFTP)</h1>
-        <span className="sftp-browser-mode">只读</span>
       </header>
       <div className="sftp-browser-actions" role="toolbar" aria-label="文件操作">
         <button type="button" className="sftp-browser-action" disabled={busy || directory === null}

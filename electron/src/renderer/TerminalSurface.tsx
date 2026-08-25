@@ -10,7 +10,6 @@ import {
   TERMINAL_LIMITS,
   type TerminalApi,
 } from "../shared/terminal-contract";
-import { CopyIcon, SearchIcon } from "./file-icons";
 import { TerminalController } from "./terminal-controller";
 import { terminalXtermTheme } from "./terminal-theme";
 import "./terminal-surface.css";
@@ -98,6 +97,7 @@ export function TerminalSurface({
   const controllerRef = useRef<TerminalController | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const searchGenerationRef = useRef(0);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [status, setStatus] = useState("正在打开绑定终端…");
   const [searchOpen, setSearchOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -105,7 +105,6 @@ export function TerminalSurface({
   const [query, setQuery] = useState("");
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [regex, setRegex] = useState(false);
-  const [hasSelection, setHasSelection] = useState(false);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -146,9 +145,6 @@ export function TerminalSurface({
     terminalRef.current = terminal;
     searchAddonRef.current = searchAddon;
 
-    const selectionDisposable = terminal.onSelectionChange(() => {
-      if (active) setHasSelection(terminal.hasSelection());
-    });
     const copyListener = (event: ClipboardEvent) => {
       interceptTerminalCopyEvent(event, terminal, () => {
         void copySelectionFrom(terminal);
@@ -226,7 +222,6 @@ export function TerminalSurface({
       resizeObserver?.disconnect();
       if (resizeObserver === null) window.removeEventListener("resize", scheduleResize);
       inputDisposable?.dispose();
-      selectionDisposable.dispose();
       host.removeEventListener("copy", copyListener, true);
       controllerRef.current = null;
       searchAddonRef.current = null;
@@ -273,11 +268,6 @@ export function TerminalSurface({
     else if (outcome === "failed") setStatus("复制终端选区失败。");
   }
 
-  async function copySelection() {
-    const terminal = terminalRef.current;
-    if (terminal !== null) await copySelectionFrom(terminal);
-  }
-
   const insertToken = insert?.token ?? 0;
   const insertText = insert?.text ?? "";
   useEffect(() => {
@@ -285,21 +275,53 @@ export function TerminalSurface({
     controllerRef.current?.enqueueText(insertText);
   }, [insertToken, insertText]);
 
+  /**
+   * The search bar used to sit behind a floating button over the output. The
+   * keyboard is where a terminal search belongs anyway, so Ctrl+F opens it and
+   * Escape hands the keys back to the terminal.
+   */
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent): void {
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        setSearchOpen(true);
+        return;
+      }
+      if (event.key === "Escape" && searchOpen) {
+        event.preventDefault();
+        setSearchOpen(false);
+        terminalRef.current?.focus();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [searchOpen]);
+
+  useEffect(() => {
+    if (searchOpen) searchInputRef.current?.focus();
+  }, [searchOpen]);
+
+  function closeSearch(): void {
+    setSearchOpen(false);
+    terminalRef.current?.focus();
+  }
+
   return (
     <section className="terminal-surface" aria-labelledby="terminal-surface-title">
       <h2 id="terminal-surface-title" className="terminal-sr-only">SSH 终端 · {title}</h2>
       <p className="terminal-sr-only">支持输入法组合输入、键盘操作、文本选择与搜索。</p>
 
-      <div className="terminal-surface-tools">
-        {searchOpen ? (
+      {searchOpen ? (
+        <div className="terminal-surface-tools">
           <form className="terminal-search" role="search" onSubmit={submitSearch}>
             <label>
               <span className="terminal-sr-only">搜索终端输出</span>
               <input
+                ref={searchInputRef}
                 type="search"
                 value={query}
                 maxLength={TERMINAL_LIMITS.maximumSearchQueryBytes}
-                placeholder="搜索输出"
+                placeholder="搜索输出（Ctrl+F）"
                 onChange={(event) => setQuery(event.target.value)}
               />
             </label>
@@ -313,27 +335,10 @@ export function TerminalSurface({
             </label>
             <button type="button" title="上一个" onClick={() => void search("previous")}>上一个</button>
             <button type="submit" title="下一个">下一个</button>
+            <button type="button" title="关闭搜索" onClick={closeSearch}>关闭</button>
           </form>
-        ) : null}
-        <button
-          type="button"
-          className="terminal-tool"
-          aria-expanded={searchOpen}
-          title="搜索终端输出"
-          onClick={() => setSearchOpen((open) => !open)}
-        >
-          <SearchIcon /><span className="terminal-sr-only">搜索终端输出</span>
-        </button>
-        <button
-          type="button"
-          className="terminal-tool"
-          disabled={!hasSelection || writeClipboard === undefined}
-          title="复制选区"
-          onClick={() => void copySelection()}
-        >
-          <CopyIcon /><span className="terminal-sr-only">复制选区</span>
-        </button>
-      </div>
+        </div>
+      ) : null}
 
       <div
         ref={hostRef}

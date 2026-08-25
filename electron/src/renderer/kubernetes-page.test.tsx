@@ -231,7 +231,10 @@ describe("standalone Kubernetes read page", () => {
 
   it("is centrally mounted with only the current 请先建立 SSH 连接 handle and fixed API", () => {
     const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
-    expect(source).toContain('import { KubernetesPage } from "./KubernetesPage";');
+    // The page is its own chunk now, so the import is the lazy one.
+    expect(source).toContain(
+      'const KubernetesPage = lazy(async () => ({ default: (await import("./KubernetesPage")).KubernetesPage }));',
+    );
     expect(source).toContain('activePage.id === "kubernetes"');
     const mount = source.match(/<KubernetesPage[\s\S]*?\/>/u)?.[0];
     expect(mount).toBeDefined();

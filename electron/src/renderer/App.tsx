@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 
 import type {
   BootstrapResult,
@@ -7,10 +16,7 @@ import type {
   PageGroup,
 } from "../shared/contract";
 import type { SshTargetSummary } from "../shared/ssh-contract";
-import {
-  ConfigGeneratorPage,
-  type ConfigGeneratorPageHandle,
-} from "./ConfigGeneratorPage";
+import type { ConfigGeneratorPageHandle } from "./ConfigGeneratorPage";
 import { ConnectionManager } from "./ConnectionManager";
 import {
   CommandHistoryPanel,
@@ -20,26 +26,11 @@ import {
   DisposalReportOverlay,
   type DisposalReportOverlayHandle,
 } from "./DisposalReportOverlay";
-import { AiHistoryPage } from "./AiHistoryPage";
-import { Notes, type NotesHandle } from "./Notes";
-import { SecurityReference } from "./SecurityReference";
-import { BaselinePage } from "./BaselinePage";
-import { FirewallPage } from "./FirewallPage";
-import { MiddlewarePage } from "./MiddlewarePage";
-import { CheckAuditPage } from "./CheckAuditPage";
-import { IntegrityPage } from "./IntegrityPage";
-import { KubernetesPage } from "./KubernetesPage";
-import { DockerPage } from "./DockerPage";
-import { LogAnalysisPage } from "./LogAnalysisPage";
-import { EmergencyCommandsPage } from "./EmergencyCommandsPage";
-import { PacketCapturePage } from "./PacketCapturePage";
-import { QuickDetectionPage } from "./QuickDetectionPage";
+import type { NotesHandle } from "./Notes";
 import {
   ApplicationLogOverlay,
   type ApplicationLogOverlayHandle,
 } from "./ApplicationLogOverlay";
-import { SnapshotPage } from "./SnapshotPage";
-import { SystemInfoPage } from "./SystemInfoPage";
 import { AppTitleBar } from "./AppTitleBar";
 import { WelcomeView } from "./WelcomeView";
 import { isModalScrimActive, subscribeModalScrim } from "./modal-scrim";
@@ -50,6 +41,30 @@ import {
 } from "./SettingsPanel";
 import { beforeSettingsTransition, toSettingsSaveInput } from "./settings-helpers";
 import { NotificationStack } from "./NotificationStack";
+
+/**
+ * One chunk per page. Everything the registry can show used to be parsed at
+ * boot even though the window shows a single page, which put the whole
+ * application over the bundler's size warning. The files sit next to the
+ * entry chunk, so a page still loads from local disk with nothing to fetch.
+ */
+const SecurityReference = lazy(async () => ({ default: (await import("./SecurityReference")).SecurityReference }));
+const Notes = lazy(async () => ({ default: (await import("./Notes")).Notes }));
+const ConfigGeneratorPage = lazy(async () => ({ default: (await import("./ConfigGeneratorPage")).ConfigGeneratorPage }));
+const SystemInfoPage = lazy(async () => ({ default: (await import("./SystemInfoPage")).SystemInfoPage }));
+const AiHistoryPage = lazy(async () => ({ default: (await import("./AiHistoryPage")).AiHistoryPage }));
+const SnapshotPage = lazy(async () => ({ default: (await import("./SnapshotPage")).SnapshotPage }));
+const FirewallPage = lazy(async () => ({ default: (await import("./FirewallPage")).FirewallPage }));
+const BaselinePage = lazy(async () => ({ default: (await import("./BaselinePage")).BaselinePage }));
+const MiddlewarePage = lazy(async () => ({ default: (await import("./MiddlewarePage")).MiddlewarePage }));
+const CheckAuditPage = lazy(async () => ({ default: (await import("./CheckAuditPage")).CheckAuditPage }));
+const IntegrityPage = lazy(async () => ({ default: (await import("./IntegrityPage")).IntegrityPage }));
+const LogAnalysisPage = lazy(async () => ({ default: (await import("./LogAnalysisPage")).LogAnalysisPage }));
+const QuickDetectionPage = lazy(async () => ({ default: (await import("./QuickDetectionPage")).QuickDetectionPage }));
+const PacketCapturePage = lazy(async () => ({ default: (await import("./PacketCapturePage")).PacketCapturePage }));
+const KubernetesPage = lazy(async () => ({ default: (await import("./KubernetesPage")).KubernetesPage }));
+const DockerPage = lazy(async () => ({ default: (await import("./DockerPage")).DockerPage }));
+const EmergencyCommandsPage = lazy(async () => ({ default: (await import("./EmergencyCommandsPage")).EmergencyCommandsPage }));
 import {
   initialNotificationState,
   notificationReducer,
@@ -441,6 +456,7 @@ export function App() {
 
       <div className="workspace" aria-hidden={overlayOpen ? true : undefined} inert={overlayOpen ? true : undefined}>
         <main className="content">
+          <Suspense fallback={<div className="content-page-loading" role="status">正在打开页面…</div>}>
           {activePage === null ? (
             <WelcomeView
               productName={bootstrap.productName}
@@ -531,6 +547,7 @@ export function App() {
           ) : (
             <MigrationPlaceholder page={activePage} />
           )}
+          </Suspense>
           {activeTarget === null && activePage?.capability === "connected-target" ? (
             <div className="content-connect-action">
               <button

@@ -80,6 +80,7 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .workspace { display: grid; grid-template-rows: minmax(0, 1fr); min-width: 0; min-height: 0; }
 .page-heading > button { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
 .content { position: relative; min-width: 0; min-height: 0; overflow: auto; background: var(--bg); scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
+.content-page-loading { display: grid; min-height: 220px; place-items: center; color: var(--muted); font-size: 13px; }
 .page { width: min(1240px, calc(100% - 44px)); margin: 0 auto; padding: 24px 0 44px; }
 .page-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 20px; }
 .page-heading h1 { margin: 2px 0 5px; color: var(--text); font-size: 22px; font-weight: 600; letter-spacing: -.02em; }

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
@@ -37,18 +39,35 @@ describe("standalone xterm surface", () => {
     );
 
     expect(markup).toContain("SSH 终端");
-    // Search lives behind a toggle so the output keeps the window.
-    expect(markup).toContain('title="搜索终端输出"');
-    expect(markup).toContain('aria-expanded="false"');
+    // Nothing floats over the output: search opens on Ctrl+F, and copying is
+    // the terminal's own copy event.
+    expect(markup).not.toContain("terminal-surface-tools");
+    expect(markup).not.toContain("terminal-tool");
+    expect(markup).not.toContain("复制选区");
     expect(markup).toContain('role="region"');
     expect(markup).toContain('aria-label="SSH 终端输出与输入"');
     expect(markup).toContain("支持输入法组合输入、键盘操作、文本选择与搜索");
     expect(markup).not.toContain("navigator.clipboard");
-    expect(markup).toContain("复制选区");
     expect(markup).not.toContain("bindingHandle");
     expect(markup).not.toContain("scopeKey");
     expect(markup).not.toContain("sessionId");
     expect(markup).not.toContain("TargetGuard");
+  });
+
+  /**
+   * Removing the toggle would have taken search with it, so the shortcut has to
+   * be the thing that opens it, and Escape has to give the keys back.
+   */
+  it("keeps search reachable from the keyboard", () => {
+    const source = readFileSync(new URL("./TerminalSurface.tsx", import.meta.url), "utf8");
+    expect(source).toContain('event.key.toLowerCase() === "f"');
+    expect(source).toContain("setSearchOpen(true);");
+    expect(source).toContain('if (event.key === "Escape" && searchOpen)');
+    expect(source).toContain("terminalRef.current?.focus();");
+    // Opening it puts the caret in the field rather than leaving it in the shell.
+    expect(source).toContain("if (searchOpen) searchInputRef.current?.focus();");
+    // The bar itself is gone from the DOM while it is closed.
+    expect(source).toMatch(/\{searchOpen \? \(\s+<div className="terminal-surface-tools">/u);
   });
 
   it("does not start a terminal or renderer bridge during SSR", () => {

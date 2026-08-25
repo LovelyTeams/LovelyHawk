@@ -285,29 +285,6 @@
   gap: 6px;
 }
 
-.terminal-tool {
-  display: inline-flex;
-  width: 26px;
-  height: 26px;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--term-border);
-  border-radius: 7px;
-  color: var(--term-muted);
-  background: var(--term-panel);
-  cursor: pointer;
-}
-
-.terminal-tool:hover:not(:disabled) {
-  border-color: var(--term-accent);
-  color: var(--term-accent);
-}
-
-.terminal-tool:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
 .terminal-surface-tools .terminal-search {
   display: flex;
   align-items: center;

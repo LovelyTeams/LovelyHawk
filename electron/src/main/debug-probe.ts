@@ -163,20 +163,26 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
     fs.mkdirSync(outputDirectory, { recursive: true });
     fs.writeFileSync(path.join(outputDirectory, "welcome-disconnected.png"), welcomeScreenshotBytes);
 
-    const landedSystemInfo = await evaluate<Record<string, unknown>>(
+    const clickedSystemInfo = await evaluate<boolean>(
       client,
-      `(async () => {
+      `(() => {
         const item = [...document.querySelectorAll('.nav-item')]
           .find(candidate => candidate.textContent.includes('主机全景'));
-        if (!item) return { prompt: '', tables: -1, section: '' };
-        item.click();
-        await new Promise(resolve => setTimeout(resolve, 120));
-        return {
-          prompt: document.querySelector('.system-info-connect-prompt')?.textContent ?? '',
-          tables: document.querySelectorAll('.system-info-table-scroll table').length,
-          section: document.querySelector('[data-testid="window-titlebar"] small')?.textContent ?? ''
-        };
+        item?.click();
+        return item instanceof HTMLButtonElement;
       })()`,
+    );
+    assert(clickedSystemInfo, "the host overview nav item is missing");
+    // Each page is its own chunk, so it arrives after the click rather than
+    // with the entry bundle. Wait for the page, do not guess at a delay.
+    await waitFor(client, "document.querySelector('.system-info-connect-prompt') !== null");
+    const landedSystemInfo = await evaluate<Record<string, unknown>>(
+      client,
+      `(() => ({
+        prompt: document.querySelector('.system-info-connect-prompt')?.textContent ?? '',
+        tables: document.querySelectorAll('.system-info-table-scroll table').length,
+        section: document.querySelector('[data-testid="window-titlebar"] small')?.textContent ?? ''
+      }))()`,
     );
     assert(
       landedSystemInfo.section === "主机全景",
@@ -5720,8 +5726,6 @@ async function probeUnauthorizedTerminalRenderer(
         const api = window.lovelyresTerminal;
         const surface = document.querySelector('.terminal-surface');
         const error = document.querySelector('.terminal-error');
-        const copyButton = [...document.querySelectorAll('.terminal-surface button')]
-          .find(button => button.textContent.includes('复制选区'));
         const parseRgb = (value) => {
           const values = value.match(/[0-9.]+/g)?.slice(0, 3).map(Number) ?? [];
           if (values.length !== 3) throw new Error('invalid terminal color');
@@ -5758,8 +5762,8 @@ async function probeUnauthorizedTerminalRenderer(
           terminalWindow: document.querySelectorAll('[data-testid="terminal-window"]').length,
           terminalSurfaces: document.querySelectorAll('.terminal-surface').length,
           xtermHosts: document.querySelectorAll('.terminal-xterm-host').length,
-          copyButtonPresent: copyButton instanceof HTMLButtonElement,
-          copyButtonDisabled: copyButton instanceof HTMLButtonElement && copyButton.disabled,
+          surfaceTools: document.querySelectorAll('.terminal-surface-tools').length,
+          surfaceButtons: document.querySelectorAll('.terminal-surface button').length,
           passwordInputs: document.querySelectorAll('input[type="password"]').length,
           imageElements: document.querySelectorAll('img').length,
           scriptElements: document.querySelectorAll('script').length,
@@ -5818,8 +5822,8 @@ async function probeUnauthorizedTerminalRenderer(
     assert(initial.terminalWindow === 1, "terminal renderer root is missing");
     assert(initial.terminalSurfaces === 1, "terminal surface is missing");
     assert(initial.xtermHosts === 1, "terminal xterm host is missing");
-    assert(initial.copyButtonPresent === true, "terminal copy-selection control is missing");
-    assert(initial.copyButtonDisabled === true, "terminal copy control enabled without a selection");
+    assert(initial.surfaceTools === 0, "terminal surface still floats a toolbar over the output");
+    assert(initial.surfaceButtons === 0, "terminal surface still draws controls over the output");
     assert(initial.passwordInputs === 0, "terminal renderer mounted a password input");
     assert(initial.imageElements === 0, "terminal renderer mounted an image");
     assert(initial.scriptElements === 1, "terminal renderer mounted unexpected scripts");

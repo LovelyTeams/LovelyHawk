@@ -343,7 +343,6 @@
 }
 
 /* File-management panel chrome. */
-.sftp-browser-mode { padding: 2px 9px; border: 1px solid var(--info-border); border-radius: 999px; color: var(--info-text); background: var(--info-soft); font-size: 12px; font-weight: 700; }
 .sftp-browser-actions { display: flex; flex: none; flex-wrap: wrap; align-items: center; gap: 6px; margin: 10px 0; }
 .sftp-browser-action { min-height: 30px; padding: 5px 12px; border: 1px solid var(--border-strong); border-radius: 8px; color: var(--text); background: var(--surface); font: inherit; font-size: 12px; cursor: pointer; }
 .sftp-browser-action:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-text); background: var(--accent-soft); }
