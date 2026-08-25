@@ -30,6 +30,17 @@ wsl -d Ubuntu -u root -e bash -lc 'systemctl start docker; cd /opt/lovelyres-lab
 
 攻击者 IP 固定为 `198.51.100.7`，方便当 IOC 用。
 
+## 第二台靶机：Alpine
+
+`/opt/lovelyres-lab-alpine/` 里是同一套植入物的 Alpine（busybox）版本，端口 2223：
+
+```bash
+wsl -d Ubuntu -u root -e bash -lc 'cd /opt/lovelyres-lab-alpine && docker build -t lovelyres-lab:alpine . && docker rm -f lab-alpine; docker run -d --restart unless-stopped --name lab-alpine -p 2223:22 lovelyres-lab:alpine'
+```
+
+探针用 `LAB=alpine` 切换。busybox 的行为和 GNU 差别很大，这台机器专门用来撞这些差异
+（`find -ls` 静默返回空就是这么发现的）。
+
 ## 探针
 
 ```bash

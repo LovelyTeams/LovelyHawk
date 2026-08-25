@@ -922,8 +922,19 @@ pub fn authorized_key(line: &str) -> bool {
 
 /// An account whose password has never been set, so the next login sets it.
 pub fn password_never_set(line: &str) -> bool {
-    line.split_whitespace()
-        .any(|field| field == "last=0" || field == "last=")
+    // A locked system account carries no aging data on purpose, and Alpine
+    // ships around twenty of them. Only an account that can actually log in is
+    // worth reporting for never having had its password set.
+    let mut locked = false;
+    let mut never = false;
+    for field in line.split_whitespace() {
+        match field {
+            "state=locked" => locked = true,
+            "last=0" | "last=" => never = true,
+            _ => {}
+        }
+    }
+    never && !locked
 }
 
 /// Accounts that can also come from somewhere other than the local files.
@@ -1390,6 +1401,20 @@ mod tests {
         assert!(!super::locked_attribute("/etc/apt/sources.list.d:"));
         assert!(!super::locked_attribute("lsattr: Operation not supported"));
         assert!(!super::locked_attribute(""));
+    }
+
+    /// Alpine ships around twenty locked system accounts, none of which carry
+    /// aging data. Flagging all of them buried the one account that mattered.
+    #[test]
+    fn password_never_set_ignores_locked_system_accounts() {
+        assert!(!super::password_never_set(
+            "bin state=locked last= min=0 max="
+        ));
+        assert!(!super::password_never_set(
+            "root state=set last=20690 min=0"
+        ));
+        assert!(super::password_never_set("backup2 state=empty last= min=0"));
+        assert!(super::password_never_set("intruder state=set last=0 min=0"));
     }
 
     /// Debian and Ubuntu ship syslog in adm. Flagging it on every host is the

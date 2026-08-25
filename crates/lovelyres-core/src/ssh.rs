@@ -4765,10 +4765,15 @@ impl TestSessionHarness {
             harness: self,
             completed: false,
         };
+        // Subscribe before announcing arrival. notify_waiters only wakes tasks
+        // that are already waiting, so a release landing between the two would
+        // strand this operation and make every test using the harness flaky.
+        let mut released = Box::pin(self.release.notified());
+        released.as_mut().enable();
         self.entered_count
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.entered.notify_waiters();
-        self.release.notified().await;
+        released.await;
         guard.completed = true;
     }
 

@@ -367,7 +367,7 @@ static CATALOG: &[CommandDefinition] = &[
         Persistence,
         "Shell 启动脚本",
         "列出全局及用户 Shell 启动脚本元数据。",
-        "find /etc/profile /etc/profile.d /etc/bashrc /etc/bash.bashrc /root /home -maxdepth 3 -type f \\( -name '.bashrc' -o -name '.profile' -o -name '*.sh' \\) -ls 2>/dev/null | head -n 500"
+        "find /etc/profile /etc/profile.d /etc/bashrc /etc/bash.bashrc /root /home -maxdepth 3 -type f \\( -name '.bashrc' -o -name '.profile' -o -name '*.sh' \\) -exec ls -ld -- {} + 2>/dev/null | head -n 500"
     )
     .flagging(command_findings::remote_execution_hint),
     portable!(
@@ -399,7 +399,7 @@ static CATALOG: &[CommandDefinition] = &[
         Files,
         "近期可执行文件",
         "定位最近七天修改且带执行位的文件。",
-        "find /tmp /var/tmp /dev/shm /usr/local/bin /opt -xdev -type f -mtime -7 -perm /111 -ls 2>/dev/null | head -n 500"
+        "find /tmp /var/tmp /dev/shm /usr/local/bin /opt -xdev -type f -mtime -7 -perm /111 -exec ls -ld -- {} + 2>/dev/null | head -n 500"
     )
     .flagging(command_findings::any_hit),
     portable!(
@@ -407,7 +407,7 @@ static CATALOG: &[CommandDefinition] = &[
         Files,
         "隐藏文件",
         "列出常见可写位置下的隐藏普通文件。",
-        "find /tmp /var/tmp /dev/shm /home /root -xdev -type f -name '.*' -ls 2>/dev/null | head -n 500"
+        "find /tmp /var/tmp /dev/shm /home /root -xdev -type f -name '.*' -exec ls -ld -- {} + 2>/dev/null | head -n 500"
     )
     .flagging(command_findings::planted_file),
     portable!(
@@ -471,7 +471,7 @@ static CATALOG: &[CommandDefinition] = &[
         Permissions,
         "全局可写目录",
         "定位任意用户都能写入的目录，重点看缺少粘滞位的位置。",
-        "find / -xdev -type d -perm -0002 -not -path '/proc/*' -not -path '/sys/*' -ls 2>/dev/null | head -n 300"
+        "find / -xdev -type d -perm -0002 -not -path '/proc/*' -not -path '/sys/*' -exec ls -ld -- {} + 2>/dev/null | head -n 300"
     )
     .with_timeout(60)
     .flagging(command_findings::world_writable_directory),
@@ -480,7 +480,7 @@ static CATALOG: &[CommandDefinition] = &[
         Permissions,
         "无属主文件",
         "查找已删除账号遗留或异常创建的文件。",
-        "find / -xdev \\( -nouser -o -nogroup \\) -ls 2>/dev/null | head -n 300"
+        "find / -xdev \\( -nouser -o -nogroup \\) -exec ls -ld -- {} + 2>/dev/null | head -n 300"
     )
     .with_timeout(60)
     .flagging(command_findings::unowned_path),
@@ -531,7 +531,7 @@ static CATALOG: &[CommandDefinition] = &[
         Permissions,
         "SSH 密钥文件",
         "列出各账号下的授权公钥与私钥文件位置和权限。",
-        "ls -la /root/.ssh 2>/dev/null; echo '--- 用户密钥 ---'; find /home -maxdepth 3 -name 'authorized_keys*' -o -maxdepth 3 -name 'id_*' -ls 2>/dev/null | head -n 200"
+        "ls -la /root/.ssh 2>/dev/null; echo '--- 用户密钥 ---'; find /home -maxdepth 3 -name 'authorized_keys*' -o -maxdepth 3 -name 'id_*' -exec ls -ld -- {} + 2>/dev/null | head -n 200"
     )
     .flagging(command_findings::ssh_key_exposure),
     portable!(
@@ -619,7 +619,7 @@ static CATALOG: &[CommandDefinition] = &[
         Accounts,
         "口令与账号有效期",
         "读取每个账号的口令最后修改时间与到期设置。",
-        "awk -F: '{printf \"%s last=%s min=%s max=%s warn=%s inactive=%s expire=%s\\n\", $1, $3, $4, $5, $6, $7, $8}' /etc/shadow 2>/dev/null | head -n 200 || echo '需要更高权限'"
+        "awk -F: '{s=\"set\"; if ($2 == \"\") s=\"empty\"; else if ($2 ~ /^[!*]/) s=\"locked\"; printf \"%s state=%s last=%s min=%s max=%s warn=%s inactive=%s expire=%s\\n\", $1, s, $3, $4, $5, $6, $7, $8}' /etc/shadow 2>/dev/null | head -n 200 || echo '需要更高权限'"
     )
     .flagging(command_findings::password_never_set),
     portable!(
@@ -878,7 +878,7 @@ static CATALOG: &[CommandDefinition] = &[
         Persistence,
         "近期改动的服务单元",
         "列出最近三十天被创建或修改的服务文件。",
-        "find /etc/systemd /lib/systemd /usr/lib/systemd -name '*.service' -mtime -30 -ls 2>/dev/null | head -n 200"
+        "find /etc/systemd /lib/systemd /usr/lib/systemd -name '*.service' -mtime -30 -exec ls -ld -- {} + 2>/dev/null | head -n 200"
     )
     .with_timeout(60)
     .flagging(command_findings::any_hit),
@@ -887,7 +887,7 @@ static CATALOG: &[CommandDefinition] = &[
         Persistence,
         "用户级服务单元",
         "检查用户目录下的自启服务。",
-        "find /home /root -maxdepth 5 -path '*/.config/systemd/*' -type f -ls 2>/dev/null | head -n 200; echo '--- 用户单元 ---'; systemctl --user list-unit-files --no-pager 2>/dev/null | head -n 100"
+        "find /home /root -maxdepth 5 -path '*/.config/systemd/*' -type f -exec ls -ld -- {} + 2>/dev/null | head -n 200; echo '--- 用户单元 ---'; systemctl --user list-unit-files --no-pager 2>/dev/null | head -n 100"
     )
     .with_timeout(60)
     .flagging(command_findings::any_hit),
@@ -936,7 +936,7 @@ static CATALOG: &[CommandDefinition] = &[
         Persistence,
         "设备触发规则",
         "检查设备事件触发执行的规则。",
-        "find /etc/udev/rules.d /lib/udev/rules.d -type f -mtime -90 -ls 2>/dev/null | head -n 100; echo '--- 带执行动作 ---'; grep -rlE 'RUN\\+?=' /etc/udev/rules.d 2>/dev/null | head -n 50"
+        "find /etc/udev/rules.d /lib/udev/rules.d -type f -mtime -90 -exec ls -ld -- {} + 2>/dev/null | head -n 100; echo '--- 带执行动作 ---'; grep -rlE 'RUN\\+?=' /etc/udev/rules.d 2>/dev/null | head -n 50"
     )
     .flagging(command_findings::remote_execution_hint),
     portable!(
@@ -968,7 +968,7 @@ static CATALOG: &[CommandDefinition] = &[
         Persistence,
         "认证模块变更",
         "检查近期被改动的认证配置与模块文件。",
-        "find /etc/pam.d -type f -mtime -60 -ls 2>/dev/null | head -n 100; echo '--- 模块文件 ---'; find /lib/security /lib64/security /usr/lib/security /usr/lib64/security -name '*.so' -mtime -60 -ls 2>/dev/null | head -n 100"
+        "find /etc/pam.d -type f -mtime -60 -exec ls -ld -- {} + 2>/dev/null | head -n 100; echo '--- 模块文件 ---'; find /lib/security /lib64/security /usr/lib/security /usr/lib64/security -name '*.so' -mtime -60 -exec ls -ld -- {} + 2>/dev/null | head -n 100"
     )
     .with_timeout(60)
     .flagging(command_findings::any_hit),
@@ -1009,7 +1009,7 @@ static CATALOG: &[CommandDefinition] = &[
         Logs,
         "日志被清理迹象",
         "列出大小为零的日志和登录记录文件状态。",
-        "ls -l /var/log/wtmp /var/log/btmp /var/log/lastlog /var/run/utmp 2>/dev/null; echo '--- 空日志文件 ---'; find /var/log -type f -size 0 -ls 2>/dev/null | head -n 200"
+        "ls -l /var/log/wtmp /var/log/btmp /var/log/lastlog /var/run/utmp 2>/dev/null; echo '--- 空日志文件 ---'; find /var/log -type f -size 0 -exec ls -ld -- {} + 2>/dev/null | head -n 200"
     )
     .flagging(command_findings::emptied_log),
     portable!(
@@ -1084,7 +1084,7 @@ static CATALOG: &[CommandDefinition] = &[
         Files,
         "近一天改动的文件",
         "在配置、家目录和站点目录里找最近改动。",
-        "find /etc /root /home /var/www /usr/local /opt -xdev -type f -mtime -1 -ls 2>/dev/null | head -n 400"
+        "find /etc /root /home /var/www /usr/local /opt -xdev -type f -mtime -1 -exec ls -ld -- {} + 2>/dev/null | head -n 400"
     )
     .with_timeout(60)
     .flagging(command_findings::planted_file),
@@ -1101,7 +1101,7 @@ static CATALOG: &[CommandDefinition] = &[
         Files,
         "配置目录近期变更",
         "列出 /etc 下最近七天被改动的文件。",
-        "find /etc -xdev -type f -mtime -7 -ls 2>/dev/null | head -n 300"
+        "find /etc -xdev -type f -mtime -7 -exec ls -ld -- {} + 2>/dev/null | head -n 300"
     )
     .with_timeout(60)
     .flagging(command_findings::planted_file),
@@ -1119,7 +1119,7 @@ static CATALOG: &[CommandDefinition] = &[
         Files,
         "站点近期新增文件",
         "列出站点目录中最近七天出现的文件。",
-        "find /var/www /usr/share/nginx /srv/www /home/*/public_html -xdev -type f -mtime -7 -ls 2>/dev/null | head -n 300"
+        "find /var/www /usr/share/nginx /srv/www /home/*/public_html -xdev -type f -mtime -7 -exec ls -ld -- {} + 2>/dev/null | head -n 300"
     )
     .with_timeout(60)
     .flagging(command_findings::any_hit),
@@ -1128,7 +1128,7 @@ static CATALOG: &[CommandDefinition] = &[
         Files,
         "可疑软链接",
         "列出常见目录下的软链接及其指向。",
-        "find /etc /root /home /tmp /var/tmp -xdev -type l -ls 2>/dev/null | head -n 300"
+        "find /etc /root /home /tmp /var/tmp -xdev -type l -exec ls -ld -- {} + 2>/dev/null | head -n 300"
     )
     .flagging(command_findings::sensitive_symlink),
     portable!(
@@ -1136,7 +1136,7 @@ static CATALOG: &[CommandDefinition] = &[
         Files,
         "异常文件名",
         "查找含空格或多重点号的文件名，常用于伪装。",
-        "find /tmp /var/tmp /dev/shm /home /root -xdev \\( -name '* *' -o -name '.. *' -o -name '...*' \\) -ls 2>/dev/null | head -n 200"
+        "find /tmp /var/tmp /dev/shm /home /root -xdev \\( -name '* *' -o -name '.. *' -o -name '...*' \\) -exec ls -ld -- {} + 2>/dev/null | head -n 200"
     )
     .flagging(command_findings::any_hit),
     portable!(
@@ -1144,7 +1144,7 @@ static CATALOG: &[CommandDefinition] = &[
         Files,
         "系统命令近期改动",
         "检查系统命令目录中最近改动的文件。",
-        "find /bin /sbin /usr/bin /usr/sbin /usr/local/bin /usr/local/sbin -xdev -type f -mtime -30 -ls 2>/dev/null | head -n 200"
+        "find /bin /sbin /usr/bin /usr/sbin /usr/local/bin /usr/local/sbin -xdev -type f -mtime -30 -exec ls -ld -- {} + 2>/dev/null | head -n 200"
     )
     .with_timeout(60)
     .flagging(command_findings::any_hit),
@@ -1153,7 +1153,7 @@ static CATALOG: &[CommandDefinition] = &[
         Files,
         "设备目录中的普通文件",
         "/dev 下出现普通文件通常不正常。",
-        "find /dev -xdev -type f -ls 2>/dev/null | head -n 100"
+        "find /dev -xdev -type f -exec ls -ld -- {} + 2>/dev/null | head -n 100"
     )
     .flagging(command_findings::any_hit),
     portable!(
@@ -1169,7 +1169,7 @@ static CATALOG: &[CommandDefinition] = &[
         Files,
         "凭据类文件位置",
         "列出私钥、证书和环境变量文件的位置，不读取内容。",
-        "find /etc /root /home /var/www /opt -xdev -type f \\( -name 'id_rsa*' -o -name 'id_ed25519*' -o -name '*.pem' -o -name '*.key' -o -name '.env' -o -name '*.p12' \\) -ls 2>/dev/null | head -n 200"
+        "find /etc /root /home /var/www /opt -xdev -type f \\( -name 'id_rsa*' -o -name 'id_ed25519*' -o -name '*.pem' -o -name '*.key' -o -name '.env' -o -name '*.p12' \\) -exec ls -ld -- {} + 2>/dev/null | head -n 200"
     )
     .with_timeout(60)
     .flagging(command_findings::ssh_key_exposure),
@@ -1245,7 +1245,7 @@ static CATALOG: &[CommandDefinition] = &[
         Containers,
         "编排文件位置",
         "查找 compose 编排文件，了解服务组成。",
-        "find /root /home /opt /srv /etc -maxdepth 4 \\( -name 'docker-compose*.yml' -o -name 'docker-compose*.yaml' -o -name 'compose.yml' -o -name 'compose.yaml' \\) -ls 2>/dev/null | head -n 100"
+        "find /root /home /opt /srv /etc -maxdepth 4 \\( -name 'docker-compose*.yml' -o -name 'docker-compose*.yaml' -o -name 'compose.yml' -o -name 'compose.yaml' \\) -exec ls -ld -- {} + 2>/dev/null | head -n 100"
     )
     .with_timeout(60)
     .flagging(command_findings::compromise_marker),
