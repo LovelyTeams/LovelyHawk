@@ -182,12 +182,46 @@ impl PortableStore {
     }
 
     pub fn read<T: DeserializeOwned>(&self, document: StoreFile) -> CoreResult<Option<T>> {
+        self.read_bounded(document, usize::MAX)
+    }
+
+    /// Read a portable document only when its encoded file is within a caller-owned budget.
+    /// The metadata check happens before allocating a buffer for attacker-controlled data.
+    pub fn read_bounded<T: DeserializeOwned>(
+        &self,
+        document: StoreFile,
+        maximum_bytes: usize,
+    ) -> CoreResult<Option<T>> {
         let _guard = self.write_lock.lock();
         let path = self.path_for(document);
         if !path.exists() {
             return Ok(None);
         }
-        let bytes = fs::read(&path).map_err(|source| CoreError::io("read", &path, source))?;
+        let encoded_len = fs::metadata(&path)
+            .map_err(|source| CoreError::io("inspect", &path, source))?
+            .len();
+        if encoded_len > maximum_bytes as u64 {
+            return Err(CoreError::validation(
+                document.subject(),
+                "the encoded portable document exceeds its aggregate storage budget",
+            ));
+        }
+        let bytes = if maximum_bytes == usize::MAX {
+            fs::read(&path).map_err(|source| CoreError::io("read", &path, source))?
+        } else {
+            let file = File::open(&path).map_err(|source| CoreError::io("open", &path, source))?;
+            let mut bytes = Vec::with_capacity((encoded_len as usize).min(maximum_bytes));
+            file.take(maximum_bytes as u64 + 1)
+                .read_to_end(&mut bytes)
+                .map_err(|source| CoreError::io("read bounded", &path, source))?;
+            if bytes.len() > maximum_bytes {
+                return Err(CoreError::validation(
+                    document.subject(),
+                    "the encoded portable document exceeds its aggregate storage budget",
+                ));
+            }
+            bytes
+        };
         let envelope: VersionedDocument<T> =
             serde_json::from_slice(&bytes).map_err(|source| CoreError::Decode {
                 subject: document.subject(),
@@ -208,6 +242,19 @@ impl PortableStore {
         T: DeserializeOwned + Default,
     {
         Ok(self.read(document)?.unwrap_or_default())
+    }
+
+    pub fn read_or_default_bounded<T>(
+        &self,
+        document: StoreFile,
+        maximum_bytes: usize,
+    ) -> CoreResult<T>
+    where
+        T: DeserializeOwned + Default,
+    {
+        Ok(self
+            .read_bounded(document, maximum_bytes)?
+            .unwrap_or_default())
     }
 
     /// Persist a schema-v1 JSON document using a flushed same-directory temp file.

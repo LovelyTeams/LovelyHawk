@@ -18,7 +18,10 @@ use std::{
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use parking_lot::Mutex as SyncMutex;
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize, Deserializer, Serialize,
+    de::{Error as _, IgnoredAny, SeqAccess, Visitor},
+};
 use sha2::{Digest, Sha256};
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -56,6 +59,8 @@ pub const MAX_MIDDLEWARE_TOTAL_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_MIDDLEWARE_DIRECTORY_ENTRIES: usize = 2048;
 const MAX_DISCOVERY_OUTPUT_BYTES: usize = 512 * 1024;
 const MAX_HISTORY_RECORDS: usize = 512;
+const MAX_MIDDLEWARE_HISTORY_STORAGE_BYTES: usize = 32 * 1024 * 1024;
+const MAX_MIDDLEWARE_HISTORY_RECORD_TEXT_BYTES: usize = 32 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -914,7 +919,54 @@ pub struct MiddlewareChangeRecord {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 struct StoredMiddlewareHistory {
+    #[serde(deserialize_with = "deserialize_middleware_history_records")]
     records: Vec<MiddlewareChangeRecord>,
+}
+
+fn deserialize_middleware_history_records<'de, D>(
+    deserializer: D,
+) -> Result<Vec<MiddlewareChangeRecord>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct MiddlewareHistoryVisitor;
+
+    impl<'de> Visitor<'de> for MiddlewareHistoryVisitor {
+        type Value = Vec<MiddlewareChangeRecord>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(
+                formatter,
+                "at most {MAX_HISTORY_RECORDS} middleware history records"
+            )
+        }
+
+        fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            let mut records = Vec::with_capacity(
+                sequence
+                    .size_hint()
+                    .unwrap_or_default()
+                    .min(MAX_HISTORY_RECORDS),
+            );
+            while records.len() < MAX_HISTORY_RECORDS {
+                let Some(record) = sequence.next_element()? else {
+                    return Ok(records);
+                };
+                records.push(record);
+            }
+            if sequence.next_element::<IgnoredAny>()?.is_some() {
+                return Err(A::Error::custom(
+                    "middleware history record count exceeds its storage budget",
+                ));
+            }
+            Ok(records)
+        }
+    }
+
+    deserializer.deserialize_seq(MiddlewareHistoryVisitor)
 }
 
 #[derive(Debug, Clone)]
@@ -1423,9 +1475,7 @@ impl MiddlewareService {
     pub fn history(&self, target: &TargetGuard) -> CoreResult<Vec<MiddlewareChangeRecord>> {
         self.target.validate(target)?;
         let _guard = self.history_lock.lock();
-        let mut records = self
-            .store
-            .read_or_default::<StoredMiddlewareHistory>(StoreFile::Middleware)?
+        let mut records = read_stored_middleware_history(&self.store)?
             .records
             .into_iter()
             .filter(|record| record.target == target.identity)
@@ -1668,9 +1718,7 @@ impl MiddlewareChangePlan {
         validate_change_record(&record)?;
         let persisted = (|| {
             let _guard = self.history_lock.lock();
-            let mut stored = self
-                .store
-                .read_or_default::<StoredMiddlewareHistory>(StoreFile::Middleware)?;
+            let mut stored = read_stored_middleware_history(&self.store)?;
             stored.records.retain(|existing| existing.id != record.id);
             stored.records.push(record.clone());
             if stored.records.len() > MAX_HISTORY_RECORDS {
@@ -1905,9 +1953,7 @@ impl MiddlewareService {
                 "record id must be a UUID",
             ));
         }
-        let record = self
-            .store
-            .read_or_default::<StoredMiddlewareHistory>(StoreFile::Middleware)?
+        let record = read_stored_middleware_history(&self.store)?
             .records
             .into_iter()
             .find(|record| record.id == record_id && record.target == session.target().identity)
@@ -4369,6 +4415,54 @@ fn sha256_hex(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
+fn read_stored_middleware_history(store: &PortableStore) -> CoreResult<StoredMiddlewareHistory> {
+    let stored = store.read_or_default_bounded::<StoredMiddlewareHistory>(
+        StoreFile::Middleware,
+        MAX_MIDDLEWARE_HISTORY_STORAGE_BYTES,
+    )?;
+    validate_stored_middleware_history(&stored)?;
+    Ok(stored)
+}
+
+fn validate_stored_middleware_history(history: &StoredMiddlewareHistory) -> CoreResult<()> {
+    if history.records.len() > MAX_HISTORY_RECORDS {
+        return Err(CoreError::validation(
+            "middleware change history",
+            "persisted history exceeds the bounded record limit",
+        ));
+    }
+    for record in &history.records {
+        let text_bytes = [
+            record.id.as_str(),
+            record.operation_id.as_str(),
+            record.target.as_str(),
+            record.instance_id.as_str(),
+            record.unit.as_str(),
+            record.binary_path.as_str(),
+            record.fragment_path.as_str(),
+            record.runtime_fingerprint.as_str(),
+            record.primary_config.as_str(),
+            record.config_root.as_str(),
+            record.path.as_str(),
+            record.remote_backup.as_str(),
+            record.old_sha256.as_str(),
+            record.new_sha256.as_str(),
+        ]
+        .into_iter()
+        .fold(0usize, |total, value| total.saturating_add(value.len()));
+        if text_bytes > MAX_MIDDLEWARE_HISTORY_RECORD_TEXT_BYTES
+            || TargetIdentity::new(record.target.as_str().to_owned()).is_err()
+        {
+            return Err(CoreError::validation(
+                "middleware change history",
+                "persisted record text exceeds its bounded validated shape",
+            ));
+        }
+        validate_change_record(record)?;
+    }
+    Ok(())
+}
+
 fn validate_change_record(record: &MiddlewareChangeRecord) -> CoreResult<()> {
     if Uuid::parse_str(&record.id).is_err()
         || Uuid::parse_str(&record.operation_id).is_err()
@@ -4459,11 +4553,31 @@ fn validate_change_record(record: &MiddlewareChangeRecord) -> CoreResult<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::{fs, path::PathBuf};
+
     use super::*;
     use crate::{
         apache_runtime::{ApacheRuntimeInvocationEvidence, ApacheStableConfigGraphEvidence},
         ssh::SshConnectionStatus,
     };
+
+    #[derive(Debug)]
+    struct TestArchiveRoot(PathBuf);
+
+    impl TestArchiveRoot {
+        fn new() -> Self {
+            let path =
+                std::env::temp_dir().join(format!("lovelyres-middleware-{}", Uuid::new_v4()));
+            fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for TestArchiveRoot {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
 
     fn instance(
         product: MiddlewareProduct,
@@ -4561,6 +4675,43 @@ mod tests {
             directory_manifests: Vec::new(),
             total_bytes: bytes.len(),
             loaded_at: Utc::now(),
+        }
+    }
+
+    fn change_record() -> MiddlewareChangeRecord {
+        let instance = instance(
+            MiddlewareProduct::Nginx,
+            "nginx.service",
+            "/etc/nginx/nginx.conf",
+            "/etc/nginx",
+        );
+        MiddlewareChangeRecord {
+            id: Uuid::new_v4().to_string(),
+            operation_id: Uuid::new_v4().to_string(),
+            target: TargetIdentity::new("host-a").unwrap(),
+            instance_id: instance.id.clone(),
+            product: instance.product,
+            unit: instance.unit.clone(),
+            binary_path: instance.binary_path.clone(),
+            fragment_path: instance.fragment_path.clone(),
+            runtime_fingerprint: instance.runtime_fingerprint.clone(),
+            primary_config: instance.primary_config.clone(),
+            config_root: instance.config_root.clone(),
+            discovered_config_root: false,
+            path: instance.primary_config.clone(),
+            remote_backup: RemotePath::new(
+                "/etc/nginx/.lovelyres-backups/00000000-0000-0000-0000-000000000000-nginx.conf",
+            )
+            .unwrap(),
+            old_sha256: "1".repeat(64),
+            new_sha256: "2".repeat(64),
+            old_bytes: 10,
+            new_bytes: 11,
+            validator: instance.validator,
+            activation: instance.activation,
+            state: MiddlewareChangeState::Applied,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
         }
     }
 
@@ -5386,40 +5537,7 @@ mod tests {
 
     #[test]
     fn persisted_restore_record_is_bound_to_managed_backup_and_closed_policy() {
-        let instance = instance(
-            MiddlewareProduct::Nginx,
-            "nginx.service",
-            "/etc/nginx/nginx.conf",
-            "/etc/nginx",
-        );
-        let mut record = MiddlewareChangeRecord {
-            id: Uuid::new_v4().to_string(),
-            operation_id: Uuid::new_v4().to_string(),
-            target: TargetIdentity::new("host-a").unwrap(),
-            instance_id: instance.id.clone(),
-            product: instance.product,
-            unit: instance.unit.clone(),
-            binary_path: instance.binary_path.clone(),
-            fragment_path: instance.fragment_path.clone(),
-            runtime_fingerprint: instance.runtime_fingerprint.clone(),
-            primary_config: instance.primary_config.clone(),
-            config_root: instance.config_root.clone(),
-            discovered_config_root: false,
-            path: instance.primary_config.clone(),
-            remote_backup: RemotePath::new(
-                "/etc/nginx/.lovelyres-backups/00000000-0000-0000-0000-000000000000-nginx.conf",
-            )
-            .unwrap(),
-            old_sha256: "1".repeat(64),
-            new_sha256: "2".repeat(64),
-            old_bytes: 10,
-            new_bytes: 11,
-            validator: instance.validator,
-            activation: instance.activation,
-            state: MiddlewareChangeState::Applied,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        };
+        let mut record = change_record();
         validate_change_record(&record).unwrap();
         record.remote_backup = RemotePath::new("/tmp/stolen.conf").unwrap();
         assert!(validate_change_record(&record).is_err());
@@ -5429,5 +5547,74 @@ mod tests {
         .unwrap();
         record.activation = MiddlewareActivationPolicy::Restart;
         assert!(validate_change_record(&record).is_err());
+    }
+
+    #[test]
+    fn persisted_history_is_byte_item_and_text_bounded_before_use() {
+        let root = TestArchiveRoot::new();
+        let store = PortableStore::prepare(root.0.clone()).unwrap();
+        let path = store.path_for(StoreFile::Middleware);
+        let oversized = fs::File::create(path).unwrap();
+        oversized
+            .set_len(MAX_MIDDLEWARE_HISTORY_STORAGE_BYTES as u64 + 1)
+            .unwrap();
+        drop(oversized);
+        assert!(matches!(
+            read_stored_middleware_history(&store),
+            Err(CoreError::Validation {
+                subject: "middleware changes",
+                ..
+            })
+        ));
+
+        let record = change_record();
+        let exact_limit = StoredMiddlewareHistory {
+            records: vec![record.clone(); MAX_HISTORY_RECORDS],
+        };
+        store.write(StoreFile::Middleware, &exact_limit).unwrap();
+        assert_eq!(
+            read_stored_middleware_history(&store)
+                .unwrap()
+                .records
+                .len(),
+            MAX_HISTORY_RECORDS
+        );
+
+        let too_many = StoredMiddlewareHistory {
+            records: vec![record.clone(); MAX_HISTORY_RECORDS + 1],
+        };
+        store.write(StoreFile::Middleware, &too_many).unwrap();
+        let encoded_error = read_stored_middleware_history(&store).unwrap_err();
+        assert!(matches!(
+            &encoded_error,
+            CoreError::Decode {
+                subject: "middleware changes",
+                ..
+            }
+        ));
+        assert!(
+            encoded_error
+                .to_string()
+                .contains("middleware history record count exceeds its storage budget")
+        );
+        assert!(matches!(
+            validate_stored_middleware_history(&too_many),
+            Err(CoreError::Validation {
+                subject: "middleware change history",
+                ..
+            })
+        ));
+
+        let mut oversized_text = record;
+        oversized_text.old_sha256 = "x".repeat(MAX_MIDDLEWARE_HISTORY_RECORD_TEXT_BYTES + 1);
+        assert!(matches!(
+            validate_stored_middleware_history(&StoredMiddlewareHistory {
+                records: vec![oversized_text],
+            }),
+            Err(CoreError::Validation {
+                subject: "middleware change history",
+                ..
+            })
+        ));
     }
 }

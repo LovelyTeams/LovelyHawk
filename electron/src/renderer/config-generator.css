@@ -1,0 +1,231 @@
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.config-generator-page { max-width: 1440px; }
+.config-generator-heading { margin-bottom: 17px; }
+.config-catalog-count {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 2px 7px;
+  min-width: 118px;
+  padding: 9px 13px;
+  color: var(--accent-text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  box-shadow: var(--shadow-sm);
+}
+.config-catalog-count strong { text-align: right; font-size: 14px; }
+.config-catalog-count span { align-self: center; color: var(--faint); font-size: 12.5px; }
+
+.config-notice {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  color: var(--success-text);
+  background: var(--success-soft);
+  border: 1px solid var(--success-border);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.config-notice.error { color: var(--danger-text); background: var(--danger-soft); border-color: var(--danger-border); }
+
+.config-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 42px;
+  padding: 0 13px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-sm);
+}
+.config-search > span:first-child { color: var(--accent-text); font-size: 18px; }
+.config-search input { min-width: 0; flex: 1; color: var(--text); background: transparent; border: 0; outline: 0; font-size: 12px; }
+.config-search small { flex: none; color: var(--faint); font-size: 12.5px; }
+.config-search:focus-within { border-color: var(--focus-ring); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus-ring) 15%, transparent); }
+
+.config-search-results {
+  position: relative;
+  z-index: 3;
+  max-height: 280px;
+  overflow: auto;
+  margin-top: 5px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-sm);
+}
+.config-search-results > p { margin: 0; padding: 18px; color: var(--faint); text-align: center; font-size: 13px; }
+.config-search-results ul { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; }
+.config-search-results button { display: grid; width: 100%; grid-template-columns: 105px minmax(140px, 220px) minmax(0, 1fr); align-items: center; gap: 10px; padding: 9px 10px; text-align: left; background: transparent; border: 0; border-radius: 7px; }
+.config-search-results button:hover, .config-search-results button:focus-visible { background: var(--accent-soft); outline: 0; }
+.config-search-results button span { color: var(--accent-text); font-size: 12.5px; }
+.config-search-results button strong { color: var(--text); font-size: 13px; }
+.config-search-results button small { overflow: hidden; color: var(--muted); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+
+.config-read-only-status {
+  display: grid;
+  grid-template-columns: minmax(150px, .7fr) minmax(190px, 1fr) minmax(260px, 1.8fr);
+  align-items: center;
+  gap: 13px;
+  margin-top: 13px;
+  padding: 12px 14px;
+  background: var(--warning-soft);
+  border: 1px solid var(--warning-border);
+  border-radius: 10px;
+}
+.config-read-only-status h2 { margin: 0; color: var(--warning-text); font-size: 12px; }
+.config-read-only-status p { margin: 3px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.config-read-only-status label { display: flex; min-width: 0; flex-direction: column; gap: 4px; color: var(--warning-text); font-size: 12px; }
+.config-read-only-status select { min-height: 33px; padding: 6px 8px; color: var(--warning-text); background: var(--surface); border: 1px solid var(--warning-border); border-radius: 7px; font-size: 12.5px; }
+.config-read-only-detail { min-width: 0; padding-left: 13px; border-left: 2px solid var(--warning); }
+.config-read-only-detail strong, .config-read-only-detail span { display: block; }
+.config-read-only-detail strong { overflow: hidden; color: var(--warning-text); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+.config-read-only-detail span { margin-top: 2px; color: var(--warning-text); font-size: 12px; font-weight: 600; }
+
+.config-loading { margin-top: 14px; padding: 70px; color: var(--faint); text-align: center; background: var(--surface); border: 1px dashed var(--border); border-radius: 14px; font-size: 12px; }
+.config-product-strip { display: grid; grid-template-columns: repeat(9, minmax(86px, 1fr)); gap: 6px; margin: 13px 0; }
+.config-product-strip button { display: flex; min-width: 0; min-height: 67px; flex-direction: column; align-items: flex-start; justify-content: center; padding: 8px 9px; text-align: left; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; }
+.config-product-strip button:hover { border-color: var(--accent-soft-border); }
+.config-product-strip button.active { color: var(--on-accent); background: linear-gradient(135deg, var(--accent-strong), var(--accent)); border-color: var(--accent); box-shadow: var(--shadow-sm); }
+.config-product-strip span { overflow: hidden; width: 100%; color: var(--faint); font-size: 12px; letter-spacing: .06em; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+.config-product-strip strong { overflow: hidden; width: 100%; margin: 3px 0; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.config-product-strip small { color: var(--faint); font-size: 12px; }
+.config-product-strip button.active span, .config-product-strip button.active small { color: color-mix(in srgb, var(--on-accent) 78%, var(--accent)); }
+
+.config-workbench { display: grid; grid-template-columns: minmax(0, 3fr) minmax(330px, 2fr); align-items: start; gap: 13px; }
+.config-editor, .config-preview { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-sm); }
+.config-editor { overflow: hidden; }
+.config-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 25px; padding: 17px 19px; background: linear-gradient(105deg, var(--accent-soft), var(--surface-alt)); border-bottom: 1px solid var(--border); }
+.config-section-heading > div { flex: none; }
+.config-section-heading span { color: var(--accent-text); font-size: 12px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
+.config-section-heading h2 { margin: 2px 0 0; color: var(--text); font-size: 16px; }
+.config-section-heading > small { max-width: 520px; color: var(--muted); font-size: 12.5px; line-height: 1.55; }
+.config-editor fieldset { margin: 0; padding: 16px 19px 18px; border: 0; border-bottom: 1px solid var(--border); }
+.config-editor legend { padding: 0; color: var(--text-secondary); font-size: 12px; font-weight: 600; }
+
+.config-choice-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 7px; margin-top: 10px; }
+.config-choice-grid label { position: relative; display: flex; min-height: 76px; flex-direction: column; gap: 5px; padding: 10px 11px; background: var(--surface-alt); border: 1px solid var(--border); border-radius: 9px; cursor: pointer; }
+.config-choice-grid label:hover { border-color: var(--accent-soft-border); }
+.config-choice-grid label.active { background: var(--accent-soft); border-color: var(--focus-ring); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--focus-ring) 26%, transparent); }
+.config-choice-grid label:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.config-choice-grid input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.config-choice-grid label > span { display: flex; align-items: center; gap: 6px; }
+.config-choice-grid strong { color: var(--text-secondary); font-size: 13px; }
+.config-choice-grid em { padding: 2px 4px; color: var(--accent-text); background: var(--accent-soft); border-radius: 4px; font-size: 12px; font-style: normal; }
+.config-choice-grid small { color: var(--muted); font-size: 12px; line-height: 1.45; }
+
+.config-feature-fieldset > p { margin: 5px 0 10px; color: var(--faint); font-size: 12px; }
+.config-feature-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; max-height: 390px; overflow: auto; padding: 2px; scrollbar-width: thin; }
+.config-feature-list > label { display: grid; grid-template-columns: 15px minmax(0, 1fr); align-items: start; gap: 8px; padding: 8px; background: var(--surface-alt); border: 1px solid var(--border); border-radius: 7px; cursor: pointer; }
+.config-feature-list > label:hover { border-color: var(--accent-soft-border); }
+.config-feature-list > label.selected { border-color: var(--focus-ring); box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus-ring) 15%, transparent); }
+.config-feature-list > label.inline-editor-anchor { grid-column: 1 / -1; border-radius: 7px 7px 0 0; }
+.config-feature-list > label:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.config-feature-list > label.unsupported { cursor: not-allowed; opacity: .5; }
+.config-feature-list > label input[type="checkbox"] { margin: 2px 0 0; accent-color: var(--accent); }
+.config-feature-list > label > span { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.config-feature-list > label strong { color: var(--text-secondary); font-size: 12.5px; }
+.config-feature-list > label small { color: var(--muted); font-size: 12px; line-height: 1.4; }
+.config-feature-list > label em { color: var(--accent-text); font-size: 12px; font-style: normal; }
+.config-feature-inline-editor {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: -6px;
+  padding: 10px 12px;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--focus-ring);
+  border-top: 0;
+  border-radius: 0 0 7px 7px;
+  font-size: 12px;
+}
+.config-feature-inline-editor header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.config-feature-inline-editor header strong { color: var(--text-secondary); font-size: 13px; }
+.config-feature-inline-editor header span { color: var(--accent-text); font-size: 12px; font-weight: 600; }
+.config-feature-inline-editor p { margin: 0; line-height: 1.5; }
+.config-feature-inline-editor > small { color: var(--muted); font-size: 12px; }
+.config-inline-numeric-editor > label { display: flex; flex-direction: column; gap: 4px; cursor: default; }
+.config-inline-numeric-editor > label > span { color: var(--text-secondary); font-size: 12.5px; font-weight: 600; }
+.config-inline-numeric-editor input {
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 8px;
+  color: var(--text);
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  outline: 0;
+  font-family: "Cascadia Mono", monospace;
+  font-size: 12.5px;
+}
+.config-inline-numeric-editor input:focus { border-color: var(--focus-ring); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus-ring) 15%, transparent); }
+.config-inline-numeric-editor input:disabled { color: var(--faint); background: var(--surface-inset); }
+.config-inline-numeric-editor > label small { color: var(--muted); font-size: 12px; line-height: 1.4; }
+
+.config-values-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 11px; margin-top: 10px; }
+.config-values-grid label { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+.config-values-grid label > span { color: var(--text-secondary); font-size: 12.5px; font-weight: 600; }
+.config-values-grid input, .config-values-grid select { width: 100%; min-height: 34px; padding: 6px 8px; color: var(--text); background: var(--surface-alt); border: 1px solid var(--border); border-radius: 7px; outline: 0; font-family: "Cascadia Mono", monospace; font-size: 12.5px; }
+.config-values-grid input:focus, .config-values-grid select:focus { border-color: var(--focus-ring); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus-ring) 15%, transparent); }
+.config-values-grid small { color: var(--faint); font-size: 12px; line-height: 1.4; }
+
+.config-generate-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 15px 19px; }
+.config-generate-row p { margin: 0; color: var(--faint); font-size: 12px; line-height: 1.45; }
+.config-generate-row > div { display: flex; flex: none; gap: 7px; }
+.config-generate-row button { flex: none; padding: 9px 14px; color: var(--on-accent); background: var(--accent); border: 0; border-radius: 8px; font-size: 13px; font-weight: 600; }
+.config-generate-row button.config-reset-product { color: var(--accent-text); background: var(--accent-soft); border: 1px solid var(--border); }
+
+.config-preview { position: sticky; top: 14px; overflow: hidden; min-height: 460px; }
+.config-preview-empty { display: flex; min-height: 458px; flex-direction: column; align-items: center; justify-content: center; padding: 35px; text-align: center;
+  background: var(--surface);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.config-preview-empty > span { display: grid; place-items: center; width: 55px; height: 55px; color: var(--accent-text); background: var(--accent-soft); border-radius: 16px; font-family: "Cascadia Mono", monospace; font-size: 17px; }
+.config-preview-empty h2 { margin: 16px 0 5px; color: var(--text-secondary); font-size: 14px; }
+.config-preview-empty p { max-width: 250px; margin: 0; color: var(--faint); font-size: 12.5px; line-height: 1.6; }
+.config-preview > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 13px; background: var(--accent-soft); border-bottom: 1px solid var(--border); }
+.config-preview > header > div { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.config-preview > header span { color: var(--accent-text); font-size: 12px; font-weight: 600; text-transform: uppercase; }
+.config-preview > header strong { overflow: hidden; color: var(--text-secondary); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.config-preview > header button { width: 27px; height: 27px; color: var(--muted); background: var(--surface); border: 1px solid var(--border); border-radius: 7px; font-size: 16px; }
+.config-artifact-tabs { display: flex; gap: 2px; overflow-x: auto; padding: 7px 7px 0; background: var(--surface-alt); }
+.config-artifact-tabs button { flex: none; max-width: 220px; overflow: hidden; padding: 7px 9px; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; background: transparent; border: 0; border-radius: 6px 6px 0 0; font-family: "Cascadia Mono", monospace; font-size: 12px; }
+.config-artifact-tabs button[aria-selected="true"] { color: var(--accent-text); background: var(--surface); box-shadow: var(--shadow-sm); }
+.config-artifact-tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.config-artifact-panel { outline: 0; }
+.config-artifact-panel:focus-visible { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--focus-ring) 30%, transparent); }
+.config-artifact-panel > div { display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; color: var(--faint); background: var(--surface); border-bottom: 1px solid var(--border); font-size: 12px; }
+.config-artifact-panel em { color: var(--warning-text); font-style: normal; }
+.config-artifact-panel pre { min-height: 250px; max-height: 480px; overflow: auto; margin: 0; padding: 12px; color: var(--console-text); background: var(--console-surface); font-family: "Cascadia Mono", monospace; font-size: 12px; line-height: 1.55; tab-size: 4; white-space: pre; }
+.config-draft-notice { margin: 8px 10px 0; padding: 7px 8px; color: var(--muted); background: var(--surface-alt); border-left: 2px solid var(--focus-ring); border-radius: 4px; font-size: 12px; line-height: 1.5; }
+.config-preview > footer { display: flex; justify-content: flex-end; gap: 7px; padding: 11px; }
+.config-preview > footer button { padding: 7px 10px; color: var(--accent-text); background: var(--accent-soft); border: 1px solid var(--border); border-radius: 7px; font-size: 12px; }
+.config-preview > footer button:last-child { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
+
+.config-generator-page button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@media (max-width: 1260px) {
+  .config-read-only-status { grid-template-columns: 1fr 1fr; }
+  .config-read-only-detail { grid-column: 1 / -1; padding: 9px 0 0; border-top: 1px solid var(--warning-border); border-left: 0; }
+  .config-product-strip { grid-template-columns: repeat(5, minmax(100px, 1fr)); }
+  .config-workbench { grid-template-columns: minmax(0, 1fr); }
+  .config-preview { position: static; }
+}
+.config-preview-empty h1, .config-preview-empty h2, .config-preview-empty strong { color: var(--text); }

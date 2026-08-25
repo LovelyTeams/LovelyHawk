@@ -135,7 +135,7 @@ pub struct TerminalAiToken {
     pub stream_id: String,
 }
 
-/// Text-only AI overlay state. Rendering code consumes `output` as a GPUI text
+/// Text-only AI overlay state. Rendering code consumes `output` as a plain text
 /// node; this model intentionally has no HTML or WebView representation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TerminalAiOverlay {
@@ -219,7 +219,7 @@ impl TerminalAiOverlay {
     }
 }
 
-/// Pure tab/overlay state used by the GPUI window and model tests.
+/// Pure tab/overlay state used by the hosting terminal window and model tests.
 #[derive(Clone, Debug)]
 pub struct TerminalWorkspace {
     tabs: Vec<TerminalTab>,

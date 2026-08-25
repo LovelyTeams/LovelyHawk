@@ -4632,6 +4632,8 @@ pub(crate) struct TestSessionHarness {
     sftp_files: Mutex<HashMap<String, Vec<u8>>>,
     sftp_modes: Mutex<HashMap<String, u32>>,
     sftp_directories: Mutex<std::collections::HashSet<String>>,
+    sftp_symlinks: Mutex<std::collections::HashSet<String>>,
+    sftp_list_count: std::sync::atomic::AtomicUsize,
     terminal_launches: Mutex<Vec<String>>,
     terminal_closed: Arc<std::sync::atomic::AtomicBool>,
 }
@@ -4659,6 +4661,14 @@ impl TestSessionHarness {
 
     pub(crate) fn set_sftp_file(&self, path: impl Into<String>, content: impl Into<Vec<u8>>) {
         let path = path.into();
+        self.sftp_directories
+            .lock()
+            .expect("test SFTP directories lock")
+            .remove(&path);
+        self.sftp_symlinks
+            .lock()
+            .expect("test SFTP symlinks lock")
+            .remove(&path);
         self.sftp_files
             .lock()
             .expect("test SFTP files lock")
@@ -4683,6 +4693,10 @@ impl TestSessionHarness {
             .lock()
             .expect("test SFTP files lock")
             .remove(&path);
+        self.sftp_symlinks
+            .lock()
+            .expect("test SFTP symlinks lock")
+            .remove(&path);
         self.sftp_modes
             .lock()
             .expect("test SFTP modes lock")
@@ -4691,6 +4705,27 @@ impl TestSessionHarness {
             .lock()
             .expect("test SFTP directories lock")
             .insert(path);
+    }
+
+    pub(crate) fn set_sftp_symlink(&self, path: impl Into<String>) {
+        let path = path.into();
+        self.sftp_files
+            .lock()
+            .expect("test SFTP files lock")
+            .remove(&path);
+        self.sftp_directories
+            .lock()
+            .expect("test SFTP directories lock")
+            .remove(&path);
+        self.sftp_symlinks
+            .lock()
+            .expect("test SFTP symlinks lock")
+            .insert(path);
+    }
+
+    pub(crate) fn sftp_list_count(&self) -> usize {
+        self.sftp_list_count
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 
     pub(crate) fn sftp_mode(&self, path: &str) -> Option<u32> {
@@ -4828,12 +4863,21 @@ impl TestSessionHarness {
         }
         Ok(match request {
             SftpRequest::Canonicalize { path } => SftpResponse::Path(path),
-            SftpRequest::List { .. } => SftpResponse::Entries(Vec::new()),
+            SftpRequest::List { .. } => {
+                self.sftp_list_count
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                SftpResponse::Entries(Vec::new())
+            }
             SftpRequest::Metadata { path, .. } => {
                 let is_directory = self
                     .sftp_directories
                     .lock()
                     .expect("test SFTP directories lock")
+                    .contains(&path);
+                let is_symlink = self
+                    .sftp_symlinks
+                    .lock()
+                    .expect("test SFTP symlinks lock")
                     .contains(&path);
                 SftpResponse::Metadata(SftpRawMetadata {
                     size: self
@@ -4853,9 +4897,9 @@ impl TestSessionHarness {
                     uid: None,
                     gid: None,
                     modified_unix_seconds: None,
-                    is_file: !is_directory,
+                    is_file: !is_directory && !is_symlink,
                     is_directory,
-                    is_symlink: false,
+                    is_symlink,
                 })
             }
             SftpRequest::Exists { path } => SftpResponse::Exists(

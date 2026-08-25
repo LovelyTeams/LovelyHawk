@@ -1951,6 +1951,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn read_log_service_keeps_hostile_remote_text_as_bounded_data() {
+        let root = TestRoot::new();
+        let (services, session, harness) = bound_services(&root).await;
+        let hostile = "</pre><script>steal()</script>\nLR_AUDIT_V2|fake";
+        harness.set_execute_output(format!(
+            "LR_AUDIT_V2|{}|{}|{}|{}|12|1|{}\n",
+            STANDARD.encode("2026-08-11 12:00:00"),
+            STANDARD.encode("cat"),
+            STANDARD.encode(hostile),
+            STANDARD.encode("operator"),
+            STANDARD.encode("check<img onerror=steal()>")
+        ));
+
+        let report = services.audit().read_log(&session, 1).await.unwrap();
+
+        assert_eq!(report.entries.len(), 1);
+        assert_eq!(report.entries[0].args, hostile);
+        assert_eq!(report.entries[0].caller, "check<img onerror=steal()>");
+        assert!(report.entries[0].args.len() <= 2_048);
+        assert!(report.entries[0].caller.len() <= 256);
+    }
+
+    #[tokio::test]
+    async fn read_only_methods_reject_target_change_while_in_flight() {
+        let status_root = TestRoot::new();
+        let (status_services, status_session, status_harness) = bound_services(&status_root).await;
+        let status_service = status_services.audit().clone();
+        let status_task = tokio::spawn(async move {
+            status_service
+                .statuses(&status_session, &["cat".to_owned()])
+                .await
+        });
+        status_harness.wait_for_entered(1).await;
+        status_services
+            .activate_target(TargetIdentity::new("connection-b").unwrap())
+            .unwrap();
+        status_harness.release_operations();
+        assert!(matches!(
+            status_task.await.unwrap(),
+            Err(CoreError::TargetChanged { .. })
+        ));
+
+        let log_root = TestRoot::new();
+        let (log_services, log_session, log_harness) = bound_services(&log_root).await;
+        let log_service = log_services.audit().clone();
+        let log_task = tokio::spawn(async move { log_service.read_log(&log_session, 1).await });
+        log_harness.wait_for_entered(1).await;
+        log_services
+            .activate_target(TargetIdentity::new("connection-b").unwrap())
+            .unwrap();
+        log_harness.release_operations();
+        assert!(matches!(
+            log_task.await.unwrap(),
+            Err(CoreError::TargetChanged { .. })
+        ));
+    }
+
+    #[tokio::test]
     async fn duplicate_alias_paths_create_one_atomic_batch_step() {
         let root = TestRoot::new();
         let (services, session, harness) = bound_services(&root).await;

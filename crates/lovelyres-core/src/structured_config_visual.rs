@@ -374,6 +374,13 @@ impl StructuredConfigVisualDocument {
         self.contains_sensitive_values
     }
 
+    /// Ordinary clipboard text is allowed only for a fully structured document
+    /// whose parsed tree contains no sensitive value. Source bytes remain
+    /// available to the separate explicit file-save boundary.
+    pub const fn can_copy_text(&self) -> bool {
+        self.structured && !self.contains_sensitive_values
+    }
+
     pub fn raw_bytes(&self) -> &[u8] {
         &self.source
     }
@@ -1742,6 +1749,34 @@ mod tests {
     }
 
     #[test]
+    fn gcware_nested_document_is_byte_exact_and_read_only() {
+        let source = b"totem {\r\n\tversion: 2\r\n\tinterface {\r\n\t\tmember {\r\n\t\t\tmemberaddr: 10.0.0.1\r\n\t\t}\r\n\t}\r\n}\r\n";
+        let document = StructuredConfigVisualDocument::parse_bytes(
+            StructuredConfigDialect::Gcware,
+            source.to_vec(),
+        )
+        .expect("reviewed nested gcware.conf fixture");
+
+        assert!(document.is_structured());
+        assert_eq!(document.raw_bytes(), source);
+        assert_eq!(document.output().bytes(), source);
+        let rows = document.rows();
+        let named = |name: &str| {
+            rows.iter()
+                .find(|row| row.name() == Some(name))
+                .unwrap_or_else(|| panic!("missing gcware row {name}"))
+        };
+        let totem = named("totem");
+        let interface = named("interface");
+        let member = named("member");
+        let memberaddr = named("memberaddr");
+        assert_eq!(interface.parent(), Some(totem.id()));
+        assert_eq!(member.parent(), Some(interface.id()));
+        assert_eq!(memberaddr.parent(), Some(member.id()));
+        assert!(rows.iter().all(|row| !row.editable()));
+    }
+
+    #[test]
     fn structurally_ambiguous_gcware_is_complete_redacted_opaque() {
         let source = b"totem{\n    password: NeverShow\n}\n";
         let document = StructuredConfigVisualDocument::parse_bytes(
@@ -2072,6 +2107,7 @@ mod tests {
                 .expect("AUTHKEY JSON fixture");
         assert!(json.is_structured());
         assert!(json.contains_sensitive_values());
+        assert!(!json.can_copy_text());
         assert_eq!(json.output().bytes(), json_source.as_bytes());
         let json_rows = json.rows();
         for key in ["authKey", "AUTHKEY"] {
@@ -2099,6 +2135,7 @@ mod tests {
         .expect("AUTH_KEY YAML fixture");
         assert!(yaml.is_structured());
         assert!(yaml.contains_sensitive_values());
+        assert!(!yaml.can_copy_text());
         assert_eq!(yaml.output().bytes(), yaml_source);
         let yaml_rows = yaml.rows();
         let yaml_member = row_named(&yaml_rows, "AUTH_KEY");
@@ -2124,6 +2161,7 @@ mod tests {
         .expect("authKey XML attribute fixture");
         assert!(xml.is_structured());
         assert!(xml.contains_sensitive_values());
+        assert!(!xml.can_copy_text());
         assert_eq!(xml.output().bytes(), xml_source);
         let xml_rows = xml.rows();
         assert!(row_named(&xml_rows, "authKey").sensitive());
@@ -2139,6 +2177,7 @@ mod tests {
         .expect("AUTHKEY SequoiaDB quickDeploy fixture");
         assert!(sequoia.is_structured());
         assert!(sequoia.contains_sensitive_values());
+        assert!(!sequoia.can_copy_text());
         assert_eq!(sequoia.output().bytes(), sequoia_source);
         let sequoia_root = sequoia.root_rows();
         let sequoia_records = sequoia.children(sequoia_root[0].id()).unwrap();
@@ -2189,6 +2228,37 @@ mod tests {
                 assert!(!debug.contains(secret));
             }
         }
+    }
+
+    #[test]
+    fn sensitive_json_blocks_whole_text_copy_and_redacts_rows_and_debug() {
+        let secret = "do-not-copy-this-secret";
+        let source =
+            format!("{{\"Version\": 2, \"mysql_server\": {{\"password\": \"{secret}\"}}}}\n");
+        let document =
+            StructuredConfigVisualDocument::parse(StructuredConfigDialect::Json, &source)
+                .expect("reviewed sensitive JSON fixture");
+        let rows = document.rows();
+
+        assert!(document.is_structured());
+        assert!(document.contains_sensitive_values());
+        assert!(!document.can_copy_text());
+        assert!(rows.iter().any(StructuredConfigRow::sensitive));
+        assert!(
+            rows.iter()
+                .filter(|row| row.sensitive())
+                .all(|row| row.preview() == "[sensitive value redacted]")
+        );
+        assert!(!format!("{document:?}{rows:?}").contains(secret));
+        assert_eq!(document.output().bytes(), source.as_bytes());
+
+        let safe = StructuredConfigVisualDocument::parse(
+            StructuredConfigDialect::Json,
+            r#"{"role":"readonly"}"#,
+        )
+        .expect("reviewed non-sensitive JSON fixture");
+        assert!(!safe.contains_sensitive_values());
+        assert!(safe.can_copy_text());
     }
 
     #[test]

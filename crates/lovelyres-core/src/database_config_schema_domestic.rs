@@ -2414,11 +2414,13 @@ const DOMESTIC_DATABASE_CONFIG_SCHEMAS: &[DatabaseConfigSchema] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::database_config::{artifact_by_key, database_starter_contents};
     use crate::database_config_schema::{
         DatabaseConfigParameterLocator, DatabaseConfigSchemaCatalog,
         DatabaseConfigSchemaCatalogError, DatabaseConfigSchemaLookupError,
         DatabaseConfigSchemaTarget, DatabaseConfigSchemaValidationStatus,
     };
+    use crate::line_config_visual::{LineConfigDialect, LineConfigVisualDocument};
 
     const YASHANDB_TEST_SCHEMAS: &[DatabaseConfigSchema] = &[YASHANDB_23_5_4_100_YASDB_INI_SCHEMA];
 
@@ -2522,6 +2524,82 @@ mod tests {
         assert!(artifact.is_file_visual_readable());
         assert!(!artifact.allows_lossless_local_draft());
         assert!(!artifact.dialect.is_generated());
+    }
+
+    #[test]
+    fn yashandb_23_5_4_100_schema_is_exact_read_only_metadata_and_never_serialized() {
+        const SOURCE: &str = "RUN_LOG_LEVEL=DEBUG\r\nCUSTOM_KEEP=literal";
+        let catalog = DatabaseConfigSchemaCatalog::new(YASHANDB_TEST_SCHEMAS).unwrap();
+        let schema = catalog
+            .lookup(target(
+                DatabaseConfigProduct::Yashan,
+                DatabaseConfigVersion::new_with_revision(23, 5, 4, 100),
+                Some("official-doc-family-23.5.4.100"),
+                DatabaseConfigComponent::Server,
+                "yashandb-yasdb-ini",
+            ))
+            .unwrap();
+        assert_eq!(schema.parameters.len(), 15);
+        assert_eq!(
+            schema.completeness,
+            DatabaseConfigSchemaCompleteness::Partial
+        );
+        assert_eq!(
+            schema.binding.versions,
+            DatabaseConfigVersionSelector::Exact(DatabaseConfigVersion::new_with_revision(
+                23, 5, 4, 100
+            ))
+        );
+        assert_eq!(
+            schema.binding.edition_key,
+            Some("official-doc-family-23.5.4.100")
+        );
+
+        let artifact = artifact_by_key("yashandb-yasdb-ini").unwrap();
+        assert_eq!(artifact.default_file_name, Some("yasdb.ini"));
+        assert!(!artifact.allows_lossless_local_draft());
+        assert_eq!(database_starter_contents(artifact), "");
+        let document = LineConfigVisualDocument::parse(LineConfigDialect::FlatKeyValue, SOURCE)
+            .expect("representative YashanDB source");
+        let raw_before = document.raw_bytes().to_vec();
+        let output_before = document.output().bytes().to_vec();
+        let rows = document.rows();
+        let run_log = rows
+            .iter()
+            .find(|row| row.name() == Some("RUN_LOG_LEVEL"))
+            .expect("reviewed schema row");
+        let validation = schema.validate_normalized_value(
+            DatabaseConfigParameterLocator {
+                container_path: None,
+                key: "RUN_LOG_LEVEL",
+            },
+            run_log.value().expect("public row value"),
+        );
+        assert_eq!(
+            validation.status(),
+            DatabaseConfigSchemaValidationStatus::SyntaxValid
+        );
+        assert_eq!(validation.normalized_value(), Some("DEBUG"));
+        assert_eq!(
+            schema
+                .parameter(DatabaseConfigParameterLocator {
+                    container_path: None,
+                    key: "RUN_LOG_LEVEL",
+                })
+                .and_then(|parameter| parameter.documented_default_for_display())
+                .as_deref(),
+            Some("INFO")
+        );
+
+        assert_eq!(document.raw_bytes(), raw_before);
+        assert_eq!(document.output().bytes(), output_before);
+        assert_eq!(document.output().bytes(), SOURCE.as_bytes());
+        let save_output = document.output();
+        let saved = save_output.text().expect("valid UTF-8 save payload");
+        assert!(!saved.contains("INFO"));
+        assert!(!saved.contains("23.5.4.100"));
+        assert!(!saved.contains("official-doc-family"));
+        assert!(!saved.contains("Partial"));
     }
 
     #[test]

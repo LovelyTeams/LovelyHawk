@@ -3,9 +3,9 @@
 
 set -e
 
-SOURCE_PNG="crates/lovelyres-gpui/assets/logo.png"
-ICONSET_DIR="crates/lovelyres-gpui/assets/icon.iconset"
-OUTPUT_ICNS="crates/lovelyres-gpui/assets/app.icns"
+SOURCE_PNG="electron/assets/logo.png"
+ICONSET_DIR="electron/assets/icon.iconset"
+OUTPUT_ICNS="electron/assets/app.icns"
 
 # 检查源文件
 if [ ! -f "$SOURCE_PNG" ]; then

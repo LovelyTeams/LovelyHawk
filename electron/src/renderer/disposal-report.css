@@ -1,0 +1,60 @@
+.disposal-report-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 64;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--backdrop);
+}
+
+.disposal-report-overlay {
+  display: flex;
+  width: min(1060px, calc(100% - 96px));
+  height: min(680px, calc(100vh - 140px));
+  min-height: 0;
+  overflow: hidden;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.disposal-report-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 20px 24px; border-bottom: 1px solid var(--border); }
+.disposal-report-heading p { margin: 0; color: var(--accent); font-size: 12px; letter-spacing: .13em; }
+.disposal-report-heading h1 { margin: 3px 0 4px; font-size: 24px; }
+.disposal-report-heading span { color: var(--muted); font-size: 13px; }
+.disposal-report-heading small { display: block; margin-top: 4px; color: var(--warning); font-size: 12px; }
+.disposal-report-heading > div:last-child { display: flex; flex-wrap: wrap; gap: 8px; }
+.disposal-report-overlay button { border: 1px solid var(--border); border-radius: 8px; padding: 7px 11px; color: var(--text); background: var(--surface-alt); cursor: pointer; }
+.disposal-report-overlay button:disabled { cursor: not-allowed; opacity: .46; }
+.disposal-report-overlay button.active { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+.disposal-report-notice { margin: 12px 24px 0; padding: 9px 12px; border: 1px solid color-mix(in srgb, var(--success) 45%, var(--border)); border-radius: 8px; color: var(--success); background: color-mix(in srgb, var(--success) 8%, transparent); font-size: 13px; }
+.disposal-report-notice.error, .disposal-report-empty.error { color: var(--danger); }
+.disposal-report-preview .error { color: var(--console-danger-text); }
+.disposal-report-empty { display: grid; flex: 1; place-items: center; padding: 30px; color: var(--muted); text-align: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.disposal-report-body { display: flex; flex: 1; min-height: 0; overflow: hidden; flex-direction: column; gap: 12px; padding: 16px 20px 20px; }
+.disposal-report-summary-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
+.disposal-report-summary-grid article { border: 1px solid var(--border); border-radius: 10px; padding: 12px; background: var(--surface-alt); }
+.disposal-report-summary-grid span { display: block; color: var(--muted); font-size: 12px; }
+.disposal-report-summary-grid strong { display: block; margin-top: 5px; font-size: 22px; }
+.disposal-report-meta { display: flex; flex-wrap: wrap; gap: 9px 18px; color: var(--muted); font: 12px/1.4 ui-monospace, Consolas, monospace; }
+.disposal-report-empty-report { border: 1px solid color-mix(in srgb, var(--warning) 40%, var(--border)); border-radius: 8px; padding: 9px 11px; color: var(--warning); font-size: 13px; }
+.disposal-report-body nav { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.disposal-report-body nav span { color: var(--muted); font-size: 13px; }
+.disposal-report-preview { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--console-border); border-radius: 11px; padding: 14px; color: var(--console-text); background: var(--console-bg); }
+.disposal-report-preview > p { color: var(--console-muted); }
+.disposal-report-preview pre { margin: 0; color: var(--console-text); font: 13px/1.55 ui-monospace, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+@media (max-width: 820px) {
+  .disposal-report-backdrop { padding: 8px; }
+  .disposal-report-heading { align-items: stretch; flex-direction: column; }
+  .disposal-report-summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+.disposal-report-empty h1, .disposal-report-empty h2, .disposal-report-empty strong { color: var(--text); }

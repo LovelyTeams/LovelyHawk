@@ -1,0 +1,66 @@
+.application-log-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 66;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--backdrop);
+}
+
+.application-log-overlay {
+  display: flex;
+  width: min(1040px, calc(100% - 96px));
+  height: min(660px, calc(100vh - 140px));
+  min-height: 0;
+  overflow: hidden;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.application-log-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 22px; padding: 20px 24px; border-bottom: 1px solid var(--border); }
+.application-log-heading p { margin: 0; color: var(--accent); font-size: 12px; letter-spacing: .13em; }
+.application-log-heading h1 { margin: 3px 0 4px; font-size: 24px; }
+.application-log-heading span { color: var(--muted); font-size: 13px; }
+.application-log-heading small { display: block; max-width: 720px; margin-top: 5px; color: var(--warning); font-size: 12px; line-height: 1.45; }
+.application-log-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.application-log-overlay button, .application-log-overlay input, .application-log-overlay select { border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--surface-alt); }
+.application-log-overlay button { padding: 7px 11px; cursor: pointer; }
+.application-log-overlay button:disabled { cursor: not-allowed; opacity: .46; }
+.application-log-overlay button.danger { border-color: color-mix(in srgb, var(--danger) 58%, var(--border)); color: var(--danger); }
+.application-log-notice { margin: 12px 24px 0; padding: 9px 12px; border: 1px solid color-mix(in srgb, var(--success) 45%, var(--border)); border-radius: 8px; color: var(--success); background: color-mix(in srgb, var(--success) 8%, transparent); font-size: 13px; }
+.application-log-notice.error, .application-log-state.error { color: var(--danger); }
+.application-log-toolbar { display: grid; grid-template-columns: minmax(240px, 1fr) auto auto auto; align-items: end; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--border); }
+.application-log-toolbar label { display: grid; gap: 5px; color: var(--muted); font-size: 12px; }
+.application-log-toolbar input, .application-log-toolbar select { min-width: 0; padding: 8px 10px; }
+.application-log-toolbar > span { padding-bottom: 8px; color: var(--muted); font-size: 13px; white-space: nowrap; }
+.application-log-list { flex: 1; min-height: 0; overflow: auto; padding: 12px 18px; color: var(--console-text); background: var(--console-bg); }
+.application-log-list .application-log-state { color: var(--console-muted); }
+.application-log-state { display: grid; min-height: 180px; place-items: center; color: var(--muted); text-align: center; }
+.application-log-entry { margin-bottom: 10px; border: 1px solid var(--border); border-left: 3px solid var(--muted); border-radius: 9px; padding: 11px 13px; background: var(--console-surface); }
+.application-log-entry.debug { border-left-color: var(--console-muted); }
+.application-log-entry.info { border-left-color: var(--accent); }
+.application-log-entry.warn { border-left-color: var(--warning); }
+.application-log-entry.error { border-left-color: var(--danger); }
+.application-log-entry > div:first-child { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; color: var(--console-muted); font: 12px/1.4 ui-monospace, Consolas, monospace; }
+.application-log-entry strong { color: var(--console-text); }
+.application-log-entry.warn strong { color: var(--console-warning-text); }
+.application-log-entry.error strong { color: var(--console-danger-text); }
+.application-log-entry code { color: var(--console-accent); }
+.application-log-entry pre { margin: 8px 0 0; color: var(--console-text); font: 13px/1.55 ui-monospace, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.application-log-entry dl { display: grid; gap: 4px; margin: 9px 0 0; padding-top: 8px; border-top: 1px solid var(--border); }
+.application-log-entry dl > div { display: grid; grid-template-columns: minmax(110px, 22%) 1fr; gap: 12px; font: 12px/1.45 ui-monospace, Consolas, monospace; }
+.application-log-entry dt { color: var(--console-muted); }
+.application-log-entry dd { min-width: 0; margin: 0; color: var(--console-text); overflow-wrap: anywhere; }
+.application-log-footnote { padding: 9px 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; line-height: 1.45; }
+
+@media (max-width: 900px) {
+  .application-log-backdrop { padding: 8px; }
+  .application-log-heading { align-items: stretch; flex-direction: column; }
+  .application-log-actions { justify-content: flex-start; }
+  .application-log-toolbar { grid-template-columns: 1fr 1fr; }
+}

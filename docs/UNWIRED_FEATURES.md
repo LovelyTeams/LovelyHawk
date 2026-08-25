@@ -1,10 +1,32 @@
 # 原生功能接线与限制清单
 
-本清单只记录当前 Rust/GPUI 主线中已经实现但尚未接入原生页面或窗口的模块，以及因安全契约或实机证据不足而刻意保持关闭的能力。
+本清单记录 Electron 迁移中尚未中央接线的模块，以及虽已中央接线但因安全契约、完整 parity 或实机证据不足而继续保持 Pending 的能力。
 
 新增实现如果不能在同一变更中完成 UI 接线，必须登记：crate 路径、领域 owner、缺少的 entity/lifecycle/render 或窗口接线、目标绑定要求，以及可验证的完成条件。
 
 ## 已实现但未接线
+
+- Linux 安全基线的 mutation/recovery Phase 2（领域 owner：`lovelyres-core::baseline`）仍未接线；只读
+  Phase 1 已经进入中央 `BackendState`、固定 RPC/IPC、frozen preload、`App` registry 与 `BaselinePage`。
+  当前公开面精确为 `getBaselineCatalog()`、`scanBaseline(bindingHandle)`、
+  `listBaselineHistory(bindingHandle)` 三个 typed 方法；页面只接收 opaque `bindingHandle`，不接收 target
+  summary、session、guard 或 generation。Rust adapter 只调用 `BaselineService::catalog/scan/list_history`，
+  扫描使用共享的真实 `BoundSshSession`，请求前后复核完整 target scope；统一 SSH disconnect 在真实断开前
+  调用 `close_binding`，只清该 binding 的 scan/history capabilities，迟到结果失败关闭。
+  公开 DTO 只含 opaque item/snapshot handles、安全目录元数据、观察值/合规结果及历史摘要；raw record、
+  operation、backup、digest、file/remote path、target/session/guard/generation 和 check/apply/verify shell
+  均不进入 renderer。portable history 在 serde 前有 4 MiB encoded-byte cap，exact 257 records 硬拒绝、
+  exact 256 合法，list/insert/lookup/transition 统一使用 fail-closed loader。目录、状态、历史分别最多
+  64/64/256 项，响应最多 256/256/512 KiB；registry 最多 12 项/4 MiB、TTL 五分钟，并限制全局 4 个和
+  每 binding 1 个并发读取。credential-like 值整字段遮蔽，hostile 文本只作为 React text node 渲染。
+  Renderer 已覆盖分类、筛选/搜索、history、loading/error/empty/truncated、activate/deactivate、scope change
+  与 late-result cleanup，且没有 plan/confirm/execute/restore/reload/file/terminal/export/AI 入口。
+  当前 Electron-native CDP PASS 证据为
+  `target/electron-debug/526e344c-a5f5-499d-9a17-ab4c0bf4defe/evidence`：该运行早于 Log Analysis 中央接线，本地目录 38 项、
+  forged/unknown scan/history 拒绝且不回显、断连页/重挂载空态、本地资源、`capturePage` 和 0 console
+  errors 均已验证。此前 `c7f9b277-006c-4f00-9fb1-7c503928d857` 运行是 `FAIL`，不可引用为通过证据。
+  Phase 2 immutable plan/exact confirm/verify/restore 仍为 `UNWIRED`；真实 Linux/OpenSSH、实际 scan/history、
+  权限/取消/断连竞态与 target-switch 成功矩阵仍为 `NOT_RUN`，因此页面整体 ledger 状态继续为 Pending。
 
 - `lovelyres-core::apache_runtime` 与 `lovelyres-core::apache_capability`（领域 owner：
   `lovelyres-core`）已经完成 Apache Evidence Seal Phase A。运行时证据合同以完整 `TargetGuard`、
@@ -23,7 +45,7 @@
   项不能显示成“不支持”。快照现在只能从同一 runtime evidence、matching stable graph evidence 和
   有界输出构造。
   当前没有 systemd/`/proc`/EnvironmentFile provider，没有分离 stdout/stderr、exit=0、超时/取消/截断
-  完整状态的精确 `httpd -M/-L/-t` transport，也没有 GPUI capability 接线。普通合并 stderr、lossy
+  完整状态的精确 `httpd -M/-L/-t` transport，也没有 Electron 页面 capability 接线。普通合并 stderr、lossy
   UTF-8 或字符串 shell 重放（尤其任意 `-C/-c`）不得作为替代。真实 Linux 的 Debian/Ubuntu
   apachectl+envvars+symlink、RHEL/Rocky direct-httpd、自定义 wrapper/drop-in、PID/restart/权限竞态和
   include/glob 组合均为 `NOT_RUN`。
@@ -45,7 +67,7 @@
   `pg_hba_file_rules`/`pg_ident_file_mappings` 校验。完成条件包括绑定 `TargetGuard`、读取目标能力与
   诊断视图、运行目标端验证，并拒绝目标切换后的迟到结果。
 
-- 配置生成器与远程 middleware 树（领域 owner：`lovelyres-gpui`）已经接入只使用安全名称/静态说明
+- 配置生成器与远程 middleware 树（领域 owner：Electron config-generator 页面）已经接入只使用安全名称/静态说明
   的本地搜索、父链过滤和逐项说明；配置生成器还展示完整已审 schema 参数目录，包括文件中未出现项。
   统一目标入口现已覆盖 4 个 middleware 和 33 个数据库产品：Nginx 有静态站点、反向代理与路径 403 三个
   typed 本地配方；Apache 2.4 有路径及子路径 `Require all denied`、禁用 TRACE（405）和减少版本信息暴露三个
@@ -72,14 +94,72 @@
   搜索不得索引 value、preview、arguments、comment、raw、default 或 secret；只读目录选择不得修改文件，
   目标动作也不得从 documented default、现值或搜索原文自动填值。上述数据库 bundle 目前是有界的分步导航，
   仍没有访问控制文件、证书链、审计插件、网络/重载及真实 readback 的自动执行，因此不能宣称完整达成目标。
-  Redis 和 Tomcat 仍只有只读结构解析，没有 directive/attribute 值模型、按工件/版本隔离的 schema 或配置生成器
-  写回视图，查询会明确返回 `MissingReviewedRecipe`；不能因为 parser 能切分文本/XML 就生成原始配置字符串。
+  `lovelyres-core::redis_config`（领域 owner：`lovelyres-core`）现已提供 Redis Open Source 6.2、7.2、7.4
+  与 8.0/8.2/8.4/8.6/8.8/8.10 的类型化“新建空实例”本地 Baseline，并已接入
+  原三栏快捷配置器（原 GPUI `config_generator`，源码归档于 docs/legacy/config-generator-baseline.rs.txt，Electron 页面替代进行中）。页面保持 Baseline 不可移除，支持按静态元数据
+  搜索、配置叠加、逐行下方类型化编辑、真实移除、仅重置 Redis、独立滚动预览、复制和 `create_new`
+  非覆盖另存；版本、数据目录、端口、连接/超时、内存/淘汰、AOF/RDB、slowlog 与 latency monitor 均展示
+  含义及风险，并强制 maxmemory 不可移除及 AOF/RDB 至少保留一种。Redis 高级语义编辑器没有安全加载器，
+  因而在界面与程序入口均明确禁用，不会显示成加载成功。该流程只适用于新建空实例，明确不承担既有含数据
+  实例的 AOF/RDB 迁移，也不生成认证/ACL、远程监听或任意指令。任何目标校验或部署还必须绑定完整
+  `TargetGuard`，使用同版本隔离验证、CAS、备份、重启后持久化与数据回读，并拒绝迟到结果；真实 Redis
+  解析、启动、迁移与部署矩阵仍为 `NOT_RUN`。
+  `lovelyres-core::postgresql_config`（领域 owner：`lovelyres-core`）现已提供 PostgreSQL 14–18
+  的类型化“新建空集群”本地 include 片段：固定回环监听、端口、SCRAM 新密码存储、WAL 耐久性、
+  统计与 autovacuum Baseline，并可叠加 13 项配置：版本化连接容量、认证超时、事务内/事务外空闲保护、
+  单进程临时文件上限、连接生命周期日志、带明确 `deadlock_timeout` 的锁等待日志、checkpoint、autovacuum
+  与临时文件阈值日志、数据/WAL I/O 计时、内建 pglz WAL 全页镜像压缩和 query ID。该模块只使用闭合
+  有界值，以 `PostgresConf` 无损解析器完成
+  生成后 allowlist 与逐字节 round-trip 校验，并只允许 `create_new` 另存；它不会生成 include 指令，
+  也不初始化、部署、覆盖、重载或重启 PostgreSQL。HBA/ident、`postgresql.auto.conf`、TLS/秘密/角色、
+  archive/restore 命令、preload、目标资源 sizing、全局 statement timeout、SQL/参数文本日志、远程监听
+  和既有集群迁移继续 typed deferred。该模块尚未接入配置生成器 entity/state/render；完成条件是原生
+  页面显式选择精确 major（后续 UI 可默认推荐 18）、展示 immutable Baseline、全部 feature/字段说明与
+  风险，支持叠加/移除/重置、滚动预览及本地不覆盖另存。任何目标校验或部署还必须绑定完整
+  `TargetGuard`，盘点全部配置来源与优先级，在同 major 隔离目标上验证启动/行为、CAS、备份、恢复与
+  effective readback，并拒绝迟到结果；真实 PostgreSQL 14–18 矩阵仍为 `NOT_RUN`。
+  `lovelyres-core::mongodb_config`（领域 owner：`lovelyres-core`）现已提供 MongoDB 7.0、8.0 与 8.3
+  的类型化“新建空本地 standalone”`mongod.conf` 草稿：Baseline 固定回环监听、开启 authorization、
+  关闭服务端 JavaScript 并使用 WiredTiger；可叠加连接上限、慢操作阈值与采样、`slowOp` profiler、
+  8.3 专属的运行中慢查询日志、显式绝对路径日志轮转、WiredTiger cache 以及新集合与 journal 压缩。
+  生成器只接受闭合有界值和严格 YAML 映射子集，拒绝 anchor、alias、tag、include、sequence、未知键、
+  重复键与多行值，并只允许 `create_new` 另存。它不生成首个用户或任何凭据，不开放远程监听，不猜测
+  `dbPath`/PID/service 布局，也不生成 TLS/私钥、Enterprise `auditLog`/LDAP/KMIP、复制集、分片或部署命令；
+  MongoDB 8.2 已于 2026-07-31 结束支持，因而不会作为可选版本。该模块尚未接入配置生成器与数据库产品
+  目录；完成条件是登记独立 MongoDB 产品/工件并接入版本选择、immutable Baseline、全部功能及字段说明、
+  叠加/移除/重置、独立滚动预览和本地非覆盖另存。任何目标动作仍需完整 `TargetGuard`、同系列隔离验证、
+  备份/恢复和行为回读；真实 MongoDB 7.0/8.0/8.3 启动与客户端矩阵仍为 `NOT_RUN`。
+  `lovelyres-core::haproxy_config`（领域 owner：`lovelyres-core`）现已提供 HAProxy 3.4 LTS、3.3 stable、
+  3.2/3.0 LTS 与 2.8/2.6 compatibility 分支的类型化 HTTP 反向代理本地草稿。Baseline 固定闭合监听与
+  单一上游、HTTP mode、必需连接/客户端/服务端超时和零重试，并默认叠加请求/队列超时、安全响应头、
+  上游 `Server` 头移除及直接边界转发头；另有健康检查、stdout 访问日志、Gzip、路径 403、直接来源
+  IP、GET/HEAD、WebSocket tunnel、连接/队列上限、仅连接失败重试、请求 ID、直接来源限速等共 16 项。
+  所有名称、地址、端口、path/CIDR、超时和上限均使用闭合 typed value；生成后由专用 allowlist parser
+  逐项复核，并只允许 `create_new` 另存。TLS 前端虽作为可搜索能力显示，但在没有证书资产、权限与目标
+  capability 闭环时明确拒绝启用，不会输出 `crt`/`ssl` 占位；本模块也不部署、reload、覆盖或声称已经
+  运行 `haproxy -c -f`。该模块尚未登记到 middleware 产品树或配置生成器；完成条件是接入版本选择、
+  immutable Baseline、全部功能/字段说明、叠加/移除/重置、独立预览与非覆盖另存，并在精确版本目标上
+  绑定 `TargetGuard` 执行配置检查、HTTP/WebSocket 行为、CAS、备份与恢复。真实 HAProxy 2.6–3.4
+  二进制与行为矩阵仍为 `NOT_RUN`。
+  `lovelyres-core::tomcat_config`（领域 owner：`lovelyres-core`）现已提供当前受支持的 Tomcat 9.0、10.1、
+  11.0 三个精确版本族的类型化“全新/空白安装 + 新 ROOT 应用”配置审阅 bundle，并已接入
+  原三栏快捷配置器（原 GPUI `config_generator`，源码归档于 docs/legacy/config-generator-baseline.rs.txt，Electron 页面替代进行中）。页面默认 Tomcat 11，显示 Servlet/Java namespace、
+  immutable Baseline、全部 feature/字段说明与 deferred 边界，支持按静态元数据搜索、配置叠加、逐行下方
+  类型化编辑、真实移除、仅重置 Tomcat、独立滚动三工件组合预览、复制和全新目录非覆盖另存；GET/HEAD
+  allow-list 与全应用 403 原子互斥。它始终同时生成 `conf/server.xml`、
+  `webapps/ROOT/META-INF/context.xml`、`webapps/ROOT/WEB-INF/web.xml`，且 `maxPostSize` 与
+  `maxSwallowSize` 的说明不冒充通用请求体或上传上限。三工件高级语义编辑与导入没有安全加载器，因而在
+  界面与程序入口均明确禁用，不会显示成加载成功。该 bundle 不是完整 Tomcat 安装包、不可直接部署，也绝不
+  覆盖/迁移现有应用、Realm、Valve、Listener 或账户；TLS、Manager/HostManager、Realm 秘密、任意 XML、
+  既有应用部署与非回环暴露继续 typed deferred。任何目标校验或部署还必须绑定完整 `TargetGuard`，在匹配
+  版本的隔离 Tomcat 上验证 schema、启动、HTTP 行为、CAS、备份与恢复并拒绝迟到结果；真实 Tomcat
+  9.0/10.1/11.0 与 Java 8/11/17 启动及 HTTP 矩阵仍为 `NOT_RUN`。
   真实 Nginx/Apache 与数据库目标的 capability/readback 矩阵仍为 `NOT_RUN`。
 
 - `lovelyres-core::line_config_visual::LineConfigTargetPolicy`（领域 owner：`lovelyres-core`）已经为
   MariaDB option file 提供字段私有、由产品与完整四段版本推导的 `?includedir` 语法门禁。当前
   allowlist 只包含官方源码逐个审校的 11.4.10、11.8.6 与 12.2.2；默认 parse/read、MySQL、相邻或
-  未知补丁全部保持 opaque，且 document 在 replace/add/update/reparse 后保留同一 policy。GPUI
+  未知补丁全部保持 opaque，且 document 在 replace/add/update/reparse 后保留同一 policy。前端
   尚无可信的完整 patch 版本输入，因此没有接入 `*_with_target_policy` API，也不会从 MariaDB 11.4
   minor schema 或 MySQL wire compatibility 推断该能力。完成条件是增加明确标为“本地语法选择、
   非目标证明”的产品+四段版本控件，切换时重新解析并使旧 NodeId 失效，同时覆盖导入、更新、
@@ -157,7 +237,7 @@
   内容及原始有序 `-D/-C/-c` 上下文。Phase A 只落地 typed evidence 与 matching-endpoint graph seal
   合同，provider/transport 尚未接线，所以 Apache 远程 plan/execution 明确失败关闭；本地生成器和
   远程只读候选图只能显示“尚未运行目标校验”，不能显示为已部署。目标模块/静态指令 capability
-  解析器也仍未接远端 transport 或 GPUI。
+  解析器也仍未接远端 transport 或 Electron 页面。
 - MySQL option file、PostgreSQL conf/HBA/ident、通用 INI、TOML、Java properties、
   flat/whitespace 配置已经具备本地无损可视化；JSON 以及 YAML/XML 的可证明安全子集已接入
   source-backed 有序只读树。YAML 的 anchor/alias/tag/merge/flow/block scalar/directive/complex
@@ -256,6 +336,339 @@
 - OpenSSH/Dropbear、MFA、Agent、跳板机、SFTP 降级和网络故障矩阵必须在适用的 Linux/SSH 实验环境执行；被忽略的自动化测试不等于通过。
 - 破坏性远端操作必须验证成功、非零退出、断连、并发变化、验证失败和恢复失败路径，不能只用 mock 结果作为发布依据。
 
-相关验收契约见 [GPUI Windows 可行性门禁](GPUI_FEASIBILITY_GATE.md) 与 [SSH 兼容性与安全策略](SSH_COMPATIBILITY.md)。
+相关验收契约见 [终端可行性门禁](../crates/lovelyres-terminal/FEASIBILITY_GATES.md) 与 [SSH 兼容性与安全策略](SSH_COMPATIBILITY.md)。
 
-- `lovelyres-core::database_config_inventory`（owner：database core）已实现 MySQL/MariaDB plugin 与 MySQL component 的闭合只读 SQL plan、typed bounded snapshot、带唯一末行 `complete_v1` 的 headerless hex-TSV parser，以及共享 `DatabaseService` 的无密码 profile 只读路径。服务保存精确 runtime identity、完整 `TargetGuard` 与 profile digest，并在两阶段查询之间、返回前和消费前提供复核；密码 profile 在第一次 SSH 前失败关闭。尚未接入 GPUI 或 core-owned native database protocol；完成条件是把 snapshot 接到 GPUI 且页面只能读取 `public_value()`，并覆盖 MySQL 8.0/8.4、MariaDB 10.11/11.4 的真实权限、空表、重复行、超限、取消与目标切换矩阵。`complete_v1` 只用于发现普通截断，不能把恶意服务端变成可信来源。真实数据库验收仍为 `NOT_RUN`，且本模块不授权任何安装、卸载或其他 mutation。
+- `lovelyres-core::database_config_inventory`（owner：database core）已实现 MySQL/MariaDB plugin 与 MySQL component 的闭合只读 SQL plan、typed bounded snapshot、带唯一末行 `complete_v1` 的 headerless hex-TSV parser，以及共享 `DatabaseService` 的无密码 profile 只读路径。服务保存精确 runtime identity、完整 `TargetGuard` 与 profile digest，并在两阶段查询之间、返回前和消费前提供复核；密码 profile 在第一次 SSH 前失败关闭。尚未接入 Electron 页面或 core-owned native database protocol；完成条件是把 snapshot 接到 Electron 页面且页面只能读取 `public_value()`，并覆盖 MySQL 8.0/8.4、MariaDB 10.11/11.4 的真实权限、空表、重复行、超限、取消与目标切换矩阵。`complete_v1` 只用于发现普通截断，不能把恶意服务端变成可信来源。真实数据库验收仍为 `NOT_RUN`，且本模块不授权任何安装、卸载或其他 mutation。
+
+## Electron 迁移期切片接线状态
+
+### 已中央接线但仍为 Pending
+
+- SSH terminal 已不再是 `UNWIRED`。`crates/lovelyres-electron-backend/src/terminal_api.rs` 的七个固定
+  内部 RPC 已实例化到 `BackendState`；main LovelyRes preload 只新增零参数 `openSshTerminal()`，当前总公开面
+  精确为 81 个方法，而独立 `terminal.html` renderer 只得到 `open/poll/input/resize/search/copySelection/close`
+  七个无 handle 方法。binding、session、guard、host、command、launch token 与 backend terminal handle
+  始终由 main/Rust 持有，不进入 URL、argv、window.name、DOM 或 renderer state。main 以 binding + window kind
+  为 key 创建 hardened `BrowserWindow`，重复入口聚焦现有窗口；新 binding、disconnect、窗口关闭、backend
+  shutdown 和打开失败都会先使上下文失效并 best-effort 关闭 terminal，迟到结果失败关闭。
+  选区复制只在已打开 terminal handle 上接受非空、最多 128 KiB UTF-8 纯文本并调用 main
+  `clipboard.writeText`；按钮和有选区的原生 copy 事件共用同一个有界 helper，无选区 Ctrl+C 不被 copy
+  边界吞掉。没有 navigator clipboard、renderer fallback、readClipboard 或新增 paste preload。
+  exact `lovelyres://app/?window=terminal` 映射到独立本地 entry；xterm DOM renderer 所需的动态尺寸/主题 CSS
+  仅在该文档允许 inline style，main App CSP 和 terminal script CSP 均未放宽，全部资源仍为
+  `lovelyres://app`。当前 Electron-native CDP 证据位于
+  `target/electron-debug/526e344c-a5f5-499d-9a17-ab4c0bf4defe/evidence`，验证当时的 pre-LogAnalysis main API、terminal exact7、
+  未授权真实窗口全方法失败关闭、零泄漏、local-only resource tree、零 console error、capturePage 和销毁。
+  条目仍为 `Pending`：真实 SSH/PTY 的成功 resize/input/poll/search/copy/close、生产 keyed reuse/focus/disconnect、
+  OpenSSH/Dropbear/auth/MFA、IME/CJK、网络故障及 packaged Windows/macOS/Linux 生命周期矩阵均为 `NOT_RUN`，
+  tabs、completion、directory launch 和 AI parity 也尚未达成，不能据此宣布 SSH terminal 完成。
+
+- Middleware 只读调查 Phase 1 已不再是 `UNWIRED`。`middleware.discover`、
+  `middleware.configuration.load` 与 `middleware.history.list` 三个固定 RPC 已进入中央 `BackendState`、main、
+  frozen preload、aggregate `LovelyResApi` 与 `App` registry；renderer 页面只接收 opaque `bindingHandle`，
+  discovery/instance 继续使用 target-scoped opaque handles，不接收 target/session/guard/generation、远端路径、
+  摘要、shell 或命令。adapter 仅调用 core `MiddlewareService::discover/load_configuration/history`，并在
+  请求前后复核完整 target scope；SSH disconnect 会先 `close_binding`，迟到结果失败关闭。当前公开 API
+  仅为 `discoverMiddleware`、`loadMiddlewareConfiguration`、`listMiddlewareHistory`。Electron-native CDP
+  的 pre-LogAnalysis 证据 `target/electron-debug/526e344c-a5f5-499d-9a17-ab4c0bf4defe/evidence` 已验证伪造/unknown
+  参数拒绝且不回显、断连页无实例/历史、refresh 禁用、本地资源、卸载重挂载后仍无远端行、capturePage 与
+  0 console errors。页面仍为 `Pending`：真实 Linux/OpenSSH/systemd/SFTP 多实例、权限/include/断连/目标切换
+  矩阵为 `NOT_RUN`，plan/confirm/execute/verify/restore/draft/file/terminal/export/AI 仍是后续独立安全设计。
+
+- 命令审计 / Check Audit 只读 Phase 1 已不再是 `UNWIRED`。`check-audit.catalog.get`、
+  `check-audit.status.collect` 与 `check-audit.log.read` 三个固定 RPC 已进入中央 `BackendState`、main、frozen
+  preload、aggregate `LovelyResApi` 与 `App` registry；renderer 页面只接收 opaque `bindingHandle`，日志读取
+  继续使用 target-scoped opaque snapshot capability，不接收 session/guard/generation/identity、shell、远端路径、
+  摘要或备份位置。adapter 只调用 core `AuditService` 的固定目录/status/log/analyze 路径，并在请求前后复核
+  完整 target scope；SSH disconnect 会先 `close_binding`，迟到结果失败关闭。当前公开 API 仅为
+  `getCheckAuditCatalog`、`collectCheckAuditStatus`、`readCheckAuditLog`。同一 pre-LogAnalysis CDP 证据已验证伪造/
+  unknown 参数拒绝且不回显、断连页无命令/日志行、本地资源、卸载重挂载后仍无远端行、capturePage 与
+  0 console errors。页面仍为 `Pending`：真实 Linux/SSH/auditd 未安装、权限拒绝、日志缺失/畸形、断连与
+  target-switch 矩阵为 `NOT_RUN`，deploy/restore/clear-log、plan/confirm/execute、file/terminal/export 仍待迁移。
+
+### 尚未中央接线或仍待完整验收
+
+以下条目同时记录仍为 `UNWIRED` 的入口，以及已经中央接线但因实机、mutation/remediation、持久化或
+packaged 验收不足而继续为 `Pending` 的切片。每一条都必须按其明确状态解读，不能因为源码、测试或
+某一阶段接线存在就把整个页面或 overlay 标记为完成：
+
+- Quick Detection read-only phase 1 已中央接线：`crates/lovelyres-electron-backend/src/quick_detection_api.rs`、
+  `electron/src/shared/quick-detection-contract.ts` 与 `QuickDetectionPage.tsx` 已实现真实 opaque SSH binding、
+  core-owned immutable `plan_scan`/`run_scan`、有界 TTL plan/scan/report registry、游标进度轮询、取消、
+  当前目标历史/详情、hostile plain-text 报告与 lifecycle cancel。独立 surface 固定为 exact7 catalog/plan/start/
+  poll/cancel/history/report；完整 `TargetGuard` 在 dispatch、事件和最终报告应用前验证，`close_binding` 会取消并
+  清除该 binding 的计划、扫描、事件、报告和字节，晚到结果不能复活。Renderer 仅接收 binding 和 opaque
+  handles；卸载/切换主动取消，request/cursor correlation 拒绝旧响应；事件只含封闭枚举和计数，报告、history
+  及所有 hostile 字段在 renderer 前按固定 marker 投影并受字节/数量上限约束。BackendState 单例、exact7 RPC、
+  main/preload exact112、aggregate contract、App binding-only page registry 与 SSH disconnect 前 eager `close_binding`
+  均已接线。当前 aggregate evidence 为 backend library 248/248、16 个 standalone targets 共 451/451（总计
+  699 tests）、Quick Detection standalone 31/31、Electron 102 files/594 tests、typecheck/build、workspace
+  Clippy/rustfmt，以及 exact112 source gate/fixture self-test。Electron-native CDP 证据
+  `target/electron-debug/19adbfae-598c-4eee-b7f1-cc2a666e3ac7/evidence` 已验证 exact7 surface：plan/start/poll/
+  cancel/history/report 的 direct 与 unknown-field forged 请求均 reject-no-echo，catalog 为 13 个封闭模块、2 个
+  profile，remediation/auto-fix/command/file/terminal/export/mutation/generic 均为 `undefined`；断连页零
+  module/profile/progress/history/report/action rows、local-only、无内部身份，unmount/remount 后仍为空，
+  `quick-detection-disconnected.png` capturePage 成功且 console error 为 0。真实 Linux/OpenSSH 的连接扫描、
+  权限、取消、断连竞态及目标切换仍为 `NOT_RUN`；自动修复在完整 plan/exact-confirmation/journal/verify/restore
+  接线前失败关闭且不提供按钮。phase 1 不再计为 `UNWIRED`，但整个页面继续为 `Pending`。
+- Docker 只读调查 phase 1 已中央接线：`crates/lovelyres-electron-backend/src/docker_read_api.rs`、
+  `electron/src/shared/docker-read-contract.ts`、`docker-read-state.ts`、`docker-read-helpers.ts` 与
+  `DockerPage.tsx` 已实现真实 opaque SSH binding、完整 `TargetGuard` 前后验证、固定 Docker runtime、
+  有界容器快照，以及 stats/images/networks/volumes/Compose 项目、容器/网络/卷详情、安全审计和日志读取。
+  Renderer 只持有 5 分钟 TTL 的 opaque snapshot/resource handles，不发送 session、guard、generation、
+  identity、命令或远端路径；后端 registry 限 8 个快照、每快照 3 个并发读取和 2 个并发刷新，并限制全部
+  行数、UTF-8 文本、日志、registry 字节与事件结果应用。网络或卷清单刷新会作废其旧资源 handle；容器
+  快照刷新或目标切换会作废该目标的全部旧 handle，晚到结果失败关闭。BackendState 单例、exact5 RPC、
+  main/preload exact96、aggregate contract、App binding-only page registry 与 SSH disconnect 前 eager
+  `close_binding` 均已接线；phase 1 不暴露 start/stop/restart/remove/exec/file/terminal/export/mutation/generic
+  surface。当前代码面验证包括 backend library 206 tests、standalone 35 tests、Electron 99 files/542 tests、
+  source gate/fixture self-test，以及 `target/electron-debug/b3e44b7a-7a8f-481d-be9d-26521d5cbfea/evidence`：
+  真实 Electron `webContents.debugger`/CDP 证明五个方法的直接和 unknown-field forged 请求共 10 项全部拒绝且
+  不回显；断连页的 table/resource/card/finding/inspection/log/tab rows 全为 0、local-only、无内部身份，卸载重挂载
+  仍为空，Docker/全局 console error 为 0，并由 `capturePage` 生成截图；标题/提示对比度为 15.05:1/6.37:1。
+  仍缺真实 Linux/OpenSSH/Docker 的空清单、权限拒绝、超限、超时、断连和目标切换矩阵。容器 action、资源/
+  Compose mutation、文件读写/复制和 container terminal 属于 phase 2，必须另行建立不可变计划、确认、审计、
+  验证/恢复及窗口生命周期闭环；整个 Docker 页面因此继续为 `Pending`，但只读 phase 1 不再计为 `UNWIRED`。
+- 日志分析只读调查 phase 1 已中央接线：`crates/lovelyres-electron-backend/src/log_analysis_read_api.rs`、
+  `electron/src/shared/log-analysis-read-contract.ts`、`log-analysis-read-state.ts`、
+  `log-analysis-read-helpers.ts` 与 `LogAnalysisPage.tsx` 已实现真实 opaque SSH binding、完整
+  `BoundSshSession`/`TargetGuard` 前后验证，并且只调用 core `LogAnalysisService` 的日志源发现、文件/
+  journal 分页读取、威胁汇总、多源关联与 IOC 搜索。Renderer 仅发送 binding、snapshot/source capability
+  及有界 typed query；远端位置只能作为 hostile plain text 展示，后续读取不接收 path，也不发送
+  session、guard、generation、identity 或命令。快照 TTL 为 5 分钟，registry 限 8 个快照、每快照 1 MiB、
+  总量 4 MiB、每快照 3 个并发读取，发现限全局 2 个且每 binding 1 个；文件源限 100 个并可附加 1 个
+  journal capability。单页限 200 行/512 KiB；关联限 2–8 个文件源、每源 200 行、观察 1,600 行、返回
+  1,000 行/1 MiB；IOC 限 1–8 个文件源、16 个 indicator、64 个 source/indicator 组合、64 个结果、
+  每结果 3 个样本且总文本 512 KiB。过期、淘汰、目标切换及晚到结果均失败关闭，疑似 credential 行整行
+  遮蔽。BackendState 已注册 exact4 固定 RPC，main/preload/aggregate contract 只公开
+  `discoverLogSources`、`readLogSource`、`correlateLogSources`、`searchLogIocs`；main 对请求与响应作严格
+  exact-object 验证，unknown/forged 参数固定失败且不回显。`App`/`LogAnalysisPage` 只接收 opaque
+  `bindingHandle`，不接 target identity、connection/session metadata；SSH disconnect 在实际断连前 eager
+  `close_binding`，取消、过期、目标切换及晚到结果均失败关闭。owner 为 Electron log analysis migration；
+  验收测试为
+  `log_analysis_read_api_standalone.rs`、`log-analysis-read-contract.test.ts`、
+  `log-analysis-read-state.test.ts`、`log-analysis-page.test.tsx` 与 `log-analysis-read-boundary.test.ts`。
+  source gate 与 fixture self-test 已接受当前 main exact89、Log Analysis exact4、strict validators、backend
+  guard/bounds、opaque-only App、forbidden surfaces 及 eager close-before-disconnect；最近完整 Electron check 为
+  96 files / 509 tests，sidecar aggregate 为 583 passed、0 failed、0 ignored，standalone 为 29/29。新的
+  Electron-native CDP 证据 `target/electron-debug/c7b33682-bc4d-4f91-bd63-8990152a2987/evidence` 已通过：
+  该 pre-Kubernetes main exact85 运行中，forged/unknown discover/read/correlate/IOC search 均 reject-no-echo，forbidden
+  mutation/rules/AI/file/terminal/export/generic 为 `undefined`，断连页无 rows、local-only、无 internal identity，
+  `log-analysis-disconnected.png` capturePage 成功，unmount/remount 后仍为空，console error 为 0。真实 Linux/OpenSSH/journal 的权限拒绝、不可用、
+  populated/空集、超限、超时、断连及 target-switch 矩阵同样 `NOT_RUN`。AI 分析、规则 mutation、导出、
+  任意文件入口与终端属于 phase 2 独立安全设计，仍为 `UNWIRED`；因此页面整体保持 `mixed`/`Pending`，
+  不把 phase 1 的代码面接线误报为完整 parity。
+- Snapshot 只读调查 phase 1：`crates/lovelyres-electron-backend/src/snapshot_read_api.rs`、
+  `electron/src/shared/snapshot-read-contract.ts`、`snapshot-read-state.ts`、`snapshot-read-helpers.ts` 与
+  `SnapshotPage.tsx` 已实现真实 opaque SSH binding、完整 `BoundSshSession`/`TargetGuard` 前后验证，并且
+  只调用 core `SnapshotService` 的 `list_directory`、`list_forensic` 与 `diff_forensic`。Renderer 仅发送
+  binding 和 opaque snapshot handles，不发送 core snapshot id、target/session/generation、host/fingerprint、
+  命令、远端路径或摘要。目录响应最多 64 份、每份 8 个固定 preset，`bytes` 使用精确 u64 十进制字符串；
+  `source`、`remote_root`、archive path、全部 SHA/digest 和 target identity 均不出 sidecar。每个目录项的
+  `archiveAvailability` 固定为 `not-checked`，页面明确便携索引可读不表示远端归档仍存在、不可变或已重新
+  验证。
+  取证索引最多 10 份；详情固定 12 个 collector、最多 2,048 行/512 KiB、每字段 512 行、单行 4 KiB，
+  serialized 响应限 768 KiB。差异固定 12 个 collector、每字段每方向 200 行、总计 1,000 行/512 KiB，
+  serialized 响应限 768 KiB，并强制 baseline 时间严格早于 newer。公开投影按 collector 固定为 7/5：
+  `processes`、`loginHistory`、`cronJobs`、`authorizedKeys`、`sudoers`、`recentModifiedFiles`、`envVariables` 的 detail 整段只返回
+  `[SENSITIVE SNAPSHOT TEXT REDACTED]` 或 `[FORENSIC COLLECTOR FAILED]`，diff 的 added/removed 每方向也最多
+  只返回一个相同固定 marker，旧内容不会进入 renderer。`networkConnections`、`listeningPorts`、
+  `startupServices`、`runningUsers`、`loadedModules` 才允许有界、控制字符归一化的
+  plain text，并继续对已知 credential marker 与当前 target/session literal 失败关闭；这只是闭合公开面，
+  不宣称能够从任意文本识别所有秘密。Core portable snapshot/export 仍可能持有原始采集文本，必须继续作为
+  core-owned 敏感数据保护。opaque catalog TTL 为 5 分钟，限 8 个 catalog、每个 128 KiB、registry 总量
+  1 MiB；list 限全局 2 个且每 binding 1 个，详情/差异限全局 8 个且每 catalog 3 个。同 scope 刷新可为
+  未变化记录复用 opaque handle 以保持选择，但会轮换内部 token；目标切换、断连、TTL、淘汰和晚到结果均
+  失败关闭。
+  Snapshot 只读 phase 1 已不再是 `UNWIRED`：`BackendState`、三个固定 RPC、main exact IPC、frozen preload、
+  aggregate `LovelyResApi` 与 App page registry 已中央接线，main 公开 API 从 67 精确增加到 70。App 只把当前
+  opaque `bindingHandle` 交给 `SnapshotPage`，不传 `ActiveSshTarget`、connection/host/port/username/timestamp
+  或其他公开目标摘要；断连会清理该 binding 的 catalog，页面卸载和晚到结果继续失败关闭。
+  Core 预投影 hardening gap 同轮关闭：portable snapshot document 在反序列化前受 128 MiB encoded-size
+  上限约束，目录/取证索引在 deserializer 中分别硬限 64/10，forensic diff 在建立集合前同时执行每字段
+  2,048 行与总计 8,192 行上限。篡改的 oversized/count 文档与过量 diff 输入均有 fail-closed 测试。
+  已观察证据包括 `snapshot_read_api_standalone.rs`、central backend RPC、core all-targets、Electron 89 个
+  Vitest 文件/460 项、exact70 source gate，以及
+  `target/electron-debug/7078e63f-be4f-47be-a3bf-6d50df216d1a/evidence` 的断连/伪造 capability/CDP/
+  capturePage。真实 Linux/SSH 的 populated index、权限拒绝、断连、TTL、目标切换与 corrupted-store 实机
+  矩阵仍为 `NOT_RUN`。create/capture/export/restore/delete/journal mutation、文件、terminal 和 AI 属于后续
+  独立安全设计，phase 1 不提供 API 或按钮；因此页面仍为 `Pending`，不得标记 Completed。
+- Emergency Commands / command workbench phase 1：
+  `crates/lovelyres-electron-backend/src/emergency_command_api.rs`、
+  `electron/src/shared/emergency-command-contract.ts`、`emergency-command-state.ts`、
+  `emergency-command-helpers.ts` 与 `EmergencyCommandsPage.tsx` 已建立独立的固定目录执行边界。Sidecar
+  load 时从真实 opaque SSH binding 捕获 `BoundSshSession` 与完整 `TargetGuard`，只调用 core
+  `CommandWorkbenchService::catalog`、`detect_system`、`execute`；系统 family、raw catalog id 和固定 shell
+  文本仅保存在按 binding/snapshot 隔离的 registry。中央 public API 固定且仅为
+  `loadEmergencyCommandCatalog(bindingHandle)` 与
+  `runEmergencyCommand(bindingHandle,snapshotHandle,commandHandle)`；renderer 只发送 opaque handles，不发送
+  family、command、target/session/generation、host、path 或任意用户输入。
+  Catalog 最多 64 项，title 128 bytes、description 512 bytes、timeout 1..=60 秒；registry 最多 8 份、
+  每份 64 KiB、总计 512 KiB、TTL 5 分钟。系统识别 sidecar deadline 为 15 秒；执行依赖 core 固定
+  30 秒 timeout 并另有 40 秒 sidecar deadline。load 全局并发 2 且同 binding 1，execute 全局并发 4 且
+  同 binding 1；刷新、TTL、淘汰、断连、完整 target epoch 变化和晚到结果均失败关闭。即时执行 DTO 最多
+  2,000 行/256 KiB、单行 4 KiB、serialized 384 KiB；credential-like 行、binding/session/connection/
+  target identity literal 和 raw catalog id 逐行替换为固定 marker，hostile 文本只进入 React text node/`pre`。
+  即时 DTO 与 portable history 是两条独立边界：core `command_workbench.rs` producer 已最小加固为 history
+  只保存固定不可执行 identity、固定有界 result/exit 摘要与安全 title，不保存 raw catalog id、shell 文本或
+  即时输出；现有 history schema/detail/search 保持兼容，保守 `mutating` 风险使 Electron replay consumer
+  明确返回 blocked。测试直接读取 portable history 文件并证明 shell、credential marker 与 hostile output
+  不落盘。
+  BackendState 单例、exact2 RPC、main/preload exact91、aggregate contract 与 App binding-only page registry
+  已中央接线；SSH disconnect 会在真实断连前 eager 清理 Emergency registry。当前代码面验证包括 backend
+  library 190/190、standalone 31/31、Electron 98 files/532 tests、source gate/fixture self-test，以及
+  `target/electron-debug/38fc68d4-41d7-43fc-ace8-ef4afdf08da5/evidence`：真实 Electron
+  `webContents.debugger`/CDP 证明 catalog/run 的直接与 unknown-field 请求均拒绝且不回显，禁用的
+  custom/shell/file/terminal/export/mutation/generic surface 均为 `undefined`；断连页零远端 rows、
+  local-only、无内部身份，卸载重挂载仍为空，console error 为 0，并由 `capturePage` 生成截图；标题与提示
+  对比度为 14.15:1/4.77:1。较早的 `136bb2ce` 报告因探针仍期待旧 API 排序而为 `FAIL`，不得引用为通过。
+  仍缺 Debian/Red Hat/Alpine/SUSE/Arch/Other 的真实命令存在性、权限拒绝、timeout、取消、断连竞态和
+  目标切换矩阵。
+  phase 1 不提供 arbitrary command、terminal、file、export、AI、mutation plan 或邻接动作；真实 SSH/Linux
+  验收继续为 `NOT_RUN`，危险 mutation/审计/验证/恢复 parity 尚未迁移，因此页面继续计为 `Pending`。
+- SFTP standalone read-only Browser phase 1：
+  `crates/lovelyres-electron-backend/src/sftp_browser_api.rs`、
+  `electron/src/shared/sftp-browser-contract.ts`、`sftp-browser-state.ts`、
+  `sftp-browser-helpers.ts` 与 `SftpBrowserPage.tsx` 已建立独立的 target-bound capability 浏览边界。
+  Sidecar 从真实 opaque SSH binding 捕获完整 `BoundSshSession`/`TargetGuard`，并且只调用 core
+  `SftpService::bind_session`、`list`、`read_text`；固定从 `RemotePath("/")` 打开，renderer 没有 path
+  参数或 fallback。未来 public API 固定且仅为 `openSftpBrowser(bindingHandle)`、
+  `listSftpDirectory(bindingHandle,browserHandle,directoryHandle)` 与
+  `readSftpText(bindingHandle,browserHandle,fileHandle)`。Remote path、raw session/guard/generation/identity、
+  host/fingerprint、shell、local path 均不进入 DTO；父级导航也只由 sidecar registry 返回的 opaque
+  directory capability 表达。每个条目都有 target/browser-scoped handle；directory/file 分别只能用于
+  browse/preview，symlink/other 的 action 固定为 `none`，不会作为目录或文件读取。
+  Core 既有边界为单目录最多 50,000 项/64 MiB，`read_text` 只接受最多 2 MiB 的 UTF-8 常规非 symlink
+  文件；本切片另把公开目录压到 128 项/128 KiB、显示名称 256 bytes，把文本压到 2,000 行/256 KiB、
+  单行 4 KiB、serialized 384 KiB。Credential-like 名称和预览行使用固定 marker 整体遮蔽，hostile 名称/
+  文本只进入 React text node/`pre`。浏览器 TTL 固定 5 分钟，最多 4 个、每个 1 MiB、registry 总量 4 MiB；
+  打开全局并发 2，list/read 全局并发 4 且同 browser 1。刷新会保留同目录未变化条目的 handle 以稳定选择，
+  但重新打开会轮换 browser/token；断连、完整 target epoch 变化、TTL、淘汰、刷新替换和晚到结果均失败关闭。
+  Core `SftpService::list` 已最小加固为在 `read_dir` 前用 non-follow metadata 严格要求 Directory，并有测试
+  证明 regular file、symlink 与 stale TargetGuard 不会回退到 read_dir；这不能消除远端在检查和读取之间
+  替换对象的 TOCTOU。
+  owner 为 Electron SFTP browser migration；验收测试为 `sftp_browser_api_standalone.rs`、core
+  `sftp::tests::directory_list_refuses_files_symlinks_and_stale_targets_before_read_dir`、
+  `sftp-browser-contract.test.ts`、`sftp-browser-state.test.ts` 与 `sftp-browser-page.test.tsx`。仍缺
+  BackendState/RPC、main/preload 三个固定方法、aggregate API contract、keyed SFTP BrowserWindow 生命周期、
+  App/window registry、source gate feature 清单、Electron CDP/capturePage，以及真实 OpenSSH/Dropbear SFTP
+  的固定根目录不可读/不可列、空目录、50k/64 MiB core 上限、非 UTF-8/2 MiB 文件、权限拒绝、慢请求、
+  断连、目标切换、symlink 与 swap race 矩阵；这些真实 SFTP 验收继续为 `NOT_RUN`。Phase 1 不提供
+  download/upload/edit/create/rename/chmod/delete/archive/extract、terminal、native dialog、export 或 AI 的
+  API/按钮；中央接线和实机证据完成前整个 SFTP 页面继续计为 `UNWIRED`/`Pending`。
+- Notification stack：`notification-state.ts` 与 `NotificationStack.tsx` 已实现去重、3/5 秒超时、64 项
+  上限、持久项、手动关闭和 hostile plain-text。仍缺 App-level host、所有生产调用点、overlay stacking
+  以及 Electron CDP timer/accessibility 证据。
+- Dialog host：`dialog-state.ts` 与 `DialogHost.tsx` 已实现 alert、非秘密 prompt 和 opaque-handle-bound
+  dangerous confirmation，含 UTF-8 边界、action/id 匹配、focus trap/restore、Escape 取消和危险操作
+  不响应 Enter。仍缺 App-level controller、所有生产调用点、与各领域 plan/cancel 方法的 typed 绑定及
+  Electron CDP；generic host 不能成为任意 backend action 或通用确认能力。
+- Application log：`crates/lovelyres-electron-backend/src/diagnostic_log_api.rs`、
+  `electron/src/shared/application-log-contract.ts`、`ApplicationLogOverlay.tsx` 与 main-only export helper
+  已实现 500 条结构化 `tracing` ring、动态级别、有界筛选/预览、敏感字段与任意 Debug/Error 脱敏、
+  volatile-only clear，以及 `wx` + fsync 的非覆盖导出。该切片不从 backend stderr 反向读取或转发内容到 renderer，renderer
+  export 结果只有 basename/count/truncated，不能取得路径或正文。唯一 sidecar subscriber 现同时挂标准 fmt
+  stderr layer（独立 per-layer `EnvFilter`）与 Application Log capture layer；BackendState 单例、exact5
+  list/level/volatile-clear/preview/export-prepare RPC、strict main/preload、native save dialog、frozen exact112 API 与
+  App-level overlay host 均已中央接线。内部 export payload 只到 main，renderer 不取得路径、正文、stderr、
+  arbitrary file 或 generic invoke surface；关闭、Escape、导航、断连和卸载都会先作废 overlay 的迟到结果，
+  但 SSH disconnect 不清除 process-local ring。当前 aggregate evidence 为 backend library 248/248、16 个
+  standalone targets 共 451/451（总计 699 tests）、Application Log standalone 11/11、Electron full
+  102 files/594 tests、typecheck/build、workspace check/Clippy/rustfmt，以及 exact112 source gate/fixture self-test。
+  Electron-native CDP 证据 `target/electron-debug/19adbfae-598c-4eee-b7f1-cc2a666e3ac7/evidence` 已验证 exact5
+  surface：list/level/preview/export unknown-field 请求 reject-no-echo，stderr/file/path/internal-payload/generic
+  均为 `undefined`；overlay 显示 0/500 ring、无 entry/detail/error rows 或内部 payload，focus/inert/Escape restore、
+  unmount/remount 清理、local-only resources、`application-log-overlay.png` capturePage 与 0 console errors 均通过。
+  便携 rolling-file writer 与 packaged native save-dialog/实际落盘 smoke 仍为 `NOT_RUN`，因此 exact5 不再计为
+  `UNWIRED`，但 overlay 整体仍为 `mixed`/`Pending`，不得标记 Completed。
+- File Integrity：`crates/lovelyres-electron-backend/src/integrity_api.rs`、
+  `electron/src/shared/integrity-contract.ts`、`integrity-state.ts`、`integrity-helpers.ts` 与
+  `IntegrityPage.tsx` 已把 Phase 0 收窄为 exact5 只读 surface：preset、目标作用域 baseline 列表、comparison
+  start/poll/cancel。Backend 在 dispatch 前后及结果 apply 前验证完整 `TargetGuard`，并限制 opaque handles、TTL、
+  registry bytes、单 binding 并发、事件 cursor 和响应字节；`close_binding` 会中止任务并回收 handles/bytes/
+  permits，晚到结果不能复活。credential、URI userinfo、binding/session/connection/target literals 与 C0 在 renderer
+  前按固定规则脱敏或投影。Renderer 仅持 binding 与 opaque capabilities；切换、卸载和错配响应会主动取消并
+  失败关闭，hostile text 只进入 React 文本节点。当前 evidence 为 standalone 29 tests（Integrity 专项 7）、
+  contract/state/helpers/page 4 files/18 tests，以及 Electron 100 files/563 tests、typecheck/build、Clippy 与 workspace
+  rustfmt。基线创建与 quarantine 明确属于远端 mutation，本 phase 不提供 API 或按钮；后续必须恢复 immutable
+  plan、exact confirmation、journal、独立验证和失败恢复。仍缺 BackendState/RPC、main/preload exact5、App page
+  registry、source gate、Electron CDP/capturePage 与真实 Linux/SSH 比较/取消/断连/目标切换证据。SFTP 定位也
+  必须等待 keyed SFTP window 安全绑定同一 TargetGuard；在中央接线前继续计为 `UNWIRED`/`Pending`。
+- Kubernetes 只读调查 phase 1 已中央接线：`crates/lovelyres-electron-backend/src/kubernetes_read_api.rs`、
+  `electron/src/shared/kubernetes-read-contract.ts`、`kubernetes-read-state.ts`、
+  `kubernetes-read-helpers.ts` 与 `KubernetesPage.tsx` 已实现真实 opaque SSH binding、完整
+  `TargetGuard` 前后验证，以及只调用 core `KubernetesService` 的 availability、namespaces、pods、
+  deployments、nodes、有界详情和最近 Pod 日志。Renderer 只发送 binding/snapshot/row capability；
+  namespace scope 也由目标绑定的 Namespace 行 capability 表达，不发送 session、guard、generation、
+  identity、资源 UID/名称/namespace、命令、日志参数或远端路径。快照为 5 分钟 sliding TTL，registry
+  限 24 个/32 MiB，每快照限 4 MiB，列表限 500 行/2 MiB，详情 256 KiB、日志 512 KiB，并限制全局与
+  逐 binding 并发；过期、淘汰、目标切换及晚到结果均失败关闭。owner 为 Electron Kubernetes read
+  migration。BackendState 已注册 exact4 固定 RPC，main/preload/aggregate contract 只公开
+  `getKubernetesAvailability`、`listKubernetesResources`、`getKubernetesResourceDetail`、
+  `getKubernetesPodLogs`；main 对请求与响应作严格 exact-object 验证，unknown/forged 参数固定失败且不回显。
+  `App`/`KubernetesPage` 只接收 opaque `bindingHandle`，不接 target identity、connection/session metadata；
+  SSH disconnect 在实际断连前 eager `close_binding`，过期、淘汰、目标切换及晚到结果均失败关闭。验收测试为
+  `kubernetes_read_api_standalone.rs`、`kubernetes-read-contract.test.ts`、`kubernetes-read-state.test.ts`、
+  `kubernetes-read-helpers.test.ts`、`kubernetes-page.test.tsx` 与 `kubernetes-read-boundary.test.ts`。
+  source gate 与 fixture self-test 已接受 main exact89、Kubernetes exact4、strict validators、backend
+  redaction/guard/bounds、opaque-only App、forbidden surfaces 及 eager close-before-disconnect；最近完整 Electron
+  check 为 97 files / 522 tests，backend library 为 177/177，standalone 为 38/38。Electron-native CDP 证据
+  `target/electron-debug/0ad5379b-1186-4f2c-892e-0b54a87cd4d1/evidence` 已验证 main exact89、forged/unknown
+  reject-no-echo、forbidden scale/restart/delete/cordon/drain/exec/file/terminal/export/generic `undefined`、断连
+  title/prompt/零 rows/local-only/no internal identity、`kubernetes-disconnected.png` capturePage、unmount/remount
+  clear、Kubernetes/全局 console error 0，以及标题/提示 14.02:1/4.73:1 对比度。真实 Linux/SSH/
+  Kubernetes 的权限拒绝、空集/populated、超限、日志截断、取消、断连及 target-switch 同样 `NOT_RUN`。
+  SFTP 定位在 keyed SFTP window 能安全绑定同一 TargetGuard 前不提供入口；scale/restart/delete/cordon/drain、
+  exec、文件、终端、导出及任何 generic mutation 均属于后续独立安全设计，仍为 `UNWIRED`。因此页面整体
+  保持 `mixed`/`Pending`，不把 phase 1 的代码面接线误报为完整 parity。
+- 网络抓包 live phase 1 已中央接线：`crates/lovelyres-electron-backend/src/packet_capture_live_api.rs`、
+  `electron/src/shared/packet-capture-live-contract.ts`、`packet-capture-live-state.ts`、
+  `packet-capture-live-helpers.ts` 与 `PacketCapturePage.tsx` 已实现真实 opaque SSH binding、完整
+  `BoundSshSession`/`TargetGuard` 前后验证，并且只调用 core `PacketCaptureService::list_interfaces` 与
+  `start_live`；远端命令、tcpdump 参数 quoting、PTY 与 `LivePacketCapture` 生命周期仍由 core 持有。
+  Renderer 只发送 binding/interface/capture capability 和严格的 filter/packetLimit/durationSeconds，
+  不发送 interface 名、session、guard、generation、identity、命令、远端路径或 core capture id。
+  interface capability 为 5 分钟 TTL，限 256 项/2 MiB；capture 限全局 8 个、每 binding 1 个，最多保留
+  512 个事件/400 个数据包/4 MiB，每次 poll 限 100 个事件/512 KiB，单事件 64 KiB，并限制全局 12 个、
+  每 binding 3 个并发操作。重复 start、过期/淘汰、断连、目标切换、artifact 事件、cursor reset 和晚到
+  结果均失败关闭；失活、切换、卸载、poll 失败和终态都会真实调用 `request_stop`/`stop`，公开失败不回显
+  attacker-controlled tcpdump stderr。BackendState 单例、exact4 RPC、main/preload exact100、aggregate contract、
+  App binding-only page registry 与 SSH disconnect 前 awaited `close_binding` 均已接线。当前代码面验证包括
+  backend library 221/221、standalone 33/33、Electron 100 files/562 tests、all-target check/Clippy、workspace
+  rustfmt，以及 source gate/fixture self-test。`target/electron-debug/2d9db536-7817-4047-9c41-87e90a2e48d9/evidence`
+  的真实 Electron `webContents.debugger`/CDP 已验证 main exact100、8 个 direct/unknown-field 请求拒绝且不回显、
+  command/file/terminal/download/export/AI/mutation/generic surface 均为 `undefined`、断连页零远端 rows、local-only、
+  无内部身份、卸载重挂载清空、Packet Capture/全局 console error 为 0，并由 `capturePage` 生成截图；标题与提示
+  对比度均为 11.10:1。仍缺真实 Linux/SSH 的 tcpdump 缺失、root/non-interactive sudo、
+  `CAP_NET_RAW`/`CAP_NET_ADMIN`、权限拒绝、空接口、超限、超时、PTY backpressure、断连、目标切换和
+  取消矩阵。PCAP evidence/download/export/cleanup、案件持久化、任意文件/终端和 AI 属于后续独立安全链，
+  phase 1 不提供 API 或按钮；整个页面继续为 `Pending`，但 live phase 1 不再计为 `UNWIRED`。
+- Firewall 只读调查 phase 1：`crates/lovelyres-electron-backend/src/firewall_read_api.rs`、
+  `electron/src/shared/firewall-read-contract.ts`、`firewall-read-state.ts`、
+  `firewall-read-helpers.ts` 与 `FirewallPage.tsx` 已实现真实 opaque SSH binding、完整
+  `BoundSshSession`/`TargetGuard` 前后验证，并且只调用 core `FirewallService::inspect` 与当前目标
+  `list_changes`。规则在 sidecar 再限制为 256 KiB 并清理非换行/Tab 控制字符；history 最多 256 条，
+  只返回 opaque change handle、闭合 backend/engine/kind/state、512-byte 标签、SSH 端口和时间戳，绝不返回
+  raw change id、operation ids、remote root、object name、preflight digest、路径、session、guard、generation、
+  identity 或命令。快照为 5 分钟 TTL，registry 限 12 个、每个 768 KiB、总量 4 MiB，history 响应限
+  512 KiB，并限制全局 8 个、每 binding 2 个并发读取；同一目标刷新复用稳定 change handle，过期、淘汰、
+  断连、目标切换及晚到结果均失败关闭。页面只有“当前规则/变更历史”、手动刷新、规则搜索和通过 injected
+  clipboard callback 的有界纯文本复制；不会回退到 renderer `window` clipboard API。owner 为 Electron
+  Firewall read migration。中央 `BackendState` 现已共享同一套 core services/SSH registry，并且只注册
+  `firewall.inspect` 与 `firewall.change-history.list` 两个 strict params RPC；main/preload/LovelyResApi 也只增加
+  arity-1 的 `inspectFirewall` 与 `listFirewallChangeHistory`，使 main frozen preload 从 exact70 变为 exact72。
+  SSH disconnect 在真实断开前 eager 清理该 binding 的 Firewall capabilities，App 只把当前 opaque
+  `bindingHandle`、固定 API 与既有 128 KiB main-owned clipboard callback 交给页面；UTF-8 截断不会切开
+  scalar，并显示明确截断提示。固定错误不回显 hostile params，页面失活、断连与 scope 切换拒绝晚到结果。
+  验收测试为 `firewall_read_api_standalone.rs`、中央 RPC/IPC/preload exact tests、
+  `firewall-read-contract.test.ts`、`firewall-read-helpers.test.ts`、`firewall-read-state.test.ts`、
+  `firewall-page.test.tsx` 和 Electron `webContents.debugger`/`capturePage`；CDP 证据包含 exact72、两次伪造
+  capability 拒绝且不回显、无 Firewall mutation/generic/file/terminal/export surface、断连空态、导航重挂载、
+  本地资源、对比度、零 console error 与 `firewall-disconnected.png`。仍缺真实 Linux/SSH 的
+  iptables/nftables/UFW/firewalld 缺失、active/empty 组合、root/non-root、非交互 sudo、超限、断连和目标切换
+  成功矩阵，全部保持 `NOT_RUN`。本阶段明确不调用 `reconcile`，所以过期的
+  `awaiting-keep` 记录不会被只读层擅自解释为已经自动恢复。任何 block/allow/isolate/keep/restore/reconcile
+  必须在后续 phase 2 重新建立 core-owned immutable plan、exact dangerous confirmation、journal、远端
+  dead-man、独立 verify 和 restore 闭环，并完成真实自锁/自动恢复矩阵；phase 1 不提供 mutation API、按钮、
+  generic execute、terminal/file/export；由于 phase 2 与真实 Linux 矩阵尚未完成，页面继续计为
+  `Pending`，不得据此宣称 Firewall 完整迁移。

@@ -1,0 +1,27 @@
+[package]
+name = "lovelyres-electron-backend"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Bounded Rust sidecar API for the LovelyRes Electron application"
+
+[dependencies]
+base64.workspace = true
+lovelyres-core = { path = "../lovelyres-core" }
+lovelyres-terminal = { path = "../lovelyres-terminal", default-features = false }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+parking_lot.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+sha2.workspace = true
+
+[[bin]]
+name = "lovelyres-backend"
+path = "src/main.rs"

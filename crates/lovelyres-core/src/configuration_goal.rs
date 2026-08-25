@@ -960,6 +960,18 @@ impl ConfigurationGoalSubject {
                 .map_or("未知数据库产品", |definition| definition.label),
         }
     }
+
+    /// Matches a user query only against this subject's reviewed public label.
+    /// The same query bounds and control-character rejection used by goal
+    /// search apply before any normalization.
+    pub fn matches_label_query(
+        self,
+        raw_query: &str,
+    ) -> Result<bool, ConfigurationGoalSearchError> {
+        validate_configuration_goal_query_text(raw_query)?;
+        let query = raw_query.trim();
+        Ok(query.is_empty() || contains_case_insensitive(self.label(), query))
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1672,6 +1684,14 @@ impl ConfigurationGoalSearchResults {
 
     pub const fn truncated(&self) -> bool {
         self.truncated
+    }
+
+    /// Returns the only subject represented by every result, or `None` when
+    /// the search is empty or spans more than one product family.
+    pub fn unique_subject(&self) -> Option<ConfigurationGoalSubject> {
+        let mut subjects = self.matches.iter().map(|matched| matched.subject());
+        let first = subjects.next()?;
+        subjects.all(|subject| subject == first).then_some(first)
     }
 }
 
@@ -2956,6 +2976,38 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn product_label_search_and_unique_subject_inference_are_bounded_and_exact() {
+        let nginx = ConfigurationGoalSubject::Middleware(MiddlewareProduct::Nginx);
+        let dm = ConfigurationGoalSubject::Database(DatabaseConfigProduct::Dm);
+        assert_eq!(nginx.matches_label_query("nginx"), Ok(true));
+        assert_eq!(dm.matches_label_query("达梦"), Ok(true));
+        assert_eq!(nginx.matches_label_query("Kafka"), Ok(false));
+        assert_eq!(nginx.matches_label_query(""), Ok(true));
+        assert_eq!(
+            nginx.matches_label_query(&"x".repeat(MAX_CONFIGURATION_GOAL_QUERY_CHARS + 1)),
+            Err(ConfigurationGoalSearchError::QueryTooLong),
+        );
+        assert_eq!(
+            nginx.matches_label_query("Nginx\nKafka"),
+            Err(ConfigurationGoalSearchError::InvalidQuery),
+        );
+        assert_eq!(
+            search_configuration_goals("Nginx 反向代理")
+                .unwrap()
+                .unique_subject(),
+            Some(nginx),
+        );
+        assert_eq!(
+            search_configuration_goals("PostgreSQL max_connections")
+                .unwrap()
+                .unique_subject(),
+            Some(ConfigurationGoalSubject::Database(
+                DatabaseConfigProduct::PostgreSql,
+            )),
+        );
+    }
+
     fn valid_projected_value(parameter: &DatabaseConfigParameterSchema) -> String {
         match parameter.value_kind {
             DatabaseConfigSchemaValueKind::Boolean { true_literal, .. } => true_literal.to_owned(),
@@ -3490,6 +3542,67 @@ mod tests {
     }
 
     #[test]
+    fn nginx_goal_search_recognizes_403_intent_and_extracts_only_typed_paths() {
+        let has_nginx_403_goal = |query: &str| {
+            search_configuration_goals(query)
+                .expect("reviewed goal query")
+                .matches()
+                .iter()
+                .any(|matched| {
+                    matches!(
+                        matched,
+                        ConfigurationGoalMatch::Recipe(recipe)
+                            if recipe.action
+                                == ConfigurationGoalRecipeAction::NginxForbiddenPath403
+                    )
+                })
+        };
+
+        for query in [
+            "403",
+            "禁止访问",
+            "拒绝访问 /admin",
+            "我现在要配 nginx 的 /admin 从外部访问全部返回 403",
+            "FORBIDDEN",
+            "deny access",
+            "admin",
+        ] {
+            assert!(has_nginx_403_goal(query), "{query:?}");
+        }
+        for query in ["启用 gzip 压缩", "access_log", "location root"] {
+            assert!(!has_nginx_403_goal(query), "{query:?}");
+        }
+
+        for (query, expected) in [
+            ("让 /admin 从外部访问返回 403", "/admin"),
+            ("禁止 /admin/tools，返回 403", "/admin/tools"),
+        ] {
+            assert_eq!(
+                nginx_forbidden_path_from_goal_query(query)
+                    .as_ref()
+                    .map(NginxForbiddenPath::as_str),
+                Some(expected),
+                "{query:?}"
+            );
+        }
+        for invalid in [
+            "/admin; return 200",
+            "/admin%2Fusers",
+            "/admin{ return 200; }",
+            "//admin",
+            "/admin//users",
+            "https://host/admin",
+            "只禁止根路径 /",
+            "禁止 /管理",
+        ] {
+            assert!(
+                nginx_forbidden_path_from_goal_query(invalid).is_none(),
+                "{invalid:?}"
+            );
+        }
+    }
+
+    #[test]
     fn apache_forbidden_path_goal_is_typed_segment_safe_and_structured() {
         let query = "Apache block /admin.v1 with 403";
         let matches = search_configuration_goals(query).unwrap();
@@ -4020,6 +4133,81 @@ mod tests {
         assert_eq!(text.parameter_index(), parameter_index);
         assert_eq!(text.draft().normalized_value(), "mysql=v16");
         assert!(!format!("{text:?}").contains("mysql=v16"));
+    }
+
+    #[test]
+    fn database_assignment_writer_preserves_product_tokens_and_equals_inside_the_value() {
+        let (schema, parameter_index, parameter) = DATABASE_CONFIG_SCHEMAS
+            .iter()
+            .filter(|schema| schema.binding.product == DatabaseConfigProduct::PostgreSql)
+            .filter(|schema| {
+                schema
+                    .binding
+                    .versions
+                    .contains(DatabaseConfigVersion::new(16, 0, 0))
+            })
+            .find_map(|schema| {
+                schema
+                    .parameters
+                    .iter()
+                    .enumerate()
+                    .find(|(_, parameter)| {
+                        parameter.container_path.is_none()
+                            && parameter.canonical_key == "max_connections"
+                    })
+                    .map(|(index, parameter)| (schema, index, parameter))
+            })
+            .expect("PostgreSQL 16 max_connections schema");
+        let query = format!(
+            "PostgreSQL 16 @{} {} = MySQL=a=b",
+            schema.binding.artifact_key, parameter.canonical_key
+        );
+        let assignment = ready_assignment(&query);
+        assert_eq!(assignment.schema(), schema);
+        assert_eq!(assignment.parameter_index(), parameter_index);
+        assert_eq!(assignment.draft().container_path(), None);
+        assert_eq!(assignment.draft().normalized_value(), "MySQL=a=b");
+
+        let artifact = artifact_by_key(schema.binding.artifact_key)
+            .expect("schema must bind a registered PostgreSQL artifact");
+        assert_eq!(artifact.dialect, DatabaseConfigDialect::PostgreSqlConf);
+        assert!(artifact.allows_lossless_local_draft());
+        let source = crate::database_config::database_starter_contents(artifact);
+        let original = crate::line_config_visual::LineConfigVisualDocument::parse(
+            crate::line_config_visual::LineConfigDialect::PostgresConf,
+            source,
+        )
+        .expect("reviewed PostgreSQL starter");
+        let original_bytes = original.raw_bytes().to_vec();
+        let mut staged = original.clone();
+        staged
+            .add_entry(
+                None,
+                assignment.draft().canonical_key(),
+                Some(assignment.draft().normalized_value()),
+            )
+            .expect("typed assignment must stage in a cloned local draft");
+
+        assert_eq!(original.raw_bytes(), original_bytes);
+        assert!(
+            staged
+                .output()
+                .text()
+                .expect("PostgreSQL starter remains UTF-8")
+                .contains("max_connections = MySQL=a=b")
+        );
+        let reparsed = crate::line_config_visual::LineConfigVisualDocument::parse_bytes(
+            crate::line_config_visual::LineConfigDialect::PostgresConf,
+            staged.output().bytes().to_vec(),
+        )
+        .expect("staged PostgreSQL draft must reparse");
+        let matching_rows = reparsed
+            .rows()
+            .into_iter()
+            .filter(|row| row.name() == Some(parameter.canonical_key))
+            .collect::<Vec<_>>();
+        assert_eq!(matching_rows.len(), 1);
+        assert_eq!(matching_rows[0].value(), Some("MySQL=a=b"));
     }
 
     #[test]

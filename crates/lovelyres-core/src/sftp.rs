@@ -440,6 +440,13 @@ impl SftpService {
         session: &BoundSftpSession,
         path: &RemotePath,
     ) -> CoreResult<Vec<SftpEntry>> {
+        let metadata = self.metadata(session, path, false).await?;
+        if metadata.kind != SftpFileKind::Directory {
+            return Err(CoreError::validation(
+                "SFTP directory path",
+                "must be a non-symlink directory",
+            ));
+        }
         match self
             .request(
                 session,
@@ -2719,6 +2726,49 @@ mod tests {
             .await
             .unwrap();
         drop(terminal);
+        drop(services);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn directory_list_refuses_files_symlinks_and_stale_targets_before_read_dir() {
+        let (root, services, session, harness) = guarded_chmod_fixture().await;
+        let file = RemotePath::new("/tmp/evidence.txt").unwrap();
+        harness.set_sftp_file(file.as_str(), b"evidence".to_vec());
+        let error = services.sftp().list(&session, &file).await.unwrap_err();
+        assert!(error.to_string().contains("non-symlink directory"));
+        assert_eq!(harness.sftp_list_count(), 0);
+
+        let symlink = RemotePath::new("/tmp/evidence-link").unwrap();
+        harness.set_sftp_symlink(symlink.as_str());
+        let error = services.sftp().list(&session, &symlink).await.unwrap_err();
+        assert!(error.to_string().contains("non-symlink directory"));
+        assert_eq!(harness.sftp_list_count(), 0);
+
+        let directory = RemotePath::new("/tmp/evidence").unwrap();
+        harness.set_sftp_directory(directory.as_str());
+        services.sftp().list(&session, &directory).await.unwrap();
+        assert_eq!(harness.sftp_list_count(), 1);
+
+        harness.set_sftp_immediate(false);
+        let pending_services = services.clone();
+        let pending_session = session.clone();
+        let pending_directory = directory.clone();
+        let pending = tokio::spawn(async move {
+            pending_services
+                .sftp()
+                .list(&pending_session, &pending_directory)
+                .await
+        });
+        harness.wait_for_entered(1).await;
+        services
+            .activate_target(TargetIdentity::new("replacement-target").unwrap())
+            .unwrap();
+        harness.release_operations();
+        let error = pending.await.unwrap().unwrap_err();
+        assert!(matches!(error, CoreError::TargetChanged { .. }));
+        assert_eq!(harness.sftp_list_count(), 1);
+
         drop(services);
         let _ = std::fs::remove_dir_all(root);
     }

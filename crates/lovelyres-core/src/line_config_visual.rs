@@ -4202,6 +4202,117 @@ gbaseserver onsoctcp 192.0.2.10 9088 g=g_cluster_1\r\n";
     }
 
     #[test]
+    fn foreign_document_node_ids_fail_closed_without_mutation() {
+        fn assert_rejected_unchanged(
+            document: &mut LineConfigVisualDocument,
+            mutation: impl FnOnce(&mut LineConfigVisualDocument) -> CoreResult<()>,
+        ) {
+            let dialect = document.dialect();
+            let raw = document.raw_bytes().to_vec();
+            let output = document.output().bytes().to_vec();
+            let rows = document.rows();
+            let structured = document.is_structured();
+            let contains_sensitive_values = document.contains_sensitive_values();
+
+            match mutation(document).expect_err("foreign line-config node ID must fail closed") {
+                CoreError::Validation { subject, message } => {
+                    assert_eq!(subject, "line configuration visual edit");
+                    assert_eq!(
+                        message,
+                        "selected line configuration node is stale or missing"
+                    );
+                }
+                error => panic!("unexpected foreign-ID error: {error}"),
+            }
+
+            assert_eq!(document.dialect(), dialect);
+            assert_eq!(document.raw_bytes(), raw);
+            assert_eq!(document.output().bytes(), output);
+            // Rows include revision-scoped IDs, so exact equality also proves
+            // that the document revision and complete projected tree did not change.
+            assert_eq!(document.rows(), rows);
+            assert_eq!(document.is_structured(), structured);
+            assert_eq!(
+                document.contains_sensitive_values(),
+                contains_sensitive_values
+            );
+        }
+
+        let mut document = LineConfigVisualDocument::parse(
+            LineConfigDialect::Ini,
+            "[local]\nkey=value\n# local document\n",
+        )
+        .unwrap();
+        let foreign_document =
+            LineConfigVisualDocument::parse(LineConfigDialect::Ini, "[foreign]\nkey=value\n")
+                .unwrap();
+        let foreign = foreign_document.rows()[0].id();
+
+        assert_rejected_unchanged(&mut document, |document| {
+            document.add_entry(Some(foreign), "added", Some("value"))
+        });
+        assert_rejected_unchanged(&mut document, |document| {
+            document.add_comment(Some(foreign), "foreign comment")
+        });
+        assert_rejected_unchanged(&mut document, |document| {
+            document.update_entry(foreign, "key", Some("changed"))
+        });
+        assert_rejected_unchanged(&mut document, |document| {
+            document.update_container(foreign, "renamed")
+        });
+        assert_rejected_unchanged(&mut document, |document| {
+            document.update_record(foreign, "local all all peer")
+        });
+        assert_rejected_unchanged(&mut document, |document| {
+            document.update_comment(foreign, "foreign comment")
+        });
+        assert_rejected_unchanged(&mut document, |document| document.remove(foreign));
+        assert_rejected_unchanged(&mut document, |document| document.move_up(foreign));
+        assert_rejected_unchanged(&mut document, |document| document.move_down(foreign));
+
+        let mut postgres = LineConfigVisualDocument::parse(
+            LineConfigDialect::PostgresConf,
+            "max_connections = 100\n",
+        )
+        .unwrap();
+        let foreign_postgres = LineConfigVisualDocument::parse(
+            LineConfigDialect::PostgresConf,
+            "shared_buffers = '128MB'\n",
+        )
+        .unwrap()
+        .rows()[0]
+            .id();
+        assert_rejected_unchanged(&mut postgres, |document| {
+            document.add_include(Some(foreign_postgres), "include", "'local.conf'")
+        });
+
+        let mut toml =
+            LineConfigVisualDocument::parse(LineConfigDialect::Toml, "[local]\nkey = 1\n").unwrap();
+        let foreign_toml =
+            LineConfigVisualDocument::parse(LineConfigDialect::Toml, "[foreign]\nkey = 1\n")
+                .unwrap()
+                .rows()[0]
+                .id();
+        assert_rejected_unchanged(&mut toml, |document| {
+            document.add_table(Some(foreign_toml), "child")
+        });
+
+        let mut hba =
+            LineConfigVisualDocument::parse(LineConfigDialect::PgHba, "local all all peer\n")
+                .unwrap();
+        let foreign_hba = LineConfigVisualDocument::parse(
+            LineConfigDialect::PgHba,
+            "host all all 127.0.0.1/32 scram-sha-256\n",
+        )
+        .unwrap()
+        .rows()[0]
+            .id();
+        assert_rejected_unchanged(&mut hba, |document| {
+            document.add_record(Some(foreign_hba), "host all all 10.0.0.0/8 scram-sha-256")
+        });
+    }
+
+    #[test]
     fn sensitive_values_never_escape_rows_or_debug_output() {
         let source = "password=super-secret\nendpoint=postgres://alice:url-secret@localhost/db\nwsrep_sst_auth=alice:galera-secret\nnormal=visible\n# password backup-secret";
         let document = LineConfigVisualDocument::parse(LineConfigDialect::FlatKeyValue, source)

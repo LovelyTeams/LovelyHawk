@@ -1,0 +1,36 @@
+{
+  "name": "@lovelyres/electron",
+  "version": "1.0.0",
+  "private": true,
+  "description": "LovelyRes Electron desktop frontend",
+  "main": "dist-electron/main/index.js",
+  "scripts": {
+    "backend:build": "cargo build --locked --package lovelyres-electron-backend --bin lovelyres-backend",
+    "build": "pnpm run build:main && pnpm run build:renderer",
+    "build:main": "node scripts/clean-main-build.cjs && tsc -p tsconfig.node.json",
+    "build:renderer": "vite build",
+    "check": "pnpm run typecheck && pnpm run test && pnpm run build",
+    "dev": "pnpm run backend:build && pnpm run build && electron .",
+    "start": "electron .",
+    "test": "vitest run",
+    "test:debug": "pnpm run backend:build && pnpm run build && node scripts/run-debug-smoke.cjs",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.renderer.json --noEmit"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/addon-search": "0.16.0",
+    "@xterm/xterm": "6.0.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.5",
+    "@vitejs/plugin-react": "6.1.0",
+    "electron": "43.4.1",
+    "typescript": "7.0.2",
+    "vite": "8.2.2",
+    "vitest": "4.1.11"
+  }
+}

@@ -1,0 +1,2302 @@
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { randomUUID } from "node:crypto";
+
+import {
+  BACKEND_PROTOCOL,
+  type AiHistoryExportFormat,
+  type AiHistoryListPage,
+  type AiHistoryMutationCancellation,
+  type AiHistoryMutationProposal,
+  type AiHistoryMutationResult,
+  type AiHistoryRecord,
+  type BootstrapResult,
+  type BaselineCatalog,
+  type BaselineHistory,
+  type BaselineScan,
+  type CheckAuditCatalog,
+  type CheckAuditCatalogInput,
+  type CheckAuditLogInput,
+  type CheckAuditLogResult,
+  type CheckAuditStatus,
+  type LogCorrelationInput,
+  type LogCorrelationResult,
+  type LogIocSearchInput,
+  type LogIocSearchResult,
+  type LogSourceReadInput,
+  type LogSourceReadResult,
+  type LogSourceSnapshot,
+  type KubernetesAvailability,
+  type KubernetesListInput,
+  type KubernetesSnapshot,
+  type KubernetesTextResult,
+  type DockerCollectionKind,
+  type DockerContainerSnapshot,
+  type DockerLogs,
+  type DockerReadCollection,
+  type DockerReadInspection,
+  type DockerResourceKind,
+  type DockerSecurityAudit,
+  type EmergencyCommandCatalog,
+  type EmergencyCommandResult,
+  type PacketCaptureInterfaceList,
+  type PacketCapturePoll,
+  type PacketCaptureStarted,
+  type PacketCaptureStartInput,
+  type PacketCaptureStopped,
+  type QuickDetectionCancellation,
+  type QuickDetectionCatalog,
+  type QuickDetectionHistoryPage,
+  type QuickDetectionPlan,
+  type QuickDetectionPlanInput,
+  type QuickDetectionPoll,
+  type QuickDetectionReport,
+  type QuickDetectionScanStarted,
+  type ApplicationLogClearResult,
+  type ApplicationLogFilter,
+  type ApplicationLogLevel,
+  type ApplicationLogLevelResult,
+  type ApplicationLogPreview,
+  type ApplicationLogSnapshot,
+  type IntegrityBaselineList,
+  type IntegrityComparisonCancellation,
+  type IntegrityComparisonPoll,
+  type IntegrityComparisonStarted,
+  type IntegrityPresetCatalog,
+  type MiddlewareConfiguration,
+  type MiddlewareDiscovery,
+  type MiddlewareHistory,
+  type ConfigCatalog,
+  type ConfigClosedResult,
+  type ConfigDraft,
+  type ConfigGenerateInput,
+  type CommandHistoryListPage,
+  type CommandHistoryMutationCancellation,
+  type CommandHistoryMutationProposal,
+  type CommandHistoryMutationResult,
+  type CommandHistoryRecord,
+  type CommandReplayIntent,
+  type DisposalReportContent,
+  type DisposalReportExportFormat,
+  type DisposalReportPreviewFormat,
+  type DisposalReportSnapshot,
+  type FirewallHistory,
+  type FirewallInspection,
+  type ConnectionDeleteCancellation,
+  type ConnectionDeletePrompt,
+  type ConnectionDeleteResult,
+  type ConnectionEditView,
+  type InternalConnectionExportResult,
+  type InternalConnectionImportResult,
+  type ConnectionSummary,
+  type ConnectionWriteInput,
+  type InternalConfigArtifact,
+  type InternalConfigCopy,
+  type NoteCreateInput,
+  type NoteDeleteProposal,
+  type NoteDeleteCancellation,
+  type NoteDeleteResult,
+  type NoteListPage,
+  type NoteResult,
+  type NotesTextExport,
+  type NoteUpdateInput,
+  type SecurityReferenceFavoritesResult,
+  type SettingsSaveInput,
+  type SettingsAiApiKeyReplacementInput,
+  type SettingsAiApiKeyReplacementResult,
+  type SettingsMutationCancellation,
+  type SettingsMutationProposal,
+  type SettingsMutationResult,
+  type SettingsSnapshot,
+  type SnapshotDetail,
+  type SnapshotDiffInput,
+  type SnapshotDiffResult,
+  type SnapshotListResult,
+  type SshAttemptCancellation,
+  type SshAttemptStarted,
+  type SshAttemptStatus,
+  type SshBindingDisconnection,
+  type SystemInfoDetail,
+  type SystemInfoSummary,
+  type SystemInfoTabCatalogEntry,
+  type SystemInfoTabKey,
+  type SystemInfoTable,
+  type TerminalClosed,
+  type TerminalInputAcknowledgement,
+  type TerminalOpened,
+  type TerminalPoll,
+  type TerminalRenderSnapshot,
+  type TerminalResized,
+  type TerminalSearch,
+  isBootstrapResult,
+  isBaselineCatalog,
+  isBaselineHistory,
+  isBaselineOpaqueHandle,
+  isBaselineScan,
+  isCheckAuditCatalog,
+  isCheckAuditCatalogInput,
+  isCheckAuditLogInput,
+  isCheckAuditLogResult,
+  isCheckAuditOpaqueHandle,
+  isCheckAuditStatus,
+  isLogAnalysisOpaqueHandle,
+  isLogCorrelationInput,
+  isLogCorrelationResult,
+  isLogIocSearchInput,
+  isLogIocSearchResult,
+  isLogSourceReadInput,
+  isLogSourceReadResult,
+  isLogSourceSnapshot,
+  isKubernetesAvailability,
+  isKubernetesListInput,
+  isKubernetesOpaqueHandle,
+  isKubernetesSnapshot,
+  isKubernetesTextResult,
+  isDockerCollectionKind,
+  isDockerContainerSnapshot,
+  isDockerLogs,
+  isDockerLogTail,
+  isDockerOpaqueHandle,
+  isDockerReadCollection,
+  isDockerReadInspection,
+  isDockerResourceKind,
+  isDockerSecurityAudit,
+  isEmergencyCommandCatalog,
+  isEmergencyCommandOpaqueHandle,
+  isEmergencyCommandResult,
+  isPacketCaptureCursor,
+  isPacketCaptureInterfaceList,
+  isPacketCaptureOpaqueHandle,
+  isPacketCapturePoll,
+  isPacketCaptureStarted,
+  isPacketCaptureStartInput,
+  isPacketCaptureStopped,
+  isQuickDetectionCancellation,
+  isQuickDetectionCatalog,
+  isQuickDetectionHistoryPage,
+  isQuickDetectionHistoryRequest,
+  isQuickDetectionOpaqueHandle,
+  isQuickDetectionPlan,
+  isQuickDetectionPlanInput,
+  isQuickDetectionPoll,
+  isQuickDetectionPollRequest,
+  isQuickDetectionReport,
+  isQuickDetectionScanStarted,
+  isApplicationLogClearResult,
+  isApplicationLogFilter,
+  isApplicationLogLevel,
+  isApplicationLogLevelResult,
+  isApplicationLogPreview,
+  isApplicationLogSnapshot,
+  isIntegrityBaselineList,
+  isIntegrityComparisonCancellation,
+  isIntegrityComparisonPoll,
+  isIntegrityComparisonStarted,
+  isIntegrityOpaqueHandle,
+  isIntegrityPollRequest,
+  isIntegrityPresetCatalog,
+  isMiddlewareConfiguration,
+  isMiddlewareDiscovery,
+  isMiddlewareHistory,
+  isMiddlewareOpaqueHandle,
+  isAiHistoryExportFormat,
+  isAiHistoryId,
+  isAiHistoryListPage,
+  isAiHistoryMutationCancellation,
+  isAiHistoryMutationProposal,
+  isAiHistoryMutationResult,
+  isAiHistoryOpaqueHandle,
+  isAiHistoryPageRequest,
+  isAiHistoryQuery,
+  isAiHistoryRecord,
+  isConfigCatalog,
+  isCommandHistoryId,
+  isCommandHistoryListPage,
+  isCommandHistoryMutationCancellation,
+  isCommandHistoryMutationProposal,
+  isCommandHistoryMutationResult,
+  isCommandHistoryOpaqueHandle,
+  isCommandHistoryPageRequest,
+  isCommandHistoryQuery,
+  isCommandHistoryRecord,
+  isCommandReplayIntent,
+  isDisposalReportContent,
+  isDisposalReportExportFormat,
+  isDisposalReportOpaqueHandle,
+  isDisposalReportPreviewFormat,
+  isDisposalReportSnapshot,
+  isFirewallHistory,
+  isFirewallInspection,
+  isFirewallOpaqueHandle,
+  isConfigClosedResult,
+  isConfigDraft,
+  isConnectionDeleteCancellation,
+  isConnectionDeletePrompt,
+  isConnectionDeleteResult,
+  isConnectionEditView,
+  isConnectionSummaryArray,
+  isInternalConnectionExportResult,
+  isInternalConnectionImportResult,
+  isInternalConfigArtifact,
+  isInternalConfigCopy,
+  isNoteDeleteProposal,
+  isNoteDeleteCancellation,
+  isNoteDeleteResult,
+  isNoteListPage,
+  isNoteResult,
+  isNotesTextExport,
+  isSecurityReferenceFavoritesResult,
+  isSettingsSaveInput,
+  isSettingsAiApiKeyReplacementInput,
+  isSettingsAiApiKeyReplacementResult,
+  isSettingsMutationCancellation,
+  isSettingsMutationHandle,
+  isSettingsMutationProposal,
+  isSettingsMutationResult,
+  isSettingsProviderId,
+  isSettingsSnapshot,
+  isSnapshotDetail,
+  isSnapshotDiffInput,
+  isSnapshotDiffResult,
+  isSnapshotListResult,
+  isSnapshotOpaqueHandle,
+  isSshAttemptCancellation,
+  isSshAttemptStarted,
+  isSshAttemptStatus,
+  isSshBindingDisconnection,
+  isSystemInfoCatalog,
+  isSystemInfoDetail,
+  isSystemInfoSummary,
+  isSystemInfoTable,
+  isTerminalBindingHandle,
+  isTerminalClosed,
+  isTerminalHandle,
+  isTerminalInputAcknowledgement,
+  isTerminalOpened,
+  isTerminalPoll,
+  isTerminalPollBounds,
+  isTerminalRenderSnapshot,
+  isTerminalResized,
+  isTerminalSearch,
+  isTerminalSearchRequest,
+  isTerminalSize,
+  terminalBase64DecodedLength,
+  TERMINAL_LIMITS,
+} from "../shared/contract.js";
+import {
+  isInternalAiHistoryExportPayload,
+  type InternalAiHistoryExportPayload,
+} from "./ai-history-export-boundary.js";
+import {
+  isInternalDisposalReportExportPayload,
+  type InternalDisposalReportExportPayload,
+} from "./disposal-report-export-boundary.js";
+import {
+  isInternalApplicationLogExportPayload,
+  type InternalApplicationLogExportPayload,
+} from "./application-log-export-boundary.js";
+
+// Mirrors the sidecar frame bound and covers the worst-case JSON escaping for
+// the core's one-million-character note limit.
+const MAX_REQUEST_BYTES = 8 * 1024 * 1024;
+const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+const REQUEST_TIMEOUT_MS = 15_000;
+const EMERGENCY_COMMAND_CATALOG_TIMEOUT_MS = 20_000;
+const EMERGENCY_COMMAND_RUN_TIMEOUT_MS = 45_000;
+const PACKET_CAPTURE_LIST_TIMEOUT_MS = 20_000;
+const PACKET_CAPTURE_START_TIMEOUT_MS = 40_000;
+const PACKET_CAPTURE_POLL_TIMEOUT_MS = 20_000;
+const PACKET_CAPTURE_STOP_TIMEOUT_MS = 10_000;
+const BACKEND_STOP_GRACE_MS = 3_000;
+
+export const SYSTEM_INFO_RPC_METHODS = Object.freeze({
+  catalog: "system-info.catalog.get",
+  summary: "system-info.summary.get",
+  collect: "system-info.table.collect",
+  detail: "system-info.detail.get",
+} as const);
+
+export const SNAPSHOT_READ_RPC_METHODS = Object.freeze({
+  list: "snapshot.list",
+  detail: "snapshot.detail.get",
+  diff: "snapshot.forensic.diff",
+} as const);
+
+export const FIREWALL_READ_RPC_METHODS = Object.freeze({
+  inspect: "firewall.inspect",
+  listHistory: "firewall.change-history.list",
+} as const);
+
+export const BASELINE_READ_RPC_METHODS = Object.freeze({
+  catalog: "baseline.catalog.get",
+  scan: "baseline.scan",
+  listHistory: "baseline.history.list",
+} as const);
+
+export const MIDDLEWARE_READ_RPC_METHODS = Object.freeze({
+  discover: "middleware.discover",
+  loadConfiguration: "middleware.configuration.load",
+  listHistory: "middleware.history.list",
+} as const);
+
+export const CHECK_AUDIT_READ_RPC_METHODS = Object.freeze({
+  catalog: "check-audit.catalog.get",
+  collectStatus: "check-audit.status.collect",
+  readLog: "check-audit.log.read",
+} as const);
+
+export const LOG_ANALYSIS_READ_RPC_METHODS = Object.freeze({
+  discoverSources: "log-analysis.sources.discover",
+  readSource: "log-analysis.source.read",
+  correlateSources: "log-analysis.sources.correlate",
+  searchIocs: "log-analysis.iocs.search",
+} as const);
+
+export const KUBERNETES_READ_RPC_METHODS = Object.freeze({
+  availability: "kubernetes.availability.get",
+  listResources: "kubernetes.resources.list",
+  resourceDetail: "kubernetes.resource.detail.get",
+  podLogs: "kubernetes.pod.logs.get",
+} as const);
+
+export const DOCKER_READ_RPC_METHODS = Object.freeze({
+  refreshContainers: "docker.containers.refresh",
+  getCollection: "docker.collection.get",
+  inspectResource: "docker.resource.inspect",
+  getSecurityAudit: "docker.security.audit.get",
+  getContainerLogs: "docker.container.logs.get",
+} as const);
+
+export const EMERGENCY_COMMAND_RPC_METHODS = Object.freeze({
+  loadCatalog: "emergency-command.catalog.load",
+  run: "emergency-command.run",
+} as const);
+
+export const PACKET_CAPTURE_LIVE_RPC_METHODS = Object.freeze({
+  listInterfaces: "packet-capture.interfaces.list",
+  start: "packet-capture.start",
+  poll: "packet-capture.poll",
+  stop: "packet-capture.stop",
+} as const);
+
+export const QUICK_DETECTION_RPC_METHODS = Object.freeze({
+  catalog: "quick-detection.catalog.get",
+  plan: "quick-detection.plan",
+  start: "quick-detection.start",
+  poll: "quick-detection.poll",
+  cancel: "quick-detection.cancel",
+  history: "quick-detection.history.list",
+  report: "quick-detection.report.get",
+} as const);
+
+export const APPLICATION_LOG_RPC_METHODS = Object.freeze({
+  list: "application-log.list",
+  setLevel: "application-log.level.set",
+  clearBuffer: "application-log.buffer.clear",
+  preview: "application-log.preview.get",
+  prepareExport: "application-log.export.prepare",
+} as const);
+
+export const INTEGRITY_RPC_METHODS = Object.freeze({
+  presets: "integrity.presets.get",
+  listBaselines: "integrity.baselines.list",
+  startComparison: "integrity.comparison.start",
+  pollComparison: "integrity.comparison.poll",
+  cancelComparison: "integrity.comparison.cancel",
+} as const);
+
+export const SETTINGS_RPC_METHODS = Object.freeze({
+  get: "settings.get",
+  save: "settings.save",
+  replaceAiApiKey: "settings.ai-api-key.replace",
+  planAiApiKeyClear: "settings.ai-api-key.clear.plan",
+  planAiProviderRemoval: "settings.ai-provider.remove.plan",
+  confirmMutation: "settings.mutation.confirm",
+  cancelMutation: "settings.mutation.cancel",
+} as const);
+
+export const AI_HISTORY_RPC_METHODS = Object.freeze({
+  list: "ai-history.list",
+  get: "ai-history.get",
+  planRemove: "ai-history.remove.plan",
+  planClear: "ai-history.clear.plan",
+  confirm: "ai-history.mutation.confirm",
+  cancel: "ai-history.mutation.cancel",
+  export: "ai-history.export",
+} as const);
+
+export const COMMAND_HISTORY_RPC_METHODS = Object.freeze({
+  list: "command-history.list",
+  get: "command-history.get",
+  planReplay: "command-history.replay.plan",
+  planRemove: "command-history.remove.plan",
+  planClear: "command-history.clear.plan",
+  confirm: "command-history.mutation.confirm",
+  cancel: "command-history.mutation.cancel",
+} as const);
+
+export const DISPOSAL_REPORT_RPC_METHODS = Object.freeze({
+  generate: "disposal-report.generate",
+  content: "disposal-report.content.get",
+  export: "disposal-report.export",
+} as const);
+
+export const TERMINAL_RPC_METHODS = Object.freeze({
+  open: "terminal.open",
+  poll: "terminal.poll",
+  input: "terminal.input",
+  resize: "terminal.resize",
+  renderSnapshot: "terminal.render-snapshot",
+  search: "terminal.search",
+  close: "terminal.close",
+} as const);
+
+export interface StoppableChildProcess {
+  readonly stdin: { end(): void };
+  readonly exitCode: number | null;
+  readonly signalCode: NodeJS.Signals | null;
+  once(
+    event: "exit",
+    listener: (code: number | null, signal: NodeJS.Signals | null) => void,
+  ): this;
+  removeListener(
+    event: "exit",
+    listener: (code: number | null, signal: NodeJS.Signals | null) => void,
+  ): this;
+  kill(signal?: NodeJS.Signals | number): boolean;
+}
+
+export function stopChildProcess(
+  child: StoppableChildProcess,
+  forceAfterMs = BACKEND_STOP_GRACE_MS,
+): Promise<void> {
+  return new Promise((resolve) => {
+    let forceTimer: NodeJS.Timeout | null = null;
+    const onExit = () => {
+      if (forceTimer !== null) clearTimeout(forceTimer);
+      child.removeListener("exit", onExit);
+      resolve();
+    };
+
+    child.once("exit", onExit);
+    if (child.exitCode !== null || child.signalCode !== null) {
+      onExit();
+      return;
+    }
+    forceTimer = setTimeout(() => {
+      child.kill("SIGKILL");
+    }, forceAfterMs);
+    child.stdin.end();
+  });
+}
+
+interface PendingRequest {
+  resolve(value: unknown): void;
+  reject(error: Error): void;
+  timeout: NodeJS.Timeout;
+}
+
+interface RpcResponse {
+  protocol: string;
+  requestId: string | null;
+  ok: boolean;
+  result?: unknown;
+  error?: {
+    code: string;
+    message: string;
+  };
+}
+
+export class BackendClient {
+  readonly #backendPath: string;
+  readonly #archiveRoot: string;
+  readonly #pending = new Map<string, PendingRequest>();
+  #process: ChildProcessWithoutNullStreams | null = null;
+  #stdoutBuffer = "";
+  #stopping = false;
+  #stopPromise: Promise<void> | null = null;
+
+  constructor(backendPath: string, archiveRoot: string) {
+    this.#backendPath = backendPath;
+    this.#archiveRoot = archiveRoot;
+  }
+
+  start(): void {
+    if (this.#process !== null) return;
+    this.#stopping = false;
+    const child = spawn(this.#backendPath, ["--archive-root", this.#archiveRoot], {
+      env: process.env,
+      shell: false,
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+    });
+    this.#process = child;
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => this.#consumeStdout(chunk));
+    child.stderr.on("data", (chunk: string) => process.stderr.write(`[backend] ${chunk}`));
+    child.on("error", (error) => this.#failAll(error));
+    child.on("exit", (code, signal) => {
+      this.#process = null;
+      if (!this.#stopping) {
+        this.#failAll(
+          new Error(`LovelyRes backend exited unexpectedly (${code ?? "no-code"}/${signal ?? "no-signal"}).`),
+        );
+      }
+    });
+  }
+
+  async stop(): Promise<void> {
+    if (this.#stopPromise !== null) return this.#stopPromise;
+    const child = this.#process;
+    if (child === null) return;
+    this.#stopping = true;
+    this.#failAll(new Error("LovelyRes backend is stopping."));
+    const stopPromise = stopChildProcess(child).finally(() => {
+      if (this.#process === child) this.#process = null;
+      if (this.#stopPromise === stopPromise) this.#stopPromise = null;
+    });
+    this.#stopPromise = stopPromise;
+    await stopPromise;
+  }
+
+  async bootstrap(): Promise<BootstrapResult> {
+    const value = await this.#request("app.bootstrap", {});
+    if (!isBootstrapResult(value)) throw new Error("The backend returned an invalid bootstrap payload.");
+    return value;
+  }
+
+  async listConnections(): Promise<ConnectionSummary[]> {
+    const value = await this.#request("connections.list", {});
+    if (!isConnectionSummaryArray(value)) {
+      throw new Error("The backend returned an invalid connection list.");
+    }
+    return value;
+  }
+
+  async getConnection(id: string): Promise<ConnectionEditView> {
+    const value = await this.#request("connections.get", { id });
+    if (!isConnectionEditView(value)) {
+      throw new Error("The backend returned an invalid connection.");
+    }
+    return value;
+  }
+
+  async createConnection(input: ConnectionWriteInput): Promise<ConnectionEditView> {
+    const value = await this.#request("connections.create", input);
+    if (!isConnectionEditView(value)) {
+      throw new Error("The backend returned an invalid created connection.");
+    }
+    return value;
+  }
+
+  async updateConnection(input: ConnectionWriteInput): Promise<ConnectionEditView> {
+    const value = await this.#request("connections.update", input);
+    if (!isConnectionEditView(value)) {
+      throw new Error("The backend returned an invalid updated connection.");
+    }
+    return value;
+  }
+
+  async planConnectionDelete(id: string): Promise<ConnectionDeletePrompt> {
+    const value = await this.#request("connections.delete.plan", { id });
+    if (!isConnectionDeletePrompt(value)) {
+      throw new Error("The backend returned an invalid connection delete plan.");
+    }
+    return value;
+  }
+
+  async confirmConnectionDelete(handle: string): Promise<ConnectionDeleteResult> {
+    const value = await this.#request("connections.delete.confirm", { handle });
+    if (!isConnectionDeleteResult(value)) {
+      throw new Error("The backend returned an invalid connection delete outcome.");
+    }
+    return value;
+  }
+
+  async cancelConnectionDelete(handle: string): Promise<ConnectionDeleteCancellation> {
+    const value = await this.#request("connections.delete.cancel", { handle });
+    if (!isConnectionDeleteCancellation(value)) {
+      throw new Error("The backend returned an invalid connection delete cancellation.");
+    }
+    return value;
+  }
+
+  async importConnectionsFile(filePath: string): Promise<InternalConnectionImportResult> {
+    const value = await this.#request("connections.import-file", { path: filePath });
+    if (!isInternalConnectionImportResult(value)) {
+      throw new Error("The backend returned an invalid connection import outcome.");
+    }
+    return value;
+  }
+
+  async exportConnectionsFile(filePath: string): Promise<InternalConnectionExportResult> {
+    const value = await this.#request("connections.export-file", { path: filePath });
+    if (!isInternalConnectionExportResult(value)) {
+      throw new Error("The backend returned an invalid connection export outcome.");
+    }
+    return value;
+  }
+
+  async startSshConnect(connectionId: string): Promise<SshAttemptStarted> {
+    const value = await this.#request("ssh.connect.start", { connectionId });
+    if (!isSshAttemptStarted(value)) {
+      throw new Error("The backend returned an invalid SSH connect attempt.");
+    }
+    return value;
+  }
+
+  async startSshProbe(input: ConnectionWriteInput): Promise<SshAttemptStarted> {
+    const value = await this.#request("ssh.probe.start", input);
+    if (!isSshAttemptStarted(value)) {
+      throw new Error("The backend returned an invalid SSH probe attempt.");
+    }
+    return value;
+  }
+
+  async getSshAttempt(attemptHandle: string): Promise<SshAttemptStatus> {
+    const value = await this.#request("ssh.attempt.get", { attemptHandle });
+    if (!isSshAttemptStatus(value)) {
+      throw new Error("The backend returned an invalid SSH attempt status.");
+    }
+    return value;
+  }
+
+  async confirmSshHostKey(
+    attemptHandle: string,
+    promptHandle: string,
+  ): Promise<SshAttemptStatus> {
+    const value = await this.#request("ssh.host-key.confirm", {
+      attemptHandle,
+      promptHandle,
+    });
+    if (!isSshAttemptStatus(value)) {
+      throw new Error("The backend returned an invalid SSH host-key outcome.");
+    }
+    return value;
+  }
+
+  async respondSshMfa(
+    attemptHandle: string,
+    promptHandle: string,
+    responses: string[],
+  ): Promise<SshAttemptStatus> {
+    const value = await this.#request("ssh.mfa.respond", {
+      attemptHandle,
+      promptHandle,
+      responses,
+    });
+    if (!isSshAttemptStatus(value)) {
+      throw new Error("The backend returned an invalid SSH MFA outcome.");
+    }
+    return value;
+  }
+
+  async cancelSshAttempt(attemptHandle: string): Promise<SshAttemptCancellation> {
+    const value = await this.#request("ssh.attempt.cancel", { attemptHandle });
+    if (!isSshAttemptCancellation(value)) {
+      throw new Error("The backend returned an invalid SSH attempt cancellation.");
+    }
+    return value;
+  }
+
+  async disconnectSshBinding(bindingHandle: string): Promise<SshBindingDisconnection> {
+    const value = await this.#request("ssh.binding.disconnect", { bindingHandle });
+    if (!isSshBindingDisconnection(value)) {
+      throw new Error("The backend returned an invalid SSH binding disconnection.");
+    }
+    return value;
+  }
+
+  async openTerminal(
+    bindingHandle: string,
+    columns: number,
+    rows: number,
+  ): Promise<TerminalOpened> {
+    if (!isTerminalBindingHandle(bindingHandle) || !isTerminalSize(columns, rows)) {
+      throw new Error("The terminal open request is invalid.");
+    }
+    const value = await this.#request(TERMINAL_RPC_METHODS.open, {
+      bindingHandle,
+      columns,
+      rows,
+    });
+    if (!isTerminalOpened(value) || value.columns !== columns || value.rows !== rows) {
+      throw new Error("The backend returned an invalid terminal open response.");
+    }
+    return value;
+  }
+
+  async pollTerminal(
+    handle: string,
+    maximumEvents: number,
+    maximumBytes: number,
+  ): Promise<TerminalPoll> {
+    if (!isTerminalHandle(handle) || !isTerminalPollBounds(maximumEvents, maximumBytes)) {
+      throw new Error("The terminal poll request is invalid.");
+    }
+    const value = await this.#request(TERMINAL_RPC_METHODS.poll, {
+      handle,
+      maximumEvents,
+      maximumBytes,
+    });
+    if (!isTerminalPoll(value)) {
+      throw new Error("The backend returned an invalid terminal poll response.");
+    }
+    return value;
+  }
+
+  async inputTerminal(
+    handle: string,
+    bytesBase64: string,
+  ): Promise<TerminalInputAcknowledgement> {
+    if (
+      !isTerminalHandle(handle) ||
+      terminalBase64DecodedLength(bytesBase64, TERMINAL_LIMITS.maximumInputBytes, false) === null
+    ) {
+      throw new Error("The terminal input request is invalid.");
+    }
+    const value = await this.#request(TERMINAL_RPC_METHODS.input, { handle, bytesBase64 });
+    if (!isTerminalInputAcknowledgement(value)) {
+      throw new Error("The backend returned an invalid terminal input response.");
+    }
+    return value;
+  }
+
+  async resizeTerminal(
+    handle: string,
+    columns: number,
+    rows: number,
+  ): Promise<TerminalResized> {
+    if (!isTerminalHandle(handle) || !isTerminalSize(columns, rows)) {
+      throw new Error("The terminal resize request is invalid.");
+    }
+    const value = await this.#request(TERMINAL_RPC_METHODS.resize, {
+      handle,
+      columns,
+      rows,
+    });
+    if (!isTerminalResized(value) || value.columns !== columns || value.rows !== rows) {
+      throw new Error("The backend returned an invalid terminal resize response.");
+    }
+    return value;
+  }
+
+  async renderTerminalSnapshot(handle: string): Promise<TerminalRenderSnapshot> {
+    if (!isTerminalHandle(handle)) throw new Error("The terminal snapshot request is invalid.");
+    const value = await this.#request(TERMINAL_RPC_METHODS.renderSnapshot, { handle });
+    if (!isTerminalRenderSnapshot(value)) {
+      throw new Error("The backend returned an invalid terminal snapshot response.");
+    }
+    return value;
+  }
+
+  async searchTerminal(
+    handle: string,
+    query: string,
+    caseSensitive: boolean,
+    regex: boolean,
+    maximumResults: number,
+  ): Promise<TerminalSearch> {
+    if (
+      !isTerminalHandle(handle) ||
+      !isTerminalSearchRequest(query, maximumResults) ||
+      typeof caseSensitive !== "boolean" ||
+      typeof regex !== "boolean"
+    ) {
+      throw new Error("The terminal search request is invalid.");
+    }
+    const value = await this.#request(TERMINAL_RPC_METHODS.search, {
+      handle,
+      query,
+      caseSensitive,
+      regex,
+      maximumResults,
+    });
+    if (!isTerminalSearch(value)) {
+      throw new Error("The backend returned an invalid terminal search response.");
+    }
+    return value;
+  }
+
+  async closeTerminal(handle: string): Promise<TerminalClosed> {
+    if (!isTerminalHandle(handle)) throw new Error("The terminal close request is invalid.");
+    const value = await this.#request(TERMINAL_RPC_METHODS.close, { handle });
+    if (!isTerminalClosed(value)) {
+      throw new Error("The backend returned an invalid terminal close response.");
+    }
+    return value;
+  }
+
+  async getSystemInfoCatalog(): Promise<SystemInfoTabCatalogEntry[]> {
+    const value = await this.#request(SYSTEM_INFO_RPC_METHODS.catalog, {});
+    if (!isSystemInfoCatalog(value)) {
+      throw new Error("The backend returned an invalid system-information catalog.");
+    }
+    return value;
+  }
+
+  async getSystemInfoSummary(bindingHandle: string): Promise<SystemInfoSummary> {
+    const value = await this.#request(SYSTEM_INFO_RPC_METHODS.summary, { bindingHandle });
+    if (!isSystemInfoSummary(value)) {
+      throw new Error("The backend returned an invalid system-information summary.");
+    }
+    return value;
+  }
+
+  async collectSystemInfo(
+    bindingHandle: string,
+    tab: SystemInfoTabKey,
+    maximumRows: number,
+  ): Promise<SystemInfoTable> {
+    const value = await this.#request(SYSTEM_INFO_RPC_METHODS.collect, {
+      bindingHandle,
+      tab,
+      maximumRows,
+    });
+    if (!isSystemInfoTable(value)) {
+      throw new Error("The backend returned an invalid system-information table.");
+    }
+    return value;
+  }
+
+  async getSystemInfoDetail(
+    bindingHandle: string,
+    snapshotHandle: string,
+    rowId: string,
+  ): Promise<SystemInfoDetail> {
+    const value = await this.#request(SYSTEM_INFO_RPC_METHODS.detail, {
+      bindingHandle,
+      snapshotHandle,
+      rowId,
+    });
+    if (!isSystemInfoDetail(value)) {
+      throw new Error("The backend returned invalid system-information detail.");
+    }
+    return value;
+  }
+
+  async listSnapshots(bindingHandle: string): Promise<SnapshotListResult> {
+    if (!isSnapshotOpaqueHandle(bindingHandle)) {
+      throw new Error("The snapshot binding is invalid.");
+    }
+    const value = await this.#request(SNAPSHOT_READ_RPC_METHODS.list, { bindingHandle });
+    if (!isSnapshotListResult(value)) {
+      throw new Error("The backend returned an invalid snapshot list.");
+    }
+    return value;
+  }
+
+  async getSnapshotDetail(
+    bindingHandle: string,
+    snapshotHandle: string,
+  ): Promise<SnapshotDetail> {
+    if (!isSnapshotOpaqueHandle(bindingHandle) || !isSnapshotOpaqueHandle(snapshotHandle)) {
+      throw new Error("The snapshot detail request is invalid.");
+    }
+    const value = await this.#request(SNAPSHOT_READ_RPC_METHODS.detail, {
+      bindingHandle,
+      snapshotHandle,
+    });
+    if (!isSnapshotDetail(value) || value.snapshotHandle !== snapshotHandle) {
+      throw new Error("The backend returned invalid snapshot detail.");
+    }
+    return value;
+  }
+
+  async diffForensicSnapshots(
+    bindingHandle: string,
+    input: SnapshotDiffInput,
+  ): Promise<SnapshotDiffResult> {
+    if (!isSnapshotOpaqueHandle(bindingHandle) || !isSnapshotDiffInput(input)) {
+      throw new Error("The forensic snapshot diff request is invalid.");
+    }
+    const value = await this.#request(SNAPSHOT_READ_RPC_METHODS.diff, { bindingHandle, input });
+    if (!isSnapshotDiffResult(value) ||
+      value.olderSnapshotHandle !== input.olderSnapshotHandle ||
+      value.newerSnapshotHandle !== input.newerSnapshotHandle) {
+      throw new Error("The backend returned an invalid forensic snapshot diff.");
+    }
+    return value;
+  }
+
+  async inspectFirewall(bindingHandle: string): Promise<FirewallInspection> {
+    if (!isFirewallOpaqueHandle(bindingHandle)) {
+      throw new Error("The firewall binding is invalid.");
+    }
+    const value = await this.#request(FIREWALL_READ_RPC_METHODS.inspect, { bindingHandle });
+    if (!isFirewallInspection(value)) {
+      throw new Error("The backend returned an invalid firewall inspection.");
+    }
+    return value;
+  }
+
+  async listFirewallChangeHistory(bindingHandle: string): Promise<FirewallHistory> {
+    if (!isFirewallOpaqueHandle(bindingHandle)) {
+      throw new Error("The firewall binding is invalid.");
+    }
+    const value = await this.#request(FIREWALL_READ_RPC_METHODS.listHistory, { bindingHandle });
+    if (!isFirewallHistory(value)) {
+      throw new Error("The backend returned invalid firewall change history.");
+    }
+    return value;
+  }
+
+  async getBaselineCatalog(): Promise<BaselineCatalog> {
+    const value = await this.#request(BASELINE_READ_RPC_METHODS.catalog, {});
+    if (!isBaselineCatalog(value)) {
+      throw new Error("The backend returned an invalid baseline catalog.");
+    }
+    return value;
+  }
+
+  async scanBaseline(bindingHandle: string): Promise<BaselineScan> {
+    if (!isBaselineOpaqueHandle(bindingHandle)) {
+      throw new Error("The baseline binding is invalid.");
+    }
+    const value = await this.#request(BASELINE_READ_RPC_METHODS.scan, { bindingHandle });
+    if (!isBaselineScan(value)) {
+      throw new Error("The backend returned an invalid baseline scan.");
+    }
+    return value;
+  }
+
+  async listBaselineHistory(bindingHandle: string): Promise<BaselineHistory> {
+    if (!isBaselineOpaqueHandle(bindingHandle)) {
+      throw new Error("The baseline binding is invalid.");
+    }
+    const value = await this.#request(BASELINE_READ_RPC_METHODS.listHistory, { bindingHandle });
+    if (!isBaselineHistory(value)) {
+      throw new Error("The backend returned invalid baseline history.");
+    }
+    return value;
+  }
+
+  async discoverMiddleware(bindingHandle: string): Promise<MiddlewareDiscovery> {
+    if (!isMiddlewareOpaqueHandle(bindingHandle)) {
+      throw new Error("The middleware binding is invalid.");
+    }
+    const value = await this.#request(MIDDLEWARE_READ_RPC_METHODS.discover, { bindingHandle });
+    if (!isMiddlewareDiscovery(value)) {
+      throw new Error("The backend returned invalid middleware discovery.");
+    }
+    return value;
+  }
+
+  async loadMiddlewareConfiguration(
+    bindingHandle: string,
+    discoveryHandle: string,
+    instanceHandle: string,
+  ): Promise<MiddlewareConfiguration> {
+    if (![bindingHandle, discoveryHandle, instanceHandle].every(isMiddlewareOpaqueHandle)) {
+      throw new Error("The middleware configuration handles are invalid.");
+    }
+    const value = await this.#request(MIDDLEWARE_READ_RPC_METHODS.loadConfiguration, {
+      bindingHandle,
+      discoveryHandle,
+      instanceHandle,
+    });
+    if (!isMiddlewareConfiguration(value)) {
+      throw new Error("The backend returned invalid middleware configuration.");
+    }
+    return value;
+  }
+
+  async listMiddlewareHistory(bindingHandle: string): Promise<MiddlewareHistory> {
+    if (!isMiddlewareOpaqueHandle(bindingHandle)) {
+      throw new Error("The middleware binding is invalid.");
+    }
+    const value = await this.#request(MIDDLEWARE_READ_RPC_METHODS.listHistory, { bindingHandle });
+    if (!isMiddlewareHistory(value)) {
+      throw new Error("The backend returned invalid middleware history.");
+    }
+    return value;
+  }
+
+  async getCheckAuditCatalog(
+    bindingHandle: string,
+    input: CheckAuditCatalogInput,
+  ): Promise<CheckAuditCatalog> {
+    if (!isCheckAuditOpaqueHandle(bindingHandle) || !isCheckAuditCatalogInput(input)) {
+      throw new Error("The command-audit catalog request is invalid.");
+    }
+    const value = await this.#request(CHECK_AUDIT_READ_RPC_METHODS.catalog, {
+      bindingHandle,
+      input,
+    });
+    if (!isCheckAuditCatalog(value) || value.customCount !== input.customCommandNames.length) {
+      throw new Error("The backend returned an invalid command-audit catalog.");
+    }
+    const returnedCustomNames = value.commands.slice(value.commands.length - value.customCount)
+      .map((command) => command.name);
+    const requestedCustomNames = [...input.customCommandNames].sort();
+    if (returnedCustomNames.some((name, index) => name !== requestedCustomNames[index])) {
+      throw new Error("The backend returned a mismatched command-audit catalog.");
+    }
+    return value;
+  }
+
+  async collectCheckAuditStatus(
+    bindingHandle: string,
+    snapshotHandle: string,
+  ): Promise<CheckAuditStatus> {
+    if (![bindingHandle, snapshotHandle].every(isCheckAuditOpaqueHandle)) {
+      throw new Error("The command-audit status request is invalid.");
+    }
+    const value = await this.#request(CHECK_AUDIT_READ_RPC_METHODS.collectStatus, {
+      bindingHandle,
+      snapshotHandle,
+    });
+    if (!isCheckAuditStatus(value) || value.snapshotHandle !== snapshotHandle) {
+      throw new Error("The backend returned invalid command-audit status.");
+    }
+    return value;
+  }
+
+  async readCheckAuditLog(
+    bindingHandle: string,
+    snapshotHandle: string,
+    input: CheckAuditLogInput,
+  ): Promise<CheckAuditLogResult> {
+    if (
+      !isCheckAuditOpaqueHandle(bindingHandle) ||
+      !isCheckAuditOpaqueHandle(snapshotHandle) ||
+      !isCheckAuditLogInput(input)
+    ) {
+      throw new Error("The command-audit log request is invalid.");
+    }
+    const value = await this.#request(CHECK_AUDIT_READ_RPC_METHODS.readLog, {
+      bindingHandle,
+      snapshotHandle,
+      input,
+    });
+    if (
+      !isCheckAuditLogResult(value) ||
+      value.snapshotHandle !== snapshotHandle ||
+      value.limit !== input.limit
+    ) {
+      throw new Error("The backend returned an invalid command-audit log.");
+    }
+    return value;
+  }
+
+  async discoverLogSources(bindingHandle: string): Promise<LogSourceSnapshot> {
+    if (!isLogAnalysisOpaqueHandle(bindingHandle)) {
+      throw new Error("The log investigation binding is invalid.");
+    }
+    const value = await this.#request(LOG_ANALYSIS_READ_RPC_METHODS.discoverSources, {
+      bindingHandle,
+    });
+    if (!isLogSourceSnapshot(value)) {
+      throw new Error("The backend returned invalid log source discovery.");
+    }
+    return value;
+  }
+
+  async readLogSource(
+    bindingHandle: string,
+    snapshotHandle: string,
+    sourceHandle: string,
+    input: LogSourceReadInput,
+  ): Promise<LogSourceReadResult> {
+    if (
+      ![bindingHandle, snapshotHandle, sourceHandle].every(isLogAnalysisOpaqueHandle) ||
+      !isLogSourceReadInput(input)
+    ) {
+      throw new Error("The log source read request is invalid.");
+    }
+    const value = await this.#request(LOG_ANALYSIS_READ_RPC_METHODS.readSource, {
+      bindingHandle,
+      snapshotHandle,
+      sourceHandle,
+      input,
+    });
+    if (
+      !isLogSourceReadResult(value) ||
+      value.snapshotHandle !== snapshotHandle ||
+      value.sourceHandle !== sourceHandle ||
+      value.page !== input.page ||
+      value.pageSize !== input.pageSize
+    ) {
+      throw new Error("The backend returned an invalid log source page.");
+    }
+    return value;
+  }
+
+  async correlateLogSources(
+    bindingHandle: string,
+    snapshotHandle: string,
+    input: LogCorrelationInput,
+  ): Promise<LogCorrelationResult> {
+    if (
+      ![bindingHandle, snapshotHandle].every(isLogAnalysisOpaqueHandle) ||
+      !isLogCorrelationInput(input)
+    ) {
+      throw new Error("The log correlation request is invalid.");
+    }
+    const value = await this.#request(LOG_ANALYSIS_READ_RPC_METHODS.correlateSources, {
+      bindingHandle,
+      snapshotHandle,
+      input,
+    });
+    if (
+      !isLogCorrelationResult(value) ||
+      value.snapshotHandle !== snapshotHandle ||
+      value.sourceHandles.length !== input.sourceHandles.length ||
+      value.sourceHandles.some((handle, index) => handle !== input.sourceHandles[index])
+    ) {
+      throw new Error("The backend returned invalid log correlation.");
+    }
+    return value;
+  }
+
+  async searchLogIocs(
+    bindingHandle: string,
+    snapshotHandle: string,
+    input: LogIocSearchInput,
+  ): Promise<LogIocSearchResult> {
+    if (
+      ![bindingHandle, snapshotHandle].every(isLogAnalysisOpaqueHandle) ||
+      !isLogIocSearchInput(input)
+    ) {
+      throw new Error("The log IOC search request is invalid.");
+    }
+    const value = await this.#request(LOG_ANALYSIS_READ_RPC_METHODS.searchIocs, {
+      bindingHandle,
+      snapshotHandle,
+      input,
+    });
+    if (
+      !isLogIocSearchResult(value) ||
+      value.snapshotHandle !== snapshotHandle ||
+      value.results.some((result) =>
+        !input.sourceHandles.includes(result.sourceHandle) ||
+        !input.indicators.includes(result.indicator))
+    ) {
+      throw new Error("The backend returned invalid log IOC search results.");
+    }
+    return value;
+  }
+
+  async getKubernetesAvailability(bindingHandle: string): Promise<KubernetesAvailability> {
+    if (!isKubernetesOpaqueHandle(bindingHandle)) {
+      throw new Error("The Kubernetes availability request is invalid.");
+    }
+    const value = await this.#request(KUBERNETES_READ_RPC_METHODS.availability, {
+      bindingHandle,
+    });
+    if (!isKubernetesAvailability(value)) {
+      throw new Error("The backend returned invalid Kubernetes availability.");
+    }
+    return value;
+  }
+
+  async listKubernetesResources(
+    bindingHandle: string,
+    input: KubernetesListInput,
+  ): Promise<KubernetesSnapshot> {
+    if (!isKubernetesOpaqueHandle(bindingHandle) || !isKubernetesListInput(input)) {
+      throw new Error("The Kubernetes resource list request is invalid.");
+    }
+    const value = await this.#request(KUBERNETES_READ_RPC_METHODS.listResources, {
+      bindingHandle,
+      input,
+    });
+    if (
+      !isKubernetesSnapshot(value) ||
+      value.tab !== input.tab ||
+      value.namespaceScoped !== (input.namespaceScope !== null)
+    ) {
+      throw new Error("The backend returned an invalid Kubernetes resource snapshot.");
+    }
+    return value;
+  }
+
+  async getKubernetesResourceDetail(
+    bindingHandle: string,
+    snapshotHandle: string,
+    rowHandle: string,
+  ): Promise<KubernetesTextResult> {
+    if (![bindingHandle, snapshotHandle, rowHandle].every(isKubernetesOpaqueHandle)) {
+      throw new Error("The Kubernetes resource detail request is invalid.");
+    }
+    const value = await this.#request(KUBERNETES_READ_RPC_METHODS.resourceDetail, {
+      bindingHandle,
+      snapshotHandle,
+      rowHandle,
+    });
+    if (
+      !isKubernetesTextResult(value) ||
+      value.snapshotHandle !== snapshotHandle ||
+      value.rowHandle !== rowHandle ||
+      value.contentKind !== "detail"
+    ) {
+      throw new Error("The backend returned invalid Kubernetes resource detail.");
+    }
+    return value;
+  }
+
+  async getKubernetesPodLogs(
+    bindingHandle: string,
+    snapshotHandle: string,
+    rowHandle: string,
+  ): Promise<KubernetesTextResult> {
+    if (![bindingHandle, snapshotHandle, rowHandle].every(isKubernetesOpaqueHandle)) {
+      throw new Error("The Kubernetes Pod log request is invalid.");
+    }
+    const value = await this.#request(KUBERNETES_READ_RPC_METHODS.podLogs, {
+      bindingHandle,
+      snapshotHandle,
+      rowHandle,
+    });
+    if (
+      !isKubernetesTextResult(value) ||
+      value.snapshotHandle !== snapshotHandle ||
+      value.rowHandle !== rowHandle ||
+      value.contentKind !== "pod-logs"
+    ) {
+      throw new Error("The backend returned invalid Kubernetes Pod logs.");
+    }
+    return value;
+  }
+
+  async refreshDockerContainers(bindingHandle: string): Promise<DockerContainerSnapshot> {
+    if (!isDockerOpaqueHandle(bindingHandle)) {
+      throw new Error("The Docker container refresh request is invalid.");
+    }
+    const value = await this.#request(DOCKER_READ_RPC_METHODS.refreshContainers, {
+      bindingHandle,
+    });
+    if (!isDockerContainerSnapshot(value)) {
+      throw new Error("The backend returned an invalid Docker container snapshot.");
+    }
+    return value;
+  }
+
+  async getDockerCollection(
+    bindingHandle: string,
+    snapshotHandle: string,
+    kind: DockerCollectionKind,
+  ): Promise<DockerReadCollection> {
+    if (
+      !isDockerOpaqueHandle(bindingHandle) ||
+      !isDockerOpaqueHandle(snapshotHandle) ||
+      !isDockerCollectionKind(kind)
+    ) {
+      throw new Error("The Docker collection request is invalid.");
+    }
+    const value = await this.#request(DOCKER_READ_RPC_METHODS.getCollection, {
+      bindingHandle,
+      snapshotHandle,
+      kind,
+    });
+    if (
+      !isDockerReadCollection(value) ||
+      value.snapshotHandle !== snapshotHandle ||
+      value.kind !== kind
+    ) {
+      throw new Error("The backend returned an invalid Docker collection.");
+    }
+    return value;
+  }
+
+  async inspectDockerResource(
+    bindingHandle: string,
+    snapshotHandle: string,
+    kind: DockerResourceKind,
+    resourceHandle: string,
+  ): Promise<DockerReadInspection> {
+    if (
+      !isDockerOpaqueHandle(bindingHandle) ||
+      !isDockerOpaqueHandle(snapshotHandle) ||
+      !isDockerResourceKind(kind) ||
+      !isDockerOpaqueHandle(resourceHandle)
+    ) {
+      throw new Error("The Docker resource inspection request is invalid.");
+    }
+    const value = await this.#request(DOCKER_READ_RPC_METHODS.inspectResource, {
+      bindingHandle,
+      snapshotHandle,
+      kind,
+      resourceHandle,
+    });
+    if (
+      !isDockerReadInspection(value) ||
+      value.snapshotHandle !== snapshotHandle ||
+      value.resourceHandle !== resourceHandle ||
+      value.kind !== kind
+    ) {
+      throw new Error("The backend returned an invalid Docker resource inspection.");
+    }
+    return value;
+  }
+
+  async getDockerSecurityAudit(
+    bindingHandle: string,
+    snapshotHandle: string,
+  ): Promise<DockerSecurityAudit> {
+    if (![bindingHandle, snapshotHandle].every(isDockerOpaqueHandle)) {
+      throw new Error("The Docker security audit request is invalid.");
+    }
+    const value = await this.#request(DOCKER_READ_RPC_METHODS.getSecurityAudit, {
+      bindingHandle,
+      snapshotHandle,
+    });
+    if (!isDockerSecurityAudit(value) || value.snapshotHandle !== snapshotHandle) {
+      throw new Error("The backend returned an invalid Docker security audit.");
+    }
+    return value;
+  }
+
+  async getDockerLogs(
+    bindingHandle: string,
+    snapshotHandle: string,
+    containerHandle: string,
+    tail: number,
+  ): Promise<DockerLogs> {
+    if (
+      ![bindingHandle, snapshotHandle, containerHandle].every(isDockerOpaqueHandle) ||
+      !isDockerLogTail(tail)
+    ) {
+      throw new Error("The Docker container log request is invalid.");
+    }
+    const value = await this.#request(DOCKER_READ_RPC_METHODS.getContainerLogs, {
+      bindingHandle,
+      snapshotHandle,
+      containerHandle,
+      tail,
+    });
+    if (
+      !isDockerLogs(value) ||
+      value.snapshotHandle !== snapshotHandle ||
+      value.containerHandle !== containerHandle ||
+      value.tail !== tail
+    ) {
+      throw new Error("The backend returned invalid Docker container logs.");
+    }
+    return value;
+  }
+
+  async loadEmergencyCommandCatalog(bindingHandle: string): Promise<EmergencyCommandCatalog> {
+    if (!isEmergencyCommandOpaqueHandle(bindingHandle)) {
+      throw new Error("The emergency command catalog request is invalid.");
+    }
+    const value = await this.#request(EMERGENCY_COMMAND_RPC_METHODS.loadCatalog, {
+      bindingHandle,
+    }, EMERGENCY_COMMAND_CATALOG_TIMEOUT_MS);
+    if (!isEmergencyCommandCatalog(value)) {
+      throw new Error("The backend returned an invalid emergency command catalog.");
+    }
+    return value;
+  }
+
+  async runEmergencyCommand(
+    bindingHandle: string,
+    snapshotHandle: string,
+    commandHandle: string,
+  ): Promise<EmergencyCommandResult> {
+    if (![bindingHandle, snapshotHandle, commandHandle].every(isEmergencyCommandOpaqueHandle)) {
+      throw new Error("The emergency command run request is invalid.");
+    }
+    const value = await this.#request(EMERGENCY_COMMAND_RPC_METHODS.run, {
+      bindingHandle,
+      snapshotHandle,
+      commandHandle,
+    }, EMERGENCY_COMMAND_RUN_TIMEOUT_MS);
+    if (
+      !isEmergencyCommandResult(value) ||
+      value.snapshotHandle !== snapshotHandle ||
+      value.commandHandle !== commandHandle
+    ) {
+      throw new Error("The backend returned an invalid emergency command result.");
+    }
+    return value;
+  }
+
+  async listPacketCaptureInterfaces(
+    bindingHandle: string,
+  ): Promise<PacketCaptureInterfaceList> {
+    if (!isPacketCaptureOpaqueHandle(bindingHandle)) {
+      throw new Error("The packet capture interface request is invalid.");
+    }
+    const value = await this.#request(PACKET_CAPTURE_LIVE_RPC_METHODS.listInterfaces, {
+      bindingHandle,
+    }, PACKET_CAPTURE_LIST_TIMEOUT_MS);
+    if (
+      !isPacketCaptureInterfaceList(value) ||
+      value.interfaces.some((item) => item.interfaceHandle === bindingHandle)
+    ) {
+      throw new Error("The backend returned an invalid packet capture interface list.");
+    }
+    return value;
+  }
+
+  async startPacketCapture(
+    bindingHandle: string,
+    interfaceHandle: string,
+    input: PacketCaptureStartInput,
+  ): Promise<PacketCaptureStarted> {
+    if (
+      !isPacketCaptureOpaqueHandle(bindingHandle) ||
+      !isPacketCaptureOpaqueHandle(interfaceHandle) ||
+      !isPacketCaptureStartInput(input)
+    ) {
+      throw new Error("The packet capture start request is invalid.");
+    }
+    const value = await this.#request(PACKET_CAPTURE_LIVE_RPC_METHODS.start, {
+      bindingHandle,
+      interfaceHandle,
+      input,
+    }, PACKET_CAPTURE_START_TIMEOUT_MS);
+    if (
+      !isPacketCaptureStarted(value) ||
+      value.captureHandle === bindingHandle ||
+      value.captureHandle === interfaceHandle
+    ) {
+      throw new Error("The backend returned an invalid packet capture start result.");
+    }
+    return value;
+  }
+
+  async pollPacketCapture(
+    bindingHandle: string,
+    captureHandle: string,
+    afterSequence: number,
+  ): Promise<PacketCapturePoll> {
+    if (
+      !isPacketCaptureOpaqueHandle(bindingHandle) ||
+      !isPacketCaptureOpaqueHandle(captureHandle) ||
+      !isPacketCaptureCursor(afterSequence)
+    ) {
+      throw new Error("The packet capture poll request is invalid.");
+    }
+    const value = await this.#request(PACKET_CAPTURE_LIVE_RPC_METHODS.poll, {
+      bindingHandle,
+      captureHandle,
+      afterSequence,
+    }, PACKET_CAPTURE_POLL_TIMEOUT_MS);
+    if (
+      !isPacketCapturePoll(value) ||
+      value.captureHandle !== captureHandle ||
+      (!value.cursorReset && value.events.some((event) => event.sequence <= afterSequence))
+    ) {
+      throw new Error("The backend returned an invalid packet capture poll result.");
+    }
+    return value;
+  }
+
+  async stopPacketCapture(
+    bindingHandle: string,
+    captureHandle: string,
+  ): Promise<PacketCaptureStopped> {
+    if (
+      !isPacketCaptureOpaqueHandle(bindingHandle) ||
+      !isPacketCaptureOpaqueHandle(captureHandle)
+    ) {
+      throw new Error("The packet capture stop request is invalid.");
+    }
+    const value = await this.#request(PACKET_CAPTURE_LIVE_RPC_METHODS.stop, {
+      bindingHandle,
+      captureHandle,
+    }, PACKET_CAPTURE_STOP_TIMEOUT_MS);
+    if (!isPacketCaptureStopped(value)) {
+      throw new Error("The backend returned an invalid packet capture stop result.");
+    }
+    return value;
+  }
+
+  async getQuickDetectionCatalog(): Promise<QuickDetectionCatalog> {
+    const value = await this.#request(QUICK_DETECTION_RPC_METHODS.catalog, {});
+    if (!isQuickDetectionCatalog(value)) {
+      throw new Error("The backend returned an invalid quick-detection catalog.");
+    }
+    return value;
+  }
+
+  async planQuickDetection(
+    bindingHandle: string,
+    input: QuickDetectionPlanInput,
+  ): Promise<QuickDetectionPlan> {
+    if (!isQuickDetectionOpaqueHandle(bindingHandle) || !isQuickDetectionPlanInput(input)) {
+      throw new Error("The quick-detection plan request is invalid.");
+    }
+    const value = await this.#request(QUICK_DETECTION_RPC_METHODS.plan, {
+      bindingHandle,
+      input,
+    });
+    const selectedModulesMatch = input.profile !== "selected" ||
+      value !== null && typeof value === "object" && "moduleIds" in value &&
+      Array.isArray(value.moduleIds) && value.moduleIds.length === input.moduleIds.length &&
+      value.moduleIds.every((module, index) => module === input.moduleIds[index]);
+    if (
+      !isQuickDetectionPlan(value) || value.planHandle === bindingHandle ||
+      value.profile !== input.profile ||
+      value.maximumFindingsPerModule !== input.maximumFindingsPerModule ||
+      !selectedModulesMatch
+    ) {
+      throw new Error("The backend returned an invalid quick-detection plan.");
+    }
+    return value;
+  }
+
+  async startQuickDetection(
+    bindingHandle: string,
+    planHandle: string,
+  ): Promise<QuickDetectionScanStarted> {
+    if (!isQuickDetectionOpaqueHandle(bindingHandle) ||
+      !isQuickDetectionOpaqueHandle(planHandle) || planHandle === bindingHandle) {
+      throw new Error("The quick-detection start request is invalid.");
+    }
+    const value = await this.#request(QUICK_DETECTION_RPC_METHODS.start, {
+      bindingHandle,
+      planHandle,
+    });
+    if (!isQuickDetectionScanStarted(value) || value.scanHandle === bindingHandle ||
+      value.scanHandle === planHandle) {
+      throw new Error("The backend returned an invalid quick-detection scan start.");
+    }
+    return value;
+  }
+
+  async pollQuickDetection(
+    bindingHandle: string,
+    scanHandle: string,
+    afterEvent: number,
+    limit: number,
+  ): Promise<QuickDetectionPoll> {
+    if (!isQuickDetectionOpaqueHandle(bindingHandle) ||
+      !isQuickDetectionOpaqueHandle(scanHandle) || scanHandle === bindingHandle ||
+      !isQuickDetectionPollRequest(afterEvent, limit)) {
+      throw new Error("The quick-detection poll request is invalid.");
+    }
+    const value = await this.#request(QUICK_DETECTION_RPC_METHODS.poll, {
+      bindingHandle,
+      scanHandle,
+      afterEvent,
+      limit,
+    });
+    if (!isQuickDetectionPoll(value) || value.scanHandle !== scanHandle ||
+      value.reportHandle === bindingHandle || value.reportHandle === scanHandle ||
+      value.events.some((event) => event.sequence <= afterEvent ||
+        event.total !== value.total || event.completed > value.completed)) {
+      throw new Error("The backend returned an invalid quick-detection poll.");
+    }
+    return value;
+  }
+
+  async cancelQuickDetection(
+    bindingHandle: string,
+    scanHandle: string,
+  ): Promise<QuickDetectionCancellation> {
+    if (!isQuickDetectionOpaqueHandle(bindingHandle) ||
+      !isQuickDetectionOpaqueHandle(scanHandle) || scanHandle === bindingHandle) {
+      throw new Error("The quick-detection cancellation request is invalid.");
+    }
+    const value = await this.#request(QUICK_DETECTION_RPC_METHODS.cancel, {
+      bindingHandle,
+      scanHandle,
+    });
+    if (!isQuickDetectionCancellation(value)) {
+      throw new Error("The backend returned an invalid quick-detection cancellation.");
+    }
+    return value;
+  }
+
+  async listQuickDetectionHistory(
+    bindingHandle: string,
+    offset: number,
+    limit: number,
+  ): Promise<QuickDetectionHistoryPage> {
+    if (!isQuickDetectionOpaqueHandle(bindingHandle) ||
+      !isQuickDetectionHistoryRequest(offset, limit)) {
+      throw new Error("The quick-detection history request is invalid.");
+    }
+    const value = await this.#request(QUICK_DETECTION_RPC_METHODS.history, {
+      bindingHandle,
+      offset,
+      limit,
+    });
+    if (!isQuickDetectionHistoryPage(value) || value.offset !== offset ||
+      value.items.length > limit ||
+      value.items.some((item) => item.reportHandle === bindingHandle)) {
+      throw new Error("The backend returned an invalid quick-detection history page.");
+    }
+    return value;
+  }
+
+  async getQuickDetectionReport(
+    bindingHandle: string,
+    reportHandle: string,
+  ): Promise<QuickDetectionReport> {
+    if (!isQuickDetectionOpaqueHandle(bindingHandle) ||
+      !isQuickDetectionOpaqueHandle(reportHandle) || reportHandle === bindingHandle) {
+      throw new Error("The quick-detection report request is invalid.");
+    }
+    const value = await this.#request(QUICK_DETECTION_RPC_METHODS.report, {
+      bindingHandle,
+      reportHandle,
+    });
+    if (!isQuickDetectionReport(value) || value.reportHandle !== reportHandle) {
+      throw new Error("The backend returned an invalid quick-detection report.");
+    }
+    return value;
+  }
+
+  async listApplicationLogs(filter: ApplicationLogFilter): Promise<ApplicationLogSnapshot> {
+    if (!isApplicationLogFilter(filter)) {
+      throw new Error("The application log filter is invalid.");
+    }
+    const value = await this.#request(APPLICATION_LOG_RPC_METHODS.list, { filter });
+    if (!isApplicationLogSnapshot(value)) {
+      throw new Error("The backend returned an invalid application log snapshot.");
+    }
+    return value;
+  }
+
+  async setApplicationLogLevel(
+    level: ApplicationLogLevel,
+  ): Promise<ApplicationLogLevelResult> {
+    if (!isApplicationLogLevel(level)) {
+      throw new Error("The application log level is invalid.");
+    }
+    const value = await this.#request(APPLICATION_LOG_RPC_METHODS.setLevel, { level });
+    if (!isApplicationLogLevelResult(value) || value.level !== level) {
+      throw new Error("The backend returned an invalid application log level result.");
+    }
+    return value;
+  }
+
+  async clearApplicationLogBuffer(): Promise<ApplicationLogClearResult> {
+    const value = await this.#request(APPLICATION_LOG_RPC_METHODS.clearBuffer, {});
+    if (!isApplicationLogClearResult(value)) {
+      throw new Error("The backend returned an invalid application log clear result.");
+    }
+    return value;
+  }
+
+  async getApplicationLogPreview(filter: ApplicationLogFilter): Promise<ApplicationLogPreview> {
+    if (!isApplicationLogFilter(filter)) {
+      throw new Error("The application log preview filter is invalid.");
+    }
+    const value = await this.#request(APPLICATION_LOG_RPC_METHODS.preview, { filter });
+    if (!isApplicationLogPreview(value)) {
+      throw new Error("The backend returned an invalid application log preview.");
+    }
+    return value;
+  }
+
+  async prepareApplicationLogExport(
+    filter: ApplicationLogFilter,
+  ): Promise<InternalApplicationLogExportPayload> {
+    if (!isApplicationLogFilter(filter)) {
+      throw new Error("The application log export filter is invalid.");
+    }
+    const value = await this.#request(APPLICATION_LOG_RPC_METHODS.prepareExport, { filter });
+    if (!isInternalApplicationLogExportPayload(value)) {
+      throw new Error("The backend returned an invalid application log export payload.");
+    }
+    return value;
+  }
+
+  async getIntegrityPresets(): Promise<IntegrityPresetCatalog> {
+    const value = await this.#request(INTEGRITY_RPC_METHODS.presets, {});
+    if (!isIntegrityPresetCatalog(value)) {
+      throw new Error("The backend returned an invalid file-integrity preset catalog.");
+    }
+    return value;
+  }
+
+  async listIntegrityBaselines(bindingHandle: string): Promise<IntegrityBaselineList> {
+    if (!isIntegrityOpaqueHandle(bindingHandle)) {
+      throw new Error("The file-integrity binding is invalid.");
+    }
+    const value = await this.#request(INTEGRITY_RPC_METHODS.listBaselines, { bindingHandle });
+    if (!isIntegrityBaselineList(value) ||
+      value.items.some((baseline) => baseline.baselineHandle === bindingHandle)) {
+      throw new Error("The backend returned an invalid file-integrity baseline list.");
+    }
+    return value;
+  }
+
+  async startIntegrityComparison(
+    bindingHandle: string,
+    baselineHandle: string,
+  ): Promise<IntegrityComparisonStarted> {
+    if (!isIntegrityOpaqueHandle(bindingHandle) ||
+      !isIntegrityOpaqueHandle(baselineHandle) || baselineHandle === bindingHandle) {
+      throw new Error("The file-integrity comparison request is invalid.");
+    }
+    const value = await this.#request(INTEGRITY_RPC_METHODS.startComparison, {
+      bindingHandle,
+      baselineHandle,
+    });
+    if (!isIntegrityComparisonStarted(value) || value.baselineHandle !== baselineHandle ||
+      value.operationHandle === bindingHandle || value.operationHandle === baselineHandle) {
+      throw new Error("The backend returned an invalid file-integrity comparison start.");
+    }
+    return value;
+  }
+
+  async pollIntegrityComparison(
+    bindingHandle: string,
+    operationHandle: string,
+    afterEvent: number,
+    limit: number,
+  ): Promise<IntegrityComparisonPoll> {
+    if (!isIntegrityOpaqueHandle(bindingHandle) ||
+      !isIntegrityOpaqueHandle(operationHandle) || operationHandle === bindingHandle ||
+      !isIntegrityPollRequest(afterEvent, limit)) {
+      throw new Error("The file-integrity poll request is invalid.");
+    }
+    const value = await this.#request(INTEGRITY_RPC_METHODS.pollComparison, {
+      bindingHandle,
+      operationHandle,
+      afterEvent,
+      limit,
+    });
+    if (!isIntegrityComparisonPoll(value) || value.operationHandle !== operationHandle ||
+      value.baselineHandle === bindingHandle || value.baselineHandle === operationHandle ||
+      value.nextEventCursor < afterEvent ||
+      value.events.some((event) => event.sequence <= afterEvent)) {
+      throw new Error("The backend returned an invalid file-integrity comparison poll.");
+    }
+    return value;
+  }
+
+  async cancelIntegrityComparison(
+    bindingHandle: string,
+    operationHandle: string,
+  ): Promise<IntegrityComparisonCancellation> {
+    if (!isIntegrityOpaqueHandle(bindingHandle) ||
+      !isIntegrityOpaqueHandle(operationHandle) || operationHandle === bindingHandle) {
+      throw new Error("The file-integrity cancellation request is invalid.");
+    }
+    const value = await this.#request(INTEGRITY_RPC_METHODS.cancelComparison, {
+      bindingHandle,
+      operationHandle,
+    });
+    if (!isIntegrityComparisonCancellation(value)) {
+      throw new Error("The backend returned an invalid file-integrity cancellation.");
+    }
+    return value;
+  }
+
+  async loadSettings(): Promise<SettingsSnapshot> {
+    const value = await this.#request(SETTINGS_RPC_METHODS.get, {});
+    if (!isSettingsSnapshot(value)) {
+      throw new Error("The backend returned an invalid settings snapshot.");
+    }
+    return value;
+  }
+
+  async saveSettings(input: SettingsSaveInput): Promise<SettingsSnapshot> {
+    if (!isSettingsSaveInput(input)) {
+      throw new Error("The settings input is invalid.");
+    }
+    const value = await this.#request(SETTINGS_RPC_METHODS.save, input);
+    if (!isSettingsSnapshot(value)) {
+      throw new Error("The backend returned an invalid settings snapshot.");
+    }
+    return value;
+  }
+
+  async replaceSettingsAiApiKey(
+    input: SettingsAiApiKeyReplacementInput,
+  ): Promise<SettingsAiApiKeyReplacementResult> {
+    if (!isSettingsAiApiKeyReplacementInput(input)) {
+      throw new Error("The Settings API-key replacement input is invalid.");
+    }
+    const value = await this.#request(SETTINGS_RPC_METHODS.replaceAiApiKey, input);
+    if (!isSettingsAiApiKeyReplacementResult(value) || value.providerId !== input.providerId) {
+      throw new Error("The backend returned an invalid Settings API-key replacement result.");
+    }
+    return value;
+  }
+
+  async planSettingsAiApiKeyClear(providerId: string): Promise<SettingsMutationProposal> {
+    if (!isSettingsProviderId(providerId)) throw new Error("The Settings provider is invalid.");
+    const value = await this.#request(SETTINGS_RPC_METHODS.planAiApiKeyClear, { providerId });
+    if (!isSettingsMutationProposal(value) || value.kind !== "clear-ai-api-key") {
+      throw new Error("The backend returned an invalid Settings API-key clear plan.");
+    }
+    return value;
+  }
+
+  async planSettingsAiProviderRemoval(providerId: string): Promise<SettingsMutationProposal> {
+    if (!isSettingsProviderId(providerId)) throw new Error("The Settings provider is invalid.");
+    const value = await this.#request(SETTINGS_RPC_METHODS.planAiProviderRemoval, { providerId });
+    if (!isSettingsMutationProposal(value) || value.kind !== "remove-ai-provider") {
+      throw new Error("The backend returned an invalid Settings provider removal plan.");
+    }
+    return value;
+  }
+
+  async confirmSettingsMutation(mutationHandle: string): Promise<SettingsMutationResult> {
+    if (!isSettingsMutationHandle(mutationHandle)) {
+      throw new Error("The Settings mutation handle is invalid.");
+    }
+    const value = await this.#request(SETTINGS_RPC_METHODS.confirmMutation, { mutationHandle });
+    if (!isSettingsMutationResult(value)) {
+      throw new Error("The backend returned an invalid Settings mutation result.");
+    }
+    return value;
+  }
+
+  async cancelSettingsMutation(mutationHandle: string): Promise<SettingsMutationCancellation> {
+    if (!isSettingsMutationHandle(mutationHandle)) {
+      throw new Error("The Settings mutation handle is invalid.");
+    }
+    const value = await this.#request(SETTINGS_RPC_METHODS.cancelMutation, { mutationHandle });
+    if (!isSettingsMutationCancellation(value)) {
+      throw new Error("The backend returned an invalid Settings mutation cancellation.");
+    }
+    return value;
+  }
+
+  async listAiHistory(query: string, offset: number, limit: number): Promise<AiHistoryListPage> {
+    if (!isAiHistoryQuery(query) || !isAiHistoryPageRequest(offset, limit)) {
+      throw new Error("The AI history page request is invalid.");
+    }
+    const value = await this.#request(AI_HISTORY_RPC_METHODS.list, { query, offset, limit });
+    if (!isAiHistoryListPage(value)) {
+      throw new Error("The backend returned an invalid AI history page.");
+    }
+    return value;
+  }
+
+  async getAiHistoryRecord(id: string): Promise<AiHistoryRecord> {
+    if (!isAiHistoryId(id)) throw new Error("The AI history identifier is invalid.");
+    const value = await this.#request(AI_HISTORY_RPC_METHODS.get, { id });
+    if (!isAiHistoryRecord(value)) {
+      throw new Error("The backend returned an invalid AI history record.");
+    }
+    return value;
+  }
+
+  async planAiHistoryRemove(id: string): Promise<AiHistoryMutationProposal> {
+    if (!isAiHistoryId(id)) throw new Error("The AI history identifier is invalid.");
+    const value = await this.#request(AI_HISTORY_RPC_METHODS.planRemove, { id });
+    if (!isAiHistoryMutationProposal(value) || value.kind !== "remove") {
+      throw new Error("The backend returned an invalid AI history removal plan.");
+    }
+    return value;
+  }
+
+  async planAiHistoryClear(): Promise<AiHistoryMutationProposal> {
+    const value = await this.#request(AI_HISTORY_RPC_METHODS.planClear, {});
+    if (!isAiHistoryMutationProposal(value) || value.kind !== "clear") {
+      throw new Error("The backend returned an invalid AI history clear plan.");
+    }
+    return value;
+  }
+
+  async confirmAiHistoryMutation(handle: string): Promise<AiHistoryMutationResult> {
+    if (!isAiHistoryOpaqueHandle(handle)) throw new Error("The AI history plan is invalid.");
+    const value = await this.#request(AI_HISTORY_RPC_METHODS.confirm, { handle });
+    if (!isAiHistoryMutationResult(value)) {
+      throw new Error("The backend returned an invalid AI history mutation result.");
+    }
+    return value;
+  }
+
+  async cancelAiHistoryMutation(handle: string): Promise<AiHistoryMutationCancellation> {
+    if (!isAiHistoryOpaqueHandle(handle)) throw new Error("The AI history plan is invalid.");
+    const value = await this.#request(AI_HISTORY_RPC_METHODS.cancel, { handle });
+    if (!isAiHistoryMutationCancellation(value)) {
+      throw new Error("The backend returned an invalid AI history cancellation.");
+    }
+    return value;
+  }
+
+  async prepareAiHistoryExport(format: AiHistoryExportFormat): Promise<InternalAiHistoryExportPayload> {
+    if (!isAiHistoryExportFormat(format)) throw new Error("The AI history export format is invalid.");
+    const value = await this.#request(AI_HISTORY_RPC_METHODS.export, { format });
+    if (!isInternalAiHistoryExportPayload(value)) {
+      throw new Error("The backend returned an invalid AI history export payload.");
+    }
+    return value;
+  }
+
+  async listCommandHistory(
+    bindingHandle: string,
+    query: string,
+    offset: number,
+    limit: number,
+  ): Promise<CommandHistoryListPage> {
+    if (!isCommandHistoryOpaqueHandle(bindingHandle) ||
+      !isCommandHistoryQuery(query) || !isCommandHistoryPageRequest(offset, limit)) {
+      throw new Error("The command history page request is invalid.");
+    }
+    const value = await this.#request(COMMAND_HISTORY_RPC_METHODS.list, {
+      bindingHandle, query, offset, limit,
+    });
+    if (!isCommandHistoryListPage(value) || value.offset !== offset) {
+      throw new Error("The backend returned an invalid command history page.");
+    }
+    return value;
+  }
+
+  async getCommandHistory(bindingHandle: string, recordId: string): Promise<CommandHistoryRecord> {
+    if (!isCommandHistoryOpaqueHandle(bindingHandle) || !isCommandHistoryId(recordId)) {
+      throw new Error("The command history record request is invalid.");
+    }
+    const value = await this.#request(COMMAND_HISTORY_RPC_METHODS.get, { bindingHandle, recordId });
+    if (!isCommandHistoryRecord(value) || value.id !== recordId) {
+      throw new Error("The backend returned an invalid command history record.");
+    }
+    return value;
+  }
+
+  async planCommandReplay(bindingHandle: string, recordId: string): Promise<CommandReplayIntent> {
+    if (!isCommandHistoryOpaqueHandle(bindingHandle) || !isCommandHistoryId(recordId)) {
+      throw new Error("The command history replay request is invalid.");
+    }
+    const value = await this.#request(COMMAND_HISTORY_RPC_METHODS.planReplay, { bindingHandle, recordId });
+    if (!isCommandReplayIntent(value)) {
+      throw new Error("The backend returned an invalid command history replay intent.");
+    }
+    return value;
+  }
+
+  async planCommandHistoryRemove(
+    bindingHandle: string,
+    recordId: string,
+  ): Promise<CommandHistoryMutationProposal> {
+    if (!isCommandHistoryOpaqueHandle(bindingHandle) || !isCommandHistoryId(recordId)) {
+      throw new Error("The command history removal plan request is invalid.");
+    }
+    const value = await this.#request(COMMAND_HISTORY_RPC_METHODS.planRemove, {
+      bindingHandle, recordId,
+    });
+    if (!isCommandHistoryMutationProposal(value) || value.kind !== "remove") {
+      throw new Error("The backend returned an invalid command history removal plan.");
+    }
+    return value;
+  }
+
+  async planCommandHistoryClear(bindingHandle: string): Promise<CommandHistoryMutationProposal> {
+    if (!isCommandHistoryOpaqueHandle(bindingHandle)) {
+      throw new Error("The command history binding is invalid.");
+    }
+    const value = await this.#request(COMMAND_HISTORY_RPC_METHODS.planClear, { bindingHandle });
+    if (!isCommandHistoryMutationProposal(value) || value.kind !== "clear") {
+      throw new Error("The backend returned an invalid command history clear plan.");
+    }
+    return value;
+  }
+
+  async confirmCommandHistoryMutation(
+    bindingHandle: string,
+    mutationHandle: string,
+  ): Promise<CommandHistoryMutationResult> {
+    if (!isCommandHistoryOpaqueHandle(bindingHandle) ||
+      !isCommandHistoryOpaqueHandle(mutationHandle)) {
+      throw new Error("The command history mutation plan is invalid.");
+    }
+    const value = await this.#request(COMMAND_HISTORY_RPC_METHODS.confirm, {
+      bindingHandle, mutationHandle,
+    });
+    if (!isCommandHistoryMutationResult(value)) {
+      throw new Error("The backend returned an invalid command history mutation result.");
+    }
+    return value;
+  }
+
+  async cancelCommandHistoryMutation(
+    bindingHandle: string,
+    mutationHandle: string,
+  ): Promise<CommandHistoryMutationCancellation> {
+    if (!isCommandHistoryOpaqueHandle(bindingHandle) ||
+      !isCommandHistoryOpaqueHandle(mutationHandle)) {
+      throw new Error("The command history mutation plan is invalid.");
+    }
+    const value = await this.#request(COMMAND_HISTORY_RPC_METHODS.cancel, {
+      bindingHandle, mutationHandle,
+    });
+    if (!isCommandHistoryMutationCancellation(value)) {
+      throw new Error("The backend returned an invalid command history cancellation.");
+    }
+    return value;
+  }
+
+  async generateDisposalReport(bindingHandle: string): Promise<DisposalReportSnapshot> {
+    if (!isDisposalReportOpaqueHandle(bindingHandle)) {
+      throw new Error("The disposal report binding is invalid.");
+    }
+    const value = await this.#request(DISPOSAL_REPORT_RPC_METHODS.generate, { bindingHandle });
+    if (!isDisposalReportSnapshot(value)) {
+      throw new Error("The backend returned an invalid disposal report snapshot.");
+    }
+    return value;
+  }
+
+  async getDisposalReportContent(
+    bindingHandle: string,
+    reportHandle: string,
+    format: DisposalReportPreviewFormat,
+  ): Promise<DisposalReportContent> {
+    if (!isDisposalReportOpaqueHandle(bindingHandle) ||
+      !isDisposalReportOpaqueHandle(reportHandle) || !isDisposalReportPreviewFormat(format)) {
+      throw new Error("The disposal report content request is invalid.");
+    }
+    const value = await this.#request(DISPOSAL_REPORT_RPC_METHODS.content, {
+      bindingHandle, reportHandle, format,
+    });
+    if (!isDisposalReportContent(value) || value.format !== format) {
+      throw new Error("The backend returned invalid disposal report content.");
+    }
+    return value;
+  }
+
+  async prepareDisposalReportExport(
+    bindingHandle: string,
+    reportHandle: string,
+    format: DisposalReportExportFormat,
+  ): Promise<InternalDisposalReportExportPayload> {
+    if (!isDisposalReportOpaqueHandle(bindingHandle) ||
+      !isDisposalReportOpaqueHandle(reportHandle) || !isDisposalReportExportFormat(format)) {
+      throw new Error("The disposal report export request is invalid.");
+    }
+    const value = await this.#request(DISPOSAL_REPORT_RPC_METHODS.export, {
+      bindingHandle, reportHandle, format,
+    });
+    if (!isInternalDisposalReportExportPayload(value) || value.format !== format) {
+      throw new Error("The backend returned an invalid disposal report export payload.");
+    }
+    return value;
+  }
+
+  async getConfigCatalog(): Promise<ConfigCatalog> {
+    const value = await this.#request("config.catalog.get", {});
+    if (!isConfigCatalog(value)) {
+      throw new Error("The backend returned an invalid configuration catalog.");
+    }
+    return value;
+  }
+
+  async generateConfig(input: ConfigGenerateInput): Promise<ConfigDraft> {
+    const value = await this.#request("config.quick.generate", input);
+    if (!isConfigDraft(value)) {
+      throw new Error("The backend returned an invalid configuration draft.");
+    }
+    return value;
+  }
+
+  async reviseConfig(
+    handle: string,
+    revision: number,
+    input: ConfigGenerateInput,
+  ): Promise<ConfigDraft> {
+    const value = await this.#request("config.quick.revise", { handle, revision, input });
+    if (!isConfigDraft(value)) {
+      throw new Error("The backend returned an invalid revised configuration draft.");
+    }
+    return value;
+  }
+
+  async copyConfigDraft(handle: string, revision: number): Promise<InternalConfigCopy> {
+    const value = await this.#request("config.quick.copy", { handle, revision });
+    if (!isInternalConfigCopy(value)) {
+      throw new Error("The backend returned an invalid configuration copy payload.");
+    }
+    return value;
+  }
+
+  async closeConfigDraft(handle: string, revision: number): Promise<ConfigClosedResult> {
+    const value = await this.#request("config.quick.close", { handle, revision });
+    if (!isConfigClosedResult(value)) {
+      throw new Error("The backend returned an invalid configuration close outcome.");
+    }
+    return value;
+  }
+
+  async getConfigArtifact(
+    handle: string,
+    revision: number,
+    artifactKey: string,
+  ): Promise<InternalConfigArtifact> {
+    const value = await this.#request("config.quick.artifact", {
+      handle,
+      revision,
+      artifactKey,
+    });
+    if (!isInternalConfigArtifact(value)) {
+      throw new Error("The backend returned an invalid configuration artifact.");
+    }
+    return value;
+  }
+
+  async setSecurityReferenceFavorites(
+    favoriteIds: string[],
+  ): Promise<SecurityReferenceFavoritesResult> {
+    const value = await this.#request("security-reference.set-favorites", { favoriteIds });
+    if (!isSecurityReferenceFavoritesResult(value)) {
+      throw new Error("The backend returned an invalid favorites payload.");
+    }
+    return value;
+  }
+
+  async listNotes(query: string, offset: number, limit: number): Promise<NoteListPage> {
+    const value = await this.#request("notes.list", { query, offset, limit });
+    if (!isNoteListPage(value)) throw new Error("The backend returned an invalid notes page.");
+    return value;
+  }
+
+  async getNote(id: string): Promise<NoteResult> {
+    const value = await this.#request("notes.get", { id });
+    if (!isNoteResult(value)) throw new Error("The backend returned an invalid note.");
+    return value;
+  }
+
+  async createNote(input: NoteCreateInput): Promise<NoteResult> {
+    const value = await this.#request("notes.create", input);
+    if (!isNoteResult(value)) throw new Error("The backend returned an invalid note.");
+    return value;
+  }
+
+  async updateNote(input: NoteUpdateInput): Promise<NoteResult> {
+    const value = await this.#request("notes.update", input);
+    if (!isNoteResult(value)) throw new Error("The backend returned an invalid note.");
+    return value;
+  }
+
+  async setNotePinned(id: string, pinned: boolean, expectedRevision: string, mutationId: string): Promise<NoteResult> {
+    const value = await this.#request("notes.set-pinned", { id, pinned, expectedRevision, mutationId });
+    if (!isNoteResult(value)) throw new Error("The backend returned an invalid note.");
+    return value;
+  }
+
+  async addNoteTag(id: string, tag: string, expectedRevision: string, mutationId: string): Promise<NoteResult> {
+    const value = await this.#request("notes.add-tag", { id, tag, expectedRevision, mutationId });
+    if (!isNoteResult(value)) throw new Error("The backend returned an invalid note.");
+    return value;
+  }
+
+  async removeNoteTag(id: string, tag: string, expectedRevision: string, mutationId: string): Promise<NoteResult> {
+    const value = await this.#request("notes.remove-tag", { id, tag, expectedRevision, mutationId });
+    if (!isNoteResult(value)) throw new Error("The backend returned an invalid note.");
+    return value;
+  }
+
+  async planNoteDelete(id: string, expectedRevision: string, mutationId: string): Promise<NoteDeleteProposal> {
+    const value = await this.#request("notes.delete.plan", { id, expectedRevision, mutationId });
+    if (!isNoteDeleteProposal(value)) {
+      throw new Error("The backend returned an invalid note delete plan.");
+    }
+    return value;
+  }
+
+  async confirmNoteDelete(handle: string, mutationId: string): Promise<NoteDeleteResult> {
+    const value = await this.#request("notes.delete.confirm", { handle, mutationId });
+    if (!isNoteDeleteResult(value)) {
+      throw new Error("The backend returned an invalid note delete outcome.");
+    }
+    return value;
+  }
+
+  async cancelNoteDelete(handle: string, mutationId: string): Promise<NoteDeleteCancellation> {
+    const value = await this.#request("notes.delete.cancel", { handle, mutationId });
+    if (!isNoteDeleteCancellation(value)) {
+      throw new Error("The backend returned an invalid note delete cancellation.");
+    }
+    return value;
+  }
+
+  async exportNotes(id: string | null): Promise<NotesTextExport> {
+    const value = await this.#request("notes.export", { id });
+    if (!isNotesTextExport(value)) {
+      throw new Error("The backend returned an invalid notes export.");
+    }
+    return value;
+  }
+
+  #request(
+    method: string,
+    params: object,
+    timeoutMs = REQUEST_TIMEOUT_MS,
+  ): Promise<unknown> {
+    const child = this.#process;
+    if (child === null || child.stdin.destroyed) {
+      return Promise.reject(new Error("LovelyRes backend is not running."));
+    }
+    const requestId = randomUUID();
+    const encoded = JSON.stringify({
+      protocol: BACKEND_PROTOCOL,
+      requestId,
+      method,
+      params,
+    });
+    if (Buffer.byteLength(encoded, "utf8") > MAX_REQUEST_BYTES) {
+      return Promise.reject(new Error("The backend request is too large."));
+    }
+    return new Promise<unknown>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.#pending.delete(requestId);
+        reject(new Error("The backend request timed out."));
+      }, timeoutMs);
+      this.#pending.set(requestId, { resolve, reject, timeout });
+      child.stdin.write(`${encoded}\n`, "utf8", (error) => {
+        if (error === null || error === undefined) return;
+        const pending = this.#pending.get(requestId);
+        if (pending === undefined) return;
+        clearTimeout(pending.timeout);
+        this.#pending.delete(requestId);
+        pending.reject(error);
+      });
+    });
+  }
+
+  #consumeStdout(chunk: string): void {
+    this.#stdoutBuffer += chunk;
+    if (Buffer.byteLength(this.#stdoutBuffer, "utf8") > MAX_RESPONSE_BYTES) {
+      const error = new Error("The backend response exceeded the allowed size.");
+      this.#process?.kill();
+      this.#failAll(error);
+      this.#stdoutBuffer = "";
+      return;
+    }
+    for (;;) {
+      const newline = this.#stdoutBuffer.indexOf("\n");
+      if (newline < 0) return;
+      const line = this.#stdoutBuffer.slice(0, newline).replace(/\r$/, "");
+      this.#stdoutBuffer = this.#stdoutBuffer.slice(newline + 1);
+      this.#consumeResponse(line);
+    }
+  }
+
+  #consumeResponse(line: string): void {
+    let response: RpcResponse;
+    try {
+      response = JSON.parse(line) as RpcResponse;
+    } catch {
+      this.#failAll(new Error("The backend emitted invalid JSON."));
+      return;
+    }
+    if (
+      response.protocol !== BACKEND_PROTOCOL ||
+      typeof response.requestId !== "string" ||
+      typeof response.ok !== "boolean"
+    ) {
+      this.#failAll(new Error("The backend emitted an invalid response envelope."));
+      return;
+    }
+    const pending = this.#pending.get(response.requestId);
+    if (pending === undefined) return;
+    clearTimeout(pending.timeout);
+    this.#pending.delete(response.requestId);
+    if (response.ok) {
+      pending.resolve(response.result);
+      return;
+    }
+    const code = response.error?.code ?? "backend-error";
+    const message = response.error?.message ?? "The backend operation failed.";
+    pending.reject(new Error(`${message} (${code})`));
+  }
+
+  #failAll(error: Error): void {
+    for (const pending of this.#pending.values()) {
+      clearTimeout(pending.timeout);
+      pending.reject(error);
+    }
+    this.#pending.clear();
+  }
+}

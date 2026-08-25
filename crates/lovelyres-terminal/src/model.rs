@@ -228,7 +228,7 @@ pub enum TerminalModelError {
     InvalidSearch(String),
 }
 
-/// ANSI parser-backed terminal state without GPUI or SSH runtime ownership.
+/// ANSI parser-backed terminal state without UI or SSH runtime ownership.
 pub struct TerminalModel {
     config: TerminalConfig,
     terminal: Term<ModelEventProxy>,

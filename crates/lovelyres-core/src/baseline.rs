@@ -6,6 +6,7 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
+    fmt,
     sync::Arc,
     time::Duration,
 };
@@ -13,7 +14,10 @@ use std::{
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use parking_lot::Mutex;
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize, Deserializer, Serialize,
+    de::{Error as _, IgnoredAny, SeqAccess, Visitor},
+};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -37,6 +41,7 @@ const RESTORE_MARKER: &str = "LR_BASELINE_RESTORE_V1";
 const REAPPLY_MARKER: &str = "LR_BASELINE_REAPPLY_V1";
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(45);
 const MAX_HISTORY: usize = 256;
+const MAX_BASELINE_HISTORY_DOCUMENT_BYTES: usize = 4 * 1024 * 1024;
 const MAX_CHANGES: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -873,7 +878,47 @@ pub struct BaselineOperationOutcome {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct StoredBaselineHistory {
+    #[serde(deserialize_with = "deserialize_baseline_history_changes")]
     changes: Vec<BaselineChangeRecord>,
+}
+
+fn deserialize_baseline_history_changes<'de, D>(
+    deserializer: D,
+) -> Result<Vec<BaselineChangeRecord>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct BaselineHistoryVisitor;
+
+    impl<'de> Visitor<'de> for BaselineHistoryVisitor {
+        type Value = Vec<BaselineChangeRecord>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(formatter, "at most {MAX_HISTORY} baseline history records")
+        }
+
+        fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            let mut changes =
+                Vec::with_capacity(sequence.size_hint().unwrap_or_default().min(MAX_HISTORY));
+            while changes.len() < MAX_HISTORY {
+                let Some(change) = sequence.next_element()? else {
+                    return Ok(changes);
+                };
+                changes.push(change);
+            }
+            if sequence.next_element::<IgnoredAny>()?.is_some() {
+                return Err(A::Error::custom(
+                    "baseline history count exceeds its storage budget",
+                ));
+            }
+            Ok(changes)
+        }
+    }
+
+    deserializer.deserialize_seq(BaselineHistoryVisitor)
 }
 
 #[derive(Debug, Clone)]
@@ -1060,15 +1105,11 @@ impl BaselineService {
         self.target.validate(target)?;
         let _guard = self.lock.lock();
         let mut records = self
-            .store
-            .read_or_default::<StoredBaselineHistory>(StoreFile::Baseline)?
+            .load_stored_baseline_history()?
             .changes
             .into_iter()
             .filter(|record| record.target == target.identity)
             .collect::<Vec<_>>();
-        for record in &records {
-            validate_record(record)?;
-        }
         records.sort_by(|left, right| right.created_at.cmp(&left.created_at));
         Ok(records)
     }
@@ -1139,9 +1180,7 @@ impl BaselineService {
     fn insert_record(&self, record: BaselineChangeRecord) -> CoreResult<()> {
         validate_record(&record)?;
         let _guard = self.lock.lock();
-        let mut stored = self
-            .store
-            .read_or_default::<StoredBaselineHistory>(StoreFile::Baseline)?;
+        let mut stored = self.load_stored_baseline_history()?;
         if stored.changes.iter().any(|item| item.id == record.id) {
             return Err(CoreError::validation(
                 "baseline record",
@@ -1162,10 +1201,10 @@ impl BaselineService {
         record_id: &str,
     ) -> CoreResult<BaselineChangeRecord> {
         validate_uuid("baseline record id", record_id)?;
+        self.target.validate(target)?;
         let _guard = self.lock.lock();
         let record = self
-            .store
-            .read_or_default::<StoredBaselineHistory>(StoreFile::Baseline)?
+            .load_stored_baseline_history()?
             .changes
             .into_iter()
             .find(|record| record.id == record_id && record.target == target.identity)
@@ -1187,9 +1226,7 @@ impl BaselineService {
     ) -> CoreResult<BaselineChangeRecord> {
         validate_uuid("baseline operation id", operation_id)?;
         let _guard = self.lock.lock();
-        let mut stored = self
-            .store
-            .read_or_default::<StoredBaselineHistory>(StoreFile::Baseline)?;
+        let mut stored = self.load_stored_baseline_history()?;
         let record = stored
             .changes
             .iter_mut()
@@ -1215,6 +1252,25 @@ impl BaselineService {
         let result = record.clone();
         self.store.write(StoreFile::Baseline, &stored)?;
         Ok(result)
+    }
+
+    fn load_stored_baseline_history(&self) -> CoreResult<StoredBaselineHistory> {
+        let stored = self
+            .store
+            .read_or_default_bounded::<StoredBaselineHistory>(
+                StoreFile::Baseline,
+                MAX_BASELINE_HISTORY_DOCUMENT_BYTES,
+            )?;
+        if stored.changes.len() > MAX_HISTORY {
+            return Err(CoreError::validation(
+                "baseline changes",
+                "the stored history count exceeds its storage budget",
+            ));
+        }
+        for record in &stored.changes {
+            validate_record(record)?;
+        }
+        Ok(stored)
     }
 }
 
@@ -2225,6 +2281,50 @@ mod tests {
         output
     }
 
+    fn stored_record(
+        index: usize,
+        target: &TargetIdentity,
+        state: BaselineChangeState,
+    ) -> BaselineChangeRecord {
+        let id = Uuid::from_u128(index as u128 + 1).to_string();
+        let changes = vec![PlannedBaselineChange {
+            item_id: "ssh-max-auth-tries".to_owned(),
+            before: BaselineObservedValue::Value("6".to_owned()),
+            after: "4".to_owned(),
+        }];
+        let files = files_for_changes(&changes).unwrap();
+        let backups = files
+            .iter()
+            .map(|file| BaselineBackupEvidence {
+                file: file.clone(),
+                sha256: Some("00".repeat(32)),
+            })
+            .collect::<Vec<_>>();
+        let created_at = Utc::now() + chrono::TimeDelta::seconds(index as i64);
+        BaselineChangeRecord {
+            id: id.clone(),
+            operation_id: Uuid::from_u128((1_u128 << 64) + index as u128 + 1).to_string(),
+            last_operation_id: Uuid::from_u128((2_u128 << 64) + index as u128 + 1).to_string(),
+            target: target.clone(),
+            changes: changes.clone(),
+            files: files.clone(),
+            backups: backups.clone(),
+            remote_root: expected_remote_root(&id).unwrap(),
+            reload_policy: BaselineReloadPolicy::Defer,
+            digest: record_digest(&changes, &files, &backups, BaselineReloadPolicy::Defer).unwrap(),
+            state,
+            created_at,
+            updated_at: created_at,
+        }
+    }
+
+    fn write_stored_history(services: &BackendServices, changes: Vec<BaselineChangeRecord>) {
+        services
+            .store()
+            .write(StoreFile::Baseline, &StoredBaselineHistory { changes })
+            .unwrap();
+    }
+
     #[test]
     fn catalog_is_closed_unique_and_values_are_canonical() {
         let mut ids = BTreeSet::new();
@@ -2595,6 +2695,134 @@ mod tests {
             .unwrap();
         assert_eq!(restored.record.state, BaselineChangeState::Restored);
         assert!(restored.verification.passed);
+    }
+
+    #[tokio::test]
+    async fn encoded_baseline_history_is_rejected_before_json_decode() {
+        let (_temp, services, session, _harness) = fixture().await;
+        let hostile = b"HOSTILE_BASELINE_DOCUMENT_MUST_NOT_ECHO";
+        let mut encoded = vec![b'x'; MAX_BASELINE_HISTORY_DOCUMENT_BYTES + 1];
+        encoded[..hostile.len()].copy_from_slice(hostile);
+        fs::write(services.store().path_for(StoreFile::Baseline), encoded).unwrap();
+
+        let error = services
+            .baseline()
+            .list_history(session.target())
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            CoreError::Validation {
+                subject: "baseline changes",
+                ..
+            }
+        ));
+        let rendered = format!("{error:?} {error}");
+        assert!(!rendered.contains(std::str::from_utf8(hostile).unwrap()));
+    }
+
+    #[tokio::test]
+    async fn stored_history_limit_rejects_257_on_every_load_path_without_echo() {
+        let (_temp, services, session, _harness) = fixture().await;
+        let target = session.target().identity.clone();
+        let mut changes = (0..=MAX_HISTORY)
+            .map(|index| stored_record(index, &target, BaselineChangeState::Applied))
+            .collect::<Vec<_>>();
+        let hostile = "HOSTILE_257TH_BASELINE_RECORD_MUST_NOT_ECHO";
+        changes[MAX_HISTORY].operation_id = hostile.to_owned();
+        let lookup_id = changes[0].id.clone();
+        write_stored_history(&services, changes);
+
+        let errors = [
+            services
+                .baseline()
+                .list_history(session.target())
+                .unwrap_err(),
+            services
+                .baseline()
+                .record_by_id(session.target(), &lookup_id)
+                .unwrap_err(),
+            services
+                .baseline()
+                .transition_record(
+                    &lookup_id,
+                    &target,
+                    BaselineChangeState::Applied,
+                    BaselineChangeState::Restored,
+                    &Uuid::new_v4().to_string(),
+                )
+                .unwrap_err(),
+            services
+                .baseline()
+                .insert_record(stored_record(
+                    MAX_HISTORY + 100,
+                    &target,
+                    BaselineChangeState::Applied,
+                ))
+                .unwrap_err(),
+        ];
+        for error in errors {
+            let rendered = format!("{error:?} {error}");
+            assert!(!rendered.contains(hostile));
+            assert!(rendered.contains("baseline history count exceeds its storage budget"));
+        }
+    }
+
+    #[tokio::test]
+    async fn exactly_256_stored_history_records_are_valid_on_every_load_path() {
+        let (_temp, services, session, _harness) = fixture().await;
+        let target = session.target().identity.clone();
+        let changes = (0..MAX_HISTORY)
+            .map(|index| stored_record(index, &target, BaselineChangeState::Applied))
+            .collect::<Vec<_>>();
+        let lookup_id = changes[0].id.clone();
+        write_stored_history(&services, changes);
+
+        assert_eq!(
+            services
+                .baseline()
+                .list_history(session.target())
+                .unwrap()
+                .len(),
+            MAX_HISTORY
+        );
+        assert_eq!(
+            services
+                .baseline()
+                .record_by_id(session.target(), &lookup_id)
+                .unwrap()
+                .id,
+            lookup_id
+        );
+        let transitioned = services
+            .baseline()
+            .transition_record(
+                &lookup_id,
+                &target,
+                BaselineChangeState::Applied,
+                BaselineChangeState::Restored,
+                &Uuid::new_v4().to_string(),
+            )
+            .unwrap();
+        assert_eq!(transitioned.state, BaselineChangeState::Restored);
+
+        let inserted = stored_record(MAX_HISTORY + 100, &target, BaselineChangeState::Applied);
+        services.baseline().insert_record(inserted.clone()).unwrap();
+        assert_eq!(
+            services
+                .baseline()
+                .list_history(session.target())
+                .unwrap()
+                .len(),
+            MAX_HISTORY
+        );
+        assert_eq!(
+            services
+                .baseline()
+                .record_by_id(session.target(), &inserted.id)
+                .unwrap()
+                .id,
+            inserted.id
+        );
     }
 
     #[test]

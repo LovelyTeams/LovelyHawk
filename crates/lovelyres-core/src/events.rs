@@ -116,7 +116,7 @@ impl TerminalEventReceiver {
         self.0.is_empty()
     }
 
-    /// Drain events during a GPUI frame without exposing the channel backend.
+    /// Drain events during a frontend frame without exposing the channel backend.
     pub fn try_recv(&self) -> CoreResult<Option<TerminalEvent>> {
         match self.0.try_recv() {
             Ok(event) => Ok(Some(event)),

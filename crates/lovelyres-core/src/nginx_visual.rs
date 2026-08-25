@@ -25,6 +25,7 @@ const MAX_NGINX_VISUAL_TOKENS: usize = 262_144;
 
 const SUGGESTED_FILE_NAME: &str = "nginx-visual.conf";
 const MAX_ROW_TEXT_BYTES: usize = 512;
+const MAX_SAFE_ROW_SEARCH_CHARS: usize = 128;
 static NEXT_DOCUMENT_REVISION: AtomicU64 = AtomicU64::new(1);
 
 const COMPETITION_SKELETON: &str = r#"# LovelyRes 应急响应比赛 Nginx 全面编辑骨架
@@ -202,6 +203,39 @@ impl NginxVisualRow {
 
     pub const fn sensitive(&self) -> bool {
         self.sensitive
+    }
+
+    /// Matches only bounded structural metadata that is safe to index.
+    ///
+    /// Directive arguments, previews, comments, and opaque source are
+    /// deliberately excluded so a goal keyword cannot make hostile or secret
+    /// configuration text searchable.
+    pub fn matches_safe_query(&self, raw_query: &str) -> bool {
+        let query = raw_query.trim();
+        if query.chars().count() > MAX_SAFE_ROW_SEARCH_CHARS || query.chars().any(char::is_control)
+        {
+            return false;
+        }
+        if query.is_empty() {
+            return true;
+        }
+
+        ascii_case_insensitive_contains(self.kind.label(), query)
+            || ascii_case_insensitive_contains(
+                match self.kind {
+                    NginxVisualNodeKind::Directive => "statement",
+                    NginxVisualNodeKind::Block => "container",
+                    NginxVisualNodeKind::Comment => "comment",
+                    NginxVisualNodeKind::Opaque => "opaque",
+                },
+                query,
+            )
+            || matches!(
+                self.kind,
+                NginxVisualNodeKind::Directive | NginxVisualNodeKind::Block
+            ) && self
+                .name()
+                .is_some_and(|name| ascii_case_insensitive_contains(name, query))
     }
 }
 
@@ -1134,6 +1168,13 @@ fn bounded_preview(bytes: &[u8]) -> (String, bool) {
     (preview, truncated)
 }
 
+fn ascii_case_insensitive_contains(haystack: &str, needle: &str) -> bool {
+    haystack
+        .as_bytes()
+        .windows(needle.len())
+        .any(|candidate| candidate.eq_ignore_ascii_case(needle.as_bytes()))
+}
+
 fn preferred_newline(source: &[u8]) -> &'static [u8] {
     if source.windows(2).any(|window| window == b"\r\n") {
         b"\r\n"
@@ -1262,6 +1303,31 @@ third_party_block option { nested_unknown yes; }
                 .any(|row| row.name() == Some("third_party_directive"))
         );
         assert!(rows.iter().any(|row| row.depth() >= 3));
+    }
+
+    #[test]
+    fn safe_nginx_row_search_never_indexes_arguments_or_preview_text() {
+        let document = NginxVisualDocument::parse("server { location = /admin { return 403; } }\n")
+            .expect("Nginx 403 fixture");
+        let rows = document.rows();
+        assert!(rows.iter().all(|row| !row.matches_safe_query("403")));
+        let return_row = rows
+            .iter()
+            .find(|row| row.name() == Some("return"))
+            .expect("return directive");
+        assert_eq!(return_row.arguments(), Some("403"));
+        assert!(return_row.matches_safe_query("RETURN"));
+        assert!(!return_row.matches_safe_query("403"));
+
+        let location_row = rows
+            .iter()
+            .find(|row| row.name() == Some("location"))
+            .expect("location block");
+        assert_eq!(location_row.arguments(), Some("= /admin"));
+        assert!(location_row.matches_safe_query("location"));
+        assert!(!location_row.matches_safe_query("/admin"));
+        assert!(!location_row.matches_safe_query("unsafe\nquery"));
+        assert!(!location_row.matches_safe_query(&"x".repeat(MAX_SAFE_ROW_SEARCH_CHARS + 1)));
     }
 
     #[test]
@@ -1430,6 +1496,66 @@ third_party_block option { nested_unknown yes; }
             document.output().text().unwrap(),
             "error_log logs/error.log;\n"
         );
+    }
+
+    #[test]
+    fn foreign_document_node_ids_fail_closed_without_mutation() {
+        fn assert_rejected_unchanged(
+            document: &mut NginxVisualDocument,
+            mutation: impl FnOnce(&mut NginxVisualDocument) -> CoreResult<()>,
+        ) {
+            let raw = document.raw_bytes().to_vec();
+            let output = document.output().bytes().to_vec();
+            let rows = document.rows();
+            let structured = document.is_structured();
+            let contains_sensitive_values = document.contains_sensitive_values();
+
+            match mutation(document).expect_err("foreign Nginx node ID must fail closed") {
+                CoreError::Validation { subject, message } => {
+                    assert_eq!(subject, "Nginx visual edit");
+                    assert_eq!(message, "selected Nginx node is stale or missing");
+                }
+                error => panic!("unexpected foreign-ID error: {error}"),
+            }
+
+            assert_eq!(document.raw_bytes(), raw);
+            assert_eq!(document.output().bytes(), output);
+            // Rows include revision-scoped IDs, so exact equality also proves
+            // that the document revision and complete projected tree did not change.
+            assert_eq!(document.rows(), rows);
+            assert_eq!(document.is_structured(), structured);
+            assert_eq!(
+                document.contains_sensitive_values(),
+                contains_sensitive_values
+            );
+        }
+
+        let mut document = NginxVisualDocument::parse(
+            "events {\n    worker_connections 1024;\n}\n# local document\n",
+        )
+        .unwrap();
+        let foreign_document =
+            NginxVisualDocument::parse("http {\n    server { listen 80; }\n}\n").unwrap();
+        let foreign = foreign_document.rows()[0].id();
+
+        assert_rejected_unchanged(&mut document, |document| {
+            document.add_directive(Some(foreign), "worker_connections", "2048")
+        });
+        assert_rejected_unchanged(&mut document, |document| {
+            document.add_block(Some(foreign), "server", "")
+        });
+        assert_rejected_unchanged(&mut document, |document| {
+            document.add_comment(Some(foreign), "foreign comment")
+        });
+        assert_rejected_unchanged(&mut document, |document| {
+            document.update_statement(foreign, "worker_processes", "2")
+        });
+        assert_rejected_unchanged(&mut document, |document| {
+            document.update_comment(foreign, "foreign comment")
+        });
+        assert_rejected_unchanged(&mut document, |document| document.remove(foreign));
+        assert_rejected_unchanged(&mut document, |document| document.move_up(foreign));
+        assert_rejected_unchanged(&mut document, |document| document.move_down(foreign));
     }
 
     #[test]

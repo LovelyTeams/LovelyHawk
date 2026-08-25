@@ -1,4 +1,4 @@
-name: GPUI CI
+name: Electron CI
 
 on:
   push:
@@ -7,15 +7,15 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: gpui-ci-${{ github.ref }}
+  group: electron-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   quality:
-    name: GPUI Cargo quality gates
+    name: Electron and Rust quality gates
     runs-on: windows-latest
     steps:
-      - name: Checkout repository and frozen baseline tag
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -31,6 +31,30 @@ jobs:
         with:
           workspaces: '. -> target'
 
-      - name: Run native workspace quality gates
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.13.0'
+
+      - name: Activate pinned pnpm
         shell: pwsh
-        run: ./scripts/gpui-quality-gates.ps1 -ManifestPath ./Cargo.toml -ExpectedVersion 1.0.0
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.28.2 --activate
+          pnpm --version
+
+      - name: Install locked Electron dependencies
+        shell: pwsh
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify gate failure detection
+        shell: pwsh
+        run: |
+          ./scripts/electron-quality-gates.ps1 -SelfTest
+          ./scripts/electron-source-gate.ps1 -SelfTest
+          ./scripts/electron-dependency-gate.ps1 -SelfTest
+          ./scripts/electron-ui-ledger-gate.ps1 -SelfTest
+
+      - name: Run Electron and Rust quality gates
+        shell: pwsh
+        run: ./scripts/electron-quality-gates.ps1

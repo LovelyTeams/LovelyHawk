@@ -10,7 +10,7 @@ pub struct ImeLayoutRect {
     pub height: f32,
 }
 
-/// Ephemeral UTF-16 document exposed to GPUI's platform IME.
+/// Ephemeral UTF-16 document exposed to a host platform IME.
 /// Committed bytes are returned to the caller and never retained as terminal history.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ImeState {

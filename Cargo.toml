@@ -1,8 +1,8 @@
 [workspace]
 members = [
   "crates/lovelyres-core",
+  "crates/lovelyres-electron-backend",
   "crates/lovelyres-terminal",
-  "crates/lovelyres-gpui",
 ]
 resolver = "2"
 
@@ -17,43 +17,35 @@ repository = "https://github.com/Tokeii0/LovelyERes"
 [workspace.dependencies]
 aes-gcm = "0.10"
 alacritty_terminal = "=0.25.1"
-anyhow = "1.0"
 async-channel = "2.5"
 async-trait = "0.1"
 base64 = "0.21"
 bytes = "1"
 chrono = { version = "0.4", features = ["serde"] }
 futures = "0.3"
-gpui = "=0.2.2"
-gpui-component = { version = "=0.5.1", default-features = false }
-gpui-component-assets = "=0.5.1"
 parking_lot = "0.12"
-raw-window-handle = "=0.6.2"
 regex = "1"
 reqwest = { version = "0.12", features = ["json", "stream", "socks"] }
 russh = { version = "0.62.5", default-features = false, features = ["ring", "flate2"] }
 russh-sftp = "2.4.0"
-rust-embed = "8.7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 thiserror = "1.0"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
-tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 unicode-width = "0.2"
 url = "2.5"
 uuid = { version = "1", features = ["v4", "serde"] }
-windows = { version = "=0.61.3", features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 zeroize = { version = "1", features = ["derive"] }
 
 [profile.dev]
 opt-level = 1
 
-# GPUI's Windows move loop refreshes the full window on every WM_MOVE. Keep
-# dependencies optimized so debug builds remain responsive while dragging
-# content-heavy main, SSH, and SFTP windows.
+# SSH crypto (russh/ring) and the alacritty terminal grid dominate debug-build
+# sidecar latency; keep dependencies optimized so development terminals stay
+# responsive under load.
 [profile.dev.package."*"]
 opt-level = 3
 

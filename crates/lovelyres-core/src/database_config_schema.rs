@@ -12,7 +12,8 @@ use url::Url;
 use zeroize::Zeroizing;
 
 use crate::database_config::{
-    DatabaseConfigComponent, DatabaseConfigDialect, DatabaseConfigProduct, artifact_by_key,
+    DatabaseConfigComponent, DatabaseConfigDialect, DatabaseConfigLocalDraftAuthority,
+    DatabaseConfigProduct, artifact_by_key,
 };
 use crate::database_config_schema_domestic::{
     DM8_MAIN_INSPECT_ONLY_SCHEMA, DM8_SQL_LOG_INSPECT_ONLY_SCHEMA,
@@ -249,6 +250,25 @@ pub struct DatabaseConfigParameterSchema {
 }
 
 impl DatabaseConfigParameterSchema {
+    /// Returns a bounded public locator label without including a configured
+    /// value. Container-qualified labels keep otherwise identical keys
+    /// unambiguous across reviewed option-file groups.
+    pub fn public_locator_label(&self) -> Option<String> {
+        if !valid_bounded_text(self.canonical_key, MAX_DATABASE_CONFIG_SCHEMA_KEY_BYTES)
+            || self.container_path.is_some_and(|container| {
+                !valid_bounded_text(container, MAX_DATABASE_CONFIG_SCHEMA_KEY_BYTES)
+            })
+        {
+            return None;
+        }
+        let label = format!(
+            "{} · {}",
+            self.container_path.unwrap_or("根级配置"),
+            self.canonical_key,
+        );
+        (label.len() <= MAX_DATABASE_CONFIG_SCHEMA_LABEL_BYTES).then_some(label)
+    }
+
     /// Returns a canonical, bounded public representation for read-only UI
     /// metadata. Invalid or sensitive metadata fails closed as absent even if a
     /// caller bypasses catalog construction.
@@ -297,6 +317,22 @@ impl DatabaseConfigSchema {
             self.completeness,
             DatabaseConfigSchemaCompleteness::Complete
         )
+    }
+
+    /// Returns local draft authority from the exact bound artifact only.
+    ///
+    /// Schema completeness, parameters and documented defaults are metadata;
+    /// none of them can elevate or reduce the artifact catalog's authority.
+    /// An unvalidated binding that disagrees with the artifact fails closed.
+    pub fn bound_artifact_local_draft_authority(
+        &self,
+    ) -> Option<DatabaseConfigLocalDraftAuthority> {
+        let artifact = artifact_by_key(self.binding.artifact_key)?;
+        if artifact.product != self.binding.product || artifact.component != self.binding.component
+        {
+            return None;
+        }
+        Some(artifact.local_draft_authority())
     }
 
     pub fn parameter(
@@ -1013,7 +1049,100 @@ fn trim_ascii_whitespace(value: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use super::*;
+
+    #[test]
+    fn schemas_never_change_vendor_or_generated_local_draft_permission() {
+        let schemas = [
+            DatabaseConfigSchema {
+                display_label: "Test vendor-schema artifact",
+                binding: DatabaseConfigSchemaBinding {
+                    product: DatabaseConfigProduct::OpenGauss,
+                    versions: DatabaseConfigVersionSelector::Exact(DatabaseConfigVersion::new(
+                        6, 0, 0,
+                    )),
+                    edition_key: Some("test.standard"),
+                    component: DatabaseConfigComponent::Deployment,
+                    artifact_key: "opengauss-om-cluster-xml",
+                },
+                completeness: DatabaseConfigSchemaCompleteness::Partial,
+                ..MYSQL_OPTION_FILE_8_0_SCHEMA
+            },
+            DatabaseConfigSchema {
+                display_label: "Test generated artifact",
+                binding: DatabaseConfigSchemaBinding {
+                    product: DatabaseConfigProduct::MySql,
+                    versions: DatabaseConfigVersionSelector::Exact(DatabaseConfigVersion::new(
+                        8, 0, 0,
+                    )),
+                    edition_key: None,
+                    component: DatabaseConfigComponent::Persistence,
+                    artifact_key: "mysql-persisted-variables",
+                },
+                completeness: DatabaseConfigSchemaCompleteness::Complete,
+                ..MYSQL_OPTION_FILE_8_0_SCHEMA
+            },
+        ];
+
+        assert_eq!(
+            schemas.map(|schema| schema.completeness),
+            [
+                DatabaseConfigSchemaCompleteness::Partial,
+                DatabaseConfigSchemaCompleteness::Complete,
+            ]
+        );
+        for schema in schemas {
+            let artifact = artifact_by_key(schema.binding.artifact_key)
+                .expect("schema fixture must bind a registered artifact");
+            let before = artifact.local_draft_authority();
+            assert_eq!(before, DatabaseConfigLocalDraftAuthority::ReadOnly);
+            assert_eq!(
+                schema.bound_artifact_local_draft_authority(),
+                Some(before),
+                "{} schema metadata changed artifact authority",
+                schema.binding.artifact_key
+            );
+            assert!(!artifact.allows_lossless_local_draft());
+        }
+
+        let editable =
+            artifact_by_key("mysql-option-file").expect("registered lossless local draft artifact");
+        let complete_schema = DatabaseConfigSchema {
+            completeness: DatabaseConfigSchemaCompleteness::Complete,
+            ..MYSQL_OPTION_FILE_8_0_SCHEMA
+        };
+        assert_eq!(
+            complete_schema.bound_artifact_local_draft_authority(),
+            Some(DatabaseConfigLocalDraftAuthority::LosslessLocalDraft)
+        );
+        assert_eq!(
+            editable.local_draft_authority(),
+            DatabaseConfigLocalDraftAuthority::LosslessLocalDraft
+        );
+    }
+
+    #[test]
+    fn mariadb_container_parameter_labels_are_unique_and_root_free() {
+        let schemas = DATABASE_CONFIG_SCHEMAS
+            .iter()
+            .filter(|schema| schema.binding.product == DatabaseConfigProduct::MariaDb)
+            .collect::<Vec<_>>();
+        assert_eq!(schemas.len(), 2);
+
+        for schema in schemas {
+            let labels = schema
+                .parameters
+                .iter()
+                .filter(|parameter| parameter.canonical_key == "wait_timeout")
+                .filter_map(DatabaseConfigParameterSchema::public_locator_label)
+                .collect::<HashSet<_>>();
+            assert_eq!(labels.len(), 9, "{}", schema.version_label);
+            assert!(labels.iter().all(|label| label.ends_with("· wait_timeout")));
+            assert!(!labels.contains("根级配置 · wait_timeout"));
+        }
+    }
 
     #[test]
     fn production_registry_is_valid_and_remains_partial() {
@@ -1077,6 +1206,29 @@ mod tests {
                 )
             )
         }));
+    }
+
+    #[test]
+    fn yashandb_yasdb_ini_has_one_exact_fixed_production_schema() {
+        let schemas = DATABASE_CONFIG_SCHEMAS
+            .iter()
+            .filter(|schema| schema.binding.artifact_key == "yashandb-yasdb-ini")
+            .collect::<Vec<_>>();
+        assert_eq!(schemas.len(), 1);
+        let schema = schemas[0];
+        assert_eq!(schema.binding.product, DatabaseConfigProduct::Yashan);
+        assert_eq!(schema.binding.component, DatabaseConfigComponent::Server);
+        assert_eq!(
+            schema.binding.versions,
+            DatabaseConfigVersionSelector::Exact(DatabaseConfigVersion::new_with_revision(
+                23, 5, 4, 100
+            ))
+        );
+        assert_eq!(
+            schema.binding.edition_key,
+            Some("official-doc-family-23.5.4.100")
+        );
+        assert!(!schema.has_complete_artifact_coverage());
     }
 
     #[test]

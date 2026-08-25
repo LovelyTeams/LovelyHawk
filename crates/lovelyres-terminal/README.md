@@ -1,7 +1,8 @@
 # lovelyres-terminal
 
-Native terminal foundation for LovelyRes GPUI. It has no
-WebView, xterm.js, ttyd, Wetty, ShellInABox, or gotty dependency.
+Headless native terminal foundation for LovelyRes. It has no
+WebView, ttyd, Wetty, ShellInABox, or gotty dependency; the Electron
+renderer consumes its bounded snapshots and events through the Rust sidecar.
 
 Implemented in this phase:
 
@@ -20,29 +21,16 @@ Implemented in this phase:
   and an injectable reconnect policy;
 - frame-budgeted event draining that batches contiguous parser input while
   preserving every event and byte in order;
-- GPUI 0.2.2 `TerminalPane` with `Focusable` and the canonical
-  `EntityInputHandler` → `ElementInputHandler` bridge;
 - UTF-16 IME preedit/selection/range/bounds mapping and UTF-8 commit;
-- xterm-compatible control, Alt, cursor, navigation, and F1–F12 key encoding;
-- local mouse drag selection, wheel scrollback, clipboard shortcuts, and a
-  search-overlay request hook;
-- measured font metrics, DPI-aware PTY pixel dimensions, and resize dispatch;
-- an input-only bounded FIFO that preserves accepted byte order, returns
-  rejected bytes to the caller, retries downstream backpressure, and exposes
-  rejection counters plus an in-pane saturation warning;
-- a coalescing one-slot resize path and an independent high-priority close
-  worker, so resize storms cannot consume input capacity and a saturated input
-  queue cannot block shutdown;
+- measured geometry helpers, DPI-aware PTY pixel dimensions, and resize dispatch;
 - per-cell ANSI foreground/background, bold, dim, italic, underline,
-  strikeout, inverse, hidden, selection, and cursor rendering.
+  strikeout, inverse, hidden, selection, and cursor state.
 
-`TerminalPane::attach` embeds an existing `Arc<Mutex<TerminalModel>>` and an
-`Arc<dyn TerminalTransport>`; `TerminalPane::create` creates the model from a
-configuration. Tokio-backed transports must bridge through LovelyRes' process
-Tokio runtime because GPUI's background executor is intentionally separate.
+Tokio-backed transports must bridge through LovelyRes' process Tokio runtime
+rather than assuming the hosting frontend's executor owns a Tokio reactor.
 
-This is still not a claim of complete SSH compatibility. The real Windows,
-OpenSSH, IME, DPI, RDP, font fallback, reconnect, and sustained-throughput
-checks are tracked in `FEASIBILITY_GATES.md`. Protocol conformance fixtures and
-deterministic high-throughput tests cover the window-independent layer; real
-tmux/vim/russh and GPUI frame-time behavior remain release gates.
+This is still not a claim of complete SSH compatibility. The real OpenSSH, IME,
+reconnect, and sustained-throughput checks are tracked in
+`FEASIBILITY_GATES.md`. Protocol conformance fixtures and deterministic
+high-throughput tests cover the window-independent layer; real tmux/vim/russh
+behavior remains a release gate.

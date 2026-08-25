@@ -378,8 +378,9 @@ pub struct AiModelList {
     pub models: Vec<String>,
 }
 
-/// A Tokio-owned task that can be awaited from a GPUI bridge without running the
-/// HTTP future on GPUI's executor. Dropping it aborts unfinished work.
+/// A Tokio-owned task that can be awaited from a frontend bridge without
+/// running the HTTP future on the caller's executor. Dropping it aborts
+/// unfinished work.
 #[must_use = "dropping an AI task aborts the request"]
 #[derive(Debug)]
 pub struct AiTask<T> {

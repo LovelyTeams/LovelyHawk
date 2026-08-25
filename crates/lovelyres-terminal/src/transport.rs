@@ -28,9 +28,9 @@ impl TerminalEvent {
 
 /// Remote PTY operations; a russh adapter implements this trait in the core crate.
 ///
-/// The GPUI pane polls these futures on its background executor. Implementations
+/// The hosting frontend polls these futures on its own executor. Implementations
 /// backed by Tokio I/O must bridge into the process-level Tokio runtime rather
-/// than assuming GPUI's executor owns a Tokio reactor.
+/// than assuming the caller's executor owns a Tokio reactor.
 #[async_trait]
 pub trait TerminalTransport: Send + Sync {
     async fn send_input(&self, bytes: &[u8]) -> Result<(), TerminalTransportError>;

@@ -120,7 +120,7 @@ manager、厂商运维工具、include 搜索顺序和运行时持久化层可�
   `LineConfigTargetPolicy` 只对官方源码
   已逐个审校的 MariaDB 11.4.10、11.8.6 与 12.2.2（revision 0）识别精确小写
   `?includedir`；相邻补丁、其他 minor、MySQL/兼容产品和无版本文档全部失败关闭。`?include`、
-  大小写变体、含 `#` 的歧义行及无终止换行的末行仍作为 opaque 保真。GPUI 尚无完整 patch
+  大小写变体、含 `#` 的歧义行及无终止换行的末行仍作为 opaque 保真。前端尚无完整 patch
   版本选择器，因此默认导入路径不会启用该策略；真实 MariaDB 各版本与 Windows 末行行为仍为
   `NOT_RUN`。
 - MySQL/MariaDB Batch A 已把静态 schema 与 catalog validator 的证明边界锁定：MySQL 8.4

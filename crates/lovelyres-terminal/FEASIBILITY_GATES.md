@@ -31,16 +31,16 @@ replace the hardware and interoperability gate required before a release.
   programs, reconnect, alternate screen, bracketed paste, application keypad,
   focus events, and DEC/SGR mouse operation in tmux/vim;
 - sustained end-to-end output and resize storms with no queue loss and bounded
-  latency. The parser/queue layer is byte-exact; russh-to-GPUI scheduling still
-  requires real-system certification;
+  latency. The parser/queue layer is byte-exact; russh-to-frontend scheduling
+  still requires real-system certification;
 - OSC 52 opt-in UX and Windows clipboard integration. The default-deny policy
   is implemented, but no release flow should enable writes implicitly;
-- visual cursor/selection/underline alignment screenshots on D3D11 GPUs;
-- renderer performance for large grids. The current correctness-first GPUI
-  renderer creates a styled element per visible cell and must be batched if the
+- visual cursor/selection/underline alignment evidence in the Electron
+  terminal window;
+- renderer performance for large grids in the Electron terminal window if the
   throughput gate misses its frame-time target.
 
 ## Explicitly outside this phase
 
-- screen-reader certification, which is not promised for GPUI 0.2.2;
+- screen-reader certification for the hosting terminal window;
 - any WebView, xterm.js, ttyd, Wetty, ShellInABox, or gotty fallback.

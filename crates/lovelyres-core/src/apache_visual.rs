@@ -2055,6 +2055,79 @@ Listen 80
     }
 
     #[test]
+    fn foreign_document_node_ids_fail_closed_without_mutation() {
+        fn assert_rejected_unchanged(
+            document: &mut ApacheVisualDocument,
+            mutation: impl FnOnce(&mut ApacheVisualDocument) -> CoreResult<()>,
+        ) {
+            let raw = document.raw_bytes().to_vec();
+            let output = document.output().bytes().to_vec();
+            let rows = document.rows();
+            let structured = document.is_structured();
+            let has_opaque_regions = document.has_opaque_regions();
+            let contains_sensitive_values = document.contains_sensitive_values();
+
+            match mutation(document).expect_err("foreign Apache node ID must fail closed") {
+                CoreError::Validation { subject, message } => {
+                    assert_eq!(subject, "Apache visual edit");
+                    assert_eq!(message, "selected Apache node is stale or missing");
+                }
+                error => panic!("unexpected foreign-ID error: {error}"),
+            }
+
+            assert_eq!(document.raw_bytes(), raw);
+            assert_eq!(document.output().bytes(), output);
+            // Rows include revision-scoped IDs, so exact equality also proves
+            // that the document revision and complete projected tree did not change.
+            assert_eq!(document.rows(), rows);
+            assert_eq!(document.is_structured(), structured);
+            assert_eq!(document.has_opaque_regions(), has_opaque_regions);
+            assert_eq!(
+                document.contains_sensitive_values(),
+                contains_sensitive_values
+            );
+        }
+
+        let mut document = ApacheVisualDocument::parse(
+            "Listen 80\n<Directory \"/srv/www\">\n    Require all granted\n</Directory>\n# local document\n",
+        )
+        .unwrap();
+        let foreign_document = ApacheVisualDocument::parse(
+            "<VirtualHost *:80>\n    ServerName foreign.test\n</VirtualHost>\n",
+        )
+        .unwrap();
+        let foreign = foreign_document.rows()[0].id();
+
+        assert_rejected_unchanged(&mut document, |document| {
+            document.add_directive(Some(foreign), "ServerName", "local.test")
+        });
+        assert_rejected_unchanged(&mut document, |document| {
+            document.add_section(Some(foreign), "Directory", "\"/srv/other\"")
+        });
+        assert_rejected_unchanged(&mut document, |document| {
+            document.add_block(Some(foreign), "IfModule", "ssl_module")
+        });
+        assert_rejected_unchanged(&mut document, |document| {
+            document.add_comment(Some(foreign), "foreign comment")
+        });
+        assert_rejected_unchanged(&mut document, |document| {
+            document.update_statement(foreign, "Listen", "443")
+        });
+        assert_rejected_unchanged(&mut document, |document| {
+            document.update_directive(foreign, "Listen", "443")
+        });
+        assert_rejected_unchanged(&mut document, |document| {
+            document.update_section(foreign, "Directory", "\"/srv/other\"")
+        });
+        assert_rejected_unchanged(&mut document, |document| {
+            document.update_comment(foreign, "foreign comment")
+        });
+        assert_rejected_unchanged(&mut document, |document| document.remove(foreign));
+        assert_rejected_unchanged(&mut document, |document| document.move_up(foreign));
+        assert_rejected_unchanged(&mut document, |document| document.move_down(foreign));
+    }
+
+    #[test]
     fn sensitive_values_are_redacted_from_rows_and_debug() {
         let secret =
             "ProxyPass / https://user:secret@example.test/\nDBDParams \"password=top-secret\"\n";
@@ -2214,13 +2287,19 @@ Listen 80
             document
                 .rows()
                 .iter()
-                .any(|row| row.name() == Some("VirtualHost"))
+                .any(|row| row.name() == Some("VirtualHost") && row.editable())
         );
         assert!(
             document
                 .rows()
                 .iter()
                 .any(|row| row.name() == Some("IncludeOptional"))
+        );
+        assert!(
+            document
+                .rows()
+                .iter()
+                .any(|row| row.name() == Some("ServerTokens"))
         );
     }
 }

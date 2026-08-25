@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true
+  }
+}

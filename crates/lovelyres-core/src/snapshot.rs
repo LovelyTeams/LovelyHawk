@@ -17,7 +17,10 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::{StreamExt, TryStreamExt, stream};
 use parking_lot::Mutex;
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize, Deserializer, Serialize,
+    de::{self, IgnoredAny, SeqAccess, Visitor},
+};
 use sha2::{Digest, Sha256};
 use tokio::sync::Notify;
 use uuid::Uuid;
@@ -43,6 +46,9 @@ const SNAPSHOT_MUTATION_TIMEOUT: Duration = Duration::from_secs(180);
 const SNAPSHOT_VERIFY_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_FORENSIC_FIELD_BYTES: usize = 256 * 1024;
 const MAX_FORENSIC_TOTAL_BYTES: usize = 2 * 1024 * 1024;
+const MAX_SNAPSHOT_DOCUMENT_BYTES: usize = 128 * 1024 * 1024;
+const MAX_FORENSIC_DIFF_INPUT_LINES_PER_FIELD: usize = 2_048;
+const MAX_FORENSIC_DIFF_INPUT_LINES_TOTAL: usize = 8_192;
 const MAX_EVENT_CAPACITY: usize = 256;
 const REMOTE_ROOT_PREFIX: &str = "/tmp/.lovelyres_snap";
 
@@ -550,8 +556,103 @@ impl ForensicEventReceiver {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SnapshotDocument {
     version: u32,
+    #[serde(deserialize_with = "deserialize_directory_snapshots")]
     directory_snapshots: Vec<DirectorySnapshot>,
+    #[serde(deserialize_with = "deserialize_forensic_snapshots")]
     forensic_snapshots: Vec<ForensicSnapshot>,
+}
+
+fn deserialize_directory_snapshots<'de, D>(
+    deserializer: D,
+) -> Result<Vec<DirectorySnapshot>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_snapshots(
+        deserializer,
+        DIRECTORY_SNAPSHOT_LIMIT,
+        "directory snapshot index",
+    )
+}
+
+fn deserialize_forensic_snapshots<'de, D>(
+    deserializer: D,
+) -> Result<Vec<ForensicSnapshot>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_snapshots(
+        deserializer,
+        FORENSIC_SNAPSHOT_LIMIT,
+        "forensic snapshot index",
+    )
+}
+
+fn deserialize_bounded_snapshots<'de, D, T>(
+    deserializer: D,
+    maximum: usize,
+    subject: &'static str,
+) -> Result<Vec<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    struct BoundedSnapshotVisitor<T> {
+        marker: std::marker::PhantomData<T>,
+        maximum: usize,
+        subject: &'static str,
+    }
+
+    impl<'de, T> Visitor<'de> for BoundedSnapshotVisitor<T>
+    where
+        T: Deserialize<'de>,
+    {
+        type Value = Vec<T>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(
+                formatter,
+                "{} with at most {} entries",
+                self.subject, self.maximum
+            )
+        }
+
+        fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            if sequence
+                .size_hint()
+                .is_some_and(|length| length > self.maximum)
+            {
+                return Err(de::Error::custom(format!(
+                    "{} exceeds its {} entry limit",
+                    self.subject, self.maximum
+                )));
+            }
+            let mut values =
+                Vec::with_capacity(sequence.size_hint().unwrap_or(0).min(self.maximum));
+            while values.len() < self.maximum {
+                match sequence.next_element()? {
+                    Some(value) => values.push(value),
+                    None => return Ok(values),
+                }
+            }
+            if sequence.next_element::<IgnoredAny>()?.is_some() {
+                return Err(de::Error::custom(format!(
+                    "{} exceeds its {} entry limit",
+                    self.subject, self.maximum
+                )));
+            }
+            Ok(values)
+        }
+    }
+
+    deserializer.deserialize_seq(BoundedSnapshotVisitor {
+        marker: std::marker::PhantomData,
+        maximum,
+        subject,
+    })
 }
 
 impl Default for SnapshotDocument {
@@ -1048,6 +1149,7 @@ impl SnapshotService {
                 entity: "newer forensic snapshot",
                 id: newer_id.to_owned(),
             })?;
+        let mut input_lines = 0;
         let fields = ForensicCollector::ALL
             .into_iter()
             .map(|collector| {
@@ -1055,9 +1157,10 @@ impl SnapshotService {
                     collector,
                     older.data.get(collector),
                     newer.data.get(collector),
+                    &mut input_lines,
                 )
             })
-            .collect();
+            .collect::<CoreResult<Vec<_>>>()?;
         Ok(ForensicSnapshotDiff {
             older_id: older.id.clone(),
             newer_id: newer.id.clone(),
@@ -1066,15 +1169,24 @@ impl SnapshotService {
     }
 
     fn load_document(&self) -> CoreResult<SnapshotDocument> {
-        let document = self
-            .store
-            .read_or_default::<SnapshotDocument>(StoreFile::Snapshots)?;
+        let document = self.store.read_or_default_bounded::<SnapshotDocument>(
+            StoreFile::Snapshots,
+            MAX_SNAPSHOT_DOCUMENT_BYTES,
+        )?;
         if document.version != SNAPSHOT_DOCUMENT_VERSION {
             return Err(CoreError::UnsupportedSchema {
                 document: "snapshot document",
                 expected: SNAPSHOT_DOCUMENT_VERSION,
                 actual: document.version,
             });
+        }
+        if document.directory_snapshots.len() > DIRECTORY_SNAPSHOT_LIMIT
+            || document.forensic_snapshots.len() > FORENSIC_SNAPSHOT_LIMIT
+        {
+            return Err(CoreError::validation(
+                "snapshot document",
+                "the portable snapshot index exceeds its bounded entry count",
+            ));
         }
         Ok(document)
     }
@@ -1920,23 +2032,42 @@ fn validate_forensic_snapshot(snapshot: ForensicSnapshot) -> CoreResult<Forensic
     Ok(snapshot)
 }
 
-fn diff_field(collector: ForensicCollector, older: &str, newer: &str) -> ForensicFieldDiff {
-    let older = line_set(older);
-    let newer = line_set(newer);
-    ForensicFieldDiff {
+fn diff_field(
+    collector: ForensicCollector,
+    older: &str,
+    newer: &str,
+    input_lines: &mut usize,
+) -> CoreResult<ForensicFieldDiff> {
+    let older = line_set(older, input_lines)?;
+    let newer = line_set(newer, input_lines)?;
+    Ok(ForensicFieldDiff {
         collector,
         added: newer.difference(&older).cloned().collect(),
         removed: older.difference(&newer).cloned().collect(),
-    }
+    })
 }
 
-fn line_set(value: &str) -> BTreeSet<String> {
-    value
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(ToOwned::to_owned)
-        .collect()
+fn line_set(value: &str, input_lines: &mut usize) -> CoreResult<BTreeSet<String>> {
+    let mut field_lines = 0_usize;
+    let mut lines = BTreeSet::new();
+    for line in value.lines().map(str::trim).filter(|line| !line.is_empty()) {
+        field_lines = field_lines.checked_add(1).ok_or_else(|| {
+            CoreError::validation("forensic snapshot diff", "input line count overflowed")
+        })?;
+        *input_lines = input_lines.checked_add(1).ok_or_else(|| {
+            CoreError::validation("forensic snapshot diff", "input line count overflowed")
+        })?;
+        if field_lines > MAX_FORENSIC_DIFF_INPUT_LINES_PER_FIELD
+            || *input_lines > MAX_FORENSIC_DIFF_INPUT_LINES_TOTAL
+        {
+            return Err(CoreError::validation(
+                "forensic snapshot diff",
+                "input exceeds the bounded line budget",
+            ));
+        }
+        lines.insert(line.to_owned());
+    }
+    Ok(lines)
 }
 
 fn is_sha256(value: &str) -> bool {
@@ -2004,6 +2135,59 @@ mod tests {
             .await
             .unwrap();
         (root, services, session, harness)
+    }
+
+    fn stored_directory_snapshot(target: TargetIdentity) -> DirectorySnapshot {
+        let id = Uuid::new_v4().to_string();
+        let remote_root = format!("{REMOTE_ROOT_PREFIX}/{id}");
+        let mut snapshot = DirectorySnapshot {
+            id,
+            target,
+            created_at: "2026-08-24T00:00:00Z".parse().unwrap(),
+            remote_root: remote_root.clone(),
+            items: vec![DirectorySnapshotItem {
+                preset: SnapshotPreset::Passwd,
+                source: SnapshotPreset::Passwd.source().to_owned(),
+                kind: SnapshotPreset::Passwd.kind(),
+                archive_path: format!("{remote_root}/{}", SnapshotPreset::Passwd.archive_name()),
+                archive_sha256: "a".repeat(64),
+                content_sha256: "b".repeat(64),
+                bytes: 42,
+                present: true,
+            }],
+            record_sha256: String::new(),
+        };
+        snapshot.record_sha256 = directory_digest(&snapshot).unwrap();
+        snapshot
+    }
+
+    fn stored_forensic_snapshot(
+        target: &TargetGuard,
+        timestamp: &str,
+        data: ForensicData,
+    ) -> ForensicSnapshot {
+        let mut snapshot = ForensicSnapshot {
+            id: format!("snap-{}", Uuid::new_v4()),
+            timestamp: timestamp.parse().unwrap(),
+            server: "host-a.test".to_owned(),
+            target: ForensicTarget {
+                identity: target.identity.clone(),
+                session_id: "session-a".to_owned(),
+                host: "host-a.test".to_owned(),
+                port: 22,
+                username: "operator".to_owned(),
+                host_key_fingerprint: "SHA256:test".to_owned(),
+            },
+            collection: ForensicCollectionSummary {
+                total: ForensicCollector::ALL.len(),
+                completed: ForensicCollector::ALL.len(),
+                failed: 0,
+            },
+            data,
+            sha256: String::new(),
+        };
+        snapshot.sha256 = forensic_digest(&snapshot).unwrap();
+        snapshot
     }
 
     #[test]
@@ -2299,9 +2483,165 @@ mod tests {
 
     #[test]
     fn forensic_diff_uses_trimmed_nonempty_line_sets() {
-        let diff = diff_field(ForensicCollector::Processes, " a\n b\n", " b \n c\n");
+        let mut input_lines = 0;
+        let diff = diff_field(
+            ForensicCollector::Processes,
+            " a\n b\n",
+            " b \n c\n",
+            &mut input_lines,
+        )
+        .unwrap();
         assert_eq!(diff.added, vec!["c"]);
         assert_eq!(diff.removed, vec!["a"]);
+        assert_eq!(input_lines, 4);
+    }
+
+    #[test]
+    fn snapshot_document_encoded_size_is_rejected_before_deserialization() {
+        let root = TestRoot::new();
+        let store = PortableStore::prepare(root.0.clone()).unwrap();
+        let services = BackendServices::new(store.clone()).unwrap();
+        let document_path = store.path_for(StoreFile::Snapshots);
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(document_path)
+            .unwrap();
+        file.set_len((MAX_SNAPSHOT_DOCUMENT_BYTES + 1) as u64)
+            .unwrap();
+        let error = services.snapshots().load_document().unwrap_err();
+        assert!(matches!(error, CoreError::Validation { .. }));
+    }
+
+    #[test]
+    fn snapshot_document_rejects_more_than_the_bounded_index_counts() {
+        let root = TestRoot::new();
+        let store = PortableStore::prepare(root.0.clone()).unwrap();
+        let services = BackendServices::new(store.clone()).unwrap();
+        let target = TargetIdentity::new("connection-a").unwrap();
+        let directory = stored_directory_snapshot(target.clone());
+        let forensic_target = TargetGuard {
+            identity: target,
+            generation: 1,
+        };
+        let forensic = stored_forensic_snapshot(
+            &forensic_target,
+            "2026-08-24T00:00:00Z",
+            ForensicData::default(),
+        );
+
+        store
+            .write(
+                StoreFile::Snapshots,
+                &SnapshotDocument {
+                    version: SNAPSHOT_DOCUMENT_VERSION,
+                    directory_snapshots: vec![directory.clone(); DIRECTORY_SNAPSHOT_LIMIT + 1],
+                    forensic_snapshots: Vec::new(),
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            services.snapshots().load_document(),
+            Err(CoreError::Decode { .. })
+        ));
+
+        store
+            .write(
+                StoreFile::Snapshots,
+                &SnapshotDocument {
+                    version: SNAPSHOT_DOCUMENT_VERSION,
+                    directory_snapshots: Vec::new(),
+                    forensic_snapshots: vec![forensic.clone(); FORENSIC_SNAPSHOT_LIMIT + 1],
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            services.snapshots().load_document(),
+            Err(CoreError::Decode { .. })
+        ));
+
+        store
+            .write(
+                StoreFile::Snapshots,
+                &SnapshotDocument {
+                    version: SNAPSHOT_DOCUMENT_VERSION,
+                    directory_snapshots: vec![directory; DIRECTORY_SNAPSHOT_LIMIT],
+                    forensic_snapshots: vec![forensic; FORENSIC_SNAPSHOT_LIMIT],
+                },
+            )
+            .unwrap();
+        let maximum = services.snapshots().load_document().unwrap();
+        assert_eq!(maximum.directory_snapshots.len(), DIRECTORY_SNAPSHOT_LIMIT);
+        assert_eq!(maximum.forensic_snapshots.len(), FORENSIC_SNAPSHOT_LIMIT);
+    }
+
+    #[tokio::test]
+    async fn forensic_diff_rejects_per_field_and_aggregate_input_line_overflow() {
+        let (_root, services, session, _harness) = setup().await;
+        let older = stored_forensic_snapshot(
+            session.target(),
+            "2026-08-23T00:00:00Z",
+            ForensicData::default(),
+        );
+        let per_field_data = ForensicData {
+            processes: (0..=MAX_FORENSIC_DIFF_INPUT_LINES_PER_FIELD)
+                .map(|index| format!("process-{index}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            ..ForensicData::default()
+        };
+        let per_field =
+            stored_forensic_snapshot(session.target(), "2026-08-24T00:00:00Z", per_field_data);
+        services
+            .snapshots()
+            .store
+            .write(
+                StoreFile::Snapshots,
+                &SnapshotDocument {
+                    version: SNAPSHOT_DOCUMENT_VERSION,
+                    directory_snapshots: Vec::new(),
+                    forensic_snapshots: vec![older.clone(), per_field.clone()],
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            services
+                .snapshots()
+                .diff_forensic(session.target(), &older.id, &per_field.id),
+            Err(CoreError::Validation { .. })
+        ));
+
+        let mut aggregate_data = ForensicData::default();
+        for collector in ForensicCollector::ALL {
+            aggregate_data.set(
+                collector,
+                (0..700)
+                    .map(|index| format!("{}-{index}", collector.id()))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            );
+        }
+        let aggregate =
+            stored_forensic_snapshot(session.target(), "2026-08-25T00:00:00Z", aggregate_data);
+        services
+            .snapshots()
+            .store
+            .write(
+                StoreFile::Snapshots,
+                &SnapshotDocument {
+                    version: SNAPSHOT_DOCUMENT_VERSION,
+                    directory_snapshots: Vec::new(),
+                    forensic_snapshots: vec![older.clone(), aggregate.clone()],
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            services
+                .snapshots()
+                .diff_forensic(session.target(), &older.id, &aggregate.id),
+            Err(CoreError::Validation { .. })
+        ));
     }
 
     #[test]

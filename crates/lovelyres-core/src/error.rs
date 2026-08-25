@@ -67,6 +67,15 @@ pub enum CoreError {
         source: std::io::Error,
     },
 
+    #[error("{operation} failed for {path}: {primary}; cleanup also failed: {cleanup_failures}")]
+    PartialCleanup {
+        operation: &'static str,
+        path: PathBuf,
+        #[source]
+        primary: Box<CoreError>,
+        cleanup_failures: String,
+    },
+
     #[error("invalid {subject}: {message}")]
     Validation {
         subject: &'static str,
@@ -184,6 +193,20 @@ impl CoreError {
         Self::Validation {
             subject,
             message: message.into(),
+        }
+    }
+
+    pub(crate) fn partial_cleanup(
+        operation: &'static str,
+        path: impl Into<PathBuf>,
+        primary: CoreError,
+        cleanup_failures: impl Into<String>,
+    ) -> Self {
+        Self::PartialCleanup {
+            operation,
+            path: path.into(),
+            primary: Box::new(primary),
+            cleanup_failures: cleanup_failures.into(),
         }
     }
 

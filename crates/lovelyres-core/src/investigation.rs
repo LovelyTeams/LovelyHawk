@@ -34,6 +34,9 @@ pub const MAX_NOTE_TITLE_CHARS: usize = 256;
 pub const MAX_NOTE_CONTENT_CHARS: usize = 1_048_576;
 pub const MAX_NOTE_TAGS: usize = 32;
 pub const MAX_NOTE_TAG_CHARS: usize = 64;
+/// Aggregate encoded notes budget. This is checked before the store allocates
+/// its JSON input buffer, so a corrupt multi-gigabyte file fails closed.
+pub const MAX_NOTES_DOCUMENT_BYTES: usize = 32 * 1024 * 1024;
 pub const MAX_CASES: usize = 30;
 pub const MAX_IOCS: usize = 500;
 pub const MAX_EVIDENCE: usize = 500;
@@ -251,6 +254,15 @@ pub struct NotesExport {
 struct NotesDocument {
     version: u32,
     notes: Vec<Note>,
+    #[serde(default)]
+    create_replays: Vec<NoteCreateReplay>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct NoteCreateReplay {
+    mutation_id: String,
+    request_digest: String,
+    note_id: String,
 }
 
 impl Default for NotesDocument {
@@ -258,6 +270,7 @@ impl Default for NotesDocument {
         Self {
             version: DOCUMENT_VERSION,
             notes: Vec::new(),
+            create_replays: Vec::new(),
         }
     }
 }
@@ -270,6 +283,7 @@ pub struct NoteRepository {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NoteDeletePlan {
     note_id: String,
+    expected_revision: String,
     operation: OperationPlan,
 }
 
@@ -281,18 +295,26 @@ impl NoteDeletePlan {
     pub fn note_id(&self) -> &str {
         &self.note_id
     }
+
+    pub fn expected_revision(&self) -> &str {
+        &self.expected_revision
+    }
 }
 
 #[derive(Debug)]
 struct NoteDeleteExecutor {
     repository: NoteRepository,
     note_id: String,
+    expected_revision: String,
 }
 
 #[async_trait]
 impl OperationExecutor for NoteDeleteExecutor {
     async fn execute(&self, _plan: &OperationPlan) -> CoreResult<ExecutionReceipt> {
-        if !self.repository.delete(&self.note_id)? {
+        if !self
+            .repository
+            .delete_if_revision(&self.note_id, &self.expected_revision)?
+        {
             return Err(not_found("note", &self.note_id));
         }
         Ok(ExecutionReceipt {
@@ -327,6 +349,25 @@ impl OperationExecutor for NoteDeleteExecutor {
 impl NoteRepository {
     pub fn plan_delete(&self, id: &str) -> CoreResult<NoteDeletePlan> {
         let note = self.get(id)?.ok_or_else(|| not_found("note", id))?;
+        let expected_revision = note_revision(&note)?;
+        self.build_delete_plan(note, expected_revision)
+    }
+
+    pub fn plan_delete_if_revision(
+        &self,
+        id: &str,
+        expected_revision: &str,
+    ) -> CoreResult<NoteDeletePlan> {
+        let note = self.get(id)?.ok_or_else(|| not_found("note", id))?;
+        ensure_note_revision(&note, expected_revision)?;
+        self.build_delete_plan(note, expected_revision.to_owned())
+    }
+
+    fn build_delete_plan(
+        &self,
+        note: Note,
+        expected_revision: String,
+    ) -> CoreResult<NoteDeletePlan> {
         let mut operation = OperationPlan::new(
             self.context.local_guard.clone(),
             format!("永久删除笔记“{}”；此操作不可恢复。", note.title),
@@ -338,6 +379,7 @@ impl NoteRepository {
             .insert("note-id".to_owned(), note.id.clone());
         Ok(NoteDeletePlan {
             note_id: note.id,
+            expected_revision,
             operation,
         })
     }
@@ -352,6 +394,7 @@ impl NoteRepository {
         let executor = NoteDeleteExecutor {
             repository: self.clone(),
             note_id: plan.note_id,
+            expected_revision: plan.expected_revision,
         };
         let verification = run_local_destructive_operation(
             self.context.as_ref(),
@@ -369,6 +412,15 @@ impl NoteRepository {
     }
 
     pub fn create(&self, input: CreateNote) -> CoreResult<Note> {
+        self.create_inner(input, None)
+    }
+
+    pub fn create_idempotent(&self, input: CreateNote, mutation_id: &str) -> CoreResult<Note> {
+        validate_mutation_id(mutation_id)?;
+        self.create_inner(input, Some(mutation_id))
+    }
+
+    fn create_inner(&self, input: CreateNote, mutation_id: Option<&str>) -> CoreResult<Note> {
         let title = match input.title {
             Some(title) if !title.trim().is_empty() => {
                 required_trimmed("note title", title, MAX_NOTE_TITLE_CHARS)?
@@ -377,10 +429,32 @@ impl NoteRepository {
         };
         let content = bounded_text("note content", input.content, MAX_NOTE_CONTENT_CHARS)?;
         let tags = normalize_tags(input.tags)?;
+        let request_digest = create_note_digest(&title, &content, &tags)?;
         let now = valid_now(self.context.clock.as_ref())?;
-        let id = generated_id(self.context.ids.as_ref(), "note")?;
         let _guard = self.context.transaction.lock();
         let mut document = load_notes(&self.context.store)?;
+        if let Some(mutation_id) = mutation_id
+            && let Some(replay) = document
+                .create_replays
+                .iter()
+                .find(|replay| replay.mutation_id == mutation_id)
+        {
+            if replay.request_digest != request_digest {
+                return Err(validation(
+                    "note mutation id",
+                    "the mutation id was already used for a different note creation",
+                ));
+            }
+            return document
+                .notes
+                .iter()
+                .find(|note| note.id == replay.note_id)
+                .cloned()
+                .ok_or_else(|| {
+                    validation("notes data", "a create replay references a missing note")
+                });
+        }
+        let id = generated_id(self.context.ids.as_ref(), "note")?;
         ensure_unique_id(document.notes.iter().map(|note| note.id.as_str()), &id)?;
         let note = Note {
             id,
@@ -394,6 +468,23 @@ impl NoteRepository {
         document.notes.insert(0, note.clone());
         if document.notes.len() > MAX_NOTES {
             document.notes.truncate(MAX_NOTES);
+        }
+        document.create_replays.retain(|replay| {
+            document
+                .notes
+                .iter()
+                .any(|stored| stored.id == replay.note_id)
+        });
+        if let Some(mutation_id) = mutation_id {
+            document.create_replays.insert(
+                0,
+                NoteCreateReplay {
+                    mutation_id: mutation_id.to_owned(),
+                    request_digest,
+                    note_id: note.id.clone(),
+                },
+            );
+            document.create_replays.truncate(256);
         }
         self.context.store.write(StoreFile::Notes, &document)?;
         Ok(note)
@@ -416,6 +507,24 @@ impl NoteRepository {
     }
 
     pub fn update(&self, id: &str, update: UpdateNote) -> CoreResult<Note> {
+        self.update_inner(id, None, update)
+    }
+
+    pub fn update_if_revision(
+        &self,
+        id: &str,
+        expected_revision: &str,
+        update: UpdateNote,
+    ) -> CoreResult<Note> {
+        self.update_inner(id, Some(expected_revision), update)
+    }
+
+    fn update_inner(
+        &self,
+        id: &str,
+        expected_revision: Option<&str>,
+        update: UpdateNote,
+    ) -> CoreResult<Note> {
         validate_lookup_id(id)?;
         let title = update
             .title
@@ -434,6 +543,9 @@ impl NoteRepository {
             .iter_mut()
             .find(|note| note.id == id)
             .ok_or_else(|| not_found("note", id))?;
+        if let Some(expected_revision) = expected_revision {
+            ensure_note_revision(note, expected_revision)?;
+        }
         if let Some(title) = title {
             note.title = title;
         }
@@ -449,20 +561,46 @@ impl NoteRepository {
         Ok(result)
     }
 
-    fn delete(&self, id: &str) -> CoreResult<bool> {
+    fn delete_if_revision(&self, id: &str, expected_revision: &str) -> CoreResult<bool> {
         validate_lookup_id(id)?;
         let _guard = self.context.transaction.lock();
         let mut document = load_notes(&self.context.store)?;
+        let note = match document.notes.iter().find(|note| note.id == id) {
+            Some(note) => note,
+            None => return Ok(false),
+        };
+        ensure_note_revision(note, expected_revision)?;
         let previous_len = document.notes.len();
         document.notes.retain(|note| note.id != id);
         if previous_len == document.notes.len() {
             return Ok(false);
         }
+        document
+            .create_replays
+            .retain(|replay| replay.note_id != id);
         self.context.store.write(StoreFile::Notes, &document)?;
         Ok(true)
     }
 
     pub fn set_pinned(&self, id: &str, pinned: bool) -> CoreResult<Note> {
+        self.set_pinned_inner(id, None, pinned)
+    }
+
+    pub fn set_pinned_if_revision(
+        &self,
+        id: &str,
+        expected_revision: &str,
+        pinned: bool,
+    ) -> CoreResult<Note> {
+        self.set_pinned_inner(id, Some(expected_revision), pinned)
+    }
+
+    fn set_pinned_inner(
+        &self,
+        id: &str,
+        expected_revision: Option<&str>,
+        pinned: bool,
+    ) -> CoreResult<Note> {
         validate_lookup_id(id)?;
         let now = valid_now(self.context.clock.as_ref())?;
         let _guard = self.context.transaction.lock();
@@ -472,6 +610,9 @@ impl NoteRepository {
             .iter_mut()
             .find(|note| note.id == id)
             .ok_or_else(|| not_found("note", id))?;
+        if let Some(expected_revision) = expected_revision {
+            ensure_note_revision(note, expected_revision)?;
+        }
         note.pinned = pinned;
         note.updated_at = now;
         let result = note.clone();
@@ -480,6 +621,24 @@ impl NoteRepository {
     }
 
     pub fn add_tag(&self, id: &str, tag: String) -> CoreResult<Note> {
+        self.add_tag_inner(id, None, tag)
+    }
+
+    pub fn add_tag_if_revision(
+        &self,
+        id: &str,
+        expected_revision: &str,
+        tag: String,
+    ) -> CoreResult<Note> {
+        self.add_tag_inner(id, Some(expected_revision), tag)
+    }
+
+    fn add_tag_inner(
+        &self,
+        id: &str,
+        expected_revision: Option<&str>,
+        tag: String,
+    ) -> CoreResult<Note> {
         validate_lookup_id(id)?;
         let tag = required_trimmed("note tag", tag, MAX_NOTE_TAG_CHARS)?;
         let now = valid_now(self.context.clock.as_ref())?;
@@ -490,6 +649,9 @@ impl NoteRepository {
             .iter_mut()
             .find(|note| note.id == id)
             .ok_or_else(|| not_found("note", id))?;
+        if let Some(expected_revision) = expected_revision {
+            ensure_note_revision(note, expected_revision)?;
+        }
         if !note.tags.iter().any(|stored| stored == &tag) {
             if note.tags.len() >= MAX_NOTE_TAGS {
                 return Err(validation("note tags", "too many tags"));
@@ -504,6 +666,24 @@ impl NoteRepository {
     }
 
     pub fn remove_tag(&self, id: &str, tag: &str) -> CoreResult<Note> {
+        self.remove_tag_inner(id, None, tag)
+    }
+
+    pub fn remove_tag_if_revision(
+        &self,
+        id: &str,
+        expected_revision: &str,
+        tag: &str,
+    ) -> CoreResult<Note> {
+        self.remove_tag_inner(id, Some(expected_revision), tag)
+    }
+
+    fn remove_tag_inner(
+        &self,
+        id: &str,
+        expected_revision: Option<&str>,
+        tag: &str,
+    ) -> CoreResult<Note> {
         validate_lookup_id(id)?;
         let now = valid_now(self.context.clock.as_ref())?;
         let _guard = self.context.transaction.lock();
@@ -513,6 +693,9 @@ impl NoteRepository {
             .iter_mut()
             .find(|note| note.id == id)
             .ok_or_else(|| not_found("note", id))?;
+        if let Some(expected_revision) = expected_revision {
+            ensure_note_revision(note, expected_revision)?;
+        }
         let previous_len = note.tags.len();
         note.tags.retain(|stored| stored != tag);
         if note.tags.len() != previous_len {
@@ -2418,9 +2601,53 @@ pub fn classify_command_risk(command: &str) -> CommandRisk {
 }
 
 fn load_notes(store: &PortableStore) -> CoreResult<NotesDocument> {
-    let document: NotesDocument = store.read_or_default(StoreFile::Notes)?;
+    let document: NotesDocument =
+        store.read_or_default_bounded(StoreFile::Notes, MAX_NOTES_DOCUMENT_BYTES)?;
     validate_notes(&document)?;
     Ok(document)
+}
+
+pub fn note_revision(note: &Note) -> CoreResult<String> {
+    let bytes = serde_json::to_vec(note).map_err(|source| CoreError::Encode {
+        subject: "note revision",
+        source,
+    })?;
+    Ok(format!("{:x}", Sha256::digest(bytes)))
+}
+
+fn ensure_note_revision(note: &Note, expected_revision: &str) -> CoreResult<()> {
+    if expected_revision.len() != 64
+        || !expected_revision
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        || note_revision(note)? != expected_revision
+    {
+        return Err(validation(
+            "note revision",
+            "the note changed after it was read; reload before mutating it",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_mutation_id(value: &str) -> CoreResult<()> {
+    if !(16..=64).contains(&value.len())
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+    {
+        return Err(validation("note mutation id", "invalid idempotency key"));
+    }
+    Ok(())
+}
+
+fn create_note_digest(title: &str, content: &str, tags: &[String]) -> CoreResult<String> {
+    let bytes =
+        serde_json::to_vec(&(title, content, tags)).map_err(|source| CoreError::Encode {
+            subject: "note creation digest",
+            source,
+        })?;
+    Ok(format!("{:x}", Sha256::digest(bytes)))
 }
 
 fn load_cases(store: &PortableStore) -> CoreResult<CasesDocument> {
@@ -2459,6 +2686,28 @@ fn validate_notes(document: &NotesDocument) -> CoreResult<()> {
         validate_tags(&note.tags)?;
         validate_timestamp(note.created_at)?;
         validate_timestamp(note.updated_at)?;
+    }
+    if document.create_replays.len() > 256 {
+        return Err(validation("notes data", "too many note creation replays"));
+    }
+    let note_ids = document
+        .notes
+        .iter()
+        .map(|note| note.id.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut mutation_ids = BTreeSet::new();
+    for replay in &document.create_replays {
+        validate_mutation_id(&replay.mutation_id)?;
+        if !mutation_ids.insert(replay.mutation_id.as_str())
+            || replay.request_digest.len() != 64
+            || !replay
+                .request_digest
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            || !note_ids.contains(replay.note_id.as_str())
+        {
+            return Err(validation("notes data", "invalid note creation replay"));
+        }
     }
     Ok(())
 }

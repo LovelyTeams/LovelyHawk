@@ -7,6 +7,7 @@
 
 use std::{
     collections::BTreeMap,
+    fmt,
     net::{IpAddr, Ipv4Addr},
     sync::Arc,
     time::Duration,
@@ -15,7 +16,10 @@ use std::{
 use async_trait::async_trait;
 use chrono::{DateTime, TimeDelta, Utc};
 use parking_lot::Mutex;
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize, Deserializer, Serialize,
+    de::{Error as _, IgnoredAny, SeqAccess, Visitor},
+};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -39,6 +43,7 @@ const READ_TIMEOUT: Duration = Duration::from_secs(30);
 const MUTATION_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_RULE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_RECORDS: usize = 256;
+const MAX_FIREWALL_DOCUMENT_BYTES: usize = 4 * 1024 * 1024;
 const PROBE_MARKER: &str = "LR_FIREWALL_PROBE_V1";
 const APPLY_MARKER: &str = "LR_FIREWALL_APPLY_V1";
 const VERIFY_MARKER: &str = "LR_FIREWALL_VERIFY_V1";
@@ -275,7 +280,47 @@ pub struct FirewallOperationOutcome {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct StoredFirewall {
+    #[serde(deserialize_with = "deserialize_firewall_changes")]
     changes: Vec<FirewallChangeRecord>,
+}
+
+fn deserialize_firewall_changes<'de, D>(
+    deserializer: D,
+) -> Result<Vec<FirewallChangeRecord>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct FirewallChangesVisitor;
+
+    impl<'de> Visitor<'de> for FirewallChangesVisitor {
+        type Value = Vec<FirewallChangeRecord>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(formatter, "at most {MAX_RECORDS} firewall change records")
+        }
+
+        fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            let mut changes =
+                Vec::with_capacity(sequence.size_hint().unwrap_or_default().min(MAX_RECORDS));
+            while changes.len() < MAX_RECORDS {
+                let Some(change) = sequence.next_element()? else {
+                    return Ok(changes);
+                };
+                changes.push(change);
+            }
+            if sequence.next_element::<IgnoredAny>()?.is_some() {
+                return Err(A::Error::custom(
+                    "firewall change count exceeds its storage budget",
+                ));
+            }
+            Ok(changes)
+        }
+    }
+
+    deserializer.deserialize_seq(FirewallChangesVisitor)
 }
 
 #[derive(Debug, Clone)]
@@ -439,15 +484,11 @@ impl FirewallService {
         self.target.validate(target)?;
         let _guard = self.lock.lock();
         let mut changes = self
-            .store
-            .read_or_default::<StoredFirewall>(StoreFile::Firewall)?
+            .load_stored_firewall()?
             .changes
             .into_iter()
             .filter(|change| change.target == target.identity)
             .collect::<Vec<_>>();
-        for change in &changes {
-            validate_record(change)?;
-        }
         changes.sort_by(|left, right| right.created_at.cmp(&left.created_at));
         Ok(changes)
     }
@@ -630,9 +671,7 @@ impl FirewallService {
     fn insert_change(&self, change: FirewallChangeRecord) -> CoreResult<()> {
         validate_record(&change)?;
         let _guard = self.lock.lock();
-        let mut stored = self
-            .store
-            .read_or_default::<StoredFirewall>(StoreFile::Firewall)?;
+        let mut stored = self.load_stored_firewall()?;
         if stored.changes.iter().any(|item| item.id == change.id) {
             return Err(CoreError::validation(
                 "firewall change",
@@ -654,8 +693,7 @@ impl FirewallService {
     ) -> CoreResult<FirewallChangeRecord> {
         validate_uuid("firewall change id", change_id)?;
         let _guard = self.lock.lock();
-        self.store
-            .read_or_default::<StoredFirewall>(StoreFile::Firewall)?
+        self.load_stored_firewall()?
             .changes
             .into_iter()
             .find(|change| change.id == change_id && change.target == target.identity)
@@ -674,9 +712,7 @@ impl FirewallService {
         operation_id: &str,
     ) -> CoreResult<FirewallChangeRecord> {
         let _guard = self.lock.lock();
-        let mut stored = self
-            .store
-            .read_or_default::<StoredFirewall>(StoreFile::Firewall)?;
+        let mut stored = self.load_stored_firewall()?;
         let change = stored
             .changes
             .iter_mut()
@@ -697,6 +733,23 @@ impl FirewallService {
         let result = change.clone();
         self.store.write(StoreFile::Firewall, &stored)?;
         Ok(result)
+    }
+
+    fn load_stored_firewall(&self) -> CoreResult<StoredFirewall> {
+        let stored = self.store.read_or_default_bounded::<StoredFirewall>(
+            StoreFile::Firewall,
+            MAX_FIREWALL_DOCUMENT_BYTES,
+        )?;
+        if stored.changes.len() > MAX_RECORDS {
+            return Err(CoreError::validation(
+                "firewall changes",
+                "the stored change count exceeds its storage budget",
+            ));
+        }
+        for change in &stored.changes {
+            validate_record(change)?;
+        }
+        Ok(stored)
     }
 }
 
@@ -1515,6 +1568,171 @@ mod tests {
             .await
             .unwrap();
         (temp, services, session, harness)
+    }
+
+    fn stored_change(
+        index: usize,
+        target: &TargetIdentity,
+        state: FirewallChangeState,
+    ) -> FirewallChangeRecord {
+        let id = Uuid::from_u128(index as u128 + 1).to_string();
+        let created_at = Utc::now() + TimeDelta::seconds(index as i64);
+        FirewallChangeRecord {
+            id: id.clone(),
+            operation_id: Uuid::from_u128((1_u128 << 64) + index as u128 + 1).to_string(),
+            last_operation_id: Uuid::from_u128((2_u128 << 64) + index as u128 + 1).to_string(),
+            target: target.clone(),
+            backend: FirewallBackend::Iptables,
+            engine: FirewallEngine::Iptables,
+            request: FirewallMutationRequest::IsolateInbound,
+            ssh_port: 22,
+            remote_root: expected_remote_root(&id).unwrap(),
+            object_name: expected_object_name(FirewallEngine::Iptables, &id).unwrap(),
+            preflight_sha256: "00".repeat(32),
+            state,
+            created_at,
+            deadman_deadline: created_at + TimeDelta::seconds(DEADMAN_SECONDS),
+            updated_at: created_at,
+        }
+    }
+
+    fn write_stored_changes(services: &BackendServices, changes: Vec<FirewallChangeRecord>) {
+        services
+            .store()
+            .write(StoreFile::Firewall, &StoredFirewall { changes })
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn encoded_firewall_document_is_rejected_before_json_decode() {
+        let (_temp, services, session, _harness) = fixture().await;
+        let hostile = b"HOSTILE_FIREWALL_DOCUMENT_MUST_NOT_ECHO";
+        let mut encoded = vec![b'x'; MAX_FIREWALL_DOCUMENT_BYTES + 1];
+        encoded[..hostile.len()].copy_from_slice(hostile);
+        fs::write(services.store().path_for(StoreFile::Firewall), encoded).unwrap();
+
+        let error = services
+            .firewall()
+            .list_changes(session.target())
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            CoreError::Validation {
+                subject: "firewall changes",
+                ..
+            }
+        ));
+        let rendered = format!("{error:?} {error}");
+        assert!(!rendered.contains(std::str::from_utf8(hostile).unwrap()));
+    }
+
+    #[tokio::test]
+    async fn stored_change_limit_rejects_257_on_every_load_path_without_echo() {
+        let (_temp, services, session, _harness) = fixture().await;
+        let target = session.target().identity.clone();
+        let mut changes = (0..=MAX_RECORDS)
+            .map(|index| stored_change(index, &target, FirewallChangeState::AwaitingKeep))
+            .collect::<Vec<_>>();
+        let hostile = "HOSTILE_257TH_RECORD_MUST_NOT_ECHO";
+        changes[MAX_RECORDS].operation_id = hostile.to_owned();
+        let lookup_id = changes[0].id.clone();
+        write_stored_changes(&services, changes);
+
+        let errors = [
+            services
+                .firewall()
+                .list_changes(session.target())
+                .unwrap_err(),
+            services
+                .firewall()
+                .change_by_id(session.target(), &lookup_id)
+                .unwrap_err(),
+            services
+                .firewall()
+                .transition_change(
+                    &lookup_id,
+                    &target,
+                    &[FirewallChangeState::AwaitingKeep],
+                    FirewallChangeState::Restored,
+                    &Uuid::new_v4().to_string(),
+                )
+                .unwrap_err(),
+            services
+                .firewall()
+                .insert_change(stored_change(
+                    MAX_RECORDS + 100,
+                    &target,
+                    FirewallChangeState::AwaitingKeep,
+                ))
+                .unwrap_err(),
+        ];
+        for error in errors {
+            let rendered = format!("{error:?} {error}");
+            assert!(!rendered.contains(hostile));
+            assert!(rendered.contains("firewall change count exceeds its storage budget"));
+        }
+    }
+
+    #[tokio::test]
+    async fn exactly_256_stored_changes_are_valid_on_every_load_path() {
+        let (_temp, services, session, _harness) = fixture().await;
+        let target = session.target().identity.clone();
+        let changes = (0..MAX_RECORDS)
+            .map(|index| stored_change(index, &target, FirewallChangeState::AwaitingKeep))
+            .collect::<Vec<_>>();
+        let lookup_id = changes[0].id.clone();
+        write_stored_changes(&services, changes);
+
+        assert_eq!(
+            services
+                .firewall()
+                .list_changes(session.target())
+                .unwrap()
+                .len(),
+            MAX_RECORDS
+        );
+        assert_eq!(
+            services
+                .firewall()
+                .change_by_id(session.target(), &lookup_id)
+                .unwrap()
+                .id,
+            lookup_id
+        );
+        let transitioned = services
+            .firewall()
+            .transition_change(
+                &lookup_id,
+                &target,
+                &[FirewallChangeState::AwaitingKeep],
+                FirewallChangeState::Restored,
+                &Uuid::new_v4().to_string(),
+            )
+            .unwrap();
+        assert_eq!(transitioned.state, FirewallChangeState::Restored);
+
+        let inserted = stored_change(
+            MAX_RECORDS + 100,
+            &target,
+            FirewallChangeState::AwaitingKeep,
+        );
+        services.firewall().insert_change(inserted.clone()).unwrap();
+        assert_eq!(
+            services
+                .firewall()
+                .list_changes(session.target())
+                .unwrap()
+                .len(),
+            MAX_RECORDS
+        );
+        assert_eq!(
+            services
+                .firewall()
+                .change_by_id(session.target(), &inserted.id)
+                .unwrap()
+                .id,
+            inserted.id
+        );
     }
 
     #[test]

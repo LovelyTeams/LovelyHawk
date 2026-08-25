@@ -1,0 +1,24 @@
+{
+  "name": "lovelyres-workspace",
+  "private": true,
+  "packageManager": "pnpm@10.28.2",
+  "scripts": {
+    "electron:build": "pnpm --filter @lovelyres/electron build",
+    "electron:check": "pnpm --filter @lovelyres/electron check",
+    "electron:dev": "pnpm --filter @lovelyres/electron dev",
+    "electron:release:package": "pwsh -NoProfile -File ./scripts/electron-package-windows.ps1",
+    "electron:release:dependency-gate": "pwsh -NoProfile -File ./scripts/electron-dependency-gate.ps1",
+    "electron:release:dependency-gate:strict": "pwsh -NoProfile -File ./scripts/electron-dependency-gate.ps1 -RequireGpuiRetired",
+    "electron:release:ledger-gate": "pwsh -NoProfile -File ./scripts/electron-ui-ledger-gate.ps1",
+    "electron:release:ledger-gate:strict": "pwsh -NoProfile -File ./scripts/electron-ui-ledger-gate.ps1 -RequireComplete",
+    "electron:release:quality-gate": "pwsh -NoProfile -File ./scripts/electron-quality-gates.ps1",
+    "electron:release:quality-gate:strict": "pwsh -NoProfile -File ./scripts/electron-quality-gates.ps1 -RequireComplete",
+    "electron:release:sidecar": "pwsh -NoProfile -File ./scripts/electron-build-windows-sidecar.ps1",
+    "electron:release:smoke": "pwsh -NoProfile -File ./scripts/electron-portable-smoke.ps1",
+    "electron:release:source-gate": "pwsh -NoProfile -File ./scripts/electron-source-gate.ps1",
+    "electron:release:selftest": "pwsh -NoProfile -File ./scripts/electron-package-validator-selftest.ps1",
+    "electron:release:validate": "pwsh -NoProfile -File ./scripts/electron-validate-package.ps1",
+    "electron:test": "pnpm --filter @lovelyres/electron test",
+    "electron:typecheck": "pnpm --filter @lovelyres/electron typecheck"
+  }
+}

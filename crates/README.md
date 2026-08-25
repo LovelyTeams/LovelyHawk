@@ -1,7 +1,7 @@
-# Native GPUI workspace
+# Electron workspace crates
 
 - `lovelyres-core`: UI-framework-independent services and safety contracts.
-- `lovelyres-terminal`: GPUI terminal emulator and SSH transport adapter.
-- `lovelyres-gpui`: native application, windows, views, and portable release entrypoint.
+- `lovelyres-terminal`: headless terminal model, protocol, transport, search, and layout code used by the Electron sidecar.
+- `lovelyres-electron-backend`: the bounded Rust sidecar and the only supported Electron-to-core process boundary.
 
-This workspace is the only supported application and release source.
+Electron main, preload, and the React renderer are the supported desktop application and release target. The legacy GPUI frontend was removed on 2026-08-25; do not reintroduce GPUI UI or release paths.

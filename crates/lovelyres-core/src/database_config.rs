@@ -218,6 +218,26 @@ pub enum DatabaseConfigEditPolicy {
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum DatabaseConfigLocalDraftAuthority {
+    LosslessLocalDraft,
+    ReadOnly,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum DatabaseConfigReadOnlyReason {
+    GeneratedArtifact,
+    VendorSchemaRequired,
+    ReadOnlyPolicy,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DatabaseConfigReadOnlyStatus {
+    pub authority: DatabaseConfigLocalDraftAuthority,
+    pub reason: DatabaseConfigReadOnlyReason,
+    pub notice: &'static str,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum DatabaseConfigValidator {
     SyntaxOnly,
     ServerConfigTest,
@@ -314,6 +334,24 @@ impl DatabaseConfigArtifactDefinition {
         }
     }
 
+    /// Returns the artifact-owned local draft authority.
+    ///
+    /// Schema metadata is deliberately not accepted here: selecting either a
+    /// partial or complete schema can validate values but cannot grant or
+    /// revoke local draft permission.
+    pub const fn local_draft_authority(self) -> DatabaseConfigLocalDraftAuthority {
+        if matches!(
+            self.edit_policy,
+            DatabaseConfigEditPolicy::LosslessLocalDraft
+        ) && matches!(self.surface, DatabaseConfigSurface::File)
+            && !self.dialect.is_generated()
+        {
+            DatabaseConfigLocalDraftAuthority::LosslessLocalDraft
+        } else {
+            DatabaseConfigLocalDraftAuthority::ReadOnly
+        }
+    }
+
     /// Whether the local file visualizer may mutate a bounded, lossless draft.
     ///
     /// This artifact-only decision grants no target validation, generation,
@@ -322,10 +360,45 @@ impl DatabaseConfigArtifactDefinition {
     /// them as a local draft.
     pub const fn allows_lossless_local_draft(self) -> bool {
         matches!(
+            self.local_draft_authority(),
+            DatabaseConfigLocalDraftAuthority::LosslessLocalDraft
+        )
+    }
+
+    /// Returns the finite reason and fixed renderer-safe notice for artifacts
+    /// that do not grant local mutation authority.
+    pub const fn read_only_status(self) -> Option<DatabaseConfigReadOnlyStatus> {
+        if self.allows_lossless_local_draft() {
+            return None;
+        }
+
+        let reason = if matches!(
             self.edit_policy,
-            DatabaseConfigEditPolicy::LosslessLocalDraft
-        ) && matches!(self.surface, DatabaseConfigSurface::File)
-            && !self.dialect.is_generated()
+            DatabaseConfigEditPolicy::VendorSchemaRequired
+        ) {
+            DatabaseConfigReadOnlyReason::VendorSchemaRequired
+        } else if matches!(self.surface, DatabaseConfigSurface::GeneratedReadOnly) {
+            DatabaseConfigReadOnlyReason::GeneratedArtifact
+        } else {
+            DatabaseConfigReadOnlyReason::ReadOnlyPolicy
+        };
+        let notice = match reason {
+            DatabaseConfigReadOnlyReason::GeneratedArtifact => {
+                "只读展示：该工件由服务器或厂商工具生成；当前仅允许预览，所有结构修改均已禁用，不能应用/部署。"
+            }
+            DatabaseConfigReadOnlyReason::VendorSchemaRequired => {
+                "只读展示：该工件策略要求匹配产品/版本的厂商 schema；选择静态 schema 也不会解锁本地结构修改。当前仅允许预览，未经过目标校验，不能应用/部署。"
+            }
+            DatabaseConfigReadOnlyReason::ReadOnlyPolicy => {
+                "只读展示：该工件的目录策略不授予本地结构修改权限，不能应用/部署。"
+            }
+        };
+
+        Some(DatabaseConfigReadOnlyStatus {
+            authority: DatabaseConfigLocalDraftAuthority::ReadOnly,
+            reason,
+            notice,
+        })
     }
 }
 
@@ -2142,11 +2215,493 @@ pub fn artifact_by_key(key: &str) -> Option<&'static DatabaseConfigArtifactDefin
         .find(|artifact| artifact.key == key)
 }
 
+/// Returns a bounded, reviewed starting point for a lossless local draft.
+///
+/// A starter is only syntax input for the local visual parser. It does not
+/// authorize target validation, generation, application, or deployment. Rows
+/// without local-draft authority fail closed to an empty source. Compatible
+/// products without a reviewed product-level starter receive comment-only
+/// import guidance, never defaults copied from the upstream dialect.
+pub fn database_starter_contents(artifact: &DatabaseConfigArtifactDefinition) -> &'static str {
+    if !artifact.allows_lossless_local_draft() {
+        return "";
+    }
+
+    match (artifact.product, artifact.dialect) {
+        (
+            DatabaseConfigProduct::MySql | DatabaseConfigProduct::MariaDb,
+            DatabaseConfigDialect::MySqlOptionFile,
+        ) => {
+            "# LovelyRes MySQL/MariaDB 应急响应比赛起始配置；部署前必须按所选产品与精确版本使用官方校验器复核。\n[mysqld]\nbind-address = 127.0.0.1\nport = 3306\nlocal-infile = 0\nskip-symbolic-links\n\n[client]\nport = 3306\n"
+        }
+        (DatabaseConfigProduct::PostgreSql, DatabaseConfigDialect::PostgreSqlConf) => {
+            "# LovelyRes 应急响应比赛起始配置；部署前以目标产品/版本校验。\nlisten_addresses = 'localhost'\nport = 5432\npassword_encryption = 'scram-sha-256'\nlogging_collector = on\nlog_connections = on\nlog_disconnections = on\n"
+        }
+        (DatabaseConfigProduct::PostgreSql, DatabaseConfigDialect::PgHbaConf) => {
+            "# TYPE  DATABASE  USER  ADDRESS  METHOD\nlocal   all       all            peer\nhost    all       all   127.0.0.1/32   scram-sha-256\nhost    all       all   ::1/128        scram-sha-256\n"
+        }
+        (DatabaseConfigProduct::PostgreSql, DatabaseConfigDialect::PgIdentConf) => {
+            "# MAPNAME  SYSTEM-USERNAME  DATABASE-USERNAME\n"
+        }
+        (_, DatabaseConfigDialect::MySqlOptionFile) => {
+            "# 当前工件没有经审查的产品级 starter；请导入目标实例原文件，本页不会依据 MySQL 兼容方言猜测参数或端口。\n"
+        }
+        (
+            _,
+            DatabaseConfigDialect::PostgreSqlConf
+            | DatabaseConfigDialect::PgHbaConf
+            | DatabaseConfigDialect::PgIdentConf,
+        ) => {
+            "# 当前工件没有经审查的产品级 starter；请导入目标实例原文件，本页不会依据 PostgreSQL 兼容方言猜测参数或端口。\n"
+        }
+        (DatabaseConfigProduct::Dm, DatabaseConfigDialect::Ini) if artifact.key == "dm-main" => {
+            "# LovelyRes DM 本地 inspect 起始配置；仅供检查，参数动态级别与范围必须由目标 DM 精确版本回读，不得据此直接应用。\nINSTANCE_NAME = DMSERVER\nPORT_NUM = 5236\n"
+        }
+        (_, DatabaseConfigDialect::Ini) => {
+            "# LovelyRes INI 起始配置；按当前组件和目标版本添加 section/参数。\n"
+        }
+        (_, DatabaseConfigDialect::Toml) => {
+            "# LovelyRes TOML 起始配置；组件参数随版本变化，请导入目标机原文件后编辑。\n"
+        }
+        (_, DatabaseConfigDialect::JavaProperties) => {
+            "# LovelyRes Java properties 起始配置；请导入匹配组件版本的原文件。\n"
+        }
+        (_, DatabaseConfigDialect::KeyValue | DatabaseConfigDialect::VendorText) => {
+            "# LovelyRes 起始配置；请导入目标实例原文件以保留厂商扩展。\n"
+        }
+        _ => "",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
+    use crate::line_config_visual::{
+        LineConfigDialect, LineConfigNodeKind, LineConfigVisualDocument,
+    };
+
+    #[test]
+    fn read_only_status_distinguishes_generated_and_vendor_schema_artifacts() {
+        let generated = artifact_by_key("mysql-persisted-variables")
+            .expect("registered generated MySQL artifact");
+        let generated_status = generated
+            .read_only_status()
+            .expect("generated artifacts are read-only");
+        assert_eq!(
+            generated_status.reason,
+            DatabaseConfigReadOnlyReason::GeneratedArtifact
+        );
+        assert!(generated_status.notice.contains("只读展示"));
+        assert!(generated_status.notice.contains("生成"));
+        assert!(!generated.allows_lossless_local_draft());
+
+        let vendor =
+            artifact_by_key("opengauss-om-cluster-xml").expect("registered vendor-schema artifact");
+        let vendor_status = vendor
+            .read_only_status()
+            .expect("vendor-schema artifacts are read-only");
+        assert_eq!(
+            vendor_status.reason,
+            DatabaseConfigReadOnlyReason::VendorSchemaRequired
+        );
+        assert!(vendor_status.notice.contains("只读展示"));
+        assert!(vendor_status.notice.contains("schema"));
+        assert!(vendor_status.notice.contains("版本"));
+        assert!(!vendor.allows_lossless_local_draft());
+
+        assert_eq!(
+            artifact_by_key("mysql-option-file")
+                .expect("registered mutable local draft")
+                .read_only_status(),
+            None
+        );
+    }
+
+    #[test]
+    fn gbase_8s_known_text_grammars_are_readable_byte_exact_and_read_only() {
+        for (key, source) in [
+            ("gbase-8s-onconfig", "ROOTNAME rootdbs\r\nSERVERNUM 0\r\n"),
+            (
+                "gbase-8s-sqlhosts",
+                "# dbserver nettype hostname service options\r\ngbaseserver onsoctcp 192.0.2.10 9088 g=g_cluster_1\r\n",
+            ),
+        ] {
+            let artifact = artifact_by_key(key).expect("registered GBase 8s artifact");
+            assert_eq!(artifact.product, DatabaseConfigProduct::GBase8s, "{key}");
+            assert_eq!(artifact.dialect, DatabaseConfigDialect::VendorText, "{key}");
+            assert_eq!(
+                artifact.support,
+                DatabaseConfigSupportLevel::VisualSyntax,
+                "{key}"
+            );
+            assert!(artifact.is_file_visual_readable(), "{key}");
+            assert!(!artifact.allows_lossless_local_draft(), "{key}");
+
+            let document = LineConfigVisualDocument::parse(LineConfigDialect::Whitespace, source)
+                .expect("reviewed GBase 8s text grammar");
+            assert!(document.is_structured(), "{key}");
+            assert!(!document.rows().is_empty(), "{key}");
+            assert_eq!(document.raw_bytes(), source.as_bytes(), "{key}");
+            assert_eq!(document.output().bytes(), source.as_bytes(), "{key}");
+        }
+
+        let first = artifacts_for(DatabaseConfigProduct::GBase8s)
+            .find(|artifact| {
+                artifact.support == DatabaseConfigSupportLevel::VisualSyntax
+                    && artifact.dialect == DatabaseConfigDialect::VendorText
+            })
+            .map(|artifact| artifact.key);
+        assert_eq!(first, Some("gbase-8s-onconfig"));
+    }
+
+    #[test]
+    fn gbase_8s_visual_text_authkey_is_redacted_and_blocks_whole_document_copy() {
+        const SOURCE: &str = "AUTHKEY K9z7Q2\n";
+        const SENTINEL: &str = "K9z7Q2";
+
+        for key in ["gbase-8s-onconfig", "gbase-8s-sqlhosts"] {
+            let artifact = artifact_by_key(key).expect("registered GBase 8s visual text artifact");
+            assert_eq!(artifact.product, DatabaseConfigProduct::GBase8s, "{key}");
+            assert_eq!(artifact.dialect, DatabaseConfigDialect::VendorText, "{key}");
+            assert_eq!(
+                artifact.support,
+                DatabaseConfigSupportLevel::VisualSyntax,
+                "{key}"
+            );
+            assert!(artifact.has_source_backed_visual_parser(), "{key}");
+            assert_eq!(
+                artifact.local_draft_authority(),
+                DatabaseConfigLocalDraftAuthority::ReadOnly,
+                "{key}"
+            );
+            assert_eq!(
+                artifact
+                    .read_only_status()
+                    .expect("GBase 8s text artifact remains read-only")
+                    .authority,
+                DatabaseConfigLocalDraftAuthority::ReadOnly,
+                "{key}"
+            );
+
+            let document = LineConfigVisualDocument::parse(LineConfigDialect::Whitespace, SOURCE)
+                .expect("GBase 8s AUTHKEY fixture");
+            assert!(document.is_structured(), "{key}");
+            assert!(document.contains_sensitive_values(), "{key}");
+            assert_eq!(document.raw_bytes(), SOURCE.as_bytes(), "{key}");
+            assert_eq!(document.output().bytes(), SOURCE.as_bytes(), "{key}");
+
+            let rows = document.rows();
+            let authkey = rows
+                .iter()
+                .find(|row| row.name() == Some("AUTHKEY"))
+                .unwrap_or_else(|| panic!("{key} lost the AUTHKEY row"));
+            assert!(authkey.sensitive(), "{key}");
+            assert_eq!(authkey.value(), None, "{key}");
+            assert_eq!(authkey.preview(), "[sensitive value redacted]", "{key}");
+            assert!(!authkey.editable(), "{key}");
+            assert!(
+                rows.iter().all(|row| {
+                    row.value() != Some(SENTINEL) && !row.preview().contains(SENTINEL)
+                }),
+                "{key} exposed the AUTHKEY value through a visual row"
+            );
+            for public_debug in [
+                format!("{artifact:?}"),
+                format!("{document:?}"),
+                format!("{:?}", document.output()),
+                format!("{rows:?}"),
+            ] {
+                assert!(!public_debug.contains(SENTINEL), "{key}");
+            }
+        }
+    }
+
+    #[test]
+    fn supported_database_starters_are_core_owned_and_structured() {
+        for (key, database_dialect, visual_dialect) in [
+            (
+                "mysql-option-file",
+                DatabaseConfigDialect::MySqlOptionFile,
+                LineConfigDialect::MySqlOption,
+            ),
+            (
+                "postgresql-main",
+                DatabaseConfigDialect::PostgreSqlConf,
+                LineConfigDialect::PostgresConf,
+            ),
+            (
+                "postgresql-hba",
+                DatabaseConfigDialect::PgHbaConf,
+                LineConfigDialect::PgHba,
+            ),
+            (
+                "dm-main",
+                DatabaseConfigDialect::Ini,
+                LineConfigDialect::Ini,
+            ),
+            (
+                "tidb-server-toml",
+                DatabaseConfigDialect::Toml,
+                LineConfigDialect::Toml,
+            ),
+            (
+                "sequoiadb-standalone-config",
+                DatabaseConfigDialect::KeyValue,
+                LineConfigDialect::FlatKeyValue,
+            ),
+        ] {
+            let artifact = artifact_by_key(key).expect("registered database starter artifact");
+            assert_eq!(artifact.key, key);
+            assert_eq!(artifact.dialect, database_dialect, "{key}");
+            assert!(artifact.has_source_backed_visual_parser(), "{key}");
+            assert!(artifact.allows_lossless_local_draft(), "{key}");
+
+            let source = database_starter_contents(artifact);
+            assert!(!source.is_empty(), "{key} has no reviewed starter");
+            let document = LineConfigVisualDocument::parse(visual_dialect, source)
+                .expect("reviewed database starter must parse");
+            assert!(document.is_structured(), "starter {key} became opaque");
+            assert!(!document.rows().is_empty(), "starter {key} has no rows");
+            assert_eq!(document.raw_bytes(), source.as_bytes(), "{key}");
+            assert_eq!(document.output().bytes(), source.as_bytes(), "{key}");
+        }
+
+        assert_eq!(
+            database_starter_contents(
+                artifact_by_key("mysql-server-uuid").expect("registered read-only artifact")
+            ),
+            ""
+        );
+    }
+
+    #[test]
+    fn compatible_and_domestic_starters_do_not_guess_upstream_defaults() {
+        for key in ["kingbase-es-main", "gbase-8c-main", "tidb-server-toml"] {
+            let artifact = artifact_by_key(key).expect("registered compatible database artifact");
+            assert!(artifact.allows_lossless_local_draft(), "{key}");
+
+            let starter = database_starter_contents(artifact);
+            assert!(
+                starter.contains("导入"),
+                "{key} must request an original file"
+            );
+            assert!(
+                starter
+                    .lines()
+                    .all(|line| line.is_empty() || line.starts_with('#')),
+                "{key} starter guidance must remain comment-only"
+            );
+            for guessed_default in [
+                "port = 5432",
+                "port = 3306",
+                "PORT_NUM = 5432",
+                "password_encryption",
+                "scram-sha-256",
+                "bind-address",
+            ] {
+                assert!(
+                    !starter.contains(guessed_default),
+                    "{key} inherited guessed default {guessed_default}"
+                );
+            }
+        }
+
+        assert!(
+            database_starter_contents(
+                artifact_by_key("mysql-option-file").expect("reviewed MySQL starter")
+            )
+            .contains("3306")
+        );
+        assert!(
+            database_starter_contents(
+                artifact_by_key("postgresql-main").expect("reviewed PostgreSQL starter")
+            )
+            .contains("5432")
+        );
+        assert!(
+            database_starter_contents(artifact_by_key("dm-main").expect("reviewed DM starter"))
+                .contains("inspect")
+        );
+        assert_eq!(
+            database_starter_contents(
+                artifact_by_key("kingbase-es-auto-conf").expect("generated KingbaseES artifact")
+            ),
+            ""
+        );
+    }
+
+    #[test]
+    fn mysql_auto_cnf_core_fixture_is_byte_exact_structured_and_non_secret() {
+        const SOURCE: &str = "[auto]\nserver-uuid=8a94f357-aab4-11df-86ab-c80aa9429562\n";
+
+        let artifact = artifact_by_key("mysql-server-uuid").expect("registered auto.cnf artifact");
+        assert_eq!(artifact.dialect, DatabaseConfigDialect::MySqlOptionFile);
+        assert!(artifact.has_source_backed_visual_parser());
+        assert!(!artifact.allows_lossless_local_draft());
+        assert_eq!(database_starter_contents(artifact), "");
+
+        let document = LineConfigVisualDocument::parse(LineConfigDialect::MySqlOption, SOURCE)
+            .expect("representative auto.cnf fixture");
+        assert!(document.is_structured());
+        assert_eq!(document.raw_bytes(), SOURCE.as_bytes());
+        assert_eq!(document.output().bytes(), SOURCE.as_bytes());
+        assert!(!document.contains_sensitive_values());
+        let rows = document.rows();
+        assert!(rows.iter().all(|row| !row.sensitive()));
+        assert!(rows.iter().any(|row| {
+            row.kind() == LineConfigNodeKind::Section && row.name() == Some("auto")
+        }));
+        let identity = rows
+            .iter()
+            .find(|row| row.name() == Some("server-uuid"))
+            .expect("auto.cnf server UUID row");
+        assert_eq!(identity.kind(), LineConfigNodeKind::Entry);
+        assert_eq!(
+            identity.value(),
+            Some("8a94f357-aab4-11df-86ab-c80aa9429562")
+        );
+
+        let secret = LineConfigVisualDocument::parse(
+            LineConfigDialect::MySqlOption,
+            "[auto]\npassword=NeverShow\n",
+        )
+        .expect("MySQL option secret boundary fixture");
+        let secret_rows = secret.rows();
+        let password = secret_rows
+            .iter()
+            .find(|row| row.name() == Some("password"))
+            .expect("password row");
+        assert!(secret.contains_sensitive_values());
+        assert!(password.sensitive());
+        assert_eq!(password.value(), None);
+        assert!(!format!("{secret:?}{secret_rows:?}").contains("NeverShow"));
+    }
+
+    #[test]
+    fn tidb_auxiliary_toml_core_fixtures_are_byte_exact_structured_and_non_secret() {
+        for (key, component, default_file_name, source) in [
+            (
+                "tidb-tiflash-toml",
+                DatabaseConfigComponent::TiFlash,
+                "tiflash.toml",
+                "[flash]\r\nservice_addr = \"127.0.0.1:3930\"",
+            ),
+            (
+                "tidb-tiflash-learner-toml",
+                DatabaseConfigComponent::TiFlashLearner,
+                "tiflash-learner.toml",
+                "[raftstore]\r\nstore-pool-size = 2",
+            ),
+            (
+                "tidb-tiproxy-toml",
+                DatabaseConfigComponent::TiProxy,
+                "tiproxy.toml",
+                "[proxy]\r\naddr = \"0.0.0.0:6000\"",
+            ),
+            (
+                "tidb-ticdc-toml",
+                DatabaseConfigComponent::TiCdc,
+                "ticdc.toml",
+                "[log]\r\nlevel = \"info\"",
+            ),
+            (
+                "tidb-ticdc-changefeed-toml",
+                DatabaseConfigComponent::TiCdcChangefeed,
+                "changefeed.toml",
+                "case-sensitive = false\r\nforce-replicate = false",
+            ),
+            (
+                "tidb-lightning-toml",
+                DatabaseConfigComponent::TiDbLightning,
+                "tidb-lightning.toml",
+                "[lightning]\r\nlevel = \"info\"",
+            ),
+        ] {
+            let artifact = artifact_by_key(key).expect("registered TiDB auxiliary artifact");
+            assert_eq!(artifact.product, DatabaseConfigProduct::TiDb, "{key}");
+            assert_eq!(artifact.component, component, "{key}");
+            assert_eq!(artifact.dialect, DatabaseConfigDialect::Toml, "{key}");
+            assert_eq!(artifact.default_file_name, Some(default_file_name), "{key}");
+            assert!(artifact.has_source_backed_visual_parser(), "{key}");
+            assert!(!artifact.allows_lossless_local_draft(), "{key}");
+            assert_eq!(database_starter_contents(artifact), "", "{key}");
+
+            let document = LineConfigVisualDocument::parse(LineConfigDialect::Toml, source)
+                .expect("representative TiDB auxiliary TOML fixture");
+            assert!(document.is_structured(), "{key}");
+            assert!(!document.rows().is_empty(), "{key}");
+            assert_eq!(document.raw_bytes(), source.as_bytes(), "{key}");
+            assert_eq!(document.output().bytes(), source.as_bytes(), "{key}");
+            assert!(!document.contains_sensitive_values(), "{key}");
+            assert!(document.rows().iter().all(|row| !row.sensitive()), "{key}");
+        }
+
+        let secret = LineConfigVisualDocument::parse(
+            LineConfigDialect::Toml,
+            "[security]\npassword = \"NeverShow\"",
+        )
+        .expect("TOML secret boundary fixture");
+        let secret_rows = secret.rows();
+        let password = secret_rows
+            .iter()
+            .find(|row| row.name() == Some("password"))
+            .expect("password row");
+        assert!(secret.contains_sensitive_values());
+        assert!(password.sensitive());
+        assert_eq!(password.value(), None);
+        assert!(!format!("{secret:?}{secret_rows:?}").contains("NeverShow"));
+    }
+
+    #[test]
+    fn yashandb_23_5_yasdb_ini_core_fixture_is_byte_exact_structured_and_non_secret() {
+        const SOURCE: &str = "LISTENER_ADDR=127.0.0.1\r\nMAX_SESSIONS=1024\r\nUNKNOWN_23_5_KEY=preserve-this-byte-exact";
+
+        let artifact =
+            artifact_by_key("yashandb-yasdb-ini").expect("registered YashanDB yasdb.ini artifact");
+        assert_eq!(artifact.product, DatabaseConfigProduct::Yashan);
+        assert_eq!(artifact.dialect, DatabaseConfigDialect::KeyValue);
+        assert_eq!(artifact.default_file_name, Some("yasdb.ini"));
+        assert!(artifact.has_source_backed_visual_parser());
+        assert!(!artifact.allows_lossless_local_draft());
+        assert_eq!(database_starter_contents(artifact), "");
+
+        let document = LineConfigVisualDocument::parse(LineConfigDialect::FlatKeyValue, SOURCE)
+            .expect("representative YashanDB yasdb.ini fixture");
+        assert!(document.is_structured());
+        assert_eq!(document.raw_bytes(), SOURCE.as_bytes());
+        assert_eq!(document.output().bytes(), SOURCE.as_bytes());
+        assert!(!document.contains_sensitive_values());
+        let rows = document.rows();
+        assert!(rows.iter().all(|row| !row.sensitive()));
+        for (key, value) in [
+            ("LISTENER_ADDR", "127.0.0.1"),
+            ("MAX_SESSIONS", "1024"),
+            ("UNKNOWN_23_5_KEY", "preserve-this-byte-exact"),
+        ] {
+            assert_eq!(
+                rows.iter()
+                    .find(|row| row.name() == Some(key))
+                    .and_then(|row| row.value()),
+                Some(value),
+                "{key}"
+            );
+        }
+
+        let secret =
+            LineConfigVisualDocument::parse(LineConfigDialect::FlatKeyValue, "PASSWORD=NeverShow")
+                .expect("flat key/value secret boundary fixture");
+        let secret_rows = secret.rows();
+        let password = secret_rows
+            .iter()
+            .find(|row| row.name() == Some("PASSWORD"))
+            .expect("password row");
+        assert!(secret.contains_sensitive_values());
+        assert!(password.sensitive());
+        assert_eq!(password.value(), None);
+        assert!(!format!("{secret:?}{secret_rows:?}").contains("NeverShow"));
+    }
 
     #[test]
     fn only_evidence_blocked_shentong_products_have_no_artifacts() {
@@ -2475,6 +3030,122 @@ mod tests {
         assert!(!synthetic.has_source_backed_visual_parser());
         synthetic.support = DatabaseConfigSupportLevel::CloudProviderSchema;
         assert!(!synthetic.has_source_backed_visual_parser());
+    }
+
+    #[test]
+    fn local_visual_selection_hides_managed_runtime_cloud_binary_and_unparsed_artifacts() {
+        for product in [
+            DatabaseConfigProduct::TdsqlMysqlManaged,
+            DatabaseConfigProduct::TdsqlPostgresqlManaged,
+            DatabaseConfigProduct::PolarDbManagedMySql,
+            DatabaseConfigProduct::PolarDbManagedPostgresql,
+            DatabaseConfigProduct::PolarDbManagedOracle,
+        ] {
+            assert!(
+                artifacts_for(product).all(|artifact| !artifact.has_source_backed_visual_parser()),
+                "{product:?} entered the local visual selection"
+            );
+            assert!(
+                !artifacts_for(product).any(|artifact| artifact.has_source_backed_visual_parser()),
+                "{product:?} gained a first visual artifact"
+            );
+        }
+
+        for key in [
+            "mysql-runtime-variables",
+            "postgresql-runtime-parameters",
+            "tdsql-mysql-managed-parameter-api",
+            "tdsql-postgresql-managed-parameter-api",
+            "polardb-managed-mysql-parameter-api",
+            "oceanbase-observer-binary",
+            "opengauss-cluster-static-config",
+            "goldendb-cluster-config",
+            "yashandb-spfile",
+            "yashandb-password-file",
+            "kingbase-es-repmgr",
+            "dm-client-service",
+            "dm-dcr-config",
+            "dm-dcr-node",
+            "opengauss-cm-server",
+            "opengauss-cm-agent",
+            "mogdb-cm-server",
+            "mogdb-cm-agent",
+            "gbase-8s-connection-manager-config",
+            "gbase-8s-communication-support-config",
+            "gbase-8s-shared-environment",
+            "gbase-8s-user-environment",
+            "gbase-8s-archecker-template",
+            "gbase-8s-storage-manager-definitions",
+            "gbase-8s-high-performance-loader-config",
+            "gbase-8s-maxconnect-config",
+        ] {
+            let artifact = artifact_by_key(key).expect("registered non-visual artifact");
+            assert!(
+                !artifact.has_source_backed_visual_parser(),
+                "{key} entered the local visual selection"
+            );
+            assert_eq!(
+                artifact.local_draft_authority(),
+                DatabaseConfigLocalDraftAuthority::ReadOnly,
+                "{key} gained local draft authority"
+            );
+            assert!(!artifact.allows_lossless_local_draft(), "{key}");
+            assert_eq!(database_starter_contents(artifact), "", "{key}");
+        }
+
+        let reviewed = artifact_by_key("mysql-option-file").expect("reviewed visual artifact");
+        assert!(reviewed.has_source_backed_visual_parser());
+        assert!(reviewed.allows_lossless_local_draft());
+    }
+
+    #[test]
+    fn unparsed_vendor_text_never_reaches_visual_rows_or_copy_boundaries() {
+        const HOSTILE_PAYLOAD: &str =
+            "<script>globalThis.vendorTextExecuted=true</script>\nAUTHKEY K9z7Q2\n";
+
+        for key in [
+            "kingbase-es-repmgr",
+            "dm-client-service",
+            "dm-dcr-config",
+            "dm-dcr-node",
+            "opengauss-cm-server",
+            "opengauss-cm-agent",
+            "mogdb-cm-server",
+            "mogdb-cm-agent",
+            "gbase-8s-connection-manager-config",
+            "gbase-8s-communication-support-config",
+            "gbase-8s-shared-environment",
+            "gbase-8s-user-environment",
+            "gbase-8s-archecker-template",
+            "gbase-8s-storage-manager-definitions",
+            "gbase-8s-high-performance-loader-config",
+            "gbase-8s-maxconnect-config",
+        ] {
+            let artifact = artifact_by_key(key).expect("registered unparsed vendor artifact");
+            assert!(artifact.is_file_visual_readable(), "{key}");
+            assert!(
+                !artifact.has_source_backed_visual_parser(),
+                "{key} exposed visual rows"
+            );
+            assert_eq!(
+                artifact.local_draft_authority(),
+                DatabaseConfigLocalDraftAuthority::ReadOnly,
+                "{key} exposed a copyable local draft"
+            );
+            assert_eq!(database_starter_contents(artifact), "", "{key}");
+
+            let status = artifact
+                .read_only_status()
+                .expect("unparsed vendor artifact remains metadata-only");
+            assert!(status.notice.len() <= 8_192, "{key}");
+            let public_debug = format!("{artifact:?}{status:?}");
+            for rejected in [HOSTILE_PAYLOAD, "vendorTextExecuted", "K9z7Q2"] {
+                assert!(
+                    !public_debug.contains(rejected),
+                    "{key} leaked rejected vendor text"
+                );
+            }
+        }
     }
 
     #[test]
@@ -3105,6 +3776,79 @@ mod tests {
     }
 
     #[test]
+    fn dm_init_password_is_redacted_non_copyable_and_rejects_ordinary_updates() {
+        const SECRET: &str = "NeverShow42";
+        const HOSTILE_REPLACEMENT: &str =
+            "<script>globalThis.dmInitExecuted=true</script> password=EchoMe";
+        const SOURCE: &str = concat!(
+            "[DAMENG]\r\n",
+            "SYSDBA_PWD=NeverShow42\r\n",
+            "LOG_PATH=/var/log/dm/primary\r\n",
+            "LOG_PATH=/var/log/dm/archive\r\n",
+        );
+
+        let artifact = artifact_by_key("dm-init").expect("registered DM init artifact");
+        assert_eq!(artifact.product, DatabaseConfigProduct::Dm);
+        assert_eq!(artifact.dialect, DatabaseConfigDialect::Ini);
+        assert_eq!(
+            artifact.local_draft_authority(),
+            DatabaseConfigLocalDraftAuthority::LosslessLocalDraft
+        );
+        assert!(artifact.has_source_backed_visual_parser());
+
+        let mut document = LineConfigVisualDocument::parse(LineConfigDialect::Ini, SOURCE)
+            .expect("representative dminit.ini fixture");
+        assert!(document.is_structured());
+        assert!(document.contains_sensitive_values());
+
+        let rows = document.rows();
+        let dameng = rows
+            .iter()
+            .find(|row| row.kind() == LineConfigNodeKind::Section && row.name() == Some("DAMENG"))
+            .expect("DAMENG section");
+        assert_eq!(dameng.child_count(), 3);
+        let password = rows
+            .iter()
+            .find(|row| row.name() == Some("SYSDBA_PWD"))
+            .expect("SYSDBA password row");
+        assert_eq!(password.parent(), Some(dameng.id()));
+        assert!(password.sensitive());
+        assert_eq!(password.value(), None);
+        assert_eq!(password.preview(), "[sensitive value redacted]");
+        assert!(!password.editable());
+        assert_eq!(
+            rows.iter()
+                .filter(|row| row.name() == Some("LOG_PATH"))
+                .map(|row| row.value())
+                .collect::<Vec<_>>(),
+            [Some("/var/log/dm/primary"), Some("/var/log/dm/archive")]
+        );
+
+        for public_debug in [
+            format!("{document:?}"),
+            format!("{:?}", document.output()),
+            format!("{rows:?}"),
+        ] {
+            assert!(!public_debug.contains(SECRET));
+            assert!(!public_debug.contains("dmInitExecuted"));
+            assert!(!public_debug.contains("EchoMe"));
+        }
+
+        let password_id = password.id();
+        let before = document.raw_bytes().to_vec();
+        for replacement in ["replacement", HOSTILE_REPLACEMENT] {
+            let error = document
+                .update_entry(password_id, "SYSDBA_PWD", Some(replacement))
+                .expect_err("ordinary visual updates must reject the secret row");
+            let public_error = error.to_string();
+            assert!(public_error.contains("dedicated secret input flow"));
+            assert!(!public_error.contains(replacement));
+            assert!(!public_error.contains(SECRET));
+            assert_eq!(document.raw_bytes(), before);
+        }
+    }
+
+    #[test]
     fn dm_dcr_files_fail_closed_until_the_vendor_grammar_is_modeled() {
         for (key, component, file_name) in [
             (
@@ -3143,6 +3887,60 @@ mod tests {
             assert!(artifact.is_file_visual_readable(), "{key}");
             assert!(!artifact.has_source_backed_visual_parser(), "{key}");
             assert!(!artifact.allows_lossless_local_draft(), "{key}");
+        }
+    }
+
+    #[test]
+    fn dm_dcr_array_and_startup_command_payloads_never_reach_the_generic_ini_editor() {
+        const DCR_CONFIG: &str = concat!(
+            "// ordered vendor-owned groups\n",
+            "[GRP]\nDCR_GRP_NAME=CSS_GRP\nDCR_GRP_TYPE=CSS\n",
+            "[CSS]\nDCR_EP_NAME=CSS0\n",
+            "[CSS]\nDCR_EP_NAME=CSS1\n",
+            "<script>globalThis.dcrExecuted=true</script>\n",
+        );
+        const DCR_NODE: &str = concat!(
+            "DMDCR_PATH=/dmdata/dmdcr_cfg.ini\n",
+            "DMDCR_DB_STARTUP_CMD=/opt/dmdbms/bin/dmserver path=/dmdata/DAMENG/dm.ini password=NeverShow42\n",
+        );
+
+        for (key, payload) in [("dm-dcr-config", DCR_CONFIG), ("dm-dcr-node", DCR_NODE)] {
+            let artifact = artifact_by_key(key).expect("registered DM DCR artifact");
+            assert_eq!(artifact.product, DatabaseConfigProduct::Dm, "{key}");
+            assert_eq!(artifact.surface, DatabaseConfigSurface::File, "{key}");
+            assert_eq!(artifact.dialect, DatabaseConfigDialect::VendorText, "{key}");
+            assert_ne!(artifact.dialect, DatabaseConfigDialect::Ini, "{key}");
+            assert_eq!(
+                artifact.support,
+                DatabaseConfigSupportLevel::VendorSchemaRequired,
+                "{key}"
+            );
+            assert!(artifact.is_file_visual_readable(), "{key}");
+            assert!(
+                !artifact.has_source_backed_visual_parser(),
+                "{key} reached the generic INI editor"
+            );
+            assert_eq!(
+                artifact.local_draft_authority(),
+                DatabaseConfigLocalDraftAuthority::ReadOnly,
+                "{key} gained draft authority"
+            );
+            assert_eq!(database_starter_contents(artifact), "", "{key}");
+
+            let status = artifact
+                .read_only_status()
+                .expect("DM DCR artifact remains fixed metadata only");
+            let public_debug = format!("{artifact:?}{status:?}");
+            for rejected in [
+                payload,
+                "DCR_GRP_NAME",
+                "DMDCR_DB_STARTUP_CMD",
+                "dmserver",
+                "dcrExecuted",
+                "NeverShow42",
+            ] {
+                assert!(!public_debug.contains(rejected), "{key} leaked {rejected}");
+            }
         }
     }
 

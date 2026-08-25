@@ -1,0 +1,104 @@
+.dialog-host-backdrop {
+  position: fixed;
+  z-index: 1500;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: var(--backdrop);
+  backdrop-filter: blur(5px);
+}
+
+.dialog-host {
+  width: min(450px, 100%);
+  padding: 25px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  outline: none;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  color: var(--text);
+}
+
+.dialog-host.is-dangerous {
+  border-color: var(--danger-border);
+}
+
+.dialog-host-eyebrow {
+  margin: 0 0 7px;
+  color: var(--accent-text);
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+}
+
+.dialog-host.is-dangerous .dialog-host-eyebrow {
+  color: var(--danger-text);
+}
+
+.dialog-host h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.dialog-host-message {
+  margin-top: 13px;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.dialog-host label {
+  display: grid;
+  gap: 6px;
+  margin-top: 17px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.dialog-host input {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  outline: none;
+  color: var(--text);
+  background: var(--surface-alt);
+}
+
+.dialog-host input:focus {
+  border-color: var(--focus-ring);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus-ring) 15%, transparent);
+}
+
+.dialog-host footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 22px;
+}
+
+.dialog-host button {
+  min-height: 35px;
+  padding: 7px 13px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  background: var(--surface-alt);
+}
+
+.dialog-host button:last-child {
+  border-color: var(--accent);
+  color: var(--on-accent);
+  background: var(--accent);
+}
+
+.dialog-host .dialog-host-danger {
+  border-color: var(--danger);
+  background: var(--danger);
+}
+.dialog-host footer .dialog-host-primary { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
+.dialog-host footer .dialog-host-primary:hover:not(:disabled) { background: var(--accent-strong); }

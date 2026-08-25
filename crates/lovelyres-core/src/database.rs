@@ -958,7 +958,7 @@ impl DatabaseService {
 
     /// Revalidates a completed snapshot immediately before a caller applies it
     /// to page state. This closes the gap between the async method returning
-    /// and a GPUI entity processing the result.
+    /// and a frontend consumer processing the result.
     pub fn validate_runtime_parameters_snapshot(
         &self,
         snapshot: &DatabaseRuntimeParametersSnapshot,
