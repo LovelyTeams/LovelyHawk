@@ -19,6 +19,7 @@ import {
  * arbitrary path, and keeps the local pane in the same shape as the remote one.
  */
 const MAX_DIRECTORIES = 512;
+const MAX_FILES = 4_096;
 const READ_DEADLINE_MS = 10_000;
 
 interface StoredDirectory {
@@ -29,6 +30,7 @@ interface StoredDirectory {
 export class LocalBrowser {
   readonly #byHandle = new Map<string, StoredDirectory>();
   readonly #byDirectory = new Map<string, string>();
+  readonly #byFile = new Map<string, string>();
   readonly #home: string;
 
   constructor(home: string = os.homedir()) {
@@ -62,6 +64,27 @@ export class LocalBrowser {
     const stored = this.#byHandle.get(oldest.value);
     this.#byHandle.delete(oldest.value);
     if (stored !== undefined) this.#byDirectory.delete(stored.directory);
+  }
+
+  /**
+   * The path behind a local file handle, for the one caller that needs it:
+   * staging an upload in main. An unknown handle resolves to null rather than
+   * to a guess, so a renderer cannot name a file this registry never listed.
+   */
+  resolveFile(entryHandle: string): { readonly path: string; readonly name: string } | null {
+    const file = this.#byFile.get(entryHandle);
+    if (file === undefined) return null;
+    return { path: file, name: path.basename(file) };
+  }
+
+  #fileHandleFor(file: string): string {
+    if (this.#byFile.size >= MAX_FILES) {
+      const oldest = this.#byFile.keys().next();
+      if (oldest.done !== true) this.#byFile.delete(oldest.value);
+    }
+    const handle = randomUUID();
+    this.#byFile.set(handle, file);
+    return handle;
   }
 
   async #read(directory: string): Promise<LocalDirectorySnapshot> {
@@ -108,7 +131,11 @@ export class LocalBrowser {
     const label = bounded(name, LOCAL_BROWSER_LIMITS.maximumNameBytes);
     if (label.text.length === 0) return null;
     return {
-      entryHandle: kind === "directory" ? this.#handleFor(full) : randomUUID(),
+      entryHandle: kind === "directory"
+        ? this.#handleFor(full)
+        : kind === "file"
+          ? this.#fileHandleFor(full)
+          : randomUUID(),
       name: label.text,
       nameTruncated: label.truncated,
       kind,

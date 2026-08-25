@@ -107,7 +107,8 @@ const terminalApi: TerminalApi = Object.freeze({
     ipcRenderer.invoke("lovelyres:terminal:sftp:operation:execute", planHandle),
   cancelSftpOperation: (planHandle: string) =>
     ipcRenderer.invoke("lovelyres:terminal:sftp:operation:cancel", planHandle),
-  stageSftpUpload: () => ipcRenderer.invoke("lovelyres:terminal:sftp:upload:stage"),
+  stageSftpUpload: (localFileHandle?: string) =>
+    ipcRenderer.invoke("lovelyres:terminal:sftp:upload:stage", localFileHandle),
   openLocalBrowser: () => ipcRenderer.invoke("lovelyres:terminal:local:open"),
   listLocalDirectory: (directoryHandle: string) =>
     ipcRenderer.invoke("lovelyres:terminal:local:list", directoryHandle),

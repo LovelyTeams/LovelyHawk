@@ -6,13 +6,19 @@ import {
   type LocalBrowserEntry,
   type LocalDirectorySnapshot,
 } from "../shared/local-browser-contract";
-import { EntryKindIcon, HomeIcon, UpIcon } from "./file-icons";
+import { EntryKindIcon, HomeIcon, UpIcon, UploadIcon } from "./file-icons";
 import { displaySftpBytes, displaySftpModifiedAt } from "./sftp-browser-helpers";
 import { SftpBrowserEmpty, SftpBrowserError, SftpBrowserStatus } from "./SftpBrowserPage";
 
 export interface LocalFilePaneProps {
   api: LocalBrowserApi;
   active?: boolean;
+  /**
+   * Sends the selected file to the remote pane. The pane hands over the entry
+   * handle it was given, never a path, and the upload is still planned and
+   * confirmed like any other change.
+   */
+  onUpload?: (entryHandle: string, name: string) => void;
 }
 
 type Status = "idle" | "loading" | "ready" | "error";
@@ -22,7 +28,7 @@ type Status = "idle" | "loading" | "ready" | "error";
  * directory it can open arrived as an opaque handle, so this pane never holds a
  * filesystem path — only the label main sends for the path bar.
  */
-export function LocalFilePane({ api, active = true }: LocalFilePaneProps) {
+export function LocalFilePane({ api, active = true, onUpload }: LocalFilePaneProps) {
   const [directory, setDirectory] = useState<LocalDirectorySnapshot | null>(null);
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -67,12 +73,26 @@ export function LocalFilePane({ api, active = true }: LocalFilePaneProps) {
   }
 
   const busy = status === "loading";
+  const selectedFile = directory?.entries.find(
+    (entry) => entry.entryHandle === selectedHandle && entry.kind === "file",
+  ) ?? null;
   const folders = directory?.entries.filter((entry) => entry.kind === "directory").length ?? 0;
   const files = (directory?.displayedEntryCount ?? 0) - folders;
   return (
     <section className="sftp-browser-pane is-local" aria-label="本地文件">
       <header className="sftp-browser-pane-head">
         <strong>本地文件</strong>
+        {onUpload === undefined ? null : (
+          <button
+            type="button"
+            className="sftp-browser-pane-action"
+            disabled={busy || selectedFile === null}
+            title={selectedFile === null ? "先选择一个文件" : `上传 ${selectedFile.name} 到远端目录`}
+            onClick={() => selectedFile !== null && onUpload(selectedFile.entryHandle, selectedFile.name)}
+          >
+            <UploadIcon />上传到远端
+          </button>
+        )}
         <button type="button" disabled={busy} title="回到主目录" aria-label="回到主目录"
           onClick={() => setRequest((current) => ({ token: current.token + 1, directoryHandle: null }))}>
           <HomeIcon />

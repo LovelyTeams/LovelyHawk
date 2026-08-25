@@ -300,7 +300,9 @@ export function SftpBrowserPage({
     try {
       let stagedHandle: string | null = null;
       if (next.kind === "upload") {
-        const staged = await api.stageSftpUpload();
+        const staged = next.localFileHandle === undefined
+          ? await api.stageSftpUpload()
+          : await api.stageSftpUpload(next.localFileHandle);
         const upload = stagedUpload(staged);
         if (upload === null) {
           setDraft(null);
@@ -415,7 +417,22 @@ export function SftpBrowserPage({
           {visibleState.directoryStatus === "error" && <SftpBrowserError
             message={visibleState.directoryError ?? "目录读取失败。"} compact />}
           <div className="sftp-browser-panes">
-            <LocalFilePane api={api} active={enabled} />
+            <LocalFilePane
+              api={api}
+              active={enabled}
+              onUpload={(entryHandle, name) => {
+                setMenu(null);
+                setPlan(null);
+                setReceipt(null);
+                setOperationError(null);
+                setDraft({
+                  kind: "upload",
+                  subject: directory?.directoryLabel ?? "当前目录",
+                  name,
+                  localFileHandle: entryHandle,
+                });
+              }}
+            />
 
             <section className="sftp-browser-pane" aria-label="远程文件">
               <header className="sftp-browser-pane-head">

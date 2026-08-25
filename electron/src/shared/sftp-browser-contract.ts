@@ -107,8 +107,12 @@ export interface SftpBrowserApi {
   confirmSftpOperation(planHandle: string): Promise<unknown>;
   executeSftpOperation(planHandle: string): Promise<unknown>;
   cancelSftpOperation(planHandle: string): Promise<unknown>;
-  /** Asks main for a file, then stages it where an upload plan can name it. */
-  stageSftpUpload(): Promise<unknown>;
+  /**
+   * Stages a file where an upload plan can name it. With a handle from the
+   * local pane it stages that file; without one main asks the operator to pick
+   * a file. Either way the renderer never sees a local path.
+   */
+  stageSftpUpload(localFileHandle?: string): Promise<unknown>;
 }
 
 type JsonRecord = Record<string, unknown>;

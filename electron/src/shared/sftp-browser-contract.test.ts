@@ -129,7 +129,8 @@ describe("sftp browser standalone contract", () => {
     // Transfers and operations name capabilities, never paths: main owns both
     // dialogs and the sidecar owns the staging area.
     expect(api).toContain("downloadSftpEntry(browserHandle: string, fileHandle: string)");
-    expect(api).toContain("stageSftpUpload(): Promise<unknown>");
+    // Staging takes at most a capability from the local pane, never a path.
+    expect(api).toContain("stageSftpUpload(localFileHandle?: string): Promise<unknown>");
     for (const forbidden of [
       "sessionId:", "guard:", "generation:", "remotePath:", "localPath:", "command:",
       ["delete", "Sftp"].join(""), ["rename", "Sftp"].join(""), ["chmod", "Sftp"].join(""),

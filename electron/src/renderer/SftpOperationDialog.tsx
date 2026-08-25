@@ -16,6 +16,8 @@ export interface SftpOperationDraft {
   name?: string;
   mode?: string;
   format?: SftpArchiveFormat;
+  /** Set when the file came from the local pane; absent means main will ask. */
+  localFileHandle?: string;
 }
 
 export interface SftpOperationDialogProps {

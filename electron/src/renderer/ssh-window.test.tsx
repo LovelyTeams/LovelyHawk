@@ -92,6 +92,35 @@ describe("SSH window shell", () => {
     expect(main).toContain("fs.lstat(full)");
   });
 
+  /**
+   * The two panes are one transfer surface: a file chosen on the left goes up
+   * to the directory open on the right, and it still goes through a plan.
+   */
+  it("uploads the local selection without either side naming a path", () => {
+    const pane = source("LocalFilePane.tsx");
+    expect(pane).toContain("onUpload(selectedFile.entryHandle, selectedFile.name)");
+    // Only a file can be sent, and only when one is selected.
+    expect(pane).toContain('entry.entryHandle === selectedHandle && entry.kind === "file"');
+    expect(pane).toContain("disabled={busy || selectedFile === null}");
+
+    const page = source("SftpBrowserPage.tsx");
+    expect(page).toContain("await api.stageSftpUpload(next.localFileHandle)");
+    expect(page).toContain("localFileHandle: entryHandle");
+
+    // Main resolves the handle to a path; an unlisted handle resolves to nothing.
+    const browser = source("../main/local-browser.ts");
+    expect(browser).toContain("resolveFile(entryHandle: string)");
+    expect(browser).toContain("if (file === undefined) return null;");
+
+    const main = source("../main/index.ts");
+    const handler = main.slice(main.indexOf('ipcMain.handle("lovelyres:terminal:sftp:upload:stage"'));
+    expect(handler.slice(0, 2_000)).toContain("localBrowser.resolveFile(requested)");
+    expect(handler.slice(0, 2_000)).toContain("The selected local file is no longer listed.");
+    // Without a handle the operator still picks the file in the system dialog.
+    expect(handler.slice(0, 2_000)).toContain("dialog.showOpenDialog(window");
+    expect(handler.slice(0, 2_000)).toContain("path.isAbsolute(chosen)");
+  });
+
   /** Download is the one transfer that needs no plan; the path is main's. */
   it("downloads through the save dialog and never lets the renderer pick a path", () => {
     const page = source("SftpBrowserPage.tsx");

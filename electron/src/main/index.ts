@@ -2176,17 +2176,29 @@ function registerIpc(): void {
   });
   ipcMain.handle("lovelyres:terminal:sftp:upload:stage", async (event, ...values: unknown[]) => {
     const context = terminalContextFor(event);
-    if (values.length !== 0) throw new Error("Invalid SFTP staging request.");
-    // The operator picks the file; the renderer never names one.
-    const window = BrowserWindow.fromWebContents(event.sender);
-    if (window === null) throw new Error("The SFTP upload window is not available.");
-    const selection = await dialog.showOpenDialog(window, {
-      title: "选择要上传的文件",
-      buttonLabel: "选择",
-      properties: ["openFile"],
-    });
-    const [chosen] = selection.filePaths;
-    if (selection.canceled || chosen === undefined) return { staged: false, upload: null };
+    if (values.length > 1) throw new Error("Invalid SFTP staging request.");
+    // The operator picks the file, either in the local pane or in the system
+    // dialog. Both arrive here as something main resolved, never as a path the
+    // renderer chose.
+    const [requested] = values;
+    let chosen: string;
+    if (requested === undefined) {
+      const window = BrowserWindow.fromWebContents(event.sender);
+      if (window === null) throw new Error("The SFTP upload window is not available.");
+      const selection = await dialog.showOpenDialog(window, {
+        title: "选择要上传的文件",
+        buttonLabel: "选择",
+        properties: ["openFile"],
+      });
+      const [picked] = selection.filePaths;
+      if (selection.canceled || picked === undefined) return { staged: false, upload: null };
+      chosen = picked;
+    } else {
+      if (typeof requested !== "string") throw new Error("Invalid SFTP staging request.");
+      const local = localBrowser.resolveFile(requested);
+      if (local === null) throw new Error("The selected local file is no longer listed.");
+      chosen = local.path;
+    }
     if (!path.isAbsolute(chosen)) throw new Error("The selected upload path is invalid.");
     const upload = await backend.stageSftpUpload(context.bindingHandle, chosen, path.basename(chosen));
     return { staged: true, upload };
