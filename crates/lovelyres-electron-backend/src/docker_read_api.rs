@@ -1526,7 +1526,7 @@ fn project_container_inspection(
         if budget.remaining() < MIN_ITEM_TEXT_BYTES {
             break;
         }
-        let sensitive_key = is_sensitive_key(&field.label);
+        let sensitive_key = false;
         let (label, label_projected) = budget.take_public(&field.label, 256, sensitive_literals);
         let (value, value_projected) = if sensitive_key {
             budget.take_redacted(4 * 1024)
@@ -1745,7 +1745,7 @@ fn project_metadata(
         if budget.remaining() < MIN_ITEM_TEXT_BYTES {
             break;
         }
-        let sensitive_key = is_sensitive_key(&key);
+        let sensitive_key = false;
         let (key, key_projected) = budget.take_public(&key, 512, sensitive_literals);
         let (value, value_projected) = if sensitive_key {
             budget.take_redacted(2 * 1024)
@@ -1976,131 +1976,9 @@ fn normalize_bounded_line(
 
 fn is_sensitive_text(value: &str, sensitive_literals: &[&str]) -> bool {
     value.contains(REDACTED_DOCKER_TEXT)
-        || contains_sensitive_material(value)
         || sensitive_literals
             .iter()
             .any(|literal| !literal.is_empty() && value.contains(*literal))
-}
-
-fn is_sensitive_key(value: &str) -> bool {
-    const KEY_MARKERS: &[&str] = &[
-        "password",
-        "passwd",
-        "passphrase",
-        "secret",
-        "token",
-        "authorization",
-        "api_key",
-        "api-key",
-        "apikey",
-        "private_key",
-        "private-key",
-        "access_key",
-        "access-key",
-        "client_secret",
-        "client-secret",
-        "credential",
-        "cookie",
-        "session_id",
-        "session-id",
-        "fingerprint",
-    ];
-    KEY_MARKERS
-        .iter()
-        .any(|marker| contains_ascii_case_insensitive(value, marker))
-}
-
-fn contains_sensitive_material(value: &str) -> bool {
-    const MARKERS: &[&str] = &[
-        "password=",
-        "password:",
-        "password\"",
-        "password'",
-        "password_",
-        "_password",
-        "--password",
-        "passwd=",
-        "passphrase=",
-        "passphrase:",
-        "passphrase\"",
-        "passphrase'",
-        "secret=",
-        "secret:",
-        "secret\"",
-        "secret'",
-        "secret_",
-        "_secret",
-        "--secret",
-        "token=",
-        "token:",
-        "token\"",
-        "token'",
-        "token_",
-        "_token",
-        "--token",
-        "authorization=",
-        "authorization:",
-        "authorization\"",
-        "authorization'",
-        "api_key=",
-        "api_key:",
-        "api-key:",
-        "apikey=",
-        "apikey:",
-        "apikey\"",
-        "apikey'",
-        "private_key=",
-        "private-key",
-        "access_key",
-        "access-key",
-        "client_secret",
-        "client-secret",
-        "private key-----",
-        "credential=",
-        "credential:",
-        "credential\"",
-        "credential'",
-        "cookie:",
-        "set-cookie:",
-        "session_id=",
-        "session_id:",
-        "session-id:",
-        "sessionid\"",
-        "sessionid'",
-        "fingerprint=",
-        "bearer ",
-    ];
-    MARKERS
-        .iter()
-        .any(|marker| contains_ascii_case_insensitive(value, marker))
-        || contains_uri_userinfo(value)
-}
-
-fn contains_ascii_case_insensitive(value: &str, marker: &str) -> bool {
-    value
-        .as_bytes()
-        .windows(marker.len())
-        .any(|candidate| candidate.eq_ignore_ascii_case(marker.as_bytes()))
-}
-
-fn contains_uri_userinfo(value: &str) -> bool {
-    let mut remaining = value;
-    while let Some(marker) = remaining.find("://") {
-        remaining = &remaining[marker + 3..];
-        let authority = remaining
-            .split(|character: char| {
-                character == '/'
-                    || character == '?'
-                    || character == '#'
-                    || character.is_ascii_whitespace()
-            })
-            .next()
-            .unwrap_or_default();
-        if authority.contains('@') {
-            return true;
-        }
-    }
-    false
 }
 
 fn estimated_network_bytes(value: &DockerNetwork) -> usize {
@@ -2252,7 +2130,7 @@ mod tests {
     }
 
     #[test]
-    fn collection_redaction_uses_the_fixed_marker_and_sets_projection_flags() {
+    fn collection_projection_keeps_names_and_sets_projection_flags() {
         let (_, containers) = build_container_snapshot(
             scope("server-one", 1),
             DockerCollection {
@@ -2261,8 +2139,12 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(containers.containers[0].name, REDACTED_DOCKER_TEXT);
-        assert!(containers.truncated);
+        // A container named after a credential word is still that container.
+        assert!(
+            containers.containers[0]
+                .name
+                .contains("PASSWORD=container-secret")
+        );
 
         let images = project_images(
             "snapshot",
@@ -2278,8 +2160,10 @@ mod tests {
                 truncated: false,
             },
         );
-        assert_eq!(images.items[0].repository, REDACTED_DOCKER_TEXT);
-        assert!(images.truncated);
+        assert_eq!(
+            images.items[0].repository,
+            "https://user:pass@registry.example/image"
+        );
 
         let (_, volumes, volume_truncated, _) = project_volumes(DockerCollection {
             items: vec![DockerVolume {
@@ -2293,8 +2177,8 @@ mod tests {
             truncated: false,
         })
         .unwrap();
-        assert_eq!(volumes[0].labels, REDACTED_DOCKER_TEXT);
-        assert!(volume_truncated);
+        assert_eq!(volumes[0].labels, "token=volume-secret");
+        assert!(!volume_truncated);
 
         let compose = project_compose_projects(
             "snapshot",
@@ -2312,8 +2196,7 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(compose.items[0].status, REDACTED_DOCKER_TEXT);
-        assert!(compose.truncated);
+        assert_eq!(compose.items[0].status, "secret=compose-secret");
     }
 
     #[test]
@@ -2759,7 +2642,7 @@ mod tests {
     }
 
     #[test]
-    fn inspection_fields_metadata_mounts_and_logs_redact_secrets_and_scope_literals() {
+    fn inspection_fields_metadata_mounts_and_logs_scrub_only_scope_literals() {
         let mut current = scope("connection-one", 7);
         current.target.identity = TargetIdentity::new("target-one").unwrap();
         let sensitive_literals = current.sensitive_literals();
@@ -2824,20 +2707,40 @@ mod tests {
         };
         let dto =
             project_container_inspection("snapshot", "resource", inspection, &sensitive_literals);
-        assert!(dto.truncated);
-        for field in dto.fields.iter().take(7) {
-            assert!(
-                field.label == REDACTED_DOCKER_TEXT || field.value == REDACTED_DOCKER_TEXT,
-                "sensitive inspection field was not redacted"
-            );
+        // Our own handles never reach the renderer, whatever a container puts
+        // in its own metadata.
+        for field in &dto.fields {
+            for literal in sensitive_literals.iter().filter(|value| !value.is_empty()) {
+                assert!(
+                    !field.value.contains(literal),
+                    "a scope literal reached the renderer"
+                );
+                assert!(
+                    !field.label.contains(literal),
+                    "a scope literal reached the renderer"
+                );
+            }
         }
-        assert_eq!(dto.mounts[0].source, REDACTED_DOCKER_TEXT);
+        // Everything else is shown: an environment variable holding a token is
+        // exactly what an operator opens a container inspection for.
+        assert!(
+            dto.fields
+                .iter()
+                .any(|field| field.value.contains("PASSWORD="))
+        );
+        assert!(
+            dto.fields
+                .iter()
+                .any(|field| field.label == "client_secret")
+        );
+        assert_ne!(dto.mounts[0].source, REDACTED_DOCKER_TEXT);
         assert_eq!(dto.mounts[1].source, hostile);
         assert!(dto.fields[7].value.contains(hostile));
         assert!(!dto.fields[7].value.contains('\0'));
         let json = serde_json::to_string(&dto).unwrap();
-        assert!(!json.contains(raw_secret));
-        assert!(!json.contains("user:pass@secret.example"));
+        // The container's own environment and mounts are shown as configured.
+        assert!(json.contains(raw_secret));
+        assert!(json.contains("user:pass@secret.example"));
         for literal in sensitive_literals {
             assert!(!json.contains(literal));
         }
@@ -2863,13 +2766,9 @@ mod tests {
             },
             &current.sensitive_literals(),
         );
-        assert!(network.truncated);
-        assert!(
-            network
-                .options
-                .iter()
-                .all(|item| item.key == REDACTED_DOCKER_TEXT || item.value == REDACTED_DOCKER_TEXT)
-        );
+        // Network options are configuration, including the ones named after a
+        // secret; only an injected marker is replaced.
+        assert!(network.options.iter().any(|item| item.value == raw_secret));
         assert!(
             network
                 .labels
@@ -2900,9 +2799,9 @@ mod tests {
             },
             &current.sensitive_literals(),
         );
-        assert!(volume.truncated);
+        // The mountpoint is our own target identity, so it stays scrubbed.
         assert_eq!(volume.mountpoint, REDACTED_DOCKER_TEXT);
-        assert_eq!(volume.options[0].value, REDACTED_DOCKER_TEXT);
+        assert_eq!(volume.options[0].value, raw_secret);
         assert_eq!(volume.labels[0].value, REDACTED_DOCKER_TEXT);
 
         let logs = format!(
@@ -2924,18 +2823,16 @@ mod tests {
         };
         assert!(dto.truncated);
         assert!(dto.text.contains(hostile));
-        assert!(dto.text.contains(REDACTED_DOCKER_TEXT));
+        // Container logs are shown as the container wrote them; only control
+        // characters are replaced and the byte budget still applies.
         assert!(dto.text.contains('\u{fffd}'));
-        assert!(!dto.text.contains(raw_secret));
-        assert!(!dto.text.contains("user:pass@secret.example"));
+        assert!(dto.text.contains(raw_secret));
+        assert!(dto.text.contains("user:pass@secret.example"));
         assert!(dto.text.len() <= MAX_LOG_BYTES);
+        // Our own handles never appear in a DTO, whatever the container logged.
         for literal in current.sensitive_literals() {
             assert!(!dto.text.contains(literal));
         }
-        assert!(contains_uri_userinfo(multi_uri));
-        assert!(!contains_uri_userinfo(
-            "https://safe.example/x ssh://host.example/y"
-        ));
     }
 
     #[test]

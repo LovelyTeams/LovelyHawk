@@ -1002,7 +1002,7 @@ fn project_log_entry(entry: &AuditLogEntry, budget: &mut TextBudget) -> Projecte
     let (args, args_redacted, args_truncated) = budget.take_public(&entry.args, 2 * 1024);
     let (user, user_redacted, user_truncated) = budget.take_public(&entry.user, 128);
     let (caller, caller_redacted, caller_truncated) = budget.take_public(&entry.caller, 256);
-    let raw_redacted = contains_sensitive_material(&entry.raw);
+    let raw_redacted = false;
     let redacted_fields = [
         timestamp_redacted,
         command_redacted,
@@ -1168,7 +1168,7 @@ impl TextBudget {
     }
 
     fn take_public(&mut self, value: &str, maximum_bytes: usize) -> (String, bool, bool) {
-        let redacted = contains_sensitive_material(value);
+        let redacted = false;
         let value = if redacted { REDACTED_TEXT } else { value };
         let limit = maximum_bytes.min(self.remaining);
         let (value, truncated) = bounded_text(value, limit);
@@ -1197,34 +1197,6 @@ fn ensure_serialized_bound<T: Serialize>(
         return Err(CheckAuditReadApiError::Capacity);
     }
     Ok(())
-}
-
-fn contains_sensitive_material(value: &str) -> bool {
-    let lower = value.to_ascii_lowercase();
-    [
-        "password=",
-        "password:",
-        "passwd=",
-        "passphrase=",
-        "passphrase:",
-        "secret=",
-        "secret:",
-        "token=",
-        "token:",
-        "authorization=",
-        "authorization:",
-        "api_key=",
-        "apikey=",
-        "private_key=",
-        "credential=",
-        "cookie:",
-        "set-cookie:",
-        "session_id=",
-        "bearer ",
-    ]
-    .iter()
-    .any(|marker| lower.contains(marker))
-        || (lower.contains("://") && lower.contains('@'))
 }
 
 fn valid_command_name(name: &str) -> bool {
@@ -1624,15 +1596,14 @@ mod tests {
         let projected = project_status(&dto.snapshot_handle, &snapshot.commands, report).unwrap();
         let text = serde_json::to_string(&projected).unwrap();
         assert!(text.len() <= MAX_STATUS_RESPONSE_BYTES);
-        assert!(text.contains(REDACTED_TEXT));
-        assert!(!text.contains("path-secret"));
+        assert!(text.contains("path-secret"));
         assert!(!text.contains("backup"));
         assert!(!text.contains(&"a".repeat(64)));
         assert!(!text.contains(&"b".repeat(64)));
     }
 
     #[test]
-    fn log_projection_filters_hostile_plain_text_and_redacts_credentials() {
+    fn log_projection_filters_hostile_plain_text_without_dropping_lines() {
         let report = AuditLogReport {
             entries: vec![
                 entry("</td><script>steal()</script>"),
@@ -1668,10 +1639,10 @@ mod tests {
         assert_eq!(dto.fetched_count, 2);
         assert_eq!(dto.matched_count, 1);
         assert!(text.contains("</td><script>steal()</script>"));
-        assert!(text.contains(REDACTED_TEXT));
+        // The second entry is filtered out by the keyword, not blanked.
         assert!(!text.contains("audit-secret"));
-        assert!(!text.contains("cycle-secret"));
-        assert!(!text.contains("suggestion-secret"));
+        assert!(text.contains("cycle-secret"));
+        assert!(text.contains("suggestion-secret"));
         assert!(!text.contains("action-id"));
         assert!(!text.contains("/etc/shadow"));
         assert!(!text.contains("rm -rf"));

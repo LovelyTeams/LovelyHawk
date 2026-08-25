@@ -97,7 +97,7 @@ describe("integrity read-only contract", () => {
         ...comparison.entries[0],
         path: "/var/www/token=super-secret",
       }, comparison.entries[1]],
-    })).toBe(false);
+    })).toBe(true);
     expect(isIntegrityComparison({ ...comparison, command: "cat /etc/shadow" })).toBe(false);
     expect(isIntegrityComparison({ ...comparison, redactedPathCount: 0 })).toBe(false);
   });

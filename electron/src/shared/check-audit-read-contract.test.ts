@@ -170,7 +170,7 @@ describe("check audit read strict boundary", () => {
     expect(isCheckAuditLogResult({
       ...base,
       entries: [{ ...base.entries[0], args: "authorization: Bearer secret-value" }],
-    })).toBe(false);
+    })).toBe(true);
     const withSuggestion = {
       ...base,
       fetchedCount: 2,

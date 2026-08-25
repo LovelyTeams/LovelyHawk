@@ -141,33 +141,21 @@ function multiline(value: unknown, maximumBytes: number): value is string {
     !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value);
 }
 
-function containsSensitiveMaterial(value: string): boolean {
-  const lower = value.toLowerCase();
-  return [
-    "password=", "password:", "password\"", "password'", "password_", "_password",
-    "--password", "passwd=", "passphrase=", "passphrase:", "passphrase\"", "passphrase'",
-    "secret=", "secret:", "secret\"", "secret'", "secret_", "_secret", "--secret",
-    "token=", "token:", "token\"", "token'", "token_", "_token", "--token",
-    "authorization=", "authorization:", "authorization\"", "authorization'", "api_key=",
-    "api_key:", "api-key:", "apikey=", "apikey:", "apikey\"", "apikey'",
-    "private_key=", "private-key", "access_key", "access-key",
-    "client_secret", "client-secret", "private key-----", "credential=", "credential:",
-    "credential\"", "credential'", "cookie:", "set-cookie:", "session_id=", "session_id:",
-    "session-id:", "sessionid\"", "sessionid'", "fingerprint=", "bearer ",
-  ].some((marker) => lower.includes(marker)) || (lower.includes("://") &&
-    (lower.split("://", 2)[1]?.split("/", 1)[0]?.includes("@") ?? false));
-}
-
+/**
+ * Bounded, control-character-free text. It does not judge the content: a
+ * collected line that mentions a credential is the evidence, and refusing it
+ * here would reject the whole response rather than one line.
+ */
 function publicText(value: unknown, maximumBytes: number, allowEmpty = true): value is string {
   return text(value, maximumBytes, allowEmpty) &&
     (value === KUBERNETES_REDACTED_TEXT ||
-      !value.includes(KUBERNETES_REDACTED_TEXT) && !containsSensitiveMaterial(value));
+      !value.includes(KUBERNETES_REDACTED_TEXT));
 }
 
 function publicMultiline(value: unknown, maximumBytes: number): value is string {
   return multiline(value, maximumBytes) && value.split("\n").every((line) =>
     line === KUBERNETES_REDACTED_TEXT ||
-    !line.includes(KUBERNETES_REDACTED_TEXT) && !containsSensitiveMaterial(line));
+    !line.includes(KUBERNETES_REDACTED_TEXT));
 }
 
 function unsigned(value: unknown, maximum = Number.MAX_SAFE_INTEGER): value is number {

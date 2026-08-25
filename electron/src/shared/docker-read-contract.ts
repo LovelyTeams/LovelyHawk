@@ -290,31 +290,14 @@ function text(value: unknown, maximumBytes: number, allowEmpty = true): value is
     encoder.encode(value).byteLength <= maximumBytes &&
     !/[\u0000-\u001f\u007f]/u.test(value) &&
     (value === DOCKER_REDACTED_TEXT ||
-      !value.includes(DOCKER_REDACTED_TEXT) && !containsSensitiveMaterial(value));
+      !value.includes(DOCKER_REDACTED_TEXT));
 }
 
 function multilineText(value: unknown, maximumBytes: number): value is string {
   return typeof value === "string" && encoder.encode(value).byteLength <= maximumBytes &&
     !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value) &&
     value.split("\n").every((line) => line === DOCKER_REDACTED_TEXT ||
-      !line.includes(DOCKER_REDACTED_TEXT) && !containsSensitiveMaterial(line));
-}
-
-function containsSensitiveMaterial(value: string): boolean {
-  const lower = value.toLowerCase();
-  return [
-    "password=", "password:", "password\"", "password'", "password_", "_password",
-    "--password", "passwd=", "passphrase=", "passphrase:", "passphrase\"", "passphrase'",
-    "secret=", "secret:", "secret\"", "secret'", "secret_", "_secret", "--secret",
-    "token=", "token:", "token\"", "token'", "token_", "_token", "--token",
-    "authorization=", "authorization:", "authorization\"", "authorization'", "api_key=",
-    "api_key:", "api-key:", "apikey=", "apikey:", "apikey\"", "apikey'",
-    "private_key=", "private-key", "access_key", "access-key", "client_secret",
-    "client-secret", "private key-----", "credential=", "credential:", "credential\"",
-    "credential'", "cookie:", "set-cookie:", "session_id=", "session_id:",
-    "session-id:", "sessionid\"", "sessionid'", "fingerprint=", "bearer ",
-  ].some((marker) => lower.includes(marker)) ||
-    /[a-z][a-z0-9+.-]*:\/\/[^\s/@]+(?::[^\s/@]*)?@/iu.test(value);
+      !line.includes(DOCKER_REDACTED_TEXT));
 }
 
 function containsFixedRedactionMarker(value: unknown, seen = new Set<object>()): boolean {

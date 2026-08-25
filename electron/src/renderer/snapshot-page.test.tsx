@@ -11,7 +11,6 @@ import type {
 } from "../shared/snapshot-read-contract";
 import {
   forensicCollectors,
-  fullyRedactedForensicCollectors,
 } from "../shared/snapshot-read-contract";
 import {
   ForensicDetailContent,
@@ -25,7 +24,6 @@ import {
 
 const hostile = "</pre><script>steal()</script><img src=x onerror=steal()>";
 const redacted = "[SENSITIVE SNAPSHOT TEXT REDACTED]";
-const fullyRedacted = new Set<string>(fullyRedactedForensicCollectors);
 const api: SnapshotReadApi = {
   listSnapshots: async () => { throw new Error(); },
   getSnapshotDetail: async () => { throw new Error(); },
@@ -52,11 +50,11 @@ const forensic: ForensicSnapshotDetail = {
   failedCollectors: 1,
   fields: forensicCollectors.map((collector, index) => ({
     collector,
-    text: fullyRedacted.has(collector) ? redacted : index === 1 ? `${hostile}\n${redacted}` : "",
-    redactedLineCount: fullyRedacted.has(collector) || index === 1 ? 1 : 0,
+    text: index === 1 ? `${hostile}\n${redacted}` : "",
+    redactedLineCount: index === 1 ? 1 : 0,
     truncated: index === 1,
   })),
-  redactedLineCount: fullyRedactedForensicCollectors.length + 1,
+  redactedLineCount: 1,
   truncated: true,
 };
 
@@ -104,7 +102,7 @@ describe("SnapshotPage", () => {
       fieldText={field.text} collector="networkConnections" onCollector={() => undefined} search="" />);
     expect(html).toContain("&lt;/pre&gt;&lt;script&gt;steal()&lt;/script&gt;");
     expect(html).not.toContain("<script>");
-    expect(html).toContain(`已遮蔽 ${fullyRedactedForensicCollectors.length + 1} 行`);
+    expect(html).toContain("已遮蔽 1 行");
     expect(html).toContain("文本已按行数或字节上限截断");
   });
 

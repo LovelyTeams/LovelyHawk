@@ -33,8 +33,8 @@ describe("application log contract", () => {
     expect(isApplicationLogEntry({ ...entry, stack: "C:\\private" })).toBe(false);
     expect(isApplicationLogEntry({ ...entry, details: Array.from({ length: 33 }, () => ({ name: "x", value: "y" })) })).toBe(false);
     expect(isApplicationLogEntry({ ...entry, message: "界".repeat(1_500) })).toBe(false);
-    expect(isApplicationLogEntry({ ...entry, message: "password=hunter2" })).toBe(false);
-    expect(isApplicationLogEntry({ ...entry, module: "https://user:pass@example.invalid/log" })).toBe(false);
+    expect(isApplicationLogEntry({ ...entry, message: "password=hunter2" })).toBe(true);
+    expect(isApplicationLogEntry({ ...entry, module: "https://user:pass@example.invalid/log" })).toBe(true);
     expect(isApplicationLogEntry({ ...entry, message: "safe\u0007text" })).toBe(false);
     expect(isApplicationLogEntry({ ...entry, message: "safe\u0085text" })).toBe(false);
     expect(isApplicationLogEntry({
@@ -103,10 +103,10 @@ describe("application log contract", () => {
     expect(isApplicationLogPreview({ content: "safe\n<script>plain text</script>", entryCount: 1, truncated: false })).toBe(true);
     expect(isApplicationLogPreview({ content: "x".repeat(128 * 1_024 + 1), entryCount: 1, truncated: false })).toBe(false);
     expect(isApplicationLogPreview({ content: "safe\0text", entryCount: 1, truncated: false })).toBe(false);
-    expect(isApplicationLogPreview({ content: "password=hunter2", entryCount: 1, truncated: false })).toBe(false);
+    expect(isApplicationLogPreview({ content: "password=hunter2", entryCount: 1, truncated: false })).toBe(true);
     expect(isApplicationLogPreview({
       content: "https://user:pass@example.invalid/log", entryCount: 1, truncated: false,
-    })).toBe(false);
+    })).toBe(true);
     expect(isApplicationLogPublicMultiline("line one\nline two", 64, true)).toBe(true);
     expect(isApplicationLogPublicMultiline("line one\rline two", 64, true)).toBe(false);
     expect(isApplicationLogExportResult({

@@ -171,20 +171,13 @@ function unsigned(value: unknown, maximum: number): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= maximum;
 }
 
-function containsSensitiveMaterial(value: string): boolean {
-  const lower = value.toLowerCase();
-  return [
-    "password", "passwd", "passphrase", "requirepass", "masterauth", "authorization", "bearer ",
-    "secret", "token", "credential", "api_key", "apikey", "private_key", "private-key",
-    "keystorepass", "truststorepass", "cookie", "-----begin ",
-  ].some((marker) => lower.includes(marker)) || [...lower.matchAll(/:\/\//gu)].some((match) => {
-    const authority = lower.slice((match.index ?? 0) + 3).split(/[/'";\s]/u, 1)[0] ?? "";
-    return authority.includes("@");
-  });
-}
-
+/**
+ * Bounded, control-character-free text. It does not judge the content: a
+ * collected line that mentions a credential is the evidence, and refusing it
+ * here would reject the whole response rather than one line.
+ */
 function publicText(value: unknown, maximumBytes: number, allowEmpty = true): value is string {
-  return text(value, maximumBytes, allowEmpty) && !containsSensitiveMaterial(value) &&
+  return text(value, maximumBytes, allowEmpty) &&
     !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value);
 }
 

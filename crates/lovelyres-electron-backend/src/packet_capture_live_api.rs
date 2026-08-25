@@ -1488,103 +1488,9 @@ fn bounded_single_line(value: &str, maximum_bytes: usize) -> (String, bool) {
 
 fn is_sensitive_text(value: &str, sensitive_literals: &[&str]) -> bool {
     value.contains(REDACTED_PACKET_CAPTURE_TEXT)
-        || contains_sensitive_material(value)
         || sensitive_literals
             .iter()
             .any(|literal| !literal.is_empty() && value.contains(*literal))
-}
-
-fn contains_sensitive_material(value: &str) -> bool {
-    const MARKERS: &[&str] = &[
-        "password=",
-        "password:",
-        "password\"",
-        "password'",
-        "password_",
-        "_password",
-        "--password",
-        "passwd=",
-        "passphrase=",
-        "passphrase:",
-        "passphrase\"",
-        "passphrase'",
-        "secret=",
-        "secret:",
-        "secret\"",
-        "secret'",
-        "secret_",
-        "_secret",
-        "--secret",
-        "token=",
-        "token:",
-        "token\"",
-        "token'",
-        "token_",
-        "_token",
-        "--token",
-        "authorization=",
-        "authorization:",
-        "authorization\"",
-        "authorization'",
-        "api_key=",
-        "api_key:",
-        "api-key:",
-        "apikey=",
-        "apikey:",
-        "apikey\"",
-        "apikey'",
-        "private_key=",
-        "private-key",
-        "access_key",
-        "access-key",
-        "client_secret",
-        "client-secret",
-        "private key-----",
-        "credential=",
-        "credential:",
-        "credential\"",
-        "credential'",
-        "cookie:",
-        "set-cookie:",
-        "session_id=",
-        "session_id:",
-        "session-id:",
-        "sessionid\"",
-        "sessionid'",
-        "fingerprint=",
-        "bearer ",
-    ];
-    MARKERS
-        .iter()
-        .any(|marker| contains_ascii_case_insensitive(value, marker))
-        || contains_uri_userinfo(value)
-}
-
-fn contains_ascii_case_insensitive(value: &str, marker: &str) -> bool {
-    value
-        .as_bytes()
-        .windows(marker.len())
-        .any(|candidate| candidate.eq_ignore_ascii_case(marker.as_bytes()))
-}
-
-fn contains_uri_userinfo(value: &str) -> bool {
-    let mut remaining = value;
-    while let Some(marker) = remaining.find("://") {
-        remaining = &remaining[marker + 3..];
-        let authority = remaining
-            .split(|character: char| {
-                character == '/'
-                    || character == '?'
-                    || character == '#'
-                    || character.is_ascii_whitespace()
-            })
-            .next()
-            .unwrap_or_default();
-        if authority.contains('@') {
-            return true;
-        }
-    }
-    false
 }
 
 fn truncate_utf8(value: &str, maximum_bytes: usize) -> (String, bool) {
@@ -1987,7 +1893,7 @@ mod tests {
     }
 
     #[test]
-    fn public_text_projection_redacts_credentials_uri_userinfo_and_scope_literals() {
+    fn public_text_projection_scrubs_scope_literals_only() {
         let current = scope("secret-host", 7);
         let sensitive_literals = current.sensitive_literals();
         let projected = project_interface(
@@ -2000,8 +1906,14 @@ mod tests {
             },
             &sensitive_literals,
         );
-        assert_eq!(projected.name, REDACTED_PACKET_CAPTURE_TEXT);
-        assert_eq!(projected.mac.as_deref(), Some(REDACTED_PACKET_CAPTURE_TEXT));
+        // An interface label that looks like a URL with credentials in it is
+        // still the label the target reported.
+        assert_ne!(projected.name, REDACTED_PACKET_CAPTURE_TEXT);
+        assert_eq!(
+            projected.mac.as_deref(),
+            Some("https://operator:secret@example.invalid/private")
+        );
+        // The one address embeds our own session id, so that row is scrubbed.
         assert_eq!(projected.addresses, [REDACTED_PACKET_CAPTURE_TEXT]);
         assert!(projected.text_truncated);
 
@@ -2031,12 +1943,13 @@ mod tests {
         state.apply_event("capture", info, &[]).unwrap();
         assert_eq!(
             serde_json::to_value(state.events.back().unwrap()).unwrap()["message"],
-            REDACTED_PACKET_CAPTURE_TEXT
+            "token=do-not-return"
         );
+        // A capture event that quotes a password field is shown as captured.
         let (quoted, changed) =
             project_public_single_line(r#"{"password":"super-secret"}"#, 256, &[]);
-        assert!(changed);
-        assert_eq!(quoted, REDACTED_PACKET_CAPTURE_TEXT);
+        assert!(!changed);
+        assert_eq!(quoted, r#"{"password":"super-secret"}"#);
         let (control, changed) = project_public_single_line("safe\0text", 64, &[]);
         assert!(changed);
         assert!(!control.contains('\0'));

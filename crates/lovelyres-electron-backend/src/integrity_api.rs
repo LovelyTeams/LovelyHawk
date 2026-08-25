@@ -1128,74 +1128,9 @@ fn project_path(value: &str, maximum_bytes: usize, sensitive_literals: &[&str]) 
 
 fn is_sensitive_text(value: &str, sensitive_literals: &[&str]) -> bool {
     value.contains(REDACTED_INTEGRITY_PATH)
-        || contains_sensitive_material(value)
         || sensitive_literals
             .iter()
             .any(|literal| !literal.is_empty() && value.contains(*literal))
-}
-
-fn contains_sensitive_material(value: &str) -> bool {
-    const MARKERS: &[&str] = &[
-        "password=",
-        "password:",
-        "passwd=",
-        "passphrase=",
-        "passphrase:",
-        "secret=",
-        "secret:",
-        "token=",
-        "token:",
-        "authorization=",
-        "authorization:",
-        "api_key=",
-        "api-key:",
-        "apikey=",
-        "private_key=",
-        "private-key",
-        "access_key",
-        "access-key",
-        "client_secret",
-        "client-secret",
-        "credential=",
-        "credential:",
-        "cookie:",
-        "set-cookie:",
-        "session_id=",
-        "session-id:",
-        "fingerprint=",
-        "bearer ",
-    ];
-    MARKERS
-        .iter()
-        .any(|marker| contains_ascii_case_insensitive(value, marker))
-        || contains_uri_userinfo(value)
-}
-
-fn contains_ascii_case_insensitive(value: &str, marker: &str) -> bool {
-    value
-        .as_bytes()
-        .windows(marker.len())
-        .any(|candidate| candidate.eq_ignore_ascii_case(marker.as_bytes()))
-}
-
-fn contains_uri_userinfo(value: &str) -> bool {
-    let mut remaining = value;
-    while let Some(marker) = remaining.find("://") {
-        remaining = &remaining[marker + 3..];
-        let authority = remaining
-            .split(|character: char| {
-                character == '/'
-                    || character == '?'
-                    || character == '#'
-                    || character.is_ascii_whitespace()
-            })
-            .next()
-            .unwrap_or_default();
-        if authority.contains('@') {
-            return true;
-        }
-    }
-    false
 }
 
 fn validate_handle(value: &str) -> Result<(), IntegrityApiError> {

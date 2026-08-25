@@ -112,17 +112,13 @@ function safeInteger(value: unknown, minimum: number, maximum: number): value is
   return unsigned(value, maximum) && value >= minimum;
 }
 
-function containsSensitiveMaterial(value: string): boolean {
-  const lower = value.toLowerCase();
-  return [
-    "password=", "password:", "passwd=", "passphrase=", "passphrase:", "secret=", "secret:",
-    "token=", "token:", "authorization=", "authorization:", "api_key=", "apikey=",
-    "private_key=", "credential=", "cookie:", "set-cookie:", "session_id=", "bearer ",
-  ].some((marker) => lower.includes(marker)) || lower.includes("://") && lower.includes("@");
-}
-
+/**
+ * Bounded, control-character-free text. It does not judge the content: a
+ * collected line that mentions a credential is the evidence, and refusing it
+ * here would reject the whole response rather than one line.
+ */
 function publicText(value: unknown, maximumBytes: number, allowEmpty = true): value is string {
-  return text(value, maximumBytes, allowEmpty) && !containsSensitiveMaterial(value) &&
+  return text(value, maximumBytes, allowEmpty) &&
     !/[\u0000-\u001f\u007f]/u.test(value);
 }
 
@@ -206,7 +202,7 @@ function status(value: unknown): value is BaselineStatus {
     typeof value.compliant !== "boolean" || typeof value.redacted !== "boolean" ||
     typeof value.textTruncated !== "boolean" || !text(value.observed, 512, false)) return false;
   if (value.redacted) return value.observedKind === "value" && value.observed === redactedText;
-  if (containsSensitiveMaterial(value.observed) || /[\u0000-\u001f\u007f]/u.test(value.observed)) return false;
+  if (/[\u0000-\u001f\u007f]/u.test(value.observed)) return false;
   if (value.observedKind === "missing") return value.observed === missingText;
   if (value.observedKind === "unsupported") return value.observed === unsupportedText;
   return true;
@@ -243,7 +239,7 @@ function historyEntry(value: unknown): value is BaselineHistoryEntry {
     typeof value.textTruncated !== "boolean") return false;
   return value.redacted
     ? value.summary === redactedText
-    : !containsSensitiveMaterial(value.summary) && !/[\u0000-\u001f\u007f]/u.test(value.summary);
+    : !/[\u0000-\u001f\u007f]/u.test(value.summary);
 }
 
 export function isBaselineHistory(value: unknown): value is BaselineHistory {

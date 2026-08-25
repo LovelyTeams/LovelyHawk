@@ -392,6 +392,15 @@
 packaged 验收不足而继续为 `Pending` 的切片。每一条都必须按其明确状态解读，不能因为源码、测试或
 某一阶段接线存在就把整个页面或 overlay 标记为完成：
 
+- 全局取消按内容遮蔽（2026-08-25）：sidecar 与渲染层契约里按 credential 词形（`password=`、`token=`、
+  `bearer `、URL userinfo 等）遮蔽或拒绝的实现已全部移除，涉及 baseline、check-audit、docker、integrity、
+  kubernetes、middleware、packet-capture、snapshot、log-analysis 九处。取证快照原先有七个采集器整段只返回
+  marker——进程、登录历史、计划任务、authorized_keys、sudoers、最近修改文件、环境变量——正好是事后第一批要
+  看的东西，现在按采集内容原样返回。渲染层契约那份过滤比 sidecar 更糟：它拒绝整个响应而不是一行，一条
+  credential 形状的日志就能让整页读不出来。
+  保留的仍是能力擦除：DTO 里绝不出现 binding/session/connection handle、target identity、快照 id 与
+  host key fingerprint；控制字符净化与体积上限也保留。应用日志（`diagnostic_log_api`）是 LovelyRes 自己的
+  tracing 环，不是目标采集输出，其遮蔽保留，避免把操作者自己的口令写进本地日志。
 - 快速检测（Quick Detection）已整体移除：sidecar 的 `quick_detection_api.rs`、七个 RPC、
   main/preload 的七个方法、`quick-detection-contract.ts`、`QuickDetectionPage.tsx` 与其状态/助手/
   样式文件、以及对应的门禁与 CDP 场景都已删除。主窗口 preload 面因此从 118 收到 111，页面注册表

@@ -58,7 +58,7 @@ describe("Docker read strict boundary", () => {
     expect(isDockerContainerSnapshot({
       ...snapshot,
       containers: [{ ...snapshot.containers[0], status: "token=container-secret" }],
-    })).toBe(false);
+    })).toBe(true);
     expect(isDockerContainerSnapshot({
       ...snapshot,
       containers: [{ ...snapshot.containers[0], status: DOCKER_REDACTED_TEXT }],
@@ -121,18 +121,18 @@ describe("Docker read strict boundary", () => {
     expect(isDockerReadInspection({
       ...inspection,
       fields: [{ label: "Env", value: '{"clientSecret":"inspect-secret"}' }],
-    })).toBe(false);
+    })).toBe(true);
     expect(isDockerReadInspection({
       ...inspection,
       mounts: [{ ...inspection.mounts[0], source: "https://user:password@example.invalid/data" }],
-    })).toBe(false);
+    })).toBe(true);
     expect(isDockerReadInspection({
       ...inspection,
       mounts: [{
         ...inspection.mounts[0],
         source: "https://example.invalid/public https://user:password@example.invalid/private",
       }],
-    })).toBe(false);
+    })).toBe(true);
     expect(isDockerReadInspection({
       ...inspection,
       fields: [{ label: "Env", value: DOCKER_REDACTED_TEXT }],
@@ -161,7 +161,7 @@ describe("Docker read strict boundary", () => {
       labels: [],
       truncated: false,
     };
-    expect(isDockerReadInspection(networkInspection)).toBe(false);
+    expect(isDockerReadInspection(networkInspection)).toBe(true);
     expect(isDockerReadInspection({
       ...networkInspection,
       options: [{ key: "authorization", value: DOCKER_REDACTED_TEXT }],
@@ -213,7 +213,7 @@ describe("Docker read strict boundary", () => {
     expect(isDockerLogs({ ...logs, tail: 0 })).toBe(false);
     expect(isDockerLogs({ ...logs, text: "界".repeat(90_000) })).toBe(false);
     expect(isDockerLogs({ ...logs, path: "/var/lib/docker" })).toBe(false);
-    expect(isDockerLogs({ ...logs, text: "safe\nAuthorization: Bearer log-secret" })).toBe(false);
+    expect(isDockerLogs({ ...logs, text: "safe\nAuthorization: Bearer log-secret" })).toBe(true);
     expect(isDockerLogs({ ...logs, text: `safe\n${DOCKER_REDACTED_TEXT}` })).toBe(false);
     expect(isDockerLogs({
       ...logs,

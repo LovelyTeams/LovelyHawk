@@ -65,7 +65,7 @@ describe("Kubernetes read strict boundary", () => {
     expect(isKubernetesAvailability({ ...value, kubectlInstalled: false })).toBe(false);
     expect(isKubernetesAvailability({ ...value, currentContext: "x".repeat(1_025) })).toBe(false);
     expect(isKubernetesAvailability({ ...value, currentContext: "token=context-secret" }))
-      .toBe(false);
+      .toBe(true);
     expect(isKubernetesAvailability({
       ...value,
       currentContext: KUBERNETES_REDACTED_TEXT,
@@ -87,7 +87,7 @@ describe("Kubernetes read strict boundary", () => {
     expect(isKubernetesReadRow({ ...podRow, supportsLogs: false })).toBe(false);
     expect(isKubernetesReadRow({ ...podRow, images: Array.from({ length: 17 }, () => "x") }))
       .toBe(false);
-    expect(isKubernetesReadRow({ ...podRow, images: ["password=image-secret"] })).toBe(false);
+    expect(isKubernetesReadRow({ ...podRow, images: ["password=image-secret"] })).toBe(true);
     expect(isKubernetesReadRow({
       ...podRow,
       images: [KUBERNETES_REDACTED_TEXT],
@@ -134,11 +134,11 @@ describe("Kubernetes read strict boundary", () => {
     expect(isKubernetesTextResult({ ...result, path: "/var/log/pods" })).toBe(false);
     expect(isKubernetesTextResult({ ...result, text: "\u0000secret" })).toBe(false);
     expect(isKubernetesTextResult({ ...result, text: "x".repeat(512 * 1_024 + 1) })).toBe(false);
-    expect(isKubernetesTextResult({ ...result, text: "safe\ntoken=pod-secret" })).toBe(false);
+    expect(isKubernetesTextResult({ ...result, text: "safe\ntoken=pod-secret" })).toBe(true);
     expect(isKubernetesTextResult({
       ...result,
       text: 'safe\n{"clientSecret":"pod-secret"}',
-    })).toBe(false);
+    })).toBe(true);
     expect(isKubernetesTextResult({
       ...result,
       text: `safe\n${KUBERNETES_REDACTED_TEXT}`,

@@ -111,7 +111,7 @@ describe("baseline read strict contract", () => {
       ...catalog,
       items: [{ ...catalog.items[0], description: "token=secret" }],
       displayed: 1,
-    })).toBe(false);
+    })).toBe(true);
   });
 
   it("accepts hostile observed text only as bounded data and rejects leaked target or path fields", () => {
@@ -126,7 +126,7 @@ describe("baseline read strict contract", () => {
     expect(isBaselineScan({
       ...scan,
       statuses: [{ ...scan.statuses[0], observed: "authorization: Bearer secret" }, scan.statuses[1]],
-    })).toBe(false);
+    })).toBe(true);
     expect(isBaselineScan({
       ...scan,
       statuses: [{
@@ -147,7 +147,7 @@ describe("baseline read strict contract", () => {
     expect(isBaselineHistory({
       ...history,
       entries: [{ ...history.entries[0], summary: "password=history-secret" }],
-    })).toBe(false);
+    })).toBe(true);
     expect(isBaselineHistory({
       ...history,
       entries: [{ ...history.entries[0], summary: redacted, redacted: true }],

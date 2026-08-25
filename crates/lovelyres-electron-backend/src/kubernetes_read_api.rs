@@ -1254,88 +1254,9 @@ fn normalize_bounded_line(
 
 fn is_sensitive_text(value: &str, sensitive_literals: &[&str]) -> bool {
     value.contains(REDACTED_KUBERNETES_TEXT)
-        || contains_sensitive_material(value)
         || sensitive_literals
             .iter()
             .any(|literal| !literal.is_empty() && value.contains(*literal))
-}
-
-fn contains_sensitive_material(value: &str) -> bool {
-    const MARKERS: &[&str] = &[
-        "password=",
-        "password:",
-        "password\"",
-        "password'",
-        "password_",
-        "_password",
-        "--password",
-        "passwd=",
-        "passphrase=",
-        "passphrase:",
-        "passphrase\"",
-        "passphrase'",
-        "secret=",
-        "secret:",
-        "secret\"",
-        "secret'",
-        "secret_",
-        "_secret",
-        "--secret",
-        "token=",
-        "token:",
-        "token\"",
-        "token'",
-        "token_",
-        "_token",
-        "--token",
-        "authorization=",
-        "authorization:",
-        "authorization\"",
-        "authorization'",
-        "api_key=",
-        "api_key:",
-        "api-key:",
-        "apikey=",
-        "apikey:",
-        "apikey\"",
-        "apikey'",
-        "private_key=",
-        "private-key",
-        "access_key",
-        "access-key",
-        "client_secret",
-        "client-secret",
-        "private key-----",
-        "credential=",
-        "credential:",
-        "credential\"",
-        "credential'",
-        "cookie:",
-        "set-cookie:",
-        "session_id=",
-        "session_id:",
-        "session-id:",
-        "sessionid\"",
-        "sessionid'",
-        "fingerprint=",
-        "bearer ",
-    ];
-    MARKERS
-        .iter()
-        .any(|marker| contains_ascii_case_insensitive(value, marker))
-        || value.split_once("://").is_some_and(|(_, remainder)| {
-            remainder
-                .split('/')
-                .next()
-                .is_some_and(|authority| authority.contains('@'))
-        })
-}
-
-fn contains_ascii_case_insensitive(value: &str, marker: &str) -> bool {
-    value
-        .as_bytes()
-        .windows(marker.len())
-        .any(|candidate| candidate.eq_ignore_ascii_case(marker.as_bytes()))
 }
 
 fn bounded_u64(value: u64) -> (u64, bool) {
@@ -1695,7 +1616,7 @@ mod tests {
     }
 
     #[test]
-    fn public_text_redacts_credentials_binding_literals_and_marker_injection() {
+    fn public_text_scrubs_binding_literals_and_marker_injection_only() {
         let hostile = "</pre><script>plain-hostile-text()</script>";
         let sensitive_literals = [
             "binding-internal-secret",
@@ -1719,14 +1640,11 @@ mod tests {
         );
         assert!(projected.text.contains(hostile));
         assert!(projected.truncated);
-        assert_eq!(projected.text.matches(REDACTED_KUBERNETES_TEXT).count(), 5);
-        for forbidden in [
-            "credential-secret",
-            "json-secret",
-            "binding-internal-secret",
-            "session-internal-secret",
-            " suffix",
-        ] {
+        // Pod output is shown as the pod wrote it; only our own handles and an
+        // injected marker are scrubbed.
+        assert!(projected.text.contains("credential-secret"));
+        assert!(projected.text.contains("json-secret"));
+        for forbidden in ["binding-internal-secret", "session-internal-secret"] {
             assert!(!projected.text.contains(forbidden));
         }
 
@@ -1741,8 +1659,9 @@ mod tests {
             MAX_DETAIL_BYTES,
             &sensitive_literals,
         );
-        assert_eq!(detail.text, REDACTED_KUBERNETES_TEXT);
-        assert!(detail.truncated);
+        // An Authorization header in a resource detail is the finding.
+        assert_eq!(detail.text, "Authorization: Bearer detail-secret");
+        assert!(!detail.truncated);
 
         let availability = project_availability(
             KubernetesAvailability {
@@ -1772,7 +1691,7 @@ mod tests {
         else {
             panic!("expected pod");
         };
-        assert_eq!(images, vec![REDACTED_KUBERNETES_TEXT.to_owned()]);
+        assert_eq!(images, vec!["token=image-secret".to_owned()]);
         assert_eq!(node, REDACTED_KUBERNETES_TEXT);
         assert!(text_truncated);
     }

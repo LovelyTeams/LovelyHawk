@@ -96,15 +96,15 @@ describe("packet capture live strict boundary", () => {
     expect(isPacketCaptureInterfaceList({
       ...list,
       interfaces: [{ ...list.interfaces[0], name: "password=hunter2" }],
-    })).toBe(false);
+    })).toBe(true);
     expect(isPacketCaptureInterfaceList({
       ...list,
       interfaces: [{ ...list.interfaces[0], name: '{"password":"hunter2"}' }],
-    })).toBe(false);
+    })).toBe(true);
     expect(isPacketCaptureInterfaceList({
       ...list,
       interfaces: [{ ...list.interfaces[0], addresses: ["https://user:pass@example.invalid/x"] }],
-    })).toBe(false);
+    })).toBe(true);
     expect(isPacketCaptureInterfaceList({
       ...list,
       interfaces: [{ ...list.interfaces[0], mac: "bad\u0007mac" }],
@@ -120,11 +120,11 @@ describe("packet capture live strict boundary", () => {
     expect(isPacketCaptureLiveEvent({ ...packet, packetId: 42 })).toBe(false);
     expect(isPacketCaptureLiveEvent({ ...packet, captureId: "core-secret" })).toBe(false);
     expect(isPacketCaptureLiveEvent({ ...packet, raw: "\u0000bad" })).toBe(false);
-    expect(isPacketCaptureLiveEvent({ ...packet, info: "Authorization: Bearer secret" })).toBe(false);
+    expect(isPacketCaptureLiveEvent({ ...packet, info: "Authorization: Bearer secret" })).toBe(true);
     expect(isPacketCaptureLiveEvent({
       ...packet,
       raw: "https://operator:password@example.invalid/private",
-    })).toBe(false);
+    })).toBe(true);
     expect(isPacketCaptureLiveEvent({ ...packet, raw: "x".repeat(16 * 1_024 + 1) })).toBe(false);
   });
 

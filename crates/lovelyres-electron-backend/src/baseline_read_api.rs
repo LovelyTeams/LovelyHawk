@@ -944,10 +944,7 @@ impl TextBudget {
     }
 }
 
-fn bounded_public_text(value: &str, maximum: usize, redacted_text: &str) -> (String, bool, bool) {
-    if contains_sensitive_material(value) {
-        return (redacted_text.to_owned(), true, false);
-    }
+fn bounded_public_text(value: &str, maximum: usize, _redacted_text: &str) -> (String, bool, bool) {
     let sanitized = value
         .chars()
         .map(|character| {
@@ -963,11 +960,7 @@ fn bounded_public_text(value: &str, maximum: usize, redacted_text: &str) -> (Str
 }
 
 fn trusted_catalog_text(value: &str, maximum: usize) -> Result<String, BaselineReadApiError> {
-    if value.is_empty()
-        || value.len() > maximum
-        || value.chars().any(char::is_control)
-        || contains_sensitive_material(value)
-    {
+    if value.is_empty() || value.len() > maximum || value.chars().any(char::is_control) {
         return Err(BaselineReadApiError::InvalidData);
     }
     Ok(value.to_owned())
@@ -982,34 +975,6 @@ fn bounded_text(value: &str, maximum: usize) -> (String, bool) {
         end -= 1;
     }
     (value[..end].to_owned(), true)
-}
-
-fn contains_sensitive_material(value: &str) -> bool {
-    let lower = value.to_ascii_lowercase();
-    [
-        "password=",
-        "password:",
-        "passwd=",
-        "passphrase=",
-        "passphrase:",
-        "secret=",
-        "secret:",
-        "token=",
-        "token:",
-        "authorization=",
-        "authorization:",
-        "api_key=",
-        "apikey=",
-        "private_key=",
-        "credential=",
-        "cookie:",
-        "set-cookie:",
-        "session_id=",
-        "bearer ",
-    ]
-    .iter()
-    .any(|marker| lower.contains(marker))
-        || lower.contains("://") && lower.contains('@')
 }
 
 const fn category_key(category: BaselineCategory) -> &'static str {
@@ -1206,7 +1171,7 @@ mod tests {
     }
 
     #[test]
-    fn scan_projection_escapes_nothing_but_redacts_credentials_and_uses_opaque_items() {
+    fn scan_projection_escapes_nothing_and_uses_opaque_items() {
         let target = scope("server", 1);
         let catalog = catalog();
         let hostile = scan(
@@ -1225,10 +1190,10 @@ mod tests {
         );
         let sensitive_dto = project_scan("scan-sensitive".to_owned(), sensitive, &catalog).unwrap();
         let sensitive_text = serde_json::to_string(&sensitive_dto).unwrap();
-        assert!(sensitive_text.contains(REDACTED_TEXT));
-        assert!(!sensitive_text.contains("scan-secret"));
-        assert_eq!(sensitive_dto.redacted_field_count, 1);
-        assert!(sensitive_dto.statuses[0].redacted);
+        // A baseline observation that reads like a credential is the finding.
+        assert!(sensitive_text.contains("authorization: Bearer scan-secret"));
+        assert_eq!(sensitive_dto.redacted_field_count, 0);
+        assert!(!sensitive_dto.statuses[0].redacted);
     }
 
     #[test]
@@ -1271,7 +1236,7 @@ mod tests {
     }
 
     #[test]
-    fn history_summary_redacts_credential_like_values() {
+    fn history_summary_keeps_the_values_it_read() {
         let current = scope("server", 1);
         let catalog = catalog();
         let dto = project_history(
@@ -1282,9 +1247,8 @@ mod tests {
         )
         .unwrap();
         let text = serde_json::to_string(&dto).unwrap();
-        assert!(text.contains(REDACTED_TEXT));
-        assert!(!text.contains("history-secret"));
-        assert_eq!(dto.redacted_field_count, 1);
+        assert!(text.contains("history-secret"));
+        assert_eq!(dto.redacted_field_count, 0);
     }
 
     #[test]

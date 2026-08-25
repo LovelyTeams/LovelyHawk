@@ -121,7 +121,7 @@ describe("middleware read contract", () => {
     expect(isMiddlewareConfiguration({
       ...configuration,
       files: [{ ...file, rawText: "password=secret" }],
-    })).toBe(false);
+    })).toBe(true);
     expect(isMiddlewareConfiguration({
       ...configuration,
       files: [{ ...file, rawText: null }],

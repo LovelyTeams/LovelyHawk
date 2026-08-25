@@ -1345,30 +1345,25 @@ foreach ($marker in @(
         Add-GateViolation "crates/lovelyres-electron-backend/src/snapshot_read_api.rs is missing bounded Snapshot marker '$marker'"
     }
 }
-$snapshotCollectorPolicyPattern = '(?s)ForensicCollector::Processes\s*\|\s*ForensicCollector::LoginHistory\s*\|\s*ForensicCollector::CronJobs\s*\|\s*ForensicCollector::AuthorizedKeys\s*\|\s*ForensicCollector::Sudoers\s*\|\s*ForensicCollector::RecentModifiedFiles\s*\|\s*ForensicCollector::EnvVariables\s*=>\s*CollectorProjection::FullyRedacted,\s*ForensicCollector::NetworkConnections\s*\|\s*ForensicCollector::ListeningPorts\s*\|\s*ForensicCollector::StartupServices\s*\|\s*ForensicCollector::RunningUsers\s*\|\s*ForensicCollector::LoadedModules\s*=>\s*CollectorProjection::BoundedPlainText'
-if ($snapshotReadApiText -notmatch $snapshotCollectorPolicyPattern) {
-    Add-GateViolation 'crates/lovelyres-electron-backend/src/snapshot_read_api.rs must pin the exact seven fully-redacted and five bounded-plain Snapshot collectors'
-}
 foreach ($marker in @(
     'const REDACTED_LINE: &str = "[SENSITIVE SNAPSHOT TEXT REDACTED]";',
     'const FAILED_COLLECTOR_LINE: &str = "[FORENSIC COLLECTOR FAILED]";',
-    'collector: ForensicCollector,',
-    'project_fully_redacted_diff_field(source)',
-    'collector_policy_marker(source)'
+    'fn forensic_sensitive_values(snapshot: &ForensicSnapshot) -> Vec<String>',
+    '.any(|marker| lower.contains(marker.as_str()))'
 )) {
     if (-not $snapshotReadApiText.Contains($marker, [System.StringComparison]::Ordinal)) {
         Add-GateViolation "crates/lovelyres-electron-backend/src/snapshot_read_api.rs is missing collector-safe projection marker '$marker'"
     }
 }
-if ([regex]::Matches($snapshotReadApiText, '\bcollector_projection\s*\(').Count -lt 3 -or
-    $snapshotReadApiText -match 'project_text_field\s*\(\s*snapshot\.data\.get') {
-    Add-GateViolation 'Snapshot detail and diff projectors must consult the collector policy before handling raw text'
+# Every collector is bounded plain text. A projection that decides what to show
+# from the collector name would be the old fully-redacted policy coming back.
+if ($snapshotReadApiText -match 'CollectorProjection::FullyRedacted' -or
+    $snapshotReadApiText -match 'fn collector_policy_marker\(') {
+    Add-GateViolation 'crates/lovelyres-electron-backend/src/snapshot_read_api.rs must not reintroduce a per-collector redaction policy'
 }
-$snapshotTsCollectorPolicyPattern = '(?s)export\s+const\s+fullyRedactedForensicCollectors\s*=\s*\[\s*"processes",\s*"loginHistory",\s*"cronJobs",\s*"authorizedKeys",\s*"sudoers",\s*"recentModifiedFiles",\s*"envVariables",?\s*\]\s+as\s+const;'
-if ($snapshotReadContractText -notmatch $snapshotTsCollectorPolicyPattern -or
-    [regex]::Matches($snapshotReadContractText, 'fullyRedactedCollectorSet\.has\(collector\)').Count -ne 2 -or
-    $snapshotReadContractText -notmatch 'isCollectorPolicyMarker\(value\.text\)\s*&&\s*value\.redactedLineCount\s*===\s*1') {
-    Add-GateViolation 'electron/src/shared/snapshot-read-contract.ts must enforce the exact collector marker policy for detail and diff'
+if ($snapshotReadContractText -match 'fullyRedactedForensicCollectors' -or
+    $snapshotReadContractText -match 'isCollectorPolicyMarker') {
+    Add-GateViolation 'electron/src/shared/snapshot-read-contract.ts must not reject a collector for what it collected'
 }
 foreach ($marker in @('mysql -uroot -pS3cr3t', 'PASSWORD = secret', 'BEGIN OPENSSH PRIVATE KEY', '/etc/shadow')) {
     if (-not $snapshotReadApiText.Contains($marker, [System.StringComparison]::Ordinal) -or
@@ -2077,7 +2072,6 @@ foreach ($marker in @(
     'unsigned(value.displayed, 500)',
     'jsonBytesAtMost(value, 2 * 1_024 * 1_024)',
     'value.contentKind === "detail" ? 256 * 1_024 : 512 * 1_024',
-    'containsSensitiveMaterial',
     'KUBERNETES_REDACTED_TEXT'
 )) {
     if (-not $kubernetesReadContractText.Contains($marker, [System.StringComparison]::Ordinal)) {
@@ -2221,7 +2215,6 @@ foreach ($marker in @(
     'export function isDockerReadInspection',
     'export function isDockerSecurityAudit',
     'export function isDockerLogs',
-    'containsSensitiveMaterial',
     'DOCKER_REDACTED_TEXT',
     'withinTextBudget(values, 1_024 * 1_024)',
     'multilineText(value.text, 256 * 1_024)',
@@ -2488,7 +2481,6 @@ foreach ($marker in @(
     'export function isPacketCaptureLiveEvent',
     'export function isPacketCapturePoll',
     'export function isPacketCaptureStopped',
-    'containsSensitiveMaterial',
     'jsonBytesAtMost(value, 256 * 1_024)',
     'jsonBytesAtMost(value, 64 * 1_024)',
     'jsonBytesAtMost(value, 512 * 1_024)',
@@ -2640,7 +2632,6 @@ foreach ($marker in @(
     'if !self.capture.allows(event.metadata())',
     'fn record_error(&mut self, field: &tracing::field::Field, _: &(dyn StdError + ''static))',
     'self.record_fixed(field, ERROR_REDACTED);',
-    'contains_sensitive_material',
     'next_public_generation'
 )) {
     if (-not $diagnosticLogApiText.Contains($marker, [System.StringComparison]::Ordinal)) {
@@ -2660,7 +2651,6 @@ foreach ($marker in @(
     'value.entries.length > 100',
     'value.details.length > 32',
     'isApplicationLogPublicMultiline(value.content, 128 * 1_024, true)',
-    'containsSensitiveMaterial',
     'containsUriUserinfo'
 )) {
     if (-not $applicationLogContractText.Contains($marker, [System.StringComparison]::Ordinal)) {
@@ -2881,7 +2871,6 @@ foreach ($marker in @(
     'RUNNING_OPERATION_TTL: Duration = Duration::from_secs(5 * 60)',
     'TERMINAL_OPERATION_TTL: Duration = Duration::from_secs(5 * 60)',
     'REDACTED_INTEGRITY_PATH',
-    'contains_sensitive_material',
     'pub(crate) fn close_binding(&self, binding_handle: &str)'
 )) {
     if (-not $integrityApiText.Contains($marker, [System.StringComparison]::Ordinal)) {

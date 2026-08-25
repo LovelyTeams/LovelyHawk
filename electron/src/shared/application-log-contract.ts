@@ -114,18 +114,12 @@ function containsUriUserinfo(value: string): boolean {
   }
 }
 
-function containsSensitiveMaterial(value: string): boolean {
-  const normalized = value.toLowerCase();
-  return CREDENTIAL_MARKERS.some((marker) => normalized.includes(marker)) ||
-    containsUriUserinfo(value);
-}
-
 function publicSingleLine(
   value: unknown,
   maximumBytes: number,
   allowEmpty = false,
 ): value is string {
-  return singleLine(value, maximumBytes, allowEmpty) && !containsSensitiveMaterial(value);
+  return singleLine(value, maximumBytes, allowEmpty);
 }
 
 export function isApplicationLogPublicMultiline(
@@ -133,8 +127,7 @@ export function isApplicationLogPublicMultiline(
   maximumBytes: number,
   allowEmpty = false,
 ): value is string {
-  return utf8(value, maximumBytes, allowEmpty) && !MULTILINE_CONTROL.test(value) &&
-    !containsSensitiveMaterial(value);
+  return utf8(value, maximumBytes, allowEmpty) && !MULTILINE_CONTROL.test(value);
 }
 
 function isSensitiveFieldName(value: string): boolean {

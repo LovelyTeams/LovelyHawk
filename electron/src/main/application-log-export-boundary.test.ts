@@ -29,11 +29,11 @@ describe("application log native export boundary", () => {
       ...payload,
       contents: "界".repeat(256 * 1_024),
     })).toBe(false);
-    expect(isInternalApplicationLogExportPayload({ ...payload, contents: "password=hunter2" })).toBe(false);
+    expect(isInternalApplicationLogExportPayload({ ...payload, contents: "password=hunter2" })).toBe(true);
     expect(isInternalApplicationLogExportPayload({
       ...payload,
       contents: "https://user:pass@example.invalid/private",
-    })).toBe(false);
+    })).toBe(true);
     expect(isInternalApplicationLogExportPayload({ ...payload, contents: "safe\0text" })).toBe(false);
     expect(isInternalApplicationLogExportPayload({ ...payload, contents: "line one\nline two" })).toBe(true);
     expect(isInternalApplicationLogExportPayload({

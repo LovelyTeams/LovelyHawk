@@ -50,7 +50,6 @@ const MAX_REGISTRY_BYTES: usize = 2 * 1024 * 1024;
 const MAX_GLOBAL_READS: usize = 4;
 const MAX_READS_PER_BINDING: usize = 1;
 const SNAPSHOT_TTL: Duration = Duration::from_secs(5 * 60);
-const REDACTED_TEXT: &str = "[SENSITIVE MIDDLEWARE TEXT REDACTED]";
 
 #[derive(Clone)]
 pub(crate) struct MiddlewareReadApi {
@@ -917,14 +916,6 @@ fn select_safe_raw_text(value: Option<&str>, remaining: usize) -> RawTextSelecti
             truncated: false,
         };
     };
-    if contains_sensitive_material(value) {
-        return RawTextSelection {
-            raw_text: None,
-            reason: "sensitive",
-            redacted: true,
-            truncated: false,
-        };
-    }
     let sanitized = sanitize_plain_text(value);
     if sanitized.len() > MAX_RAW_TEXT_PER_FILE_BYTES || sanitized.len() > remaining {
         return RawTextSelection {
@@ -1060,11 +1051,6 @@ impl TextBudget {
     }
 
     fn take_public(&mut self, value: &str, maximum: usize) -> (String, bool, bool) {
-        if contains_sensitive_material(value) {
-            let redacted = REDACTED_TEXT.to_owned();
-            self.remaining = self.remaining.saturating_sub(redacted.len());
-            return (redacted, true, false);
-        }
         let sanitized = sanitize_plain_text(value);
         let maximum = maximum.min(self.remaining);
         let (bounded, truncated) = bounded_text(&sanitized, maximum);
@@ -1093,39 +1079,6 @@ fn bounded_text(value: &str, maximum: usize) -> (String, bool) {
         end -= 1;
     }
     (value[..end].to_owned(), true)
-}
-
-fn contains_sensitive_material(value: &str) -> bool {
-    let lower = value.to_ascii_lowercase();
-    [
-        "password",
-        "passwd",
-        "passphrase",
-        "requirepass",
-        "masterauth",
-        "authorization",
-        "bearer ",
-        "secret",
-        "token",
-        "credential",
-        "api_key",
-        "apikey",
-        "private_key",
-        "private-key",
-        "keystorepass",
-        "truststorepass",
-        "cookie",
-        "-----begin ",
-    ]
-    .iter()
-    .any(|marker| lower.contains(marker))
-        || lower.match_indices("://").any(|(scheme_end, _)| {
-            let authority = &lower[scheme_end + 3..];
-            let end = authority
-                .find(['/', ' ', '\t', '\r', '\n', '\'', '"', ';'])
-                .unwrap_or(authority.len());
-            authority[..end].contains('@')
-        })
 }
 
 const fn product_key(product: MiddlewareProduct) -> &'static str {
@@ -1292,9 +1245,10 @@ mod tests {
             assert!(!redacted);
             assert!(!truncated);
         }
+        // A configuration line that sets a token is the finding, not a leak.
         let (value, redacted, _) = budget.take_public("token=remote-secret", 256);
-        assert_eq!(value, REDACTED_TEXT);
-        assert!(redacted);
+        assert_eq!(value, "token=remote-secret");
+        assert!(!redacted);
         let (value, _, _) = budget.take_public("line\u{0}tail", 256);
         assert_eq!(value, "line�tail");
         let (value, _, truncated) = budget.take_public("界界", 4);
@@ -1310,9 +1264,10 @@ mod tests {
         let core_denied = select_safe_raw_text(None, 1024);
         assert!(core_denied.raw_text.is_none());
         assert_eq!(core_denied.reason, "not-safe-text");
-        let sidecar_denied = select_safe_raw_text(Some("password=secret"), 1024);
-        assert!(sidecar_denied.raw_text.is_none());
-        assert!(sidecar_denied.redacted);
+        // A configuration that sets a password is the configuration.
+        let credential_like = select_safe_raw_text(Some("password=secret"), 1024);
+        assert_eq!(credential_like.raw_text.as_deref(), Some("password=secret"));
+        assert!(!credential_like.redacted);
         let oversized = "x".repeat(MAX_RAW_TEXT_PER_FILE_BYTES + 1);
         let bounded = select_safe_raw_text(Some(&oversized), oversized.len());
         assert!(bounded.raw_text.is_none());

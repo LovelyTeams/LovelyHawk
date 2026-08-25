@@ -39,13 +39,12 @@ fn public_read_surface_has_no_resource_identity_command_or_mutation_input() {
 }
 
 #[test]
-fn phase_zero_has_eager_binding_cleanup_and_bounded_secret_redaction() {
+fn phase_zero_has_eager_binding_cleanup_and_bounded_scope_scrubbing() {
     let source = include_str!("../src/kubernetes_read_api.rs");
     for required in [
         "pub(crate) fn close_binding(&self, binding_handle: &str)",
         "snapshots.close_binding(binding_handle);",
         "fn project_public_multiline(",
-        "fn contains_sensitive_material(",
         "[SENSITIVE KUBERNETES TEXT REDACTED]",
         "&scope.sensitive_literals()",
     ] {

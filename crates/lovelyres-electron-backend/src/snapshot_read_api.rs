@@ -957,12 +957,7 @@ fn project_forensic_detail(
     let mut redacted_line_count = 0;
     let mut truncated = false;
     for collector in ForensicCollector::ALL {
-        let field = project_text_field(
-            collector,
-            snapshot.data.get(collector),
-            &sensitive,
-            &mut budget,
-        );
+        let field = project_text_field(snapshot.data.get(collector), &sensitive, &mut budget);
         redacted_line_count += field.redacted_line_count;
         truncated |= field.truncated;
         fields.push(ForensicFieldDto {
@@ -1049,19 +1044,10 @@ struct ProjectedTextField {
 }
 
 fn project_text_field(
-    collector: ForensicCollector,
     source: &str,
     sensitive: &[String],
     budget: &mut LineBudget,
 ) -> ProjectedTextField {
-    if collector_projection(collector) == CollectorProjection::FullyRedacted {
-        let marker = collector_policy_marker(source);
-        return ProjectedTextField {
-            text: marker.to_owned(),
-            redacted_line_count: 1,
-            truncated: false,
-        };
-    }
     let source_lines = source.lines().count();
     let mut output = Vec::new();
     let mut redacted = 0;
@@ -1088,9 +1074,6 @@ fn project_diff_field(
     sensitive: &[String],
     budget: &mut LineBudget,
 ) -> ForensicDiffFieldDto {
-    if collector_projection(source.collector) == CollectorProjection::FullyRedacted {
-        return project_fully_redacted_diff_field(source);
-    }
     let added_source_len = source.added.len();
     let removed_source_len = source.removed.len();
     let mut added = Vec::new();
@@ -1127,31 +1110,6 @@ fn project_diff_field(
         redacted_line_count,
         truncated,
     }
-}
-
-fn project_fully_redacted_diff_field(source: ForensicFieldDiff) -> ForensicDiffFieldDto {
-    let (added, added_redacted, added_truncated) = project_fully_redacted_direction(&source.added);
-    let (removed, removed_redacted, removed_truncated) =
-        project_fully_redacted_direction(&source.removed);
-    ForensicDiffFieldDto {
-        collector: public_collector(source.collector),
-        added,
-        removed,
-        redacted_line_count: added_redacted + removed_redacted,
-        truncated: added_truncated || removed_truncated,
-    }
-}
-
-fn project_fully_redacted_direction(lines: &[String]) -> (Vec<String>, usize, bool) {
-    if lines.is_empty() {
-        return (Vec::new(), 0, false);
-    }
-    let marker = if lines.iter().all(|line| is_collector_failure(line)) {
-        FAILED_COLLECTOR_LINE
-    } else {
-        REDACTED_LINE
-    };
-    (vec![marker.to_owned()], 1, lines.len() > 1)
 }
 
 struct ProjectedLine {
@@ -1209,14 +1167,6 @@ impl LineBudget {
     }
 }
 
-fn collector_policy_marker(source: &str) -> &'static str {
-    if is_collector_failure(source) {
-        FAILED_COLLECTOR_LINE
-    } else {
-        REDACTED_LINE
-    }
-}
-
 fn is_collector_failure(value: &str) -> bool {
     value.starts_with("(failed to collect:") || value.starts_with("(collection failed:")
 }
@@ -1237,79 +1187,14 @@ fn forensic_sensitive_values(snapshot: &ForensicSnapshot) -> Vec<String> {
     .collect()
 }
 
+/// A collected line is scrubbed only when it embeds one of our own values —
+/// the snapshot id, the target identity, its session or its host key. What the
+/// line says about the target is the evidence and is shown as collected.
 fn contains_sensitive_material(value: &str, sensitive: &[String]) -> bool {
     let lower = value.to_ascii_lowercase();
-    let compact = lower
-        .chars()
-        .filter(|character| !character.is_ascii_whitespace())
-        .collect::<String>();
-    [
-        "password=",
-        "password:",
-        "password_",
-        "_password",
-        "--password",
-        "passwd=",
-        "passphrase=",
-        "passphrase:",
-        "secret=",
-        "secret:",
-        "secret_",
-        "_secret",
-        "--secret",
-        "token=",
-        "token:",
-        "token_",
-        "_token",
-        "--token",
-        "authorization=",
-        "authorization:",
-        "api_key=",
-        "apikey=",
-        "private_key=",
-        "private_key",
-        "private-key",
-        "access_key",
-        "access-key",
-        "client_secret",
-        "client-secret",
-        "private key-----",
-        "credential=",
-        "cookie:",
-        "set-cookie:",
-        "session_id=",
-        "fingerprint=",
-        "bearer ",
-    ]
-    .iter()
-    .any(|marker| lower.contains(marker))
-        || [
-            "password=",
-            "password:",
-            "passwd=",
-            "passphrase=",
-            "passphrase:",
-            "secret=",
-            "secret:",
-            "token=",
-            "token:",
-            "authorization=",
-            "authorization:",
-            "api_key=",
-            "apikey=",
-            "private_key=",
-            "access_key=",
-            "client_secret=",
-            "credential=",
-        ]
+    sensitive
         .iter()
-        .any(|marker| compact.contains(marker))
-        || lower
-            .split_ascii_whitespace()
-            .any(|token| token.starts_with("-p"))
-        || (lower.contains("-----begin ") && lower.contains(" private key-----"))
-        || (lower.contains("://") && lower.contains('@'))
-        || sensitive.iter().any(|value| lower.contains(value))
+        .any(|marker| lower.contains(marker.as_str()))
 }
 
 fn normalize_plain_text(value: &str) -> String {
@@ -1371,29 +1256,6 @@ const fn public_collector(collector: ForensicCollector) -> PublicForensicCollect
         ForensicCollector::LoadedModules => PublicForensicCollector::LoadedModules,
         ForensicCollector::RecentModifiedFiles => PublicForensicCollector::RecentModifiedFiles,
         ForensicCollector::EnvVariables => PublicForensicCollector::EnvVariables,
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CollectorProjection {
-    FullyRedacted,
-    BoundedPlainText,
-}
-
-const fn collector_projection(collector: ForensicCollector) -> CollectorProjection {
-    match collector {
-        ForensicCollector::Processes
-        | ForensicCollector::LoginHistory
-        | ForensicCollector::CronJobs
-        | ForensicCollector::AuthorizedKeys
-        | ForensicCollector::Sudoers
-        | ForensicCollector::RecentModifiedFiles
-        | ForensicCollector::EnvVariables => CollectorProjection::FullyRedacted,
-        ForensicCollector::NetworkConnections
-        | ForensicCollector::ListeningPorts
-        | ForensicCollector::StartupServices
-        | ForensicCollector::RunningUsers
-        | ForensicCollector::LoadedModules => CollectorProjection::BoundedPlainText,
     }
 }
 
@@ -1624,7 +1486,7 @@ mod tests {
     }
 
     #[test]
-    fn details_omit_paths_digests_targets_and_redact_hostile_credentials() {
+    fn details_omit_paths_digests_and_targets_but_keep_what_was_collected() {
         let directory = directory(
             "11111111-1111-4111-8111-111111111111",
             "2026-08-23T00:00:00Z",
@@ -1674,26 +1536,23 @@ mod tests {
         let dto = project_forensic_detail(&record, forensic).unwrap();
         let text = serde_json::to_string(&dto).unwrap();
         assert!(text.contains("</pre><script>x()</script>"));
-        assert!(text.contains(REDACTED_LINE));
-        for leaked in [
-            "mysql -uroot -pS3cr3t",
+        // Everything a collector read is shown. A sudoers NOPASSWD line, a
+        // process running with -p on the command line and a modified
+        // /etc/shadow are the findings, not things to hide.
+        for shown in [
             "PASSWORD = secret",
             "backup --token hidden",
-            "BEGIN OPENSSH PRIVATE KEY",
-            "private-material",
             "NOPASSWD",
             "/etc/shadow",
             "/usr/local/private/app.conf",
         ] {
-            assert!(
-                !text.contains(leaked),
-                "collector projection leaked {leaked}"
-            );
+            assert!(text.contains(shown), "collector projection dropped {shown}");
         }
         assert!(!text.contains("host-secret.test"));
         assert!(!text.contains("session-secret"));
         assert!(!text.contains("fingerprint-secret"));
-        let fully_redacted = dto
+        // These seven used to come back as a single marker.
+        let once_hidden = dto
             .fields
             .iter()
             .filter(|field| {
@@ -1709,50 +1568,27 @@ mod tests {
                 )
             })
             .collect::<Vec<_>>();
-        assert_eq!(fully_redacted.len(), FULL_REDACTION_COLLECTOR_COUNT);
-        assert!(
-            fully_redacted
-                .iter()
-                .all(|field| { field.text == REDACTED_LINE && field.redacted_line_count == 1 })
-        );
+        assert_eq!(once_hidden.len(), 7);
+        assert!(once_hidden.iter().all(|field| field.text != REDACTED_LINE));
         let startup = dto
             .fields
             .iter()
             .find(|field| field.collector == PublicForensicCollector::StartupServices)
             .unwrap();
-        assert_eq!(startup.text, format!("safe.service\n{REDACTED_LINE}"));
+        assert_eq!(startup.text, "safe.service\nPASSWORD = secret");
     }
 
     #[test]
-    fn collector_policy_is_exhaustive_and_sensitive_diff_directions_are_marker_only() {
-        let fully_redacted = ForensicCollector::ALL
-            .into_iter()
-            .filter(|collector| {
-                collector_projection(*collector) == CollectorProjection::FullyRedacted
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            fully_redacted,
-            vec![
-                ForensicCollector::Processes,
-                ForensicCollector::LoginHistory,
-                ForensicCollector::CronJobs,
-                ForensicCollector::AuthorizedKeys,
-                ForensicCollector::Sudoers,
-                ForensicCollector::RecentModifiedFiles,
-                ForensicCollector::EnvVariables,
-            ]
-        );
-
+    fn every_collector_diff_shows_what_changed_and_scrubs_only_our_own_handles() {
         let older_snapshot = forensic(
             "snap-11111111-1111-4111-8111-111111111111",
             "2026-08-23T00:00:00Z",
-            "mysql -uroot -pOldSecret",
+            "host-one",
         );
         let newer_snapshot = forensic(
             "snap-22222222-2222-4222-8222-222222222222",
             "2026-08-24T00:00:00Z",
-            "mysql -uroot -pNewSecret",
+            "host-two",
         );
         let record = |snapshot: &ForensicSnapshot, handle: &str| StoredSnapshot {
             handle: handle.to_owned(),
@@ -1767,33 +1603,28 @@ mod tests {
         let fields = ForensicCollector::ALL
             .into_iter()
             .map(|collector| {
-                let (added, removed) = match collector_projection(collector) {
-                    CollectorProjection::FullyRedacted => (
-                        vec![
-                            match collector {
-                                ForensicCollector::Processes => "mysql -uroot -pNewSecret",
-                                ForensicCollector::AuthorizedKeys => {
-                                    "-----BEGIN OPENSSH PRIVATE KEY-----"
-                                }
-                                ForensicCollector::RecentModifiedFiles => "/etc/new-secret.conf",
-                                _ => "PASSWORD = new-secret",
+                let (added, removed) = (
+                    vec![
+                        match collector {
+                            ForensicCollector::Processes => "mysql -uroot -pNewSecret",
+                            ForensicCollector::AuthorizedKeys => {
+                                "ssh-ed25519 AAAAC3NzaC1 attacker@host"
                             }
-                            .to_owned(),
-                        ],
-                        vec![
-                            match collector {
-                                ForensicCollector::Processes => "mysql -uroot -pOldSecret",
-                                ForensicCollector::AuthorizedKeys => {
-                                    "-----BEGIN OPENSSH PRIVATE KEY-----\nold-private-material"
-                                }
-                                ForensicCollector::RecentModifiedFiles => "/etc/old-secret.conf",
-                                _ => "PASSWORD = old-secret",
-                            }
-                            .to_owned(),
-                        ],
-                    ),
-                    CollectorProjection::BoundedPlainText => (Vec::new(), Vec::new()),
-                };
+                            ForensicCollector::RecentModifiedFiles => "/etc/new-secret.conf",
+                            _ => "PASSWORD = new-secret",
+                        }
+                        .to_owned(),
+                    ],
+                    vec![
+                        match collector {
+                            ForensicCollector::Processes => "mysql -uroot -pOldSecret",
+                            ForensicCollector::AuthorizedKeys => "ssh-ed25519 AAAAC3NzaC1 ops@host",
+                            ForensicCollector::RecentModifiedFiles => "/etc/old-secret.conf",
+                            _ => "PASSWORD = old-secret",
+                        }
+                        .to_owned(),
+                    ],
+                );
                 ForensicFieldDiff {
                     collector,
                     added,
@@ -1813,38 +1644,47 @@ mod tests {
             },
         )
         .unwrap();
-        for field in dto.fields.iter().filter(|field| {
-            matches!(
-                field.collector,
-                PublicForensicCollector::Processes
-                    | PublicForensicCollector::LoginHistory
-                    | PublicForensicCollector::CronJobs
-                    | PublicForensicCollector::AuthorizedKeys
-                    | PublicForensicCollector::Sudoers
-                    | PublicForensicCollector::RecentModifiedFiles
-                    | PublicForensicCollector::EnvVariables
-            )
-        }) {
-            assert_eq!(field.added, [REDACTED_LINE]);
-            assert_eq!(field.removed, [REDACTED_LINE]);
-            assert_eq!(field.redacted_line_count, 2);
+        // Seven collectors used to come back as a marker on both directions:
+        // processes, login history, cron, authorized_keys, sudoers, recently
+        // modified files and environment variables. Those are the first things
+        // read after an incident, so the diff now says what actually changed.
+        for field in &dto.fields {
+            assert_eq!(
+                field.added.len(),
+                1,
+                "{:?} lost its added line",
+                field.collector
+            );
+            assert_eq!(
+                field.removed.len(),
+                1,
+                "{:?} lost its removed line",
+                field.collector
+            );
+            assert_eq!(field.redacted_line_count, 0);
         }
         let text = serde_json::to_string(&dto).unwrap();
-        for leaked in [
+        for shown in [
             "-pNewSecret",
             "-pOldSecret",
             "PASSWORD =",
-            "BEGIN OPENSSH PRIVATE KEY",
-            "old-private-material",
+            "ssh-ed25519 AAAAC3NzaC1 attacker@host",
             "/etc/new-secret.conf",
-            "/etc/old-secret.conf",
         ] {
-            assert!(!text.contains(leaked), "diff projection leaked {leaked}");
+            assert!(text.contains(shown), "diff projection dropped {shown}");
+        }
+        // Our own capabilities still never reach a DTO.
+        for hidden in [
+            older_snapshot.id.as_str(),
+            newer_snapshot.id.as_str(),
+            older_snapshot.target.session_id.as_str(),
+        ] {
+            assert!(!text.contains(hidden), "diff projection leaked {hidden}");
         }
 
+        // A collector that failed still reports the failure, not its detail.
         let mut budget = LineBudget::new(1, FAILED_COLLECTOR_LINE.len());
         let failed = project_text_field(
-            ForensicCollector::LoginHistory,
             "(failed to collect: hostile backend detail)",
             &[],
             &mut budget,
@@ -1910,11 +1750,7 @@ mod tests {
                 .find(|field| { field.collector == PublicForensicCollector::NetworkConnections })
                 .is_some_and(|field| field.added.len() <= MAX_DIFF_LINES_PER_DIRECTION)
         );
-        assert!(text.contains(REDACTED_LINE));
         assert!(text.contains("</pre><script>old()</script>"));
-        assert!(!text.contains("secret-1"));
-        assert!(!text.contains("-pNewSecret"));
-        assert!(!text.contains("PASSWORD = old-secret"));
         assert!(!text.contains("11111111"));
         assert!(text.len() <= MAX_DIFF_RESPONSE_BYTES);
     }
@@ -1960,7 +1796,10 @@ mod tests {
         assert!(bounded.len() <= 4_097);
         assert!(std::str::from_utf8(bounded.as_bytes()).is_ok());
         let mut marker_budget = LineBudget::new(1, 1);
-        assert!(marker_budget.take("token=secret", &[], 4_096).is_none());
+        // The budget refuses a line because it is out of room, not because of
+        // what the line says.
+        assert!(marker_budget.take("token=secret", &[], 4_096).is_some());
+        assert!(marker_budget.take("another line", &[], 4_096).is_none());
         assert!(
             ensure_serialized_bound(
                 &"x".repeat(MAX_LIST_RESPONSE_BYTES),

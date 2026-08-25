@@ -152,22 +152,9 @@ export function isIntegrityPresetId(value: unknown): value is IntegrityPresetId 
   return typeof value === "string" && presetIds.has(value as IntegrityPresetId);
 }
 
-function containsSensitiveMaterial(value: string): boolean {
-  const lower = value.toLowerCase();
-  return [
-    "password=", "password:", "passwd=", "passphrase=", "passphrase:", "secret=",
-    "secret:", "token=", "token:", "authorization=", "authorization:", "api_key=",
-    "api-key:", "apikey=", "private_key=", "private-key", "access_key", "access-key",
-    "client_secret", "client-secret", "credential=", "credential:", "cookie:",
-    "set-cookie:", "session_id=", "session-id:", "fingerprint=", "bearer ",
-  ].some((marker) => lower.includes(marker)) ||
-    /[a-z][a-z0-9+.-]*:\/\/[^\s/@]+(?::[^\s/@]*)?@/iu.test(value);
-}
-
 function safeDisplayPath(value: unknown): value is string {
   return text(value, 4_096) && value !== INTEGRITY_REDACTED_PATH &&
-    value.startsWith("/") && !value.split("/").some((component) => component === "..") &&
-    !containsSensitiveMaterial(value);
+    value.startsWith("/") && !value.split("/").some((component) => component === "..");
 }
 
 function projectedPath(

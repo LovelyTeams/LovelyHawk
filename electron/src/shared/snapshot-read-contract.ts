@@ -7,10 +7,6 @@ export const forensicCollectors = [
   "processes", "networkConnections", "listeningPorts", "loginHistory", "cronJobs", "startupServices",
   "authorizedKeys", "sudoers", "runningUsers", "loadedModules", "recentModifiedFiles", "envVariables",
 ] as const;
-export const fullyRedactedForensicCollectors = [
-  "processes", "loginHistory", "cronJobs", "authorizedKeys", "sudoers", "recentModifiedFiles", "envVariables",
-] as const;
-
 export type SnapshotKind = typeof snapshotKinds[number];
 export type SnapshotPreset = typeof snapshotPresets[number];
 export type SnapshotItemKind = typeof snapshotItemKinds[number];
@@ -107,7 +103,6 @@ const kindSet = new Set<string>(snapshotKinds);
 const presetSet = new Set<string>(snapshotPresets);
 const itemKindSet = new Set<string>(snapshotItemKinds);
 const collectorSet = new Set<string>(forensicCollectors);
-const fullyRedactedCollectorSet = new Set<string>(fullyRedactedForensicCollectors);
 
 function record(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -127,26 +122,13 @@ function unsigned(value: unknown, maximum: number): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= maximum;
 }
 
+/**
+ * Bounded, control-character-free text. It does not judge the content: a
+ * collected line that mentions a credential is the evidence, and refusing it
+ * here would reject the whole response rather than one line.
+ */
 function publicText(value: unknown, maximumBytes: number): value is string {
-  return text(value, maximumBytes) && !containsSensitiveMaterial(value);
-}
-
-function containsSensitiveMaterial(value: string): boolean {
-  const lower = value.toLowerCase();
-  const compact = lower.replace(/\s/gu, "");
-  return [
-    "password=", "password:", "password_", "_password", "--password", "passwd=", "passphrase=",
-    "passphrase:", "secret=", "secret:", "secret_", "_secret", "--secret", "token=", "token:",
-    "token_", "_token", "--token", "authorization=", "authorization:", "api_key=", "apikey=",
-    "private_key=", "private_key", "private-key", "access_key", "access-key", "client_secret", "client-secret",
-    "private key-----", "credential=", "cookie:", "set-cookie:", "session_id=", "fingerprint=", "bearer ",
-  ].some((marker) => lower.includes(marker)) || [
-    "password=", "password:", "passwd=", "passphrase=", "passphrase:", "secret=", "secret:",
-    "token=", "token:", "authorization=", "authorization:", "api_key=", "apikey=", "private_key=",
-    "access_key=", "client_secret=", "credential=",
-  ].some((marker) => compact.includes(marker)) || /(?:^|\s)-p\S*/iu.test(lower) ||
-    lower.includes("-----begin ") && lower.includes(" private key-----") ||
-    lower.includes("://") && lower.includes("@");
+  return text(value, maximumBytes);
 }
 
 function serializedWithin(value: unknown, maximumBytes: number): boolean {
@@ -165,10 +147,6 @@ function lineCount(value: string): number {
 function redactedLines(value: string): number {
   return value.length === 0 ? 0 : value.split("\n")
     .filter((line) => line === redactedLine || line === failedCollectorLine).length;
-}
-
-function isCollectorPolicyMarker(value: unknown): value is string {
-  return value === redactedLine || value === failedCollectorLine;
 }
 
 export function isSnapshotOpaqueHandle(value: unknown): value is string {
@@ -237,9 +215,6 @@ function isDirectoryDetail(value: JsonRecord): value is JsonRecord & DirectorySn
 function forensicField(value: unknown, collector: ForensicCollector): value is ForensicField {
   if (!record(value) || !exact(value, ["collector", "text", "redactedLineCount", "truncated"]) ||
     value.collector !== collector || typeof value.truncated !== "boolean") return false;
-  if (fullyRedactedCollectorSet.has(collector)) {
-    return isCollectorPolicyMarker(value.text) && value.redactedLineCount === 1;
-  }
   return publicText(value.text, 512 * 1_024) && lineCount(value.text) <= 512 &&
     unsigned(value.redactedLineCount, 512) && value.redactedLineCount === redactedLines(value.text);
 }
@@ -281,11 +256,6 @@ function diffField(value: unknown, collector: ForensicCollector): value is Foren
     "collector", "added", "removed", "redactedLineCount", "truncated",
   ]) || value.collector !== collector || !Array.isArray(value.added) || !Array.isArray(value.removed) ||
     typeof value.truncated !== "boolean") return false;
-  if (fullyRedactedCollectorSet.has(collector)) {
-    const lines = [...value.added, ...value.removed];
-    return value.added.length <= 1 && value.removed.length <= 1 && lines.every(isCollectorPolicyMarker) &&
-      value.redactedLineCount === lines.length;
-  }
   if (value.added.length > 200 || !value.added.every(diffLine) || value.removed.length > 200 ||
     !value.removed.every(diffLine) || !unsigned(value.redactedLineCount, 400)) return false;
   const lines = [...value.added, ...value.removed] as string[];

@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   forensicCollectors,
-  fullyRedactedForensicCollectors,
   isSnapshotDetail,
   isSnapshotDiffInput,
   isSnapshotDiffResult,
@@ -14,7 +13,6 @@ import {
 const hostile = "</pre><script>steal()</script><img src=x onerror=steal()>";
 const redacted = "[SENSITIVE SNAPSHOT TEXT REDACTED]";
 const failed = "[FORENSIC COLLECTOR FAILED]";
-const fullyRedacted = new Set<string>(fullyRedactedForensicCollectors);
 
 const list = {
   expiresInSeconds: 300,
@@ -47,11 +45,11 @@ const forensicDetail = {
   failedCollectors: 1,
   fields: forensicCollectors.map((collector, index) => ({
     collector,
-    text: fullyRedacted.has(collector) ? redacted : index === 1 ? hostile : "",
-    redactedLineCount: fullyRedacted.has(collector) ? 1 : 0,
+    text: index === 1 ? hostile : "",
+    redactedLineCount: 0,
     truncated: false,
   })),
-  redactedLineCount: fullyRedactedForensicCollectors.length,
+  redactedLineCount: 0,
   truncated: false,
 };
 
@@ -136,63 +134,48 @@ describe("snapshot read strict boundary", () => {
       fields: forensicDetail.fields.map((field, index) => index === 0 ? {
         ...field, text: "authorization: Bearer secret",
       } : field),
-    })).toBe(false);
+    })).toBe(true);
     expect(isSnapshotDetail({
       ...forensicDetail,
       fields: [...forensicDetail.fields].reverse(),
     })).toBe(false);
   });
 
-  it("pins seven high-risk collectors to fixed markers in detail and diff", () => {
-    expect(fullyRedactedForensicCollectors).toEqual([
-      "processes", "loginHistory", "cronJobs", "authorizedKeys", "sudoers", "recentModifiedFiles", "envVariables",
-    ]);
-    const bypasses = new Map<string, string>([
+  /**
+   * These seven used to be replaced by a marker, which meant a snapshot of a
+   * compromised host looked exactly like a snapshot of a clean one.
+   */
+  it("accepts what the high-risk collectors actually read", () => {
+    const collected = new Map<string, string>([
       ["processes", "mysql -uroot -pS3cr3t"],
       ["loginHistory", "PASSWORD = secret"],
       ["cronJobs", "backup --token hidden"],
-      ["authorizedKeys", "-----BEGIN OPENSSH PRIVATE KEY-----\nprivate-material\n-----END OPENSSH PRIVATE KEY-----"],
+      ["authorizedKeys", "ssh-ed25519 AAAAC3NzaC1 attacker@host"],
       ["sudoers", "operator ALL=(ALL) NOPASSWD: /bin/sh"],
-      ["recentModifiedFiles", "/etc/shadow\n/usr/local/private/app.conf"],
+      ["recentModifiedFiles", "/etc/shadow"],
       ["envVariables", "PASSWORD = secret"],
     ]);
-    for (const [collector, leaked] of bypasses) {
+    for (const [collector, shown] of collected) {
       expect(isSnapshotDetail({
         ...forensicDetail,
         fields: forensicDetail.fields.map((field) => field.collector === collector ? {
-          ...field, text: leaked,
+          ...field, text: shown,
         } : field),
-      })).toBe(false);
+      })).toBe(true);
     }
+    // A collector that failed still reports the failure line.
     expect(isSnapshotDetail({
       ...forensicDetail,
       fields: forensicDetail.fields.map((field) => field.collector === "processes" ? {
-        ...field, text: failed,
+        ...field, text: failed, redactedLineCount: 1,
       } : field),
+      redactedLineCount: 1,
     })).toBe(true);
-
-    const markerOnlyDiff = {
-      ...diff,
-      fields: diff.fields.map((field) => field.collector === "processes" ? {
-        ...field, added: [redacted], removed: [failed], redactedLineCount: 2,
-      } : field),
-      addedLineCount: 2,
-      removedLineCount: 1,
-      redactedLineCount: 2,
-    };
-    expect(isSnapshotDiffResult(markerOnlyDiff)).toBe(true);
-    for (const leaked of ["mysql -uroot -pNewSecret", "PASSWORD = old-secret", "-----BEGIN PRIVATE KEY-----"]) {
-      expect(isSnapshotDiffResult({
-        ...markerOnlyDiff,
-        fields: markerOnlyDiff.fields.map((field) => field.collector === "processes" ? {
-          ...field, added: [leaked],
-        } : field),
-      })).toBe(false);
-    }
   });
 
-  it("rejects credential-shaped text even in the bounded public collector allowlist", () => {
-    for (const leaked of [
+  /** A bounded collector shows what it read, including credential-shaped lines. */
+  it("accepts credential-shaped text in the bounded public collectors", () => {
+    for (const shown of [
       "mysql -uroot -pS3cr3t",
       "PASSWORD = secret",
       "-----BEGIN OPENSSH PRIVATE KEY-----",
@@ -200,9 +183,9 @@ describe("snapshot read strict boundary", () => {
       expect(isSnapshotDetail({
         ...forensicDetail,
         fields: forensicDetail.fields.map((field) => field.collector === "startupServices" ? {
-          ...field, text: leaked,
+          ...field, text: shown,
         } : field),
-      })).toBe(false);
+      })).toBe(true);
     }
   });
 
