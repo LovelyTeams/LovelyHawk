@@ -41,6 +41,9 @@ export interface TerminalApi {
   openSftpBrowser(): Promise<unknown>;
   listSftpDirectory(browserHandle: string, directoryHandle: string): Promise<unknown>;
   readSftpText(browserHandle: string, fileHandle: string): Promise<unknown>;
+  /** The operator's own machine, addressed by opaque directory handles. */
+  openLocalBrowser(): Promise<unknown>;
+  listLocalDirectory(directoryHandle: string): Promise<unknown>;
 }
 
 export interface TerminalWindowLaunchResult {

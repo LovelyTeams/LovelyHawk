@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
+import type { LocalBrowserApi } from "../shared/local-browser-contract";
 import type {
   SftpBrowserApi,
   SftpBrowserEntry,
@@ -18,7 +19,9 @@ import {
   SftpTextPreviewView,
 } from "./SftpBrowserPage";
 
-const api: SftpBrowserApi = {
+const api: SftpBrowserApi & LocalBrowserApi = {
+  openLocalBrowser: async () => { throw new Error(); },
+  listLocalDirectory: async () => { throw new Error(); },
   openSftpBrowser: async () => { throw new Error(); },
   listSftpDirectory: async () => { throw new Error(); },
   readSftpText: async () => { throw new Error(); },

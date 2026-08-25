@@ -94,6 +94,9 @@ const terminalApi: TerminalApi = Object.freeze({
       browserHandle,
       fileHandle,
     }),
+  openLocalBrowser: () => ipcRenderer.invoke("lovelyres:terminal:local:open"),
+  listLocalDirectory: (directoryHandle: string) =>
+    ipcRenderer.invoke("lovelyres:terminal:local:list", directoryHandle),
 });
 
 contextBridge.exposeInMainWorld("lovelyresTerminal", terminalApi);

@@ -110,6 +110,9 @@ import type {
   EmergencyCommandResult,
 } from "./emergency-command-contract.js";
 import type {
+  LocalDirectorySnapshot,
+} from "./local-browser-contract.js";
+import type {
   SftpDirectorySnapshot,
   SftpTextPreview,
 } from "./sftp-browser-contract.js";
@@ -165,6 +168,7 @@ export * from "./kubernetes-read-contract.js";
 export * from "./docker-read-contract.js";
 export * from "./emergency-command-contract.js";
 export * from "./sftp-browser-contract.js";
+export * from "./local-browser-contract.js";
 export * from "./packet-capture-live-contract.js";
 export * from "./quick-detection-contract.js";
 export * from "./application-log-contract.js";

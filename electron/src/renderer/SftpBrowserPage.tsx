@@ -9,6 +9,8 @@ import {
   type SftpDirectorySnapshot,
   type SftpTextPreview,
 } from "../shared/sftp-browser-contract";
+import type { LocalBrowserApi } from "../shared/local-browser-contract";
+import { LocalFilePane } from "./LocalFilePane";
 import {
   DownloadGlyph,
   FolderPlusGlyph,
@@ -40,7 +42,7 @@ export interface SftpBrowserConnection {
 
 export interface SftpBrowserPageProps {
   connection: SftpBrowserConnection | null;
-  api: SftpBrowserApi;
+  api: SftpBrowserApi & LocalBrowserApi;
   active?: boolean;
 }
 
@@ -253,24 +255,7 @@ export function SftpBrowserPage({
           {visibleState.directoryStatus === "error" && <SftpBrowserError
             message={visibleState.directoryError ?? "目录读取失败。"} compact />}
           <div className="sftp-browser-panes">
-            <section className="sftp-browser-pane is-local" aria-label="本地文件">
-              <header className="sftp-browser-pane-head">
-                <strong>本地文件</strong>
-              </header>
-              <div className="sftp-browser-pathbar">
-                <span className="sftp-browser-path-value is-muted">尚未接入</span>
-              </div>
-              <div className="sftp-browser-pane-body">
-                <div className="sftp-browser-rows">
-                  <div className="sftp-browser-table-head" aria-hidden="true">
-                    <span>名称</span><span>大小</span><span>修改时间</span>
-                  </div>
-                  <SftpBrowserEmpty title="本地文件浏览尚未接入"
-                    detail="渲染层还没有本地文件能力，接入后这里会列出本机目录。" compact />
-                </div>
-              </div>
-              <footer className="sftp-browser-pane-foot"><span>—</span></footer>
-            </section>
+            <LocalFilePane api={api} active={enabled} />
 
             <section className="sftp-browser-pane" aria-label="远程文件">
               <header className="sftp-browser-pane-head">

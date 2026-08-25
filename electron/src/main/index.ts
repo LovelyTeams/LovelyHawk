@@ -32,6 +32,7 @@ import {
   type RendererCloseGate,
 } from "./app-lifecycle.js";
 import { installDebugProbe } from "./debug-probe.js";
+import { LocalBrowser } from "./local-browser.js";
 import { installDevToolsToggle, isDebugModeEnabled } from "./debug-mode.js";
 import {
   cancelledAiHistoryExport,
@@ -73,6 +74,8 @@ import {
   isDockerOpaqueHandle,
   isDockerResourceKind,
   isEmergencyCommandOpaqueHandle,
+  isLocalBrowserOpaqueHandle,
+  isLocalDirectorySnapshot,
   isSftpBrowserOpaqueHandle,
   isPacketCaptureCursor,
   isPacketCaptureOpaqueHandle,
@@ -224,6 +227,8 @@ let mainWindow: BrowserWindow | null = null;
 let rendererReady = false;
 let rendererCloseGate: RendererCloseGate | null = null;
 const terminalBindingState = new TerminalBindingLaunchState();
+// Reads the operator's own machine for the SSH window's local pane.
+const localBrowser = new LocalBrowser();
 
 interface TerminalWindowContext {
   readonly key: string;
@@ -2099,6 +2104,22 @@ function registerIpc(): void {
   });
   // The SFTP browser answers only the terminal window, whose binding main
   // resolves from the calling window; the renderer never sends target identity.
+  ipcMain.handle("lovelyres:terminal:local:open", async (event, ...values: unknown[]) => {
+    terminalContextFor(event);
+    if (values.length !== 0) throw new Error("Invalid local browser request.");
+    const snapshot = await localBrowser.open();
+    if (!isLocalDirectorySnapshot(snapshot)) throw new Error("Invalid local directory listing.");
+    return snapshot;
+  });
+  ipcMain.handle("lovelyres:terminal:local:list", async (event, ...values: unknown[]) => {
+    terminalContextFor(event);
+    if (values.length !== 1 || !isLocalBrowserOpaqueHandle(values[0])) {
+      throw new Error("Invalid local directory request.");
+    }
+    const snapshot = await localBrowser.list(values[0]);
+    if (!isLocalDirectorySnapshot(snapshot)) throw new Error("Invalid local directory listing.");
+    return snapshot;
+  });
   ipcMain.handle("lovelyres:terminal:sftp:open", async (event, ...values: unknown[]) => {
     const context = terminalContextFor(event);
     if (values.length !== 0) throw new Error("Invalid SFTP browser request.");

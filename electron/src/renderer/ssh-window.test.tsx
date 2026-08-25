@@ -77,6 +77,21 @@ describe("SSH window shell", () => {
     expect(source("TerminalSurface.tsx")).toContain("controllerRef.current?.enqueueText(insertText);");
   });
 
+  /** The local pane reads the operator's machine through opaque handles. */
+  it("browses the local machine without letting the renderer name a path", () => {
+    const pane = source("LocalFilePane.tsx");
+    expect(pane).toContain("api.openLocalBrowser()");
+    expect(pane).toContain("api.listLocalDirectory(request.directoryHandle)");
+    // Navigation is by handle; a path never crosses back.
+    expect(pane).not.toMatch(/[A-Za-z]:\|path\.join|localPath/u);
+
+    const main = source("../main/local-browser.ts");
+    expect(main).toContain("#byHandle");
+    expect(main).toContain("The local directory capability is unknown or expired.");
+    // Links are described, never followed blindly.
+    expect(main).toContain("fs.lstat(full)");
+  });
+
   it("keeps write actions visibly unavailable instead of pretending", () => {
     const page = source("SftpBrowserPage.tsx");
     expect(page).toContain("文件管理 (SFTP)");
