@@ -297,7 +297,10 @@ impl fmt::Display for CheckAuditReadApiError {
 impl std::error::Error for CheckAuditReadApiError {}
 
 impl From<CoreError> for CheckAuditReadApiError {
-    fn from(_: CoreError) -> Self {
+    fn from(error: CoreError) -> Self {
+        // The renderer only ever sees a fixed message, so without this the
+        // reason a page failed is lost before anyone can read it.
+        tracing::warn!(operation = "CheckAuditRead", error = %error, "core operation failed");
         Self::Core
     }
 }

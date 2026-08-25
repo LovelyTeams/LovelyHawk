@@ -1597,7 +1597,10 @@ impl fmt::Display for PacketCaptureLiveApiError {
 impl std::error::Error for PacketCaptureLiveApiError {}
 
 impl From<CoreError> for PacketCaptureLiveApiError {
-    fn from(_: CoreError) -> Self {
+    fn from(error: CoreError) -> Self {
+        // The renderer only ever sees a fixed message, so without this the
+        // reason a page failed is lost before anyone can read it.
+        tracing::warn!(operation = "PacketCaptureLive", error = %error, "core operation failed");
         Self::Core
     }
 }

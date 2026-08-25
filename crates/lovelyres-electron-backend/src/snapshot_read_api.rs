@@ -327,7 +327,10 @@ impl fmt::Display for SnapshotReadApiError {
 impl std::error::Error for SnapshotReadApiError {}
 
 impl From<CoreError> for SnapshotReadApiError {
-    fn from(_: CoreError) -> Self {
+    fn from(error: CoreError) -> Self {
+        // The renderer only ever sees a fixed message, so without this the
+        // reason a page failed is lost before anyone can read it.
+        tracing::warn!(operation = "SnapshotRead", error = %error, "core operation failed");
         Self::Core
     }
 }
