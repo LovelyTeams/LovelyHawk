@@ -19,6 +19,14 @@ interface TerminalSurfaceProps {
   initialColumns?: number;
   initialRows?: number;
   writeClipboard?: (text: string) => Promise<void>;
+  /** Reports the live grid so the window can show it in its status bar. */
+  onViewport?: (columns: number, rows: number) => void;
+  /**
+   * A snippet to type into the terminal. It goes through the same bounded
+   * queue as typed input, and a new token replays it; the newline stays with
+   * the operator, so a half-formed command never runs on its own.
+   */
+  insert?: { token: number; text: string } | null;
 }
 
 interface TerminalSelectionSource {
@@ -78,8 +86,13 @@ export function TerminalSurface({
   initialColumns = 80,
   initialRows = 24,
   writeClipboard,
+  onViewport,
+  insert = null,
 }: TerminalSurfaceProps) {
   const hostRef = useRef<HTMLDivElement>(null);
+  // Held in a ref so a changing callback never restarts the terminal.
+  const onViewportRef = useRef(onViewport);
+  onViewportRef.current = onViewport;
   const terminalRef = useRef<Terminal | null>(null);
   const controllerRef = useRef<TerminalController | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
@@ -173,6 +186,7 @@ export function TerminalSurface({
         terminal.resize(size.columns, size.rows);
       }
       controller.resize(size.columns, size.rows);
+      onViewportRef.current?.(size.columns, size.rows);
     }
 
     function scheduleResize() {
@@ -191,6 +205,7 @@ export function TerminalSurface({
 
     const initialSize = clampTerminalSize(initialColumns, initialRows);
     terminal.resize(initialSize.columns, initialSize.rows);
+    onViewportRef.current?.(initialSize.columns, initialSize.rows);
     void controller.open(initialSize.columns, initialSize.rows).then((opened) => {
       if (!active || !opened) return;
       setStatus("终端已连接。");
@@ -260,6 +275,13 @@ export function TerminalSurface({
     const terminal = terminalRef.current;
     if (terminal !== null) await copySelectionFrom(terminal);
   }
+
+  const insertToken = insert?.token ?? 0;
+  const insertText = insert?.text ?? "";
+  useEffect(() => {
+    if (insertToken === 0 || insertText === "") return;
+    controllerRef.current?.enqueueText(insertText);
+  }, [insertToken, insertText]);
 
   return (
     <section className="terminal-surface" aria-labelledby="terminal-surface-title">

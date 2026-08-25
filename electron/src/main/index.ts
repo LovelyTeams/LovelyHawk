@@ -123,7 +123,9 @@ import {
 } from "../shared/contract.js";
 import {
   DEFAULT_THEME_ID,
+  TARGET_LABEL_ARGUMENT_PREFIX,
   THEME_ARGUMENT_PREFIX,
+  sanitizeTargetLabel,
   isThemeId,
   themeDefinition,
 } from "../shared/theme-contract.js";
@@ -381,6 +383,13 @@ function createTerminalWindow(bindingHandle: string): TerminalWindowLaunchResult
     show: false,
     backgroundColor: theme.terminalBackground,
     title: "LovelyRes SSH Terminal",
+    // The window draws its own title bar; only the system buttons stay native.
+    titleBarStyle: "hidden",
+    titleBarOverlay: {
+      color: theme.chromeColor,
+      symbolColor: theme.chromeSymbolColor,
+      height: TITLE_BAR_HEIGHT,
+    },
     webPreferences: {
       preload: path.join(__dirname, "..", "preload", "terminal.js"),
       contextIsolation: true,
@@ -390,7 +399,10 @@ function createTerminalWindow(bindingHandle: string): TerminalWindowLaunchResult
       devTools: debugMode,
       // The terminal window is invoke-only, so its theme arrives as a launch
       // switch the preload stamps before first paint.
-      additionalArguments: [THEME_ARGUMENT_PREFIX + theme.id],
+      additionalArguments: [
+        THEME_ARGUMENT_PREFIX + theme.id,
+        TARGET_LABEL_ARGUMENT_PREFIX + sanitizeTargetLabel(terminalBindingState.currentTargetLabel()),
+      ],
     },
   });
   installDevToolsToggle(terminalWindow, debugMode);

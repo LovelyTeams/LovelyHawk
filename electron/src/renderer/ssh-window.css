@@ -1,0 +1,327 @@
+/* The SSH window: its own title bar, the shell, and the file panel. */
+
+.ssh-window {
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+  box-sizing: border-box;
+  flex-direction: column;
+  color: var(--text);
+  background: var(--bg);
+}
+
+.ssh-window *,
+.ssh-window *::before,
+.ssh-window *::after {
+  box-sizing: border-box;
+}
+
+/* Title bar ------------------------------------------------------------- */
+
+.ssh-window-titlebar {
+  display: flex;
+  height: 40px;
+  flex: none;
+  align-items: stretch;
+  padding-left: 10px;
+  border-bottom: 1px solid var(--chrome-border);
+  background: var(--chrome-bg);
+  -webkit-app-region: drag;
+}
+
+.ssh-window-tabs {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.ssh-window-tab {
+  display: inline-flex;
+  max-width: 320px;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 13px;
+  border: 1px solid var(--chrome-border);
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  overflow: hidden;
+  color: var(--chrome-muted);
+  background: transparent;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.ssh-window-tab.is-active {
+  color: var(--chrome-text);
+  background: var(--bg);
+  font-weight: 650;
+}
+
+.ssh-window-tab-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--success-bright);
+}
+
+.ssh-window-tab-hint {
+  overflow: hidden;
+  color: var(--chrome-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+/* Body ------------------------------------------------------------------ */
+
+.ssh-window-body {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  gap: 10px;
+  padding: 10px;
+}
+
+.ssh-window-shell {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 52%;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ssh-window-shell-bar {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.ssh-window-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text);
+  background: var(--surface);
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.ssh-window-chip.is-quiet {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.ssh-window-files-toggle {
+  min-height: 28px;
+  margin-left: auto;
+  padding: 4px 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ssh-window-files-toggle:hover {
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.ssh-window-files-toggle:focus-visible,
+.command-assistant button:focus-visible {
+  outline: 3px solid var(--console-accent);
+  outline-offset: 2px;
+}
+
+.ssh-window-terminal {
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+  border: 1px solid var(--term-border);
+  border-radius: 10px;
+  background: var(--term-bg);
+}
+
+.ssh-window-terminal .terminal-surface {
+  height: 100%;
+  border: 0;
+}
+
+.ssh-window-status {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  background: var(--surface);
+  font-size: 12px;
+}
+
+.ssh-window-status-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* Command assistant ------------------------------------------------------ */
+
+.command-assistant {
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.command-assistant-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+.command-assistant-toggle {
+  min-height: 26px;
+  padding: 3px 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface-alt);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.command-assistant-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.command-assistant-groups button {
+  min-height: 26px;
+  padding: 3px 12px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--muted);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.command-assistant-groups button.is-active {
+  border-color: var(--accent);
+  color: var(--on-accent);
+  background: var(--accent);
+  font-weight: 650;
+}
+
+.command-assistant-snippets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 10px 10px;
+}
+
+.command-assistant-snippets button {
+  min-height: 28px;
+  padding: 4px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface-alt);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.command-assistant-snippets button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: var(--accent-soft);
+}
+
+.command-assistant-snippets button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* File panel ------------------------------------------------------------- */
+
+.ssh-window-files {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 48%;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.ssh-window-files > .sftp-browser-page {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  margin: 0;
+  padding: 12px;
+}
+
+/* The panel is far narrower than a page, so the browser stacks instead. */
+.ssh-window-files .sftp-browser-workbench {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ssh-window-files .sftp-browser-list {
+  min-height: 0;
+  max-height: none;
+  flex: 1 1 45%;
+}
+
+.ssh-window-files .sftp-browser-detail {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+}
+
+.ssh-window-files .sftp-browser-toolbar {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ssh-window-files .sftp-browser-status,
+.ssh-window-files .sftp-browser-empty,
+.ssh-window-files .sftp-browser-error {
+  min-height: 110px;
+}
+
+@media (max-width: 1000px) {
+  .ssh-window-body { flex-direction: column; }
+  .ssh-window-shell,
+  .ssh-window-files { flex: 1 1 auto; }
+}

@@ -18,8 +18,12 @@ declare const document: {
  * terminal-preload-theme.test.ts fails if the two lists ever diverge.
  */
 const THEME_ARGUMENT_PREFIX = "--lovelyres-theme=";
+const TARGET_LABEL_ARGUMENT_PREFIX = "--lovelyres-target-label=";
 const THEME_IDS = ["light", "dark", "sakura", "incident-canvas"];
 const DEFAULT_THEME = "light";
+const MAX_TARGET_LABEL_BYTES = 128;
+// Written as an escape so the source file stays plain text.
+const CONTROL_CHARACTERS = new RegExp("[\u0000-\u001f\u007f]", "gu");
 
 /**
  * The terminal window stays strictly invoke-only, so main hands it the active
@@ -33,8 +37,16 @@ function applyLaunchTheme(): void {
     const argument = process.argv.find((value) => value.startsWith(THEME_ARGUMENT_PREFIX));
     const requested = argument?.slice(THEME_ARGUMENT_PREFIX.length) ?? "";
     const theme = THEME_IDS.includes(requested) ? requested : DEFAULT_THEME;
+    // Presentation only: the label says which target this window belongs to, and
+    // the window still cannot name a target in any request.
+    const raw = process.argv.find((value) => value.startsWith(TARGET_LABEL_ARGUMENT_PREFIX));
+    const label = (raw?.slice(TARGET_LABEL_ARGUMENT_PREFIX.length) ?? "")
+      .replace(CONTROL_CHARACTERS, "")
+      .slice(0, MAX_TARGET_LABEL_BYTES);
     const apply = () => {
-      if (document.documentElement !== null) document.documentElement.dataset["theme"] = theme;
+      if (document.documentElement === null) return;
+      document.documentElement.dataset["theme"] = theme;
+      document.documentElement.dataset["targetLabel"] = label;
     };
     if (document.documentElement === null && document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", apply, { once: true });

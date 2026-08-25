@@ -9,6 +9,12 @@ export class TerminalBindingLaunchState {
   #pendingAttemptHandle: string | null = null;
   #acceptedAttemptHandle: string | null = null;
   #activeBindingHandle: string | null = null;
+  #activeTargetLabel = "";
+
+  /** Display-only label for the SSH window title bar. */
+  currentTargetLabel(): string {
+    return this.#activeTargetLabel;
+  }
 
   startConnect(attemptHandle: string): void {
     this.#pendingAttemptHandle = attemptHandle;
@@ -31,6 +37,8 @@ export class TerminalBindingLaunchState {
       this.#pendingAttemptHandle = null;
       this.#acceptedAttemptHandle = attemptHandle;
       this.#activeBindingHandle = status.bindingHandle;
+      this.#activeTargetLabel =
+        `${status.target.username}@${status.target.host}:${status.target.port}`;
       return { kind: "accepted", bindingHandle: status.bindingHandle, previousBindingHandle };
     }
     if (

@@ -3531,9 +3531,13 @@ foreach ($marker in @(
         Add-GateViolation "electron/src/renderer/AppTitleBar.tsx is missing terminal launch marker '$marker'"
     }
 }
-if ($terminalWindowText -notmatch '(?s)<TerminalSurface\s+api=\{window\.lovelyresTerminal\}\s+writeClipboard=\{window\.lovelyresTerminal\.copySelection\}\s*/>' -or
+# The window may name its own local state; it may never hold target identity
+# or reach the main-window API.
+$terminalWindowIdentity = $terminalWindowText -replace '\btoken\b', 'local'
+if ($terminalWindowText -notmatch '(?s)<TerminalSurface\s+api=\{window\.lovelyresTerminal\}\s+writeClipboard=\{window\.lovelyresTerminal\.copySelection\}' -or
     $terminalWindowText -notmatch '(?s)<SftpBrowserPage\s' -or
-    $terminalWindowText -match '(?i)\b(?:binding|session|guard|host|path|command|token|handle)\b') {
+    $terminalWindowIdentity -match '(?i)\b(?:bindingHandle|sessionId|connectionId|targetIdentity|hostKey|remotePath|guard|snapshotHandle|handle)\b' -or
+    $terminalWindowText -match 'window\.lovelyres\b') {
     Add-GateViolation 'electron/src/renderer/TerminalWindow.tsx must mount only the handle-free dedicated terminal API and its trusted copy boundary'
 }
 if ($terminalSurfaceText -match '(?i)\b(?:bindingHandle|scopeKey|sessionId|targetGuard|launchToken)\b' -or

@@ -213,22 +213,26 @@ export function SftpBrowserPage({
   return (
     <main className="sftp-browser-page">
       <header className="sftp-browser-header">
-        <div>
-          <h1>SFTP 只读浏览器</h1>
-          </div>
-        <div className="sftp-browser-header-actions">
-          <button type="button" disabled={busy || directory === null}
-            onClick={() => directory !== null && requestDirectory(directory.directoryHandle)}>
-            {visibleState.directoryStatus === "loading" ? "读取中…" : "刷新当前目录"}
-          </button>
-          <button type="button" disabled={busy} onClick={() => setReopenVersion((value) => value + 1)}>
-            重新打开根目录
-          </button>
-        </div>
+        <h1>文件管理 (SFTP)</h1>
+        <span className="sftp-browser-mode">只读</span>
       </header>
-      <p className="sftp-browser-boundary">
-        只浏览目录与预览 UTF-8 文本文件；不跟随符号链接，远端名称与内容一律按纯文本处理。
-      </p>
+      <div className="sftp-browser-actions" role="toolbar" aria-label="文件操作">
+        <button type="button" className="sftp-browser-action" disabled={busy || directory === null}
+          onClick={() => directory !== null && requestDirectory(directory.directoryHandle)}>
+          {visibleState.directoryStatus === "loading" ? "读取中…" : "刷新"}
+        </button>
+        <button type="button" className="sftp-browser-action" disabled={busy}
+          onClick={() => setReopenVersion((value) => value + 1)}>
+          根目录
+        </button>
+        <span className="sftp-browser-action-divider" aria-hidden="true" />
+        {["上传", "下载", "删除", "新建文件夹"].map((label) => (
+          <button type="button" key={label} className="sftp-browser-action is-pending" disabled
+            title="写操作尚未接入：核心已有计划-确认-执行模型，Electron 边界还没开放。">
+            {label}
+          </button>
+        ))}
+      </div>
 
       {visibleState.directoryStatus === "loading" && directory === null ? (
         <SftpBrowserStatus label="正在绑定 SFTP 会话并读取固定根目录…" />
@@ -279,6 +283,14 @@ export function SftpBrowserPage({
           {directory.directoryLabelTruncated && <p className="sftp-browser-warning" role="status">
             当前目录显示名称已按字节上限截断。
           </p>}
+          <div className="sftp-browser-summary">
+            <span>
+              {directory.displayedEntryCount} 个项目（
+              {entries.filter((item) => item.kind === "directory").length} 个文件夹，
+              {entries.filter((item) => item.kind !== "directory").length} 个文件）
+            </span>
+            <span>能力约 {Math.max(1, Math.ceil(directory.expiresInSeconds / 60))} 分钟内有效</span>
+          </div>
           <SftpBrowserWorkbench
             entries={entries}
             selected={selected}
@@ -292,6 +304,12 @@ export function SftpBrowserPage({
             onBrowse={(entryHandle) => requestDirectory(entryHandle)}
             onPreview={requestPreview}
           />
+          <section className="sftp-browser-queue" aria-label="传输队列">
+            <header>
+              <strong>传输队列</strong>
+              <span>写操作接入后，上传与下载的进度会显示在这里。</span>
+            </header>
+          </section>
         </>
       )}
     </main>

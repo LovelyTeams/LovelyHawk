@@ -151,23 +151,3 @@
   border: 0;
 }
 
-/* SSH window: shell on the left, read-only file browser on the right. */
-.terminal-window-root { display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; }
-.terminal-window-split { display: flex; min-height: 0; flex: 1; gap: 10px; }
-.terminal-window-shell { min-width: 0; flex: 1; }
-.terminal-window-split.is-open .terminal-window-shell { flex: 1 1 55%; }
-.terminal-window-files { display: flex; min-width: 0; flex: 1 1 45%; flex-direction: column; overflow: hidden; border: 1px solid var(--term-border); border-radius: 10px; background: var(--surface); }
-.terminal-window-files > .sftp-browser-page { width: 100%; height: 100%; margin: 0; padding: 12px; }
-.terminal-window-files-toggle { align-self: flex-start; min-height: 30px; padding: 5px 13px; border: 1px solid var(--term-border); border-radius: 8px; color: var(--term-text); background: var(--term-panel); font: inherit; font-size: 13px; cursor: pointer; }
-.terminal-window-files-toggle:hover { border-color: var(--term-accent); color: var(--term-accent); }
-.terminal-window-files-toggle:focus-visible { outline: 3px solid var(--term-accent); outline-offset: 2px; }
-
-/* The panel is far narrower than a page, so the browser stacks instead. */
-.terminal-window-files .sftp-browser-workbench { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 8px; }
-.terminal-window-files .sftp-browser-list { min-height: 0; max-height: none; flex: 1 1 45%; }
-.terminal-window-files .sftp-browser-page { display: flex; min-height: 0; flex-direction: column; }
-.terminal-window-files .sftp-browser-detail { min-height: 0; flex: 1; overflow: auto; }
-.terminal-window-files .sftp-browser-toolbar { flex-wrap: wrap; gap: 8px; }
-.terminal-window-files .sftp-browser-status,
-.terminal-window-files .sftp-browser-empty,
-.terminal-window-files .sftp-browser-error { min-height: 120px; }

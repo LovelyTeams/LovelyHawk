@@ -79,6 +79,27 @@ export const DEFAULT_THEME_ID: SettingsTheme = "light";
 
 /** Switch used to hand a new window its theme before first paint. */
 export const THEME_ARGUMENT_PREFIX = "--lovelyres-theme=";
+/**
+ * Display-only label for the SSH window title bar, e.g. `root@10.0.0.9:22`.
+ * It is presentation text, never a capability: the window still cannot name a
+ * target in any request, because main resolves that from the window itself.
+ */
+export const TARGET_LABEL_ARGUMENT_PREFIX = "--lovelyres-target-label=";
+export const MAX_TARGET_LABEL_BYTES = 128;
+
+/** Keeps a label renderable: single line, bounded, no control characters. */
+export function sanitizeTargetLabel(value: string): string {
+  const encoder = new TextEncoder();
+  const plain = [...value].filter((character) => {
+    const code = character.codePointAt(0) ?? 0;
+    return code >= 0x20 && code !== 0x7f;
+  }).join("");
+  let bounded = plain;
+  while (encoder.encode(bounded).byteLength > MAX_TARGET_LABEL_BYTES) {
+    bounded = [...bounded].slice(0, -1).join("");
+  }
+  return bounded;
+}
 
 export function isThemeId(value: unknown): value is SettingsTheme {
   return THEMES.some((theme) => theme.id === value);
