@@ -99,13 +99,6 @@ $expectedPreloadBindings = @(
     @{ Name = 'startPacketCapture'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:packet-capture:start' },
     @{ Name = 'pollPacketCapture'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:packet-capture:poll' },
     @{ Name = 'stopPacketCapture'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:packet-capture:stop' },
-    @{ Name = 'getQuickDetectionCatalog'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:quick-detection:catalog:get' },
-    @{ Name = 'planQuickDetection'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:quick-detection:plan' },
-    @{ Name = 'startQuickDetection'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:quick-detection:start' },
-    @{ Name = 'pollQuickDetection'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:quick-detection:poll' },
-    @{ Name = 'cancelQuickDetection'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:quick-detection:cancel' },
-    @{ Name = 'listQuickDetectionHistory'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:quick-detection:history:list' },
-    @{ Name = 'getQuickDetectionReport'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:quick-detection:report:get' },
     @{ Name = 'listApplicationLogs'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:application-log:list' },
     @{ Name = 'setApplicationLogLevel'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:application-log:level:set' },
     @{ Name = 'clearApplicationLogBuffer'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:application-log:buffer:clear' },
@@ -164,8 +157,8 @@ $expectedPreloadBindings = @(
     @{ Name = 'notifyRendererReady'; Method = 'send'; Registration = 'on'; Channel = 'lovelyres:renderer-ready' }
 )
 
-if ($expectedPreloadBindings.Count -ne 118) {
-    throw "Electron main preload allowlist must contain exactly 118 methods; found $($expectedPreloadBindings.Count)."
+if ($expectedPreloadBindings.Count -ne 111) {
+    throw "Electron main preload allowlist must contain exactly 111 methods; found $($expectedPreloadBindings.Count)."
 }
 
 function Get-CspPolicyViolation {
@@ -559,10 +552,6 @@ $requiredFiles = @(
     (Join-Path $electronRoot 'src/renderer/packet-capture-page.css'),
     (Join-Path $electronRoot 'src/renderer/packet-capture-live-helpers.ts'),
     (Join-Path $electronRoot 'src/renderer/packet-capture-live-state.ts'),
-    (Join-Path $electronRoot 'src/renderer/QuickDetectionPage.tsx'),
-    (Join-Path $electronRoot 'src/renderer/quick-detection.css'),
-    (Join-Path $electronRoot 'src/renderer/quick-detection-helpers.ts'),
-    (Join-Path $electronRoot 'src/renderer/quick-detection-state.ts'),
     (Join-Path $electronRoot 'src/renderer/ApplicationLogOverlay.tsx'),
     (Join-Path $electronRoot 'src/renderer/application-log.css'),
     (Join-Path $electronRoot 'src/renderer/application-log-helpers.ts'),
@@ -587,7 +576,6 @@ $requiredFiles = @(
     (Join-Path $electronRoot 'src/shared/docker-read-contract.ts'),
     (Join-Path $electronRoot 'src/shared/emergency-command-contract.ts'),
     (Join-Path $electronRoot 'src/shared/packet-capture-live-contract.ts'),
-    (Join-Path $electronRoot 'src/shared/quick-detection-contract.ts'),
     (Join-Path $electronRoot 'src/shared/application-log-contract.ts'),
     (Join-Path $electronRoot 'src/shared/integrity-contract.ts'),
     (Join-Path $electronRoot 'src/shared/terminal-contract.ts'),
@@ -610,7 +598,6 @@ $requiredFiles = @(
     (Join-Path $backendRoot 'src/docker_read_api.rs'),
     (Join-Path $backendRoot 'src/emergency_command_api.rs'),
     (Join-Path $backendRoot 'src/packet_capture_live_api.rs'),
-    (Join-Path $backendRoot 'src/quick_detection_api.rs'),
     (Join-Path $backendRoot 'src/diagnostic_log_api.rs'),
     (Join-Path $backendRoot 'src/integrity_api.rs'),
     (Join-Path $backendRoot 'src/terminal_api.rs'),
@@ -651,7 +638,6 @@ $kubernetesReadContractPath = Join-Path $electronRoot 'src/shared/kubernetes-rea
 $dockerReadContractPath = Join-Path $electronRoot 'src/shared/docker-read-contract.ts'
 $emergencyCommandContractPath = Join-Path $electronRoot 'src/shared/emergency-command-contract.ts'
 $packetCaptureLiveContractPath = Join-Path $electronRoot 'src/shared/packet-capture-live-contract.ts'
-$quickDetectionContractPath = Join-Path $electronRoot 'src/shared/quick-detection-contract.ts'
 $applicationLogContractPath = Join-Path $electronRoot 'src/shared/application-log-contract.ts'
 $integrityContractPath = Join-Path $electronRoot 'src/shared/integrity-contract.ts'
 $terminalContractPath = Join-Path $electronRoot 'src/shared/terminal-contract.ts'
@@ -693,9 +679,6 @@ $emergencyCommandStatePath = Join-Path $electronRoot 'src/renderer/emergency-com
 $packetCapturePagePath = Join-Path $electronRoot 'src/renderer/PacketCapturePage.tsx'
 $packetCaptureHelpersPath = Join-Path $electronRoot 'src/renderer/packet-capture-live-helpers.ts'
 $packetCaptureStatePath = Join-Path $electronRoot 'src/renderer/packet-capture-live-state.ts'
-$quickDetectionPagePath = Join-Path $electronRoot 'src/renderer/QuickDetectionPage.tsx'
-$quickDetectionHelpersPath = Join-Path $electronRoot 'src/renderer/quick-detection-helpers.ts'
-$quickDetectionStatePath = Join-Path $electronRoot 'src/renderer/quick-detection-state.ts'
 $applicationLogOverlayPath = Join-Path $electronRoot 'src/renderer/ApplicationLogOverlay.tsx'
 $applicationLogHelpersPath = Join-Path $electronRoot 'src/renderer/application-log-helpers.ts'
 $applicationLogStatePath = Join-Path $electronRoot 'src/renderer/application-log-state.ts'
@@ -730,7 +713,6 @@ $kubernetesReadApiPath = Join-Path $backendRoot 'src/kubernetes_read_api.rs'
 $dockerReadApiPath = Join-Path $backendRoot 'src/docker_read_api.rs'
 $emergencyCommandApiPath = Join-Path $backendRoot 'src/emergency_command_api.rs'
 $packetCaptureLiveApiPath = Join-Path $backendRoot 'src/packet_capture_live_api.rs'
-$quickDetectionApiPath = Join-Path $backendRoot 'src/quick_detection_api.rs'
 $diagnosticLogApiPath = Join-Path $backendRoot 'src/diagnostic_log_api.rs'
 $integrityApiPath = Join-Path $backendRoot 'src/integrity_api.rs'
 $backendMainPath = Join-Path $backendRoot 'src/main.rs'
@@ -763,7 +745,6 @@ $kubernetesReadContractText = Get-Content -LiteralPath $kubernetesReadContractPa
 $dockerReadContractText = Get-Content -LiteralPath $dockerReadContractPath -Raw
 $emergencyCommandContractText = Get-Content -LiteralPath $emergencyCommandContractPath -Raw
 $packetCaptureLiveContractText = Get-Content -LiteralPath $packetCaptureLiveContractPath -Raw
-$quickDetectionContractText = Get-Content -LiteralPath $quickDetectionContractPath -Raw
 $applicationLogContractText = Get-Content -LiteralPath $applicationLogContractPath -Raw
 $integrityContractText = Get-Content -LiteralPath $integrityContractPath -Raw
 $terminalContractText = Get-Content -LiteralPath $terminalContractPath -Raw
@@ -805,9 +786,6 @@ $emergencyCommandStateText = Get-Content -LiteralPath $emergencyCommandStatePath
 $packetCapturePageText = Get-Content -LiteralPath $packetCapturePagePath -Raw
 $packetCaptureHelpersText = Get-Content -LiteralPath $packetCaptureHelpersPath -Raw
 $packetCaptureStateText = Get-Content -LiteralPath $packetCaptureStatePath -Raw
-$quickDetectionPageText = Get-Content -LiteralPath $quickDetectionPagePath -Raw
-$quickDetectionHelpersText = Get-Content -LiteralPath $quickDetectionHelpersPath -Raw
-$quickDetectionStateText = Get-Content -LiteralPath $quickDetectionStatePath -Raw
 $applicationLogOverlayText = Get-Content -LiteralPath $applicationLogOverlayPath -Raw
 $applicationLogHelpersText = Get-Content -LiteralPath $applicationLogHelpersPath -Raw
 $applicationLogStateText = Get-Content -LiteralPath $applicationLogStatePath -Raw
@@ -844,7 +822,6 @@ $kubernetesReadApiText = Get-Content -LiteralPath $kubernetesReadApiPath -Raw
 $dockerReadApiText = Get-Content -LiteralPath $dockerReadApiPath -Raw
 $emergencyCommandApiText = Get-Content -LiteralPath $emergencyCommandApiPath -Raw
 $packetCaptureLiveApiText = Get-Content -LiteralPath $packetCaptureLiveApiPath -Raw
-$quickDetectionApiText = Get-Content -LiteralPath $quickDetectionApiPath -Raw
 $diagnosticLogApiText = Get-Content -LiteralPath $diagnosticLogApiPath -Raw
 $integrityApiText = Get-Content -LiteralPath $integrityApiPath -Raw
 $backendMainText = Get-Content -LiteralPath $backendMainPath -Raw
@@ -1474,7 +1451,7 @@ foreach ($marker in @(
         Add-GateViolation "crates/lovelyres-electron-backend/src/lib.rs is missing Firewall boundary marker '$marker'"
     }
 }
-if ($backendLibText -notmatch '(?s)self\.snapshot_read\.close_binding\(&params\.binding_handle\);\s*self\.firewall_read\.close_binding\(&params\.binding_handle\);\s*self\.baseline_read\.close_binding\(&params\.binding_handle\);\s*self\.middleware_read\.close_binding\(&params\.binding_handle\);\s*self\.check_audit_read\.close_binding\(&params\.binding_handle\);\s*self\.integrity\.close_binding\(&params\.binding_handle\);\s*self\.log_analysis_read\.close_binding\(&params\.binding_handle\);\s*self\.kubernetes_read\.close_binding\(&params\.binding_handle\);\s*self\.emergency_command\.close_binding\(&params\.binding_handle\);\s*self\.docker_read\.close_binding\(&params\.binding_handle\);\s*self\.quick_detection\.close_binding\(&params\.binding_handle\);\s*self\.sftp_browser\.close_binding\(&params\.binding_handle\);\s*self\.packet_capture_live\s*\.close_binding\(&params\.binding_handle\)\s*\.await;\s*self\.ssh\s*\.disconnect_binding') {
+if ($backendLibText -notmatch '(?s)self\.snapshot_read\.close_binding\(&params\.binding_handle\);\s*self\.firewall_read\.close_binding\(&params\.binding_handle\);\s*self\.baseline_read\.close_binding\(&params\.binding_handle\);\s*self\.middleware_read\.close_binding\(&params\.binding_handle\);\s*self\.check_audit_read\.close_binding\(&params\.binding_handle\);\s*self\.integrity\.close_binding\(&params\.binding_handle\);\s*self\.log_analysis_read\.close_binding\(&params\.binding_handle\);\s*self\.kubernetes_read\.close_binding\(&params\.binding_handle\);\s*self\.emergency_command\.close_binding\(&params\.binding_handle\);\s*self\.docker_read\.close_binding\(&params\.binding_handle\);\s*self\.sftp_browser\.close_binding\(&params\.binding_handle\);\s*self\.packet_capture_live\s*\.close_binding\(&params\.binding_handle\)\s*\.await;\s*self\.ssh\s*\.disconnect_binding') {
     Add-GateViolation 'SSH disconnect must eagerly close Snapshot, Firewall, Baseline, Middleware, Check Audit, File Integrity, Log Analysis, Kubernetes, Emergency Commands, Docker, Quick Detection, SFTP browser, and Packet Capture capabilities before the real disconnect'
 }
 foreach ($marker in @(
@@ -2443,7 +2420,7 @@ foreach ($channel in @(
 }
 $packetCaptureMainBoundary = $mainText.Substring(
     $mainText.IndexOf('ipcMain.handle("lovelyres:packet-capture:interfaces:list"', [System.StringComparison]::Ordinal),
-    $mainText.IndexOf('ipcMain.handle("lovelyres:quick-detection:catalog:get"', [System.StringComparison]::Ordinal) -
+    $mainText.IndexOf('ipcMain.handle("lovelyres:application-log:list"', [System.StringComparison]::Ordinal) -
         $mainText.IndexOf('ipcMain.handle("lovelyres:packet-capture:interfaces:list"', [System.StringComparison]::Ordinal)
 )
 if ([regex]::Matches($packetCaptureMainBoundary, 'validateSender\(event\)').Count -ne 4 -or
@@ -2546,178 +2523,6 @@ foreach ($marker in @(
 if (-not $packetCaptureHelpersText.Contains('export function packetCaptureScope(bindingHandle: string): string', [System.StringComparison]::Ordinal) -or
     -not $packetCaptureStateText.Contains('| { type: "scope-changed"; scope: string | null }', [System.StringComparison]::Ordinal)) {
     Add-GateViolation 'Packet Capture renderer lifecycle must scope only by opaque binding handle'
-}
-$quickDetectionApiMatch = [regex]::Match(
-    $quickDetectionContractText,
-    '(?ms)\bexport\s+interface\s+QuickDetectionApi\s*\{(?<body>.*?)^\s*\}'
-)
-if (-not $quickDetectionApiMatch.Success) {
-    Add-GateViolation 'electron/src/shared/quick-detection-contract.ts is missing QuickDetectionApi'
-} else {
-    $quickDetectionNames = @([regex]::Matches($quickDetectionApiMatch.Groups['body'].Value, '(?m)^\s{2}(?<name>[A-Za-z_$][A-Za-z0-9_$]*)\s*\(') | ForEach-Object { $_.Groups['name'].Value })
-    if (($quickDetectionNames -join "`n") -cne (@('getQuickDetectionCatalog', 'planQuickDetection', 'startQuickDetection', 'pollQuickDetection', 'cancelQuickDetection', 'listQuickDetectionHistory', 'getQuickDetectionReport') -join "`n")) {
-        Add-GateViolation 'electron/src/shared/quick-detection-contract.ts must expose exactly catalog/plan/start/poll/cancel/history/report'
-    }
-    if ($quickDetectionApiMatch.Groups['body'].Value -notmatch 'getQuickDetectionCatalog\(\):\s*Promise<unknown>;' -or
-        $quickDetectionApiMatch.Groups['body'].Value -notmatch 'planQuickDetection\(bindingHandle:\s*string,\s*input:\s*QuickDetectionPlanInput\):\s*Promise<unknown>;' -or
-        $quickDetectionApiMatch.Groups['body'].Value -notmatch 'startQuickDetection\(bindingHandle:\s*string,\s*planHandle:\s*string\):\s*Promise<unknown>;' -or
-        $quickDetectionApiMatch.Groups['body'].Value -notmatch '(?s)pollQuickDetection\(\s*bindingHandle:\s*string,\s*scanHandle:\s*string,\s*afterEvent:\s*number,\s*limit:\s*number,?\s*\):\s*Promise<unknown>;' -or
-        $quickDetectionApiMatch.Groups['body'].Value -notmatch 'cancelQuickDetection\(bindingHandle:\s*string,\s*scanHandle:\s*string\):\s*Promise<unknown>;' -or
-        $quickDetectionApiMatch.Groups['body'].Value -notmatch 'listQuickDetectionHistory\(bindingHandle:\s*string,\s*offset:\s*number,\s*limit:\s*number\):\s*Promise<unknown>;' -or
-        $quickDetectionApiMatch.Groups['body'].Value -notmatch 'getQuickDetectionReport\(bindingHandle:\s*string,\s*reportHandle:\s*string\):\s*Promise<unknown>;' -or
-        $quickDetectionApiMatch.Groups['body'].Value -match '(?i)\b(?:commandText|shellText|filePath|remotePath|terminal|download|export|mutation|remediation|autofix|session|guard|target|connection|secret|genericInvoke)\b') {
-        Add-GateViolation 'electron/src/shared/quick-detection-contract.ts must pin seven raw-unknown responses behind typed bounded input and opaque handles'
-    }
-}
-foreach ($pattern in @(
-    'getQuickDetectionCatalog\(\):\s*Promise<QuickDetectionCatalog>;',
-    '(?s)planQuickDetection\(\s*bindingHandle:\s*string,\s*input:\s*QuickDetectionPlanInput,?\s*\):\s*Promise<QuickDetectionPlan>;',
-    '(?s)startQuickDetection\(\s*bindingHandle:\s*string,\s*planHandle:\s*string,?\s*\):\s*Promise<QuickDetectionScanStarted>;',
-    '(?s)pollQuickDetection\(\s*bindingHandle:\s*string,\s*scanHandle:\s*string,\s*afterEvent:\s*number,\s*limit:\s*number,?\s*\):\s*Promise<QuickDetectionPoll>;',
-    '(?s)cancelQuickDetection\(\s*bindingHandle:\s*string,\s*scanHandle:\s*string,?\s*\):\s*Promise<QuickDetectionCancellation>;',
-    '(?s)listQuickDetectionHistory\(\s*bindingHandle:\s*string,\s*offset:\s*number,\s*limit:\s*number,?\s*\):\s*Promise<QuickDetectionHistoryPage>;',
-    '(?s)getQuickDetectionReport\(\s*bindingHandle:\s*string,\s*reportHandle:\s*string,?\s*\):\s*Promise<QuickDetectionReport>;'
-)) {
-    if ($contractText -notmatch $pattern) {
-        Add-GateViolation "electron/src/shared/contract.ts is missing an exact Quick Detection API signature matching '$pattern'"
-    }
-}
-foreach ($channel in @(
-    'lovelyres:quick-detection:catalog:get',
-    'lovelyres:quick-detection:plan',
-    'lovelyres:quick-detection:start',
-    'lovelyres:quick-detection:poll',
-    'lovelyres:quick-detection:cancel',
-    'lovelyres:quick-detection:history:list',
-    'lovelyres:quick-detection:report:get'
-)) {
-    if ([regex]::Matches($mainText, [regex]::Escape($channel)).Count -ne 1) {
-        Add-GateViolation "electron/src/main/index.ts must register exactly one fixed Quick Detection IPC '$channel'"
-    }
-    if ([regex]::Matches($preloadText, [regex]::Escape(('ipcRenderer.invoke("' + $channel + '"'))).Count -ne 1) {
-        Add-GateViolation "electron/src/preload/index.ts must invoke exactly one fixed Quick Detection IPC '$channel'"
-    }
-}
-$quickDetectionMainBoundary = $mainText.Substring(
-    $mainText.IndexOf('ipcMain.handle("lovelyres:quick-detection:catalog:get"', [System.StringComparison]::Ordinal),
-    $mainText.IndexOf('ipcMain.handle("lovelyres:application-log:list"', [System.StringComparison]::Ordinal) -
-        $mainText.IndexOf('ipcMain.handle("lovelyres:quick-detection:catalog:get"', [System.StringComparison]::Ordinal)
-)
-if ([regex]::Matches($quickDetectionMainBoundary, 'validateSender\(event\)').Count -ne 7 -or
-    [regex]::Matches($quickDetectionMainBoundary, 'values\.length\s*!==\s*0').Count -ne 1 -or
-    [regex]::Matches($quickDetectionMainBoundary, 'values\.length\s*!==\s*1').Count -ne 6 -or
-    [regex]::Matches($quickDetectionMainBoundary, 'hasExactKeys\(value,').Count -ne 6 -or
-    [regex]::Matches($quickDetectionMainBoundary, 'isQuickDetectionOpaqueHandle').Count -ne 10 -or
-    [regex]::Matches($quickDetectionMainBoundary, 'isQuickDetectionPlanInput').Count -ne 1 -or
-    [regex]::Matches($quickDetectionMainBoundary, 'isQuickDetectionPollRequest').Count -ne 1 -or
-    [regex]::Matches($quickDetectionMainBoundary, 'isQuickDetectionHistoryRequest').Count -ne 1 -or
-    $quickDetectionMainBoundary -match '(?i)\b(?:commandText|shellText|filePath|remotePath|targetIdentity|targetGeneration|connectionId|sessionId|mutationHandle|exportPath|terminalHandle|remediationHandle|genericInvoke)\b') {
-    Add-GateViolation 'electron/src/main/index.ts must accept only exact Quick Detection binding/plan/scan/report/cursor capability objects'
-}
-foreach ($marker in @(
-    'mod quick_detection_api;',
-    'quick_detection: Arc<QuickDetectionApi>',
-    'QuickDetectionApi::new(services.clone(), Arc::clone(&ssh))',
-    'self.quick_detection.close_binding(&params.binding_handle);',
-    'QuickDetectionPlanParams',
-    'QuickDetectionPlanHandleParams',
-    'QuickDetectionPollParams',
-    'QuickDetectionScanHandleParams',
-    'QuickDetectionHistoryParams',
-    'QuickDetectionReportParams',
-    'fn quick_detection_failure(error: QuickDetectionApiError)',
-    'quick-detection.catalog.get',
-    'quick-detection.plan',
-    'quick-detection.start',
-    'quick-detection.poll',
-    'quick-detection.cancel',
-    'quick-detection.history.list',
-    'quick-detection.report.get',
-    'source: None'
-)) {
-    if (-not $backendLibText.Contains($marker, [System.StringComparison]::Ordinal)) {
-        Add-GateViolation "crates/lovelyres-electron-backend/src/lib.rs is missing Quick Detection boundary/redaction marker '$marker'"
-    }
-}
-if ($backendLibText -notmatch '(?s)self\.quick_detection\.close_binding\(&params\.binding_handle\);\s*self\.sftp_browser\.close_binding\(&params\.binding_handle\);\s*self\.packet_capture_live\s*\.close_binding\(&params\.binding_handle\)\s*\.await;\s*self\.ssh\s*\.disconnect_binding') {
-    Add-GateViolation 'Quick Detection capabilities must close before Packet Capture cleanup and the real SSH disconnect'
-}
-foreach ($marker in @(
-    'BoundSshSession',
-    'TargetGuard',
-    'MAX_HANDLE_BYTES: usize = 128',
-    'MAX_PLAN_MODULES: usize = 13',
-    'MAX_PLANS: usize = 16',
-    'MAX_SCANS: usize = 8',
-    'MAX_REPORTS: usize = 24',
-    'MAX_EVENTS_PER_SCAN: usize = 64',
-    'MAX_POLL_EVENTS: usize = 32',
-    'MAX_HISTORY_OFFSET: usize = 56',
-    'MAX_HISTORY_PAGE: usize = 8',
-    'MAX_REPORT_FINDINGS: usize = 400',
-    'MAX_REPORT_TEXT_BUDGET: usize = 512 * 1024',
-    'MAX_REPORT_BYTES: usize = 1024 * 1024',
-    'MAX_REPORT_REGISTRY_BYTES: usize = 12 * 1024 * 1024',
-    'REDACTED_QUICK_DETECTION_TEXT',
-    'pub(crate) fn close_binding(&self, binding_handle: &str)',
-    'self.validate_binding(&scope)?;',
-    'detection_event_channel(MAX_EVENTS_PER_SCAN)?'
-)) {
-    if (-not $quickDetectionApiText.Contains($marker, [System.StringComparison]::Ordinal)) {
-        Add-GateViolation "crates/lovelyres-electron-backend/src/quick_detection_api.rs is missing bounded/redacted Quick Detection marker '$marker'"
-    }
-}
-foreach ($marker in @(
-    'export function isQuickDetectionOpaqueHandle',
-    'export function isQuickDetectionCatalog',
-    'export function isQuickDetectionPlanInput',
-    'export function isQuickDetectionPlan',
-    'export function isQuickDetectionScanStarted',
-    'export function isQuickDetectionCancellation',
-    'export function isQuickDetectionPoll',
-    'export function isQuickDetectionHistoryPage',
-    'export function isQuickDetectionReport',
-    'export function isQuickDetectionHistoryRequest',
-    'export function isQuickDetectionPollRequest',
-    'containsSensitiveMaterial',
-    'value.events.length > 32',
-    'value.items.length > 8',
-    'value.modules.length > 13',
-    'textBytes <= 512 * 1_024'
-)) {
-    if (-not $quickDetectionContractText.Contains($marker, [System.StringComparison]::Ordinal)) {
-        Add-GateViolation "electron/src/shared/quick-detection-contract.ts is missing strict bounded/redacted validator marker '$marker'"
-    }
-}
-if ($appText -notmatch '(?s)activePage\.id\s*===\s*"quick-detection".{0,300}<QuickDetectionPage\s+bindingHandle=\{activeTarget\?\.bindingHandle\s*\?\?\s*null\}\s+api=\{window\.lovelyres\}') {
-    Add-GateViolation 'electron/src/renderer/App.tsx must mount QuickDetectionPage with only the current opaque binding handle and fixed API'
-}
-if ($quickDetectionPageText -match '(?i)\b(?:SshTargetSummary|QuickDetectionConnection|connectionId|sessionId|targetGuard|generation|host|port|username|dataRoot|filePath|remotePath|targetIdentity|targetGeneration|apiKey)\b' -or
-    $quickDetectionPageText -match '(?i)\b(?:executeCommand|runCustomCommand|openTerminal|openFile|downloadReport|exportReport|applyRemediation|autoFix|planMutation|genericInvoke|innerHTML|dangerouslySetInnerHTML)\b') {
-    Add-GateViolation 'electron/src/renderer/QuickDetectionPage.tsx exceeds the opaque bounded read-only plain-text Phase 1 surface'
-}
-foreach ($marker in @(
-    'bindingHandle: string | null;',
-    'const scope = bindingHandle;',
-    'dispatch({ type: "scope-changed", scope });',
-    'api.getQuickDetectionCatalog()',
-    'api.listQuickDetectionHistory(bindingHandle, 0, HISTORY_PAGE_SIZE)',
-    'api.planQuickDetection(bindingHandle, input)',
-    'api.startQuickDetection(bindingHandle, planHandle)',
-    'api.pollQuickDetection(bindingHandle, scanHandle, afterEvent, POLL_PAGE_SIZE)',
-    'api.cancelQuickDetection(bindingHandle, scanHandle)',
-    'api.getQuickDetectionReport(bindingHandle, handle)',
-    'cancelQuickDetectionLifecycle(api, scan.bindingHandle, scan.scanHandle, scan.stage)',
-    'lifecycleScanRef.current = null;'
-)) {
-    if (-not $quickDetectionPageText.Contains($marker, [System.StringComparison]::Ordinal)) {
-        Add-GateViolation "electron/src/renderer/QuickDetectionPage.tsx is missing lifecycle marker '$marker'"
-    }
-}
-if (-not $quickDetectionHelpersText.Contains('export async function cancelQuickDetectionLifecycle(', [System.StringComparison]::Ordinal) -or
-    -not $quickDetectionStateText.Contains('| { type: "scope-changed"; scope: string | null }', [System.StringComparison]::Ordinal) -or
-    -not $quickDetectionStateText.Contains('action.scope === state.scope ? state : { ...createQuickDetectionState(), scope: action.scope }', [System.StringComparison]::Ordinal)) {
-    Add-GateViolation 'Quick Detection renderer lifecycle must scope only by opaque binding handle and clear stale state'
 }
 $applicationLogApiMatch = [regex]::Match(
     $applicationLogContractText,

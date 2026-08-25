@@ -20,7 +20,6 @@ import type {
   NoteCreateInput,
   NoteUpdateInput,
   PacketCaptureStartInput,
-  QuickDetectionPlanInput,
   SettingsAiApiKeyReplacementInput,
   SettingsSaveInput,
   SnapshotDiffInput,
@@ -248,36 +247,6 @@ const api: LovelyResApi = Object.freeze({
     ipcRenderer.invoke("lovelyres:packet-capture:stop", {
       bindingHandle,
       captureHandle,
-    }),
-  getQuickDetectionCatalog: () =>
-    ipcRenderer.invoke("lovelyres:quick-detection:catalog:get"),
-  planQuickDetection: (bindingHandle: string, input: QuickDetectionPlanInput) =>
-    ipcRenderer.invoke("lovelyres:quick-detection:plan", { bindingHandle, input }),
-  startQuickDetection: (bindingHandle: string, planHandle: string) =>
-    ipcRenderer.invoke("lovelyres:quick-detection:start", { bindingHandle, planHandle }),
-  pollQuickDetection: (
-    bindingHandle: string,
-    scanHandle: string,
-    afterEvent: number,
-    limit: number,
-  ) => ipcRenderer.invoke("lovelyres:quick-detection:poll", {
-    bindingHandle,
-    scanHandle,
-    afterEvent,
-    limit,
-  }),
-  cancelQuickDetection: (bindingHandle: string, scanHandle: string) =>
-    ipcRenderer.invoke("lovelyres:quick-detection:cancel", { bindingHandle, scanHandle }),
-  listQuickDetectionHistory: (bindingHandle: string, offset: number, limit: number) =>
-    ipcRenderer.invoke("lovelyres:quick-detection:history:list", {
-      bindingHandle,
-      offset,
-      limit,
-    }),
-  getQuickDetectionReport: (bindingHandle: string, reportHandle: string) =>
-    ipcRenderer.invoke("lovelyres:quick-detection:report:get", {
-      bindingHandle,
-      reportHandle,
     }),
   listApplicationLogs: (filter: ApplicationLogFilter) =>
     ipcRenderer.invoke("lovelyres:application-log:list", filter),

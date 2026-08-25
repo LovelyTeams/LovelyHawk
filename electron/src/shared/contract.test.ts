@@ -33,14 +33,6 @@ import {
   type PacketCaptureStarted,
   type PacketCaptureStartInput,
   type PacketCaptureStopped,
-  type QuickDetectionCancellation,
-  type QuickDetectionCatalog,
-  type QuickDetectionHistoryPage,
-  type QuickDetectionPlan,
-  type QuickDetectionPlanInput,
-  type QuickDetectionPoll,
-  type QuickDetectionReport,
-  type QuickDetectionScanStarted,
   type ApplicationLogClearResult,
   type ApplicationLogExportResult,
   type ApplicationLogFilter,
@@ -341,58 +333,6 @@ describe("backend response validation", () => {
     expect(api.stopPacketCapture).toHaveLength(2);
   });
 
-  it("re-exports exactly seven binding-only Quick Detection methods", () => {
-    const api: Pick<
-      LovelyResApi,
-      | "getQuickDetectionCatalog"
-      | "planQuickDetection"
-      | "startQuickDetection"
-      | "pollQuickDetection"
-      | "cancelQuickDetection"
-      | "listQuickDetectionHistory"
-      | "getQuickDetectionReport"
-    > = {
-      getQuickDetectionCatalog: async () => ({}) as QuickDetectionCatalog,
-      planQuickDetection: async (
-        _bindingHandle: string,
-        _input: QuickDetectionPlanInput,
-      ) => ({}) as QuickDetectionPlan,
-      startQuickDetection: async (_bindingHandle: string, _planHandle: string) =>
-        ({}) as QuickDetectionScanStarted,
-      pollQuickDetection: async (
-        _bindingHandle: string,
-        _scanHandle: string,
-        _afterEvent: number,
-        _limit: number,
-      ) => ({}) as QuickDetectionPoll,
-      cancelQuickDetection: async (_bindingHandle: string, _scanHandle: string) =>
-        ({}) as QuickDetectionCancellation,
-      listQuickDetectionHistory: async (
-        _bindingHandle: string,
-        _offset: number,
-        _limit: number,
-      ) => ({}) as QuickDetectionHistoryPage,
-      getQuickDetectionReport: async (_bindingHandle: string, _reportHandle: string) =>
-        ({}) as QuickDetectionReport,
-    };
-    expect(Object.keys(api)).toEqual([
-      "getQuickDetectionCatalog",
-      "planQuickDetection",
-      "startQuickDetection",
-      "pollQuickDetection",
-      "cancelQuickDetection",
-      "listQuickDetectionHistory",
-      "getQuickDetectionReport",
-    ]);
-    expect(api.getQuickDetectionCatalog).toHaveLength(0);
-    expect(api.planQuickDetection).toHaveLength(2);
-    expect(api.startQuickDetection).toHaveLength(2);
-    expect(api.pollQuickDetection).toHaveLength(4);
-    expect(api.cancelQuickDetection).toHaveLength(2);
-    expect(api.listQuickDetectionHistory).toHaveLength(3);
-    expect(api.getQuickDetectionReport).toHaveLength(2);
-  });
-
   it("exposes one handle-free main-window terminal launch method", () => {
     const api: Pick<LovelyResApi, "openSshTerminal"> = {
       openSshTerminal: async () => ({ opened: true, reused: false }) satisfies TerminalWindowLaunchResult,
@@ -553,7 +493,7 @@ describe("backend response validation", () => {
         productName: "LovelyRes",
         appVersion: "1.0.0",
         protocolVersion: BACKEND_PROTOCOL,
-        pages: Array.from({ length: 20 }, () => page),
+        pages: Array.from({ length: 19 }, () => page),
         securityReferenceFavoriteIds: [],
       }),
     ).toBe(false);

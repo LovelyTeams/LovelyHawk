@@ -307,51 +307,6 @@ describe("Packet Capture Live backend client boundary", () => {
   });
 });
 
-describe("Quick Detection backend client boundary", () => {
-  it("pins exactly seven binding-scoped RPC methods and validates correlated DTOs", () => {
-    expect(QUICK_DETECTION_RPC_METHODS).toEqual({
-      catalog: "quick-detection.catalog.get",
-      plan: "quick-detection.plan",
-      start: "quick-detection.start",
-      poll: "quick-detection.poll",
-      cancel: "quick-detection.cancel",
-      history: "quick-detection.history.list",
-      report: "quick-detection.report.get",
-    });
-    expect(Object.keys(QUICK_DETECTION_RPC_METHODS)).toHaveLength(7);
-    expect(BackendClient.prototype.getQuickDetectionCatalog.toString())
-      .toContain("isQuickDetectionCatalog");
-    expect(BackendClient.prototype.planQuickDetection.toString())
-      .toContain("isQuickDetectionPlanInput");
-    expect(BackendClient.prototype.planQuickDetection.toString())
-      .toContain("value.profile !== input.profile");
-    expect(BackendClient.prototype.startQuickDetection.toString())
-      .toContain("value.scanHandle === planHandle");
-    expect(BackendClient.prototype.pollQuickDetection.toString())
-      .toContain("value.scanHandle !== scanHandle");
-    expect(BackendClient.prototype.pollQuickDetection.toString())
-      .toContain("event.sequence <= afterEvent");
-    expect(BackendClient.prototype.pollQuickDetection.toString())
-      .toContain("event.total !== value.total");
-    expect(BackendClient.prototype.cancelQuickDetection.toString())
-      .toContain("isQuickDetectionCancellation");
-    expect(BackendClient.prototype.listQuickDetectionHistory.toString())
-      .toContain("value.offset !== offset");
-    expect(BackendClient.prototype.listQuickDetectionHistory.toString())
-      .toContain("value.items.length > limit");
-    expect(BackendClient.prototype.getQuickDetectionReport.toString())
-      .toContain("value.reportHandle !== reportHandle");
-    for (const method of [
-      BackendClient.prototype.planQuickDetection,
-      BackendClient.prototype.startQuickDetection,
-      BackendClient.prototype.pollQuickDetection,
-      BackendClient.prototype.cancelQuickDetection,
-      BackendClient.prototype.listQuickDetectionHistory,
-      BackendClient.prototype.getQuickDetectionReport,
-    ]) expect(method.toString()).toContain("isQuickDetectionOpaqueHandle");
-  });
-});
-
 describe("Application Log backend client boundary", () => {
   it("pins exactly five process-local RPC methods and validates every DTO", () => {
     expect(APPLICATION_LOG_RPC_METHODS).toEqual({

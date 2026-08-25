@@ -963,52 +963,6 @@
    }
   },
   {
-   "id": "quick-detection",
-   "owner": [
-    "electron-renderer",
-    "rust-backend",
-    "lovelyres-core"
-   ],
-   "source": [
-    "crates/lovelyres-gpui/src/quick_detection.rs",
-    "crates/lovelyres-core/src/detection.rs"
-   ],
-   "replacement": {
-    "state": "mixed",
-    "targets": [
-     "electron/src/renderer/QuickDetectionPage.tsx",
-     "electron/src/shared/quick-detection-contract.ts",
-     "crates/lovelyres-electron-backend/src/quick_detection_api.rs",
-     "Central exact7 catalog/plan/start/poll/cancel/history/report RPC/preload/App surface",
-     "Electron CDP exact112 disconnected/forged/lifecycle evidence",
-     "Pending remediation plans and real Linux/OpenSSH validation"
-    ]
-   },
-   "status": "Pending",
-   "acceptance": [
-    "Detection selection, immutable plans, evidence/results, remediation planning, cancellation, target guards, and bounded output preserve the GPUI workflow."
-   ],
-   "tests": {
-    "required": [
-     "Core detection tests",
-     "Backend contract tests",
-     "Renderer interaction tests",
-     "Electron CDP page smoke"
-    ],
-    "evidence": [
-     "electron-backend-quick-detection-phase0-2026-08-25",
-     "electron-renderer-quick-detection-phase0-2026-08-25",
-     "electron-backend-quick-detection-central-2026-08-25",
-     "electron-check-quick-detection-central-2026-08-25",
-     "electron-source-gate-quick-detection-central-2026-08-25",
-     "electron-backend-exact112-quick-detection-application-log-2026-08-25",
-     "electron-check-exact112-quick-detection-application-log-2026-08-25",
-     "electron-source-gate-exact112-quick-detection-application-log-2026-08-25",
-     "electron-cdp-exact112-quick-detection-application-log-2026-08-25"
-    ]
-   }
-  },
-  {
    "id": "security-reference",
    "owner": [
     "electron-renderer",

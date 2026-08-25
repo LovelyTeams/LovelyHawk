@@ -392,25 +392,12 @@
 packaged 验收不足而继续为 `Pending` 的切片。每一条都必须按其明确状态解读，不能因为源码、测试或
 某一阶段接线存在就把整个页面或 overlay 标记为完成：
 
-- Quick Detection read-only phase 1 已中央接线：`crates/lovelyres-electron-backend/src/quick_detection_api.rs`、
-  `electron/src/shared/quick-detection-contract.ts` 与 `QuickDetectionPage.tsx` 已实现真实 opaque SSH binding、
-  core-owned immutable `plan_scan`/`run_scan`、有界 TTL plan/scan/report registry、游标进度轮询、取消、
-  当前目标历史/详情、hostile plain-text 报告与 lifecycle cancel。独立 surface 固定为 exact7 catalog/plan/start/
-  poll/cancel/history/report；完整 `TargetGuard` 在 dispatch、事件和最终报告应用前验证，`close_binding` 会取消并
-  清除该 binding 的计划、扫描、事件、报告和字节，晚到结果不能复活。Renderer 仅接收 binding 和 opaque
-  handles；卸载/切换主动取消，request/cursor correlation 拒绝旧响应；事件只含封闭枚举和计数，报告、history
-  及所有 hostile 字段在 renderer 前按固定 marker 投影并受字节/数量上限约束。BackendState 单例、exact7 RPC、
-  main/preload exact112、aggregate contract、App binding-only page registry 与 SSH disconnect 前 eager `close_binding`
-  均已接线。当前 aggregate evidence 为 backend library 248/248、16 个 standalone targets 共 451/451（总计
-  699 tests）、Quick Detection standalone 31/31、Electron 102 files/594 tests、typecheck/build、workspace
-  Clippy/rustfmt，以及 exact112 source gate/fixture self-test。Electron-native CDP 证据
-  `target/electron-debug/19adbfae-598c-4eee-b7f1-cc2a666e3ac7/evidence` 已验证 exact7 surface：plan/start/poll/
-  cancel/history/report 的 direct 与 unknown-field forged 请求均 reject-no-echo，catalog 为 13 个封闭模块、2 个
-  profile，remediation/auto-fix/command/file/terminal/export/mutation/generic 均为 `undefined`；断连页零
-  module/profile/progress/history/report/action rows、local-only、无内部身份，unmount/remount 后仍为空，
-  `quick-detection-disconnected.png` capturePage 成功且 console error 为 0。真实 Linux/OpenSSH 的连接扫描、
-  权限、取消、断连竞态及目标切换仍为 `NOT_RUN`；自动修复在完整 plan/exact-confirmation/journal/verify/restore
-  接线前失败关闭且不提供按钮。phase 1 不再计为 `UNWIRED`，但整个页面继续为 `Pending`。
+- 快速检测（Quick Detection）已整体移除：sidecar 的 `quick_detection_api.rs`、七个 RPC、
+  main/preload 的七个方法、`quick-detection-contract.ts`、`QuickDetectionPage.tsx` 与其状态/助手/
+  样式文件、以及对应的门禁与 CDP 场景都已删除。主窗口 preload 面因此从 118 收到 111，页面注册表
+  从 20 收到 19。core 的 `detection.rs` 保留：baseline、compliance、report 与 services 仍在用它。
+  该切片在 ledger 的 `pages` 中不再存在；`verificationRuns` 里的历史记录按原样保留，因为那些运行
+  当时确实发生过。
 - Docker 只读调查 phase 1 已中央接线：`crates/lovelyres-electron-backend/src/docker_read_api.rs`、
   `electron/src/shared/docker-read-contract.ts`、`docker-read-state.ts`、`docker-read-helpers.ts` 与
   `DockerPage.tsx` 已实现真实 opaque SSH binding、完整 `TargetGuard` 前后验证、固定 Docker runtime、

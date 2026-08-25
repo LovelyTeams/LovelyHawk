@@ -57,7 +57,6 @@ import {
   type SshAttemptStatus,
   type TerminalClosed,
   type TerminalWindowLaunchResult,
-  type QuickDetectionPlanInput,
   isConfigGenerateInput,
   isBaselineOpaqueHandle,
   isCheckAuditCatalogInput,
@@ -81,10 +80,6 @@ import {
   isPacketCaptureCursor,
   isPacketCaptureOpaqueHandle,
   isPacketCaptureStartInput,
-  isQuickDetectionHistoryRequest,
-  isQuickDetectionOpaqueHandle,
-  isQuickDetectionPlanInput,
-  isQuickDetectionPollRequest,
   isApplicationLogFilter,
   isApplicationLogLevel,
   isIntegrityOpaqueHandle,
@@ -1402,114 +1397,6 @@ function registerIpc(): void {
       throw new Error("Invalid packet capture stop request.");
     }
     return backend.stopPacketCapture(value.bindingHandle, value.captureHandle);
-  });
-  ipcMain.handle("lovelyres:quick-detection:catalog:get", async (event, ...values: unknown[]) => {
-    validateSender(event);
-    if (values.length !== 0) {
-      throw new Error("Invalid quick-detection catalog request.");
-    }
-    return backend.getQuickDetectionCatalog();
-  });
-  ipcMain.handle("lovelyres:quick-detection:plan", async (event, ...values: unknown[]) => {
-    validateSender(event);
-    const value = values[0];
-    if (
-      values.length !== 1 ||
-      !isRecord(value) ||
-      !hasExactKeys(value, ["bindingHandle", "input"]) ||
-      !isQuickDetectionOpaqueHandle(value.bindingHandle) ||
-      !isQuickDetectionPlanInput(value.input)
-    ) {
-      throw new Error("Invalid quick-detection plan request.");
-    }
-    return backend.planQuickDetection(
-      value.bindingHandle,
-      value.input as QuickDetectionPlanInput,
-    );
-  });
-  ipcMain.handle("lovelyres:quick-detection:start", async (event, ...values: unknown[]) => {
-    validateSender(event);
-    const value = values[0];
-    if (
-      values.length !== 1 ||
-      !isRecord(value) ||
-      !hasExactKeys(value, ["bindingHandle", "planHandle"]) ||
-      !isQuickDetectionOpaqueHandle(value.bindingHandle) ||
-      !isQuickDetectionOpaqueHandle(value.planHandle) ||
-      value.bindingHandle === value.planHandle
-    ) {
-      throw new Error("Invalid quick-detection start request.");
-    }
-    return backend.startQuickDetection(value.bindingHandle, value.planHandle);
-  });
-  ipcMain.handle("lovelyres:quick-detection:poll", async (event, ...values: unknown[]) => {
-    validateSender(event);
-    const value = values[0];
-    if (
-      values.length !== 1 ||
-      !isRecord(value) ||
-      !hasExactKeys(value, ["bindingHandle", "scanHandle", "afterEvent", "limit"]) ||
-      !isQuickDetectionOpaqueHandle(value.bindingHandle) ||
-      !isQuickDetectionOpaqueHandle(value.scanHandle) ||
-      value.bindingHandle === value.scanHandle ||
-      !isQuickDetectionPollRequest(value.afterEvent, value.limit)
-    ) {
-      throw new Error("Invalid quick-detection poll request.");
-    }
-    return backend.pollQuickDetection(
-      value.bindingHandle,
-      value.scanHandle,
-      value.afterEvent as number,
-      value.limit as number,
-    );
-  });
-  ipcMain.handle("lovelyres:quick-detection:cancel", async (event, ...values: unknown[]) => {
-    validateSender(event);
-    const value = values[0];
-    if (
-      values.length !== 1 ||
-      !isRecord(value) ||
-      !hasExactKeys(value, ["bindingHandle", "scanHandle"]) ||
-      !isQuickDetectionOpaqueHandle(value.bindingHandle) ||
-      !isQuickDetectionOpaqueHandle(value.scanHandle) ||
-      value.bindingHandle === value.scanHandle
-    ) {
-      throw new Error("Invalid quick-detection cancellation request.");
-    }
-    return backend.cancelQuickDetection(value.bindingHandle, value.scanHandle);
-  });
-  ipcMain.handle("lovelyres:quick-detection:history:list", async (event, ...values: unknown[]) => {
-    validateSender(event);
-    const value = values[0];
-    if (
-      values.length !== 1 ||
-      !isRecord(value) ||
-      !hasExactKeys(value, ["bindingHandle", "offset", "limit"]) ||
-      !isQuickDetectionOpaqueHandle(value.bindingHandle) ||
-      !isQuickDetectionHistoryRequest(value.offset, value.limit)
-    ) {
-      throw new Error("Invalid quick-detection history request.");
-    }
-    return backend.listQuickDetectionHistory(
-      value.bindingHandle,
-      value.offset as number,
-      value.limit as number,
-    );
-  });
-  ipcMain.handle("lovelyres:quick-detection:report:get", async (event, ...values: unknown[]) => {
-    validateSender(event);
-    const value = values[0];
-    if (
-      values.length !== 1 ||
-      !isRecord(value) ||
-      !hasExactKeys(value, ["bindingHandle", "reportHandle"]) ||
-      !isQuickDetectionOpaqueHandle(value.bindingHandle) ||
-      !isQuickDetectionOpaqueHandle(value.reportHandle) ||
-      value.bindingHandle === value.reportHandle
-    ) {
-      throw new Error("Invalid quick-detection report request.");
-    }
-    return backend.getQuickDetectionReport(value.bindingHandle, value.reportHandle);
   });
   ipcMain.handle("lovelyres:application-log:list", async (event, ...values: unknown[]) => {
     validateSender(event);

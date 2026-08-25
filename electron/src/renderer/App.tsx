@@ -60,7 +60,6 @@ const MiddlewarePage = lazy(async () => ({ default: (await import("./MiddlewareP
 const CheckAuditPage = lazy(async () => ({ default: (await import("./CheckAuditPage")).CheckAuditPage }));
 const IntegrityPage = lazy(async () => ({ default: (await import("./IntegrityPage")).IntegrityPage }));
 const LogAnalysisPage = lazy(async () => ({ default: (await import("./LogAnalysisPage")).LogAnalysisPage }));
-const QuickDetectionPage = lazy(async () => ({ default: (await import("./QuickDetectionPage")).QuickDetectionPage }));
 const PacketCapturePage = lazy(async () => ({ default: (await import("./PacketCapturePage")).PacketCapturePage }));
 const KubernetesPage = lazy(async () => ({ default: (await import("./KubernetesPage")).KubernetesPage }));
 const DockerPage = lazy(async () => ({ default: (await import("./DockerPage")).DockerPage }));
@@ -516,11 +515,6 @@ export function App() {
             />
           ) : activePage.id === "log-analysis" ? (
             <LogAnalysisPage
-              bindingHandle={activeTarget?.bindingHandle ?? null}
-              api={window.lovelyres}
-            />
-          ) : activePage.id === "quick-detection" ? (
-            <QuickDetectionPage
               bindingHandle={activeTarget?.bindingHandle ?? null}
               api={window.lovelyres}
             />

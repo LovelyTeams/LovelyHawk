@@ -49,14 +49,6 @@ import {
   type PacketCaptureStarted,
   type PacketCaptureStartInput,
   type PacketCaptureStopped,
-  type QuickDetectionCancellation,
-  type QuickDetectionCatalog,
-  type QuickDetectionHistoryPage,
-  type QuickDetectionPlan,
-  type QuickDetectionPlanInput,
-  type QuickDetectionPoll,
-  type QuickDetectionReport,
-  type QuickDetectionScanStarted,
   type ApplicationLogClearResult,
   type ApplicationLogFilter,
   type ApplicationLogLevel,
@@ -182,17 +174,6 @@ import {
   isPacketCaptureStarted,
   isPacketCaptureStartInput,
   isPacketCaptureStopped,
-  isQuickDetectionCancellation,
-  isQuickDetectionCatalog,
-  isQuickDetectionHistoryPage,
-  isQuickDetectionHistoryRequest,
-  isQuickDetectionOpaqueHandle,
-  isQuickDetectionPlan,
-  isQuickDetectionPlanInput,
-  isQuickDetectionPoll,
-  isQuickDetectionPollRequest,
-  isQuickDetectionReport,
-  isQuickDetectionScanStarted,
   isApplicationLogClearResult,
   isApplicationLogFilter,
   isApplicationLogLevel,
@@ -403,16 +384,6 @@ export const PACKET_CAPTURE_LIVE_RPC_METHODS = Object.freeze({
   start: "packet-capture.start",
   poll: "packet-capture.poll",
   stop: "packet-capture.stop",
-} as const);
-
-export const QUICK_DETECTION_RPC_METHODS = Object.freeze({
-  catalog: "quick-detection.catalog.get",
-  plan: "quick-detection.plan",
-  start: "quick-detection.start",
-  poll: "quick-detection.poll",
-  cancel: "quick-detection.cancel",
-  history: "quick-detection.history.list",
-  report: "quick-detection.report.get",
 } as const);
 
 export const APPLICATION_LOG_RPC_METHODS = Object.freeze({
@@ -1527,143 +1498,6 @@ export class BackendClient {
     }, PACKET_CAPTURE_STOP_TIMEOUT_MS);
     if (!isPacketCaptureStopped(value)) {
       throw new Error("The backend returned an invalid packet capture stop result.");
-    }
-    return value;
-  }
-
-  async getQuickDetectionCatalog(): Promise<QuickDetectionCatalog> {
-    const value = await this.#request(QUICK_DETECTION_RPC_METHODS.catalog, {});
-    if (!isQuickDetectionCatalog(value)) {
-      throw new Error("The backend returned an invalid quick-detection catalog.");
-    }
-    return value;
-  }
-
-  async planQuickDetection(
-    bindingHandle: string,
-    input: QuickDetectionPlanInput,
-  ): Promise<QuickDetectionPlan> {
-    if (!isQuickDetectionOpaqueHandle(bindingHandle) || !isQuickDetectionPlanInput(input)) {
-      throw new Error("The quick-detection plan request is invalid.");
-    }
-    const value = await this.#request(QUICK_DETECTION_RPC_METHODS.plan, {
-      bindingHandle,
-      input,
-    });
-    const selectedModulesMatch = input.profile !== "selected" ||
-      value !== null && typeof value === "object" && "moduleIds" in value &&
-      Array.isArray(value.moduleIds) && value.moduleIds.length === input.moduleIds.length &&
-      value.moduleIds.every((module, index) => module === input.moduleIds[index]);
-    if (
-      !isQuickDetectionPlan(value) || value.planHandle === bindingHandle ||
-      value.profile !== input.profile ||
-      value.maximumFindingsPerModule !== input.maximumFindingsPerModule ||
-      !selectedModulesMatch
-    ) {
-      throw new Error("The backend returned an invalid quick-detection plan.");
-    }
-    return value;
-  }
-
-  async startQuickDetection(
-    bindingHandle: string,
-    planHandle: string,
-  ): Promise<QuickDetectionScanStarted> {
-    if (!isQuickDetectionOpaqueHandle(bindingHandle) ||
-      !isQuickDetectionOpaqueHandle(planHandle) || planHandle === bindingHandle) {
-      throw new Error("The quick-detection start request is invalid.");
-    }
-    const value = await this.#request(QUICK_DETECTION_RPC_METHODS.start, {
-      bindingHandle,
-      planHandle,
-    });
-    if (!isQuickDetectionScanStarted(value) || value.scanHandle === bindingHandle ||
-      value.scanHandle === planHandle) {
-      throw new Error("The backend returned an invalid quick-detection scan start.");
-    }
-    return value;
-  }
-
-  async pollQuickDetection(
-    bindingHandle: string,
-    scanHandle: string,
-    afterEvent: number,
-    limit: number,
-  ): Promise<QuickDetectionPoll> {
-    if (!isQuickDetectionOpaqueHandle(bindingHandle) ||
-      !isQuickDetectionOpaqueHandle(scanHandle) || scanHandle === bindingHandle ||
-      !isQuickDetectionPollRequest(afterEvent, limit)) {
-      throw new Error("The quick-detection poll request is invalid.");
-    }
-    const value = await this.#request(QUICK_DETECTION_RPC_METHODS.poll, {
-      bindingHandle,
-      scanHandle,
-      afterEvent,
-      limit,
-    });
-    if (!isQuickDetectionPoll(value) || value.scanHandle !== scanHandle ||
-      value.reportHandle === bindingHandle || value.reportHandle === scanHandle ||
-      value.events.some((event) => event.sequence <= afterEvent ||
-        event.total !== value.total || event.completed > value.completed)) {
-      throw new Error("The backend returned an invalid quick-detection poll.");
-    }
-    return value;
-  }
-
-  async cancelQuickDetection(
-    bindingHandle: string,
-    scanHandle: string,
-  ): Promise<QuickDetectionCancellation> {
-    if (!isQuickDetectionOpaqueHandle(bindingHandle) ||
-      !isQuickDetectionOpaqueHandle(scanHandle) || scanHandle === bindingHandle) {
-      throw new Error("The quick-detection cancellation request is invalid.");
-    }
-    const value = await this.#request(QUICK_DETECTION_RPC_METHODS.cancel, {
-      bindingHandle,
-      scanHandle,
-    });
-    if (!isQuickDetectionCancellation(value)) {
-      throw new Error("The backend returned an invalid quick-detection cancellation.");
-    }
-    return value;
-  }
-
-  async listQuickDetectionHistory(
-    bindingHandle: string,
-    offset: number,
-    limit: number,
-  ): Promise<QuickDetectionHistoryPage> {
-    if (!isQuickDetectionOpaqueHandle(bindingHandle) ||
-      !isQuickDetectionHistoryRequest(offset, limit)) {
-      throw new Error("The quick-detection history request is invalid.");
-    }
-    const value = await this.#request(QUICK_DETECTION_RPC_METHODS.history, {
-      bindingHandle,
-      offset,
-      limit,
-    });
-    if (!isQuickDetectionHistoryPage(value) || value.offset !== offset ||
-      value.items.length > limit ||
-      value.items.some((item) => item.reportHandle === bindingHandle)) {
-      throw new Error("The backend returned an invalid quick-detection history page.");
-    }
-    return value;
-  }
-
-  async getQuickDetectionReport(
-    bindingHandle: string,
-    reportHandle: string,
-  ): Promise<QuickDetectionReport> {
-    if (!isQuickDetectionOpaqueHandle(bindingHandle) ||
-      !isQuickDetectionOpaqueHandle(reportHandle) || reportHandle === bindingHandle) {
-      throw new Error("The quick-detection report request is invalid.");
-    }
-    const value = await this.#request(QUICK_DETECTION_RPC_METHODS.report, {
-      bindingHandle,
-      reportHandle,
-    });
-    if (!isQuickDetectionReport(value) || value.reportHandle !== reportHandle) {
-      throw new Error("The backend returned an invalid quick-detection report.");
     }
     return value;
   }

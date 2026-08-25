@@ -139,11 +139,8 @@ describe("standalone Docker read page", () => {
 
   it("uses global theme tokens with no color literals", () => {
     const css = readFileSync(new URL("./docker-page.css", import.meta.url), "utf8");
-    const quickCss = readFileSync(new URL("./quick-detection.css", import.meta.url), "utf8");
     expect((css.match(/var\(--[a-z0-9-]+\)/gu) ?? []).length).toBeGreaterThan(10);
     expect(css).not.toMatch(/#[0-9a-f]{3,8}|rgba?\(|hsla?\(/iu);
     expect(css).toMatch(/\.docker-log-text\s*\{[^}]*color:\s*var\(--console-text\)[^}]*background:\s*var\(--console-bg\)/su);
-    expect(quickCss).not.toMatch(/#[0-9a-f]{3,8}|rgba?\(|hsla?\(/iu);
-    expect(quickCss).toMatch(/\.quick-detection-module-detail pre\s*\{[^}]*color:\s*var\(--console-text\);[^}]*background:\s*var\(--console-bg\);/su);
   });
 });

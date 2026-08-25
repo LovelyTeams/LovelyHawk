@@ -124,16 +124,6 @@ import type {
   PacketCaptureStopped,
 } from "./packet-capture-live-contract.js";
 import type {
-  QuickDetectionCancellation,
-  QuickDetectionCatalog,
-  QuickDetectionHistoryPage,
-  QuickDetectionPlan,
-  QuickDetectionPlanInput,
-  QuickDetectionPoll,
-  QuickDetectionReport,
-  QuickDetectionScanStarted,
-} from "./quick-detection-contract.js";
-import type {
   ApplicationLogClearResult,
   ApplicationLogExportResult,
   ApplicationLogFilter,
@@ -170,7 +160,6 @@ export * from "./emergency-command-contract.js";
 export * from "./sftp-browser-contract.js";
 export * from "./local-browser-contract.js";
 export * from "./packet-capture-live-contract.js";
-export * from "./quick-detection-contract.js";
 export * from "./application-log-contract.js";
 export * from "./integrity-contract.js";
 
@@ -571,34 +560,6 @@ export interface LovelyResApi {
     bindingHandle: string,
     captureHandle: string,
   ): Promise<PacketCaptureStopped>;
-  getQuickDetectionCatalog(): Promise<QuickDetectionCatalog>;
-  planQuickDetection(
-    bindingHandle: string,
-    input: QuickDetectionPlanInput,
-  ): Promise<QuickDetectionPlan>;
-  startQuickDetection(
-    bindingHandle: string,
-    planHandle: string,
-  ): Promise<QuickDetectionScanStarted>;
-  pollQuickDetection(
-    bindingHandle: string,
-    scanHandle: string,
-    afterEvent: number,
-    limit: number,
-  ): Promise<QuickDetectionPoll>;
-  cancelQuickDetection(
-    bindingHandle: string,
-    scanHandle: string,
-  ): Promise<QuickDetectionCancellation>;
-  listQuickDetectionHistory(
-    bindingHandle: string,
-    offset: number,
-    limit: number,
-  ): Promise<QuickDetectionHistoryPage>;
-  getQuickDetectionReport(
-    bindingHandle: string,
-    reportHandle: string,
-  ): Promise<QuickDetectionReport>;
   listApplicationLogs(filter: ApplicationLogFilter): Promise<ApplicationLogSnapshot>;
   setApplicationLogLevel(level: ApplicationLogLevel): Promise<ApplicationLogLevelResult>;
   clearApplicationLogBuffer(): Promise<ApplicationLogClearResult>;
@@ -822,7 +783,7 @@ export function isBootstrapResult(value: unknown): value is BootstrapResult {
     typeof value.appVersion === "string" &&
     value.protocolVersion === BACKEND_PROTOCOL &&
     Array.isArray(value.pages) &&
-    value.pages.length === 20 &&
+    value.pages.length === 19 &&
     value.pages.every(isPageDescriptor) &&
     new Set(value.pages.map((page) => page.id)).size === value.pages.length &&
     isStringArray(value.securityReferenceFavoriteIds, 512)

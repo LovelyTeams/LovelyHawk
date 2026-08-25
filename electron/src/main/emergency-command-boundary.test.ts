@@ -32,11 +32,11 @@ function expectLiteralErrorsOnly(source: string, expectedCount: number): void {
 }
 
 describe("central Emergency Commands Electron boundary", () => {
-  it("keeps the exact two closed methods in the frozen exact 118 preload", () => {
+  it("keeps the exact two closed methods in the frozen exact 111 preload", () => {
     const body = frozenApiBody();
     const names = [...body.matchAll(/^  (?<name>[A-Za-z_$][A-Za-z0-9_$]*):/gmu)]
       .map((match) => match.groups?.name);
-    expect(names).toHaveLength(118);
+    expect(names).toHaveLength(111);
     for (const name of ["loadEmergencyCommandCatalog", "runEmergencyCommand"]) {
       expect(names.filter((candidate) => candidate === name)).toEqual([name]);
     }

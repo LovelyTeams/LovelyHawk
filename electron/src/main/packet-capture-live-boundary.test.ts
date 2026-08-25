@@ -29,11 +29,11 @@ function expectLiteralErrorsOnly(source: string, expectedCount: number): void {
 }
 
 describe("central Packet Capture Live Electron boundary", () => {
-  it("keeps the exact four live methods in the frozen exact 118 preload", () => {
+  it("keeps the exact four live methods in the frozen exact 111 preload", () => {
     const body = frozenApiBody();
     const names = [...body.matchAll(/^  (?<name>[A-Za-z_$][A-Za-z0-9_$]*):/gmu)]
       .map((match) => match.groups?.name);
-    expect(names).toHaveLength(118);
+    expect(names).toHaveLength(111);
     for (const name of [
       "listPacketCaptureInterfaces",
       "startPacketCapture",
@@ -58,7 +58,7 @@ describe("central Packet Capture Live Electron boundary", () => {
 
     const boundary = mainSource.slice(
       mainSource.indexOf('ipcMain.handle("lovelyres:packet-capture:interfaces:list"'),
-      mainSource.indexOf('ipcMain.handle("lovelyres:quick-detection:catalog:get"'),
+      mainSource.indexOf('ipcMain.handle("lovelyres:application-log:list"'),
     );
     expect((boundary.match(/validateSender\(event\)/gu) ?? [])).toHaveLength(4);
     expect((boundary.match(/values\.length !== 1/gu) ?? [])).toHaveLength(4);
@@ -94,7 +94,7 @@ describe("central Packet Capture Live Electron boundary", () => {
 
     const boundary = backendClientSource.slice(
       backendClientSource.indexOf("async listPacketCaptureInterfaces"),
-      backendClientSource.indexOf("async getQuickDetectionCatalog"),
+      backendClientSource.indexOf("async listApplicationLogs"),
     );
     for (const validator of [
       "isPacketCaptureInterfaceList",
@@ -120,7 +120,7 @@ describe("central Packet Capture Live Electron boundary", () => {
   it("keeps the aggregate API concrete, binding-only, and free of generic primitives", () => {
     const api = contractSource.slice(
       contractSource.indexOf("listPacketCaptureInterfaces(bindingHandle: string)"),
-      contractSource.indexOf("getQuickDetectionCatalog():"),
+      contractSource.indexOf("listApplicationLogs(filter:"),
     );
     expect(api).toContain(
       "listPacketCaptureInterfaces(bindingHandle: string): Promise<PacketCaptureInterfaceList>;",

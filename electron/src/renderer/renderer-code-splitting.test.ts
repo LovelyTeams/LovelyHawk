@@ -8,7 +8,7 @@ const app = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const PAGES = [
   "SecurityReference", "Notes", "ConfigGeneratorPage", "SystemInfoPage", "AiHistoryPage",
   "SnapshotPage", "FirewallPage", "BaselinePage", "MiddlewarePage", "CheckAuditPage",
-  "IntegrityPage", "LogAnalysisPage", "QuickDetectionPage", "PacketCapturePage",
+  "IntegrityPage", "LogAnalysisPage", "PacketCapturePage",
   "KubernetesPage", "DockerPage", "EmergencyCommandsPage",
 ];
 

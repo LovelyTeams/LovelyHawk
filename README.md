@@ -29,7 +29,7 @@ LovelyERes 的桌面前端已 **完全迁移到 Electron**，GPUI crate、依赖
 
 - SSH 连接、host-key/MFA、目标激活与断开；
 - SSH 终端、SFTP 和容器终端独立窗口；
-- 系统信息、Docker、Kubernetes、快速检测、安全速查、日志、抓包和完整性检查；
+- 系统信息、Docker、Kubernetes、安全速查、日志、抓包和完整性检查；
 - 防火墙、快照、基线、数据库、中间件、Java 更新和多机批量工作流；
 - 调查笔记、命令历史、AI 历史、设置、诊断和处置报告；
 - TargetGuard、不可变危险计划、精确确认、journal、执行后验证与可恢复流程。

@@ -19,7 +19,6 @@ mod log_analysis_read_api;
 mod middleware_read_api;
 mod notes_api;
 mod packet_capture_live_api;
-mod quick_detection_api;
 mod settings_api;
 mod sftp_browser_api;
 mod snapshot_read_api;
@@ -73,7 +72,6 @@ use crate::{
     packet_capture_live_api::{
         PacketCaptureLiveApi, PacketCaptureLiveApiError, PacketCaptureStartInput,
     },
-    quick_detection_api::{QuickDetectionApi, QuickDetectionApiError, QuickDetectionPlanInput},
     settings_api::{
         SettingsAiApiKeyReplacementInput, SettingsApi, SettingsApiError, SettingsSaveInput,
     },
@@ -116,7 +114,6 @@ pub struct BackendState {
     notes: NotesApi,
     note_replays: parking_lot::Mutex<HashMap<String, NoteReplayEntry>>,
     packet_capture_live: PacketCaptureLiveApi,
-    quick_detection: Arc<QuickDetectionApi>,
     ssh: Arc<SshApi>,
     settings: SettingsApi,
     snapshot_read: SnapshotReadApi,
@@ -190,7 +187,6 @@ impl BackendState {
         let log_analysis_read = LogAnalysisReadApi::new(services.clone(), Arc::clone(&ssh));
         let middleware_read = MiddlewareReadApi::new(services.clone(), Arc::clone(&ssh));
         let packet_capture_live = PacketCaptureLiveApi::new(services.clone(), Arc::clone(&ssh));
-        let quick_detection = Arc::new(QuickDetectionApi::new(services.clone(), Arc::clone(&ssh)));
         let settings = SettingsApi::new(&services);
         let snapshot_read = SnapshotReadApi::new(services.clone(), Arc::clone(&ssh));
         let system_info = SystemInfoApi::new(services.clone(), Arc::clone(&ssh));
@@ -216,7 +212,6 @@ impl BackendState {
             notes: NotesApi::default(),
             note_replays: parking_lot::Mutex::new(HashMap::new()),
             packet_capture_live,
-            quick_detection,
             ssh,
             settings,
             snapshot_read,
@@ -443,7 +438,6 @@ impl BackendState {
                             self.kubernetes_read.close_binding(&params.binding_handle);
                             self.emergency_command.close_binding(&params.binding_handle);
                             self.docker_read.close_binding(&params.binding_handle);
-                            self.quick_detection.close_binding(&params.binding_handle);
                             self.sftp_browser.close_binding(&params.binding_handle);
                             self.packet_capture_live
                                 .close_binding(&params.binding_handle)
@@ -1092,61 +1086,6 @@ impl BackendState {
                         .map_err(packet_capture_live_failure),
                     Err(failure) => Err(failure),
                 }
-            }
-            RpcMethod::QuickDetectionCatalogGet => parse_params::<EmptyParams>(request.params)
-                .map(|_| to_value(QuickDetectionApi::catalog())),
-            RpcMethod::QuickDetectionPlan => {
-                parse_params::<QuickDetectionPlanParams>(request.params).and_then(|params| {
-                    self.quick_detection
-                        .plan_scan(&params.binding_handle, params.input)
-                        .map(to_value)
-                        .map_err(quick_detection_failure)
-                })
-            }
-            RpcMethod::QuickDetectionStart => {
-                parse_params::<QuickDetectionPlanHandleParams>(request.params).and_then(|params| {
-                    self.quick_detection
-                        .start_scan(&params.binding_handle, &params.plan_handle)
-                        .map(to_value)
-                        .map_err(quick_detection_failure)
-                })
-            }
-            RpcMethod::QuickDetectionPoll => {
-                parse_params::<QuickDetectionPollParams>(request.params).and_then(|params| {
-                    self.quick_detection
-                        .poll_scan(
-                            &params.binding_handle,
-                            &params.scan_handle,
-                            params.after_event,
-                            params.limit,
-                        )
-                        .map(to_value)
-                        .map_err(quick_detection_failure)
-                })
-            }
-            RpcMethod::QuickDetectionCancel => {
-                parse_params::<QuickDetectionScanHandleParams>(request.params).and_then(|params| {
-                    self.quick_detection
-                        .cancel_scan(&params.binding_handle, &params.scan_handle)
-                        .map(to_value)
-                        .map_err(quick_detection_failure)
-                })
-            }
-            RpcMethod::QuickDetectionHistoryList => {
-                parse_params::<QuickDetectionHistoryParams>(request.params).and_then(|params| {
-                    self.quick_detection
-                        .list_history(&params.binding_handle, params.offset, params.limit)
-                        .map(to_value)
-                        .map_err(quick_detection_failure)
-                })
-            }
-            RpcMethod::QuickDetectionReportGet => {
-                parse_params::<QuickDetectionReportParams>(request.params).and_then(|params| {
-                    self.quick_detection
-                        .get_report(&params.binding_handle, &params.report_handle)
-                        .map(to_value)
-                        .map_err(quick_detection_failure)
-                })
             }
             RpcMethod::ApplicationLogList => {
                 parse_params::<ApplicationLogFilterParams>(request.params).and_then(|params| {
@@ -1917,20 +1856,6 @@ enum RpcMethod {
     PacketCapturePoll,
     #[serde(rename = "packet-capture.stop")]
     PacketCaptureStop,
-    #[serde(rename = "quick-detection.catalog.get")]
-    QuickDetectionCatalogGet,
-    #[serde(rename = "quick-detection.plan")]
-    QuickDetectionPlan,
-    #[serde(rename = "quick-detection.start")]
-    QuickDetectionStart,
-    #[serde(rename = "quick-detection.poll")]
-    QuickDetectionPoll,
-    #[serde(rename = "quick-detection.cancel")]
-    QuickDetectionCancel,
-    #[serde(rename = "quick-detection.history.list")]
-    QuickDetectionHistoryList,
-    #[serde(rename = "quick-detection.report.get")]
-    QuickDetectionReportGet,
     #[serde(rename = "application-log.list")]
     ApplicationLogList,
     #[serde(rename = "application-log.level.set")]
@@ -2487,51 +2412,6 @@ struct PacketCapturePollParams {
 struct PacketCaptureHandleParams {
     binding_handle: String,
     capture_handle: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct QuickDetectionPlanParams {
-    binding_handle: String,
-    input: QuickDetectionPlanInput,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct QuickDetectionPlanHandleParams {
-    binding_handle: String,
-    plan_handle: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct QuickDetectionPollParams {
-    binding_handle: String,
-    scan_handle: String,
-    after_event: u64,
-    limit: usize,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct QuickDetectionScanHandleParams {
-    binding_handle: String,
-    scan_handle: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct QuickDetectionHistoryParams {
-    binding_handle: String,
-    offset: usize,
-    limit: usize,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct QuickDetectionReportParams {
-    binding_handle: String,
-    report_handle: String,
 }
 
 #[derive(Deserialize)]
@@ -3567,61 +3447,6 @@ fn packet_capture_live_failure(error: PacketCaptureLiveApiError) -> RpcFailure {
     }
 }
 
-fn quick_detection_failure(error: QuickDetectionApiError) -> RpcFailure {
-    match error {
-        QuickDetectionApiError::Core(source) => RpcFailure::core(
-            "run bounded quick-detection operation",
-            "quick-detection-operation-failed",
-            "LovelyRes could not complete the quick-detection operation.",
-            source,
-        ),
-        QuickDetectionApiError::RegistryUnavailable => RpcFailure {
-            operation: "run bounded quick-detection operation",
-            code: "quick-detection-operation-failed",
-            public_message: "LovelyRes could not complete the quick-detection operation.",
-            source: None,
-        },
-        QuickDetectionApiError::BindingUnavailable => RpcFailure {
-            operation: "validate quick-detection SSH binding",
-            code: "quick-detection-binding-unavailable",
-            public_message: "The quick-detection target binding is missing or stale.",
-            source: None,
-        },
-        QuickDetectionApiError::InvalidInput
-        | QuickDetectionApiError::InvalidBounds
-        | QuickDetectionApiError::InvalidHandle => RpcFailure {
-            operation: "validate quick-detection request",
-            code: "invalid-params",
-            public_message: "The quick-detection request parameters are invalid.",
-            source: None,
-        },
-        QuickDetectionApiError::PlanUnavailable => RpcFailure {
-            operation: "validate quick-detection plan capability",
-            code: "quick-detection-plan-unavailable",
-            public_message: "The quick-detection plan is missing, expired, or stale.",
-            source: None,
-        },
-        QuickDetectionApiError::ScanUnavailable => RpcFailure {
-            operation: "validate quick-detection scan capability",
-            code: "quick-detection-scan-unavailable",
-            public_message: "The quick-detection scan is missing, expired, or stale.",
-            source: None,
-        },
-        QuickDetectionApiError::ReportUnavailable => RpcFailure {
-            operation: "validate quick-detection report capability",
-            code: "quick-detection-report-unavailable",
-            public_message: "The quick-detection report is missing, expired, or stale.",
-            source: None,
-        },
-        QuickDetectionApiError::Capacity => RpcFailure {
-            operation: "bound quick-detection registry",
-            code: "quick-detection-capacity",
-            public_message: "The bounded quick-detection capacity has been reached.",
-            source: None,
-        },
-    }
-}
-
 fn diagnostic_log_failure(error: DiagnosticLogApiError) -> RpcFailure {
     match error {
         DiagnosticLogApiError::SearchTooLong | DiagnosticLogApiError::SearchContainsControl => {
@@ -3981,17 +3806,6 @@ fn page_descriptors() -> Vec<PageDescriptor> {
             summary: "调查工作负载、事件、日志与集群资源。",
             primary_action: "刷新集群",
             sections: &["工作负载", "事件", "资源"],
-            migration_state: Pending,
-        },
-        PageDescriptor {
-            id: "quick-detection",
-            group: Triage,
-            title: "快速检测",
-            icon: "⌁",
-            capability: ConnectedTarget,
-            summary: "按封闭计划执行只读检测并查看有界报告。",
-            primary_action: "规划检测",
-            sections: &["检测模块", "执行进度", "只读报告"],
             migration_state: Pending,
         },
         PageDescriptor {
@@ -4457,7 +4271,7 @@ mod tests {
         assert!(response.ok);
         let result = response.result.unwrap();
         assert_eq!(result["protocolVersion"], PROTOCOL_VERSION);
-        assert_eq!(result["pages"].as_array().unwrap().len(), 20);
+        assert_eq!(result["pages"].as_array().unwrap().len(), 19);
         assert!(result.get("dataRoot").is_none());
         assert_eq!(
             result["pages"]
@@ -6323,7 +6137,7 @@ mod tests {
         let params = source
             .split("struct PacketCaptureBindingParams")
             .nth(1)
-            .and_then(|value| value.split("struct QuickDetectionPlanParams").next())
+            .and_then(|value| value.split("struct ApplicationLogFilterParams").next())
             .unwrap();
         for forbidden in [
             "interface_name",
@@ -6423,314 +6237,6 @@ mod tests {
             assert_eq!(failure.public_message, expected_message);
             assert!(failure.source.is_none());
         }
-    }
-
-    #[tokio::test]
-    async fn quick_detection_rpc_routes_are_exact_scoped_and_never_echo_renderer_ingredients() {
-        let root = TestRoot::new();
-        let state = BackendState::open(root.0.clone()).unwrap();
-        let binding = "11111111-1111-4111-8111-111111111111";
-        let plan = "22222222-2222-4222-8222-222222222222";
-        let scan = "33333333-3333-4333-8333-333333333333";
-        let report = "44444444-4444-4444-8444-444444444444";
-
-        let catalog = handle_frame(&state, &request("quick-detection.catalog.get", "{}")).await;
-        assert!(catalog.ok);
-        assert!(catalog.error.is_none());
-
-        for (method, params) in [
-            (
-                "quick-detection.plan",
-                serde_json::json!({
-                    "bindingHandle": binding,
-                    "input": {
-                        "profile": "selected",
-                        "moduleIds": ["ssh-audit"],
-                        "maximumFindingsPerModule": 1,
-                    },
-                }),
-            ),
-            (
-                "quick-detection.start",
-                serde_json::json!({ "bindingHandle": binding, "planHandle": plan }),
-            ),
-            (
-                "quick-detection.poll",
-                serde_json::json!({
-                    "bindingHandle": binding,
-                    "scanHandle": scan,
-                    "afterEvent": 0,
-                    "limit": 1,
-                }),
-            ),
-            (
-                "quick-detection.cancel",
-                serde_json::json!({ "bindingHandle": binding, "scanHandle": scan }),
-            ),
-            (
-                "quick-detection.history.list",
-                serde_json::json!({ "bindingHandle": binding, "offset": 0, "limit": 1 }),
-            ),
-            (
-                "quick-detection.report.get",
-                serde_json::json!({ "bindingHandle": binding, "reportHandle": report }),
-            ),
-        ] {
-            let response = handle_frame(&state, &request(method, &params.to_string())).await;
-            assert!(!response.ok, "{method} accepted a missing binding");
-            let failure = response.error.as_ref().unwrap();
-            assert_eq!(
-                failure.code, "quick-detection-binding-unavailable",
-                "{method}"
-            );
-            assert_eq!(
-                failure.message, "The quick-detection target binding is missing or stale.",
-                "{method}"
-            );
-            let text = serde_json::to_string(&response).unwrap();
-            for capability in [binding, plan, scan, report] {
-                assert!(!text.contains(capability), "{method} echoed {capability}");
-            }
-        }
-
-        let forged = "renderer-forged-quick-shell-path-target-session-secret";
-        for (method, mut params) in [
-            ("quick-detection.catalog.get", serde_json::json!({})),
-            (
-                "quick-detection.plan",
-                serde_json::json!({
-                    "bindingHandle": binding,
-                    "input": {
-                        "profile": "selected",
-                        "moduleIds": ["ssh-audit"],
-                        "maximumFindingsPerModule": 1,
-                    },
-                }),
-            ),
-            (
-                "quick-detection.start",
-                serde_json::json!({ "bindingHandle": binding, "planHandle": plan }),
-            ),
-            (
-                "quick-detection.poll",
-                serde_json::json!({
-                    "bindingHandle": binding,
-                    "scanHandle": scan,
-                    "afterEvent": 0,
-                    "limit": 1,
-                }),
-            ),
-            (
-                "quick-detection.cancel",
-                serde_json::json!({ "bindingHandle": binding, "scanHandle": scan }),
-            ),
-            (
-                "quick-detection.history.list",
-                serde_json::json!({ "bindingHandle": binding, "offset": 0, "limit": 1 }),
-            ),
-            (
-                "quick-detection.report.get",
-                serde_json::json!({ "bindingHandle": binding, "reportHandle": report }),
-            ),
-        ] {
-            params["shell"] = serde_json::json!(forged);
-            let response = handle_frame(&state, &request(method, &params.to_string())).await;
-            assert!(!response.ok, "{method} accepted a forged field");
-            assert_eq!(response.error.as_ref().unwrap().code, "invalid-params");
-            assert!(!serde_json::to_string(&response).unwrap().contains(forged));
-        }
-
-        let nested = handle_frame(
-            &state,
-            &request(
-                "quick-detection.plan",
-                &serde_json::json!({
-                    "bindingHandle": binding,
-                    "input": {
-                        "profile": "selected",
-                        "moduleIds": ["ssh-audit"],
-                        "maximumFindingsPerModule": 1,
-                        "command": forged,
-                    },
-                })
-                .to_string(),
-            ),
-        )
-        .await;
-        assert!(!nested.ok);
-        assert_eq!(nested.error.as_ref().unwrap().code, "invalid-params");
-        assert!(!serde_json::to_string(&nested).unwrap().contains(forged));
-
-        let invalid_binding = "../HOSTILE_QUICK_BINDING_MUST_NOT_ECHO";
-        let invalid = handle_frame(
-            &state,
-            &request(
-                "quick-detection.history.list",
-                &serde_json::json!({
-                    "bindingHandle": invalid_binding,
-                    "offset": 0,
-                    "limit": 1,
-                })
-                .to_string(),
-            ),
-        )
-        .await;
-        assert!(!invalid.ok);
-        assert_eq!(invalid.error.as_ref().unwrap().code, "invalid-params");
-        assert!(
-            !serde_json::to_string(&invalid)
-                .unwrap()
-                .contains(invalid_binding)
-        );
-    }
-
-    #[test]
-    fn quick_detection_rpc_names_state_params_and_failures_are_closed_and_redacted() {
-        for method in [
-            "quick-detection.catalog.get",
-            "quick-detection.plan",
-            "quick-detection.start",
-            "quick-detection.poll",
-            "quick-detection.cancel",
-            "quick-detection.history.list",
-            "quick-detection.report.get",
-        ] {
-            assert!(
-                serde_json::from_value::<RpcMethod>(serde_json::json!(method)).is_ok(),
-                "missing fixed Quick Detection RPC method {method}"
-            );
-        }
-        for alias in [
-            "quick-detection.execute",
-            "quick-detection.command.run",
-            "quick-detection.shell.run",
-            "quick-detection.path.read",
-            "quick-detection.file.read",
-            "quick-detection.terminal.open",
-            "quick-detection.export",
-            "quick-detection.remediation.apply",
-            "quick-detection.mutation.confirm",
-            "quick-detection.invoke",
-        ] {
-            assert!(serde_json::from_value::<RpcMethod>(serde_json::json!(alias)).is_err());
-        }
-
-        let source = include_str!("lib.rs");
-        let state = source
-            .split("pub struct BackendState")
-            .nth(1)
-            .and_then(|value| value.split("struct NoteReplayEntry").next())
-            .unwrap();
-        assert_eq!(
-            state
-                .matches("quick_detection: Arc<QuickDetectionApi>")
-                .count(),
-            1
-        );
-        let open = source
-            .split("impl BackendState")
-            .nth(1)
-            .and_then(|value| value.split("async fn replay_note_mutation").next())
-            .unwrap();
-        assert_eq!(open.matches("QuickDetectionApi::new").count(), 1);
-        let params = source
-            .split("struct QuickDetectionPlanParams")
-            .nth(1)
-            .and_then(|value| value.split("struct ApplicationLogFilterParams").next())
-            .unwrap();
-        assert_eq!(params.matches("deny_unknown_fields").count(), 6);
-        for forbidden in [
-            "target",
-            "session",
-            "connection",
-            "command",
-            "shell",
-            "path",
-            "mutation",
-            "file",
-            "terminal",
-            "export",
-            "generic",
-            "remediation",
-        ] {
-            assert!(
-                !params.contains(forbidden),
-                "Quick Detection params exposed forbidden primitive {forbidden}"
-            );
-        }
-
-        let core = quick_detection_failure(QuickDetectionApiError::Core(CoreError::Validation {
-            subject: "password=hunter",
-            message: "renderer-marker-must-not-echo".to_owned(),
-        }));
-        assert_eq!(core.code, "quick-detection-operation-failed");
-        assert_eq!(
-            core.public_message,
-            "LovelyRes could not complete the quick-detection operation."
-        );
-        assert!(core.source.is_some());
-
-        let cases = [
-            (
-                QuickDetectionApiError::RegistryUnavailable,
-                "quick-detection-operation-failed",
-                "LovelyRes could not complete the quick-detection operation.",
-            ),
-            (
-                QuickDetectionApiError::BindingUnavailable,
-                "quick-detection-binding-unavailable",
-                "The quick-detection target binding is missing or stale.",
-            ),
-            (
-                QuickDetectionApiError::InvalidInput,
-                "invalid-params",
-                "The quick-detection request parameters are invalid.",
-            ),
-            (
-                QuickDetectionApiError::InvalidBounds,
-                "invalid-params",
-                "The quick-detection request parameters are invalid.",
-            ),
-            (
-                QuickDetectionApiError::InvalidHandle,
-                "invalid-params",
-                "The quick-detection request parameters are invalid.",
-            ),
-            (
-                QuickDetectionApiError::PlanUnavailable,
-                "quick-detection-plan-unavailable",
-                "The quick-detection plan is missing, expired, or stale.",
-            ),
-            (
-                QuickDetectionApiError::ScanUnavailable,
-                "quick-detection-scan-unavailable",
-                "The quick-detection scan is missing, expired, or stale.",
-            ),
-            (
-                QuickDetectionApiError::ReportUnavailable,
-                "quick-detection-report-unavailable",
-                "The quick-detection report is missing, expired, or stale.",
-            ),
-            (
-                QuickDetectionApiError::Capacity,
-                "quick-detection-capacity",
-                "The bounded quick-detection capacity has been reached.",
-            ),
-        ];
-        for (error, expected_code, expected_message) in cases {
-            let failure = quick_detection_failure(error);
-            assert_eq!(failure.code, expected_code);
-            assert_eq!(failure.public_message, expected_message);
-            assert!(failure.source.is_none());
-        }
-
-        let quick_page = source
-            .split("id: \"quick-detection\"")
-            .nth(1)
-            .and_then(|value| value.split("PageDescriptor {").next())
-            .unwrap();
-        assert!(quick_page.contains("只读报告"));
-        assert!(!quick_page.contains("修复计划"));
     }
 
     #[tokio::test]
@@ -7276,9 +6782,6 @@ mod tests {
             .find("self.docker_read.close_binding(&params.binding_handle);")
             .unwrap();
         let packet_capture_close = branch.find("self.packet_capture_live").unwrap();
-        let quick_detection_close = branch
-            .find("self.quick_detection.close_binding(&params.binding_handle);")
-            .unwrap();
         let disconnect = branch
             .find(".disconnect_binding(&params.binding_handle)")
             .unwrap();
@@ -7292,8 +6795,6 @@ mod tests {
         assert!(emergency_command_close < disconnect);
         assert!(docker_close < disconnect);
         assert!(packet_capture_close < disconnect);
-        assert!(quick_detection_close < disconnect);
-        assert!(quick_detection_close < packet_capture_close);
         assert!(integrity_close < packet_capture_close);
     }
 

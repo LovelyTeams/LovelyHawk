@@ -28,7 +28,7 @@ describe("application shell inventory", () => {
     const components = readdirSync(rendererDir())
       .filter((name) => name.endsWith("Page.tsx"))
       .map((name) => name.slice(0, -".tsx".length));
-    expect(components.length).toBeGreaterThan(15);
+    expect(components.length).toBeGreaterThan(14);
 
     const terminalWindow = source("TerminalWindow.tsx");
     for (const component of components) {
