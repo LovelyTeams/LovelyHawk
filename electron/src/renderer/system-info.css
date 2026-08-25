@@ -12,10 +12,14 @@
 .system-info-detail-state.error { color: var(--danger-text); background: var(--danger-soft); border-color: var(--danger-border); }
 .system-info-loading,
 .system-info-table-state { display: grid; min-height: 180px; place-items: center; color: var(--faint); background: var(--surface); border: 1px solid var(--border); border-radius: 14px; font-size: 12px; }
-.system-info-summary { display: grid; min-height: 0; align-content: start; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
-.system-info-summary article { display: flex; min-width: 0; flex-direction: column; gap: 5px; padding: 11px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-sm); }
+/* One field per line. The cards wrapped four to a row and cut the long values
+   short, so the kernel, the CPU and the root device all ended in an ellipsis;
+   a full-width row has the space to show them whole. */
+.system-info-summary { display: grid; min-height: 0; align-content: start; grid-template-columns: minmax(0, 1fr); overflow: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
+.system-info-summary article { display: grid; min-width: 0; align-items: baseline; grid-template-columns: 128px minmax(0, 1fr); gap: 14px; padding: 7px 12px; border-bottom: 1px solid var(--border); }
+.system-info-summary article:last-child { border-bottom: 0; }
 .system-info-summary span { color: var(--faint); font-size: 12px; }
-.system-info-summary strong { overflow: hidden; color: var(--text); font-family: "Cascadia Mono", monospace; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.system-info-summary strong { min-width: 0; color: var(--text); font-family: "Cascadia Mono", monospace; font-size: 13px; overflow-wrap: anywhere; }
 .system-info-workbench { display: grid; min-height: 560px; grid-template-columns: 190px minmax(0, 1fr); overflow: hidden; background: var(--surface); border: 1px solid var(--border); border-radius: 15px; box-shadow: var(--shadow-sm); }
 .system-info-tabs { overflow: auto; padding: 12px 9px; background: var(--surface-alt); border-right: 1px solid var(--border); scrollbar-width: thin; }
 .system-info-tabs section + section { margin-top: 14px; }
@@ -57,5 +61,5 @@
 
 @media (max-width: 1180px) {
   .system-info-workbench { grid-template-columns: 165px minmax(0, 1fr); }
-  .system-info-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .system-info-summary article { grid-template-columns: 104px minmax(0, 1fr); }
 }

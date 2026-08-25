@@ -92,6 +92,23 @@ describe("AppTitleBar", () => {
     expect(cssSource).toMatch(/\.window-titlebar-actions \{[^}]*-webkit-app-region: no-drag/u);
   });
 
+  /**
+   * Both windows shipped without an icon, so Windows drew the stock Electron
+   * one on the taskbar and in the Alt-Tab list next to a title that said
+   * LovelyRes.
+   */
+  it("gives both windows the shipped application icon", () => {
+    expect(mainSource).toContain('const file = process.platform === "win32" ? "app.ico" : "logo.png";');
+    // The icon ships beside the renderer, so the packaged app resolves it the
+    // same way it resolves everything else it loads.
+    expect(mainSource).toContain('path.join(app.getAppPath(), "dist-renderer", file)');
+    // A missing file leaves the option out rather than failing the launch.
+    expect(mainSource).toContain("return fs.existsSync(icon) ? { icon } : {};");
+    expect(mainSource.match(/\.\.\.applicationIcon\(\),/gu)).toHaveLength(2);
+    // Windows groups taskbar buttons by application id, not by executable.
+    expect(mainSource).toContain('app.setAppUserModelId("com.lovelyres.app")');
+  });
+
   it("shows a moon for dark themes and a sun for light ones", () => {
     const render = (themeKind: "light" | "dark") => renderToStaticMarkup(
       <AppTitleBar

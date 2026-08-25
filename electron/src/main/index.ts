@@ -389,6 +389,7 @@ function createTerminalWindow(bindingHandle: string): TerminalWindowLaunchResult
     show: false,
     backgroundColor: theme.terminalBackground,
     title: "LovelyRes SSH Terminal",
+    ...applicationIcon(),
     // The window draws its own title bar; only the system buttons stay native.
     titleBarStyle: "hidden",
     titleBarOverlay: {
@@ -2276,6 +2277,18 @@ function registerIpc(): void {
   });
 }
 
+/**
+ * The application icon, shipped beside the renderer so the packaged app finds
+ * it next to everything else it loads. Windows wants the multi-size .ico for
+ * the taskbar; the others take the PNG. A missing file leaves the icon unset
+ * rather than failing the launch.
+ */
+function applicationIcon(): { readonly icon: string } | Record<string, never> {
+  const file = process.platform === "win32" ? "app.ico" : "logo.png";
+  const icon = path.join(app.getAppPath(), "dist-renderer", file);
+  return fs.existsSync(icon) ? { icon } : {};
+}
+
 async function registerRendererProtocol(): Promise<void> {
   const rendererRoot = path.join(app.getAppPath(), "dist-renderer");
   await protocol.handle(RENDERER_SCHEME, (request) => {
@@ -2298,6 +2311,7 @@ function createWindow(): void {
     show: false,
     backgroundColor: theme.windowBackground,
     title: "LovelyRes",
+    ...applicationIcon(),
     titleBarStyle: "hidden",
     titleBarOverlay: {
       color: theme.chromeColor,
@@ -2380,6 +2394,7 @@ function writeRequestedSmokeMarker(): void {
 
 if (singleInstance) {
   app.whenReady().then(async () => {
+    if (process.platform === "win32") app.setAppUserModelId("com.lovelyres.app");
     session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
       callback(false);
     });
