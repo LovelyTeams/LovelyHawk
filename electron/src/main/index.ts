@@ -77,6 +77,7 @@ import {
   isLocalBrowserOpaqueHandle,
   isLocalDirectorySnapshot,
   isSftpBrowserOpaqueHandle,
+  isSftpOperationInput,
   isPacketCaptureCursor,
   isPacketCaptureOpaqueHandle,
   isPacketCaptureStartInput,
@@ -2136,6 +2137,59 @@ function registerIpc(): void {
       selection.filePath,
     );
     return { saved: true, fileName: path.basename(selection.filePath), bytes: transfer.bytes };
+  });
+  ipcMain.handle("lovelyres:terminal:sftp:operation:plan", async (event, ...values: unknown[]) => {
+    const context = terminalContextFor(event);
+    const value = values[0];
+    if (
+      values.length !== 1 ||
+      !isRecord(value) ||
+      !hasOnlyKeys(value, ["browserHandle", "input"]) ||
+      !isSftpBrowserOpaqueHandle(value.browserHandle) ||
+      !isSftpOperationInput(value.input)
+    ) {
+      throw new Error("Invalid SFTP operation request.");
+    }
+    return backend.planSftpOperation(context.bindingHandle, value.browserHandle, value.input);
+  });
+  ipcMain.handle("lovelyres:terminal:sftp:operation:confirm", async (event, ...values: unknown[]) => {
+    const context = terminalContextFor(event);
+    if (values.length !== 1 || !isSftpBrowserOpaqueHandle(values[0])) {
+      throw new Error("Invalid SFTP confirmation request.");
+    }
+    return backend.confirmSftpOperation(context.bindingHandle, values[0]);
+  });
+  ipcMain.handle("lovelyres:terminal:sftp:operation:execute", async (event, ...values: unknown[]) => {
+    const context = terminalContextFor(event);
+    if (values.length !== 1 || !isSftpBrowserOpaqueHandle(values[0])) {
+      throw new Error("Invalid SFTP execution request.");
+    }
+    return backend.executeSftpOperation(context.bindingHandle, values[0]);
+  });
+  ipcMain.handle("lovelyres:terminal:sftp:operation:cancel", async (event, ...values: unknown[]) => {
+    const context = terminalContextFor(event);
+    if (values.length !== 1 || !isSftpBrowserOpaqueHandle(values[0])) {
+      throw new Error("Invalid SFTP cancellation request.");
+    }
+    await backend.cancelSftpOperation(context.bindingHandle, values[0]);
+    return { cancelled: true };
+  });
+  ipcMain.handle("lovelyres:terminal:sftp:upload:stage", async (event, ...values: unknown[]) => {
+    const context = terminalContextFor(event);
+    if (values.length !== 0) throw new Error("Invalid SFTP staging request.");
+    // The operator picks the file; the renderer never names one.
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (window === null) throw new Error("The SFTP upload window is not available.");
+    const selection = await dialog.showOpenDialog(window, {
+      title: "选择要上传的文件",
+      buttonLabel: "选择",
+      properties: ["openFile"],
+    });
+    const [chosen] = selection.filePaths;
+    if (selection.canceled || chosen === undefined) return { staged: false, upload: null };
+    if (!path.isAbsolute(chosen)) throw new Error("The selected upload path is invalid.");
+    const upload = await backend.stageSftpUpload(context.bindingHandle, chosen, path.basename(chosen));
+    return { staged: true, upload };
   });
   ipcMain.handle("lovelyres:terminal:local:open", async (event, ...values: unknown[]) => {
     terminalContextFor(event);

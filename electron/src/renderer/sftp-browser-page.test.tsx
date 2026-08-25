@@ -26,6 +26,11 @@ const api: SftpBrowserApi & LocalBrowserApi = {
   listSftpDirectory: async () => { throw new Error(); },
   readSftpText: async () => { throw new Error(); },
   downloadSftpEntry: async () => { throw new Error(); },
+  planSftpOperation: async () => { throw new Error(); },
+  confirmSftpOperation: async () => { throw new Error(); },
+  executeSftpOperation: async () => { throw new Error(); },
+  cancelSftpOperation: async () => { throw new Error(); },
+  stageSftpUpload: async () => { throw new Error(); },
 };
 
 const hostileName = "<script>steal()<img src=x onerror=steal()>";
@@ -68,16 +73,19 @@ describe("SftpBrowserPage", () => {
     expect(rows).not.toContain("预览文本");
     expect(rows).not.toContain("打开目录");
 
-    const fileHtml = renderToStaticMarkup(<SftpBrowserDetail selected={entries[1]!} previewStatus="idle"
-      preview={null} previewError={null} busy={false} onBrowse={() => undefined} onPreview={() => undefined} />);
-    expect(fileHtml).toContain("预览文本");
-    expect(fileHtml).not.toContain("打开目录</button>");
+    // The preview surface stays out of the way until it has something the
+    // table cannot show.
+    const idle = renderToStaticMarkup(<SftpBrowserDetail selected={entries[1]!} previewStatus="idle"
+      preview={null} previewError={null} />);
+    expect(idle).toBe("");
 
-    const symlinkHtml = renderToStaticMarkup(<SftpBrowserDetail selected={entries[2]!} previewStatus="idle"
-      preview={null} previewError={null} busy={false} onBrowse={() => undefined} onPreview={() => undefined} />);
-    expect(symlinkHtml).toContain("符号链接不会跟随");
-    expect(symlinkHtml).not.toContain("预览文本</button>");
-    expect(symlinkHtml).not.toContain("打开目录</button>");
+    const failed = renderToStaticMarkup(<SftpBrowserDetail selected={entries[1]!} previewStatus="error"
+      preview={null} previewError="固定公开错误" />);
+    expect(failed).toContain("固定公开错误");
+
+    const symlink = renderToStaticMarkup(<SftpBrowserDetail selected={entries[2]!} previewStatus="idle"
+      preview={null} previewError={null} />);
+    expect(symlink).toBe("");
   });
 
   /** The design asks for a table; every column has to come from the contract. */

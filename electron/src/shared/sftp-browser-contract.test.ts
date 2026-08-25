@@ -113,18 +113,27 @@ describe("sftp browser standalone contract", () => {
    * the target has to arrive through the plan/confirm pipeline instead, so
    * those names stay forbidden here until that pipeline exists.
    */
-  it("keeps the public surface at exactly four finite methods", () => {
+  /**
+   * Reading, one transfer, and the plan pipeline. There is deliberately no
+   * method that changes a target directly: every change is planned, confirmed
+   * and executed as three separate steps.
+   */
+  it("keeps the public surface at exactly nine finite methods", () => {
     const source = readFileSync(new URL("./sftp-browser-contract.ts", import.meta.url), "utf8");
     const api = source.split("export interface SftpBrowserApi")[1]!.split("}")[0]!;
     expect([...api.matchAll(/^\s{2}([A-Za-z0-9]+)\(/gmu)].map((match) => match[1])).toEqual([
       "openSftpBrowser", "listSftpDirectory", "readSftpText", "downloadSftpEntry",
+      "planSftpOperation", "confirmSftpOperation", "executeSftpOperation",
+      "cancelSftpOperation", "stageSftpUpload",
     ]);
-    // The download names a capability, never a path: main owns the save dialog.
+    // Transfers and operations name capabilities, never paths: main owns both
+    // dialogs and the sidecar owns the staging area.
     expect(api).toContain("downloadSftpEntry(browserHandle: string, fileHandle: string)");
+    expect(api).toContain("stageSftpUpload(): Promise<unknown>");
     for (const forbidden of [
       "sessionId:", "guard:", "generation:", "remotePath:", "localPath:", "command:",
-      ["upload", "Sftp"].join(""), ["delete", "Sftp"].join(""), ["rename", "Sftp"].join(""),
-      ["chmod", "Sftp"].join(""), ["open", "Terminal"].join(""), ["export", "Sftp"].join(""),
+      ["delete", "Sftp"].join(""), ["rename", "Sftp"].join(""), ["chmod", "Sftp"].join(""),
+      ["write", "Sftp"].join(""), ["open", "Terminal"].join(""), ["export", "Sftp"].join(""),
     ]) expect(api).not.toContain(forbidden);
   });
 });

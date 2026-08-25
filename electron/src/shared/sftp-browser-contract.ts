@@ -49,12 +49,66 @@ export interface SftpTransferResult {
   bytes: string | null;
 }
 
+export const sftpOperationKinds = [
+  "create-directory", "rename", "chmod", "remove", "archive", "upload",
+] as const;
+export const sftpArchiveFormats = ["tar", "tar-gzip", "tar-zstd"] as const;
+
+export type SftpOperationKind = typeof sftpOperationKinds[number];
+export type SftpArchiveFormat = typeof sftpArchiveFormats[number];
+
+/** What the core will do, written out before anything is touched. */
+export interface SftpOperationPlan {
+  planHandle: string;
+  browserHandle: string;
+  kind: SftpOperationKind;
+  summary: string;
+  dangerous: boolean;
+  /** What could be put back if verification fails, when a backup was taken. */
+  restoreDescription: string | null;
+  state: "planned" | "confirmed" | "spent";
+  expiresInSeconds: number;
+}
+
+/** What actually happened, after the core verified its own work. */
+export interface SftpOperationReceipt {
+  planHandle: string;
+  kind: SftpOperationKind;
+  passed: boolean;
+  detail: string;
+  /** True when verification failed and the backup was put back. */
+  restored: boolean;
+}
+
+export interface SftpStagedUpload {
+  stagedHandle: string;
+  name: string;
+  bytes: string;
+}
+
+/** The capabilities an operation names, never a path, a mode owner or a target. */
+export interface SftpOperationInput {
+  kind: SftpOperationKind;
+  entryHandles: string[];
+  name?: string;
+  mode?: number;
+  format?: SftpArchiveFormat;
+  stagedHandle?: string;
+}
+
 export interface SftpBrowserApi {
   openSftpBrowser(): Promise<unknown>;
   listSftpDirectory(browserHandle: string, directoryHandle: string): Promise<unknown>;
   readSftpText(browserHandle: string, fileHandle: string): Promise<unknown>;
   /** Asks main for a save location, then copies the file there. */
   downloadSftpEntry(browserHandle: string, fileHandle: string): Promise<unknown>;
+  /** Nothing changes until confirm and execute follow this plan. */
+  planSftpOperation(browserHandle: string, input: SftpOperationInput): Promise<unknown>;
+  confirmSftpOperation(planHandle: string): Promise<unknown>;
+  executeSftpOperation(planHandle: string): Promise<unknown>;
+  cancelSftpOperation(planHandle: string): Promise<unknown>;
+  /** Asks main for a file, then stages it where an upload plan can name it. */
+  stageSftpUpload(): Promise<unknown>;
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -62,6 +116,8 @@ const encoder = new TextEncoder();
 const kindSet = new Set<string>(sftpBrowserEntryKinds);
 const actionSet = new Set<string>(sftpBrowserEntryActions);
 const maximumU64 = "18446744073709551615";
+// Written as an escape so the source file stays plain text.
+const CONTROL_CHARACTERS = new RegExp("[\u0000-\u001f\u007f]", "u");
 
 function record(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -164,6 +220,76 @@ export function isSftpTransferResult(value: unknown): value is SftpTransferResul
     typeof value.saved !== "boolean") return false;
   if (!value.saved) return value.fileName === null && value.bytes === null;
   return safeName(value.fileName, false, 256) && u64String(value.bytes);
+}
+
+const operationKindSet = new Set<string>(sftpOperationKinds);
+
+/** Plan text is drawn in a dialog, so it stays one bounded line. */
+function planText(value: unknown, maximumBytes: number): value is string {
+  return text(value, maximumBytes, false) && !CONTROL_CHARACTERS.test(value);
+}
+
+const archiveFormatSet = new Set<string>(sftpArchiveFormats);
+
+/**
+ * The renderer's request, checked before it reaches the sidecar. Each kind
+ * names exactly the capabilities it needs, and nothing carries a path.
+ */
+export function isSftpOperationInput(value: unknown): value is SftpOperationInput {
+  if (!record(value) || typeof value.kind !== "string" || !operationKindSet.has(value.kind) ||
+    !Array.isArray(value.entryHandles) || value.entryHandles.length === 0 ||
+    value.entryHandles.length > 64 ||
+    !value.entryHandles.every(isSftpBrowserOpaqueHandle)) return false;
+  const named = value.name === null || value.name === undefined
+    ? null
+    : safeName(value.name, false, 255) ? value.name : false;
+  if (named === false) return false;
+  const single = value.entryHandles.length === 1;
+  switch (value.kind) {
+    case "create-directory":
+    case "rename":
+      return single && named !== null;
+    case "chmod":
+      return single && named === null && unsigned(value.mode, 0o7777);
+    case "remove":
+      return single && named === null;
+    case "archive":
+      return named !== null && typeof value.format === "string" &&
+        archiveFormatSet.has(value.format);
+    case "upload":
+      return single && named !== null && isSftpBrowserOpaqueHandle(value.stagedHandle);
+    default:
+      return false;
+  }
+}
+
+export function isSftpOperationPlan(value: unknown): value is SftpOperationPlan {
+  return record(value) && exact(value, [
+    "planHandle", "browserHandle", "kind", "summary", "dangerous", "restoreDescription",
+    "state", "expiresInSeconds",
+  ]) && isSftpBrowserOpaqueHandle(value.planHandle) &&
+    isSftpBrowserOpaqueHandle(value.browserHandle) &&
+    typeof value.kind === "string" && operationKindSet.has(value.kind) &&
+    planText(value.summary, 1_024) && typeof value.dangerous === "boolean" &&
+    (value.restoreDescription === null || planText(value.restoreDescription, 1_024)) &&
+    (value.state === "planned" || value.state === "confirmed" || value.state === "spent") &&
+    unsigned(value.expiresInSeconds, 300) && value.expiresInSeconds > 0;
+}
+
+export function isSftpOperationReceipt(value: unknown): value is SftpOperationReceipt {
+  return record(value) && exact(value, ["planHandle", "kind", "passed", "detail", "restored"]) &&
+    isSftpBrowserOpaqueHandle(value.planHandle) &&
+    typeof value.kind === "string" && operationKindSet.has(value.kind) &&
+    typeof value.passed === "boolean" && planText(value.detail, 1_024) &&
+    typeof value.restored === "boolean" &&
+    // Nothing is put back when the work passed.
+    !(value.passed && value.restored);
+}
+
+export function isSftpStagedUpload(value: unknown): value is SftpStagedUpload {
+  return record(value) && exact(value, ["stagedHandle", "name", "bytes"]) &&
+    isSftpBrowserOpaqueHandle(value.stagedHandle) &&
+    safeName(value.name, false, 256) && u64String(value.bytes);
 }
 
 export function isSftpTextPreview(value: unknown): value is SftpTextPreview {

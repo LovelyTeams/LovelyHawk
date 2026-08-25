@@ -19,6 +19,7 @@ const SCROLL_LISTS: Record<string, string> = {
   ".emergency-commands-list": ".emergency-command-group",
   ".notes-list": ".note-row",
   ".connection-list": ".connection-list-row",
+  ".sftp-operation-dialog": ".sftp-operation-dialog > *",
 };
 
 function rule(css: string, selector: string): string {

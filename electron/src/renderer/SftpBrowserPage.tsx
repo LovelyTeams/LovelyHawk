@@ -1,9 +1,15 @@
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useReducer, useRef, useState, type MouseEvent } from "react";
 
 import {
   isSftpDirectorySnapshot,
+  isSftpOperationPlan,
+  isSftpOperationReceipt,
+  isSftpStagedUpload,
   isSftpTextPreview,
   isSftpTransferResult,
+  type SftpOperationInput,
+  type SftpOperationPlan,
+  type SftpOperationReceipt,
   sftpBrowserEntryKinds,
   type SftpBrowserApi,
   type SftpBrowserEntry,
@@ -12,6 +18,8 @@ import {
 } from "../shared/sftp-browser-contract";
 import type { LocalBrowserApi } from "../shared/local-browser-contract";
 import { LocalFilePane } from "./LocalFilePane";
+import { SftpContextMenu, type SftpMenuAction } from "./SftpContextMenu";
+import { SftpOperationDialog, type SftpOperationDraft } from "./SftpOperationDialog";
 import {
   ArchiveIcon,
   DownloadIcon,
@@ -72,6 +80,15 @@ export function SftpBrowserPage({
   const [pendingPreview, setPendingPreview] = useState<PendingPreview | null>(null);
   const [transferNotice, setTransferNotice] = useState<string | null>(null);
   const transferInFlight = useRef(false);
+  const [menu, setMenu] = useState<
+    { position: { x: number; y: number }; entry: SftpBrowserEntry | null } | null
+  >(null);
+  const [draft, setDraft] = useState<SftpOperationDraft | null>(null);
+  const [plan, setPlan] = useState<SftpOperationPlan | null>(null);
+  const [receipt, setReceipt] = useState<SftpOperationReceipt | null>(null);
+  const [operationError, setOperationError] = useState<string | null>(null);
+  const [operationBusy, setOperationBusy] = useState(false);
+  const operationInFlight = useRef(false);
   const requestRef = useRef(0);
   const scope = connection === null ? null : sftpBrowserScope(connection);
   const enabled = active && connection !== null;
@@ -242,6 +259,105 @@ export function SftpBrowserPage({
     }
   }
 
+  function openMenu(event: MouseEvent, entry: SftpBrowserEntry | null): void {
+    event.preventDefault();
+    if (entry !== null) selectEntry(entry.entryHandle);
+    setMenu({ position: { x: event.clientX, y: event.clientY }, entry });
+  }
+
+  function startOperation(action: SftpMenuAction, entry: SftpBrowserEntry | null): void {
+    setMenu(null);
+    setPlan(null);
+    setReceipt(null);
+    setOperationError(null);
+    if (action === "open" && entry !== null) return requestDirectory(entry.entryHandle);
+    if (action === "preview") return requestPreview();
+    if (action === "download") return void downloadSelected();
+    if (action === "open") return;
+    const subject = entry === null ? (directory?.directoryLabel ?? "当前目录") : entry.name;
+    const rename = action === "rename" ? entry?.name : undefined;
+    setDraft(rename === undefined
+      ? { kind: action, subject }
+      : { kind: action, subject, name: rename });
+  }
+
+  async function buildPlan(next: SftpOperationDraft): Promise<void> {
+    if (operationInFlight.current) return;
+    const browserHandle = visibleState.directory?.browserHandle ?? null;
+    const directoryHandle = visibleState.directory?.directoryHandle ?? null;
+    const entryHandle = visibleState.selectedEntryHandle;
+    if (browserHandle === null || directoryHandle === null) return;
+    const handles = next.kind === "create-directory" || next.kind === "upload"
+      ? [directoryHandle]
+      : entryHandle === null ? [] : [entryHandle];
+    if (handles.length === 0) {
+      setOperationError("请先选择一个条目。");
+      return;
+    }
+    operationInFlight.current = true;
+    setOperationBusy(true);
+    setOperationError(null);
+    try {
+      let stagedHandle: string | null = null;
+      if (next.kind === "upload") {
+        const staged = await api.stageSftpUpload();
+        const upload = stagedUpload(staged);
+        if (upload === null) {
+          setDraft(null);
+          return;
+        }
+        stagedHandle = upload.stagedHandle;
+        if (next.name === undefined || next.name.length === 0) {
+          next = { ...next, name: upload.name };
+        }
+      }
+      const input: SftpOperationInput = { kind: next.kind, entryHandles: handles };
+      if (next.name !== undefined && next.name.length > 0) input.name = next.name;
+      if (next.mode !== undefined && next.mode.length > 0) {
+        input.mode = Number.parseInt(next.mode, 8);
+      }
+      if (next.format !== undefined) input.format = next.format;
+      if (stagedHandle !== null) input.stagedHandle = stagedHandle;
+      const value = await api.planSftpOperation(browserHandle, input);
+      if (!isSftpOperationPlan(value)) throw new Error();
+      setDraft(next);
+      setPlan(value);
+    } catch {
+      setOperationError("无法生成计划；条目可能已变化，或参数不被接受。");
+    } finally {
+      operationInFlight.current = false;
+      setOperationBusy(false);
+    }
+  }
+
+  async function runPlan(): Promise<void> {
+    if (operationInFlight.current || plan === null) return;
+    operationInFlight.current = true;
+    setOperationBusy(true);
+    setOperationError(null);
+    try {
+      const confirmed = await api.confirmSftpOperation(plan.planHandle);
+      if (!isSftpOperationPlan(confirmed)) throw new Error();
+      const value = await api.executeSftpOperation(plan.planHandle);
+      if (!isSftpOperationReceipt(value)) throw new Error();
+      setReceipt(value);
+      if (value.passed && directory !== null) requestDirectory(directory.directoryHandle);
+    } catch {
+      setOperationError("执行失败；目标可能已变化，或计划已过期。");
+    } finally {
+      operationInFlight.current = false;
+      setOperationBusy(false);
+    }
+  }
+
+  function closeOperation(): void {
+    if (plan !== null && receipt === null) void api.cancelSftpOperation(plan.planHandle);
+    setDraft(null);
+    setPlan(null);
+    setReceipt(null);
+    setOperationError(null);
+  }
+
   function updateFilter(kind: SftpBrowserKindFilter) {
     setPendingPreview(null);
     dispatch({ type: "kind-selected", kind });
@@ -258,19 +374,32 @@ export function SftpBrowserPage({
           onClick={() => directory !== null && requestDirectory(directory.directoryHandle)}>
           <RefreshIcon />{visibleState.directoryStatus === "loading" ? "读取中" : "刷新"}
         </button>
-        <button type="button" className="sftp-browser-action is-upload" disabled title={PENDING_WRITE}>
+        <button type="button" className="sftp-browser-action is-upload"
+          disabled={busy || directory === null}
+          onClick={() => {
+            setPlan(null);
+            setReceipt(null);
+            setOperationError(null);
+            setDraft({ kind: "upload", subject: directory?.directoryLabel ?? "当前目录" });
+          }}>
           <UploadIcon />上传
         </button>
-        <button type="button" className="sftp-browser-action is-download" disabled title={PENDING_WRITE}>
+        <button type="button" className="sftp-browser-action is-download"
+          disabled={busy || selected?.kind !== "file"}
+          onClick={() => void downloadSelected()}>
           <DownloadIcon />下载
         </button>
-        <button type="button" className="sftp-browser-action is-danger" disabled title={PENDING_WRITE}>
+        <button type="button" className="sftp-browser-action is-danger"
+          disabled={busy || selected === null}
+          onClick={() => startOperation("remove", selected)}>
           <TrashIcon />删除
         </button>
-        <button type="button" className="sftp-browser-action" disabled title={PENDING_WRITE}>
+        <button type="button" className="sftp-browser-action" disabled={busy || directory === null}
+          onClick={() => startOperation("create-directory", null)}>
           <NewFolderIcon />新建文件夹
         </button>
-        <button type="button" className="sftp-browser-action" disabled title={PENDING_WRITE}>
+        <button type="button" className="sftp-browser-action" disabled={busy || selected === null}
+          onClick={() => startOperation("archive", selected)}>
           <ArchiveIcon />打包
         </button>
       </div>
@@ -326,7 +455,8 @@ export function SftpBrowserPage({
               <div className="sftp-browser-pane-body">
                 <SftpBrowserTable entries={entries} selectedHandle={visibleState.selectedEntryHandle}
                   search={visibleState.search} busy={busy} onSelect={selectEntry}
-                  onBrowse={(entryHandle) => requestDirectory(entryHandle)} />
+                  onBrowse={(entryHandle) => requestDirectory(entryHandle)}
+                  onContextMenu={openMenu} />
               </div>
               <footer className="sftp-browser-pane-foot">
                 <span>
@@ -343,27 +473,46 @@ export function SftpBrowserPage({
           </p>}
 
           <SftpBrowserDetail
-            onDownload={() => void downloadSelected()}
             transferNotice={transferNotice}
             selected={selected}
             previewStatus={visibleState.previewStatus}
             preview={visibleState.preview}
             previewError={visibleState.previewError}
-            busy={busy}
-            onBrowse={(entryHandle) => requestDirectory(entryHandle)}
-            onPreview={requestPreview}
           />
 
-          <section className="sftp-browser-queue" aria-label="传输队列">
-            <header>
-              <strong>传输队列</strong>
-              <span>写操作接入后，上传与下载的进度会显示在这里。</span>
-            </header>
-          </section>
+          {menu === null ? null : (
+            <SftpContextMenu
+              position={menu.position}
+              entry={menu.entry}
+              busy={busy}
+              onAction={(action) => startOperation(action, menu.entry)}
+              onDismiss={() => setMenu(null)}
+            />
+          )}
+          {draft === null ? null : (
+            <SftpOperationDialog
+              draft={draft}
+              plan={plan}
+              receipt={receipt}
+              busy={operationBusy}
+              error={operationError}
+              onPlan={(next) => void buildPlan(next)}
+              onConfirm={() => void runPlan()}
+              onClose={closeOperation}
+            />
+          )}
         </>
       )}
     </main>
   );
+}
+
+/** Main answers either a staged file or a dismissed dialog. */
+function stagedUpload(value: unknown): { stagedHandle: string; name: string } | null {
+  if (typeof value !== "object" || value === null) return null;
+  const reply = value as { staged?: unknown; upload?: unknown };
+  if (reply.staged !== true || !isSftpStagedUpload(reply.upload)) return null;
+  return { stagedHandle: reply.upload.stagedHandle, name: reply.upload.name };
 }
 
 const PENDING_WRITE = "写操作尚未接入：核心已有计划-确认-执行模型，Electron 边界还没开放。";
@@ -376,6 +525,7 @@ export function SftpBrowserTable({
   busy,
   onSelect,
   onBrowse,
+  onContextMenu,
 }: {
   entries: SftpBrowserEntry[];
   selectedHandle: string | null;
@@ -383,9 +533,11 @@ export function SftpBrowserTable({
   busy: boolean;
   onSelect: (entryHandle: string) => void;
   onBrowse: (entryHandle: string) => void;
+  onContextMenu?: (event: MouseEvent, entry: SftpBrowserEntry | null) => void;
 }) {
   return (
-    <div className="sftp-browser-rows" role="list">
+    <div className="sftp-browser-rows" role="list"
+      onContextMenu={(event) => onContextMenu?.(event, null)}>
       <div className="sftp-browser-table-head" aria-hidden="true">
         <span>名称</span><span>大小</span><span>修改时间</span>
       </div>
@@ -407,6 +559,10 @@ export function SftpBrowserTable({
           aria-pressed={entry.entryHandle === selectedHandle}
           onClick={() => onSelect(entry.entryHandle)}
           onDoubleClick={() => entry.action === "browse" && onBrowse(entry.entryHandle)}
+          onContextMenu={(event) => {
+            event.stopPropagation();
+            onContextMenu?.(event, entry);
+          }}
         >
           <span className="sftp-browser-row-name">
             <span className={`sftp-browser-row-kind is-${entry.kind}`}>
@@ -425,74 +581,41 @@ export function SftpBrowserTable({
   );
 }
 
-/** What the operator can do with the selected entry, and its preview. */
+/**
+ * The preview surface. The row already shows name, size and time, and the
+ * context menu owns the actions, so this only appears when it has something
+ * the table cannot show: file text, a transfer result, or a read failure.
+ */
 export function SftpBrowserDetail({
   selected,
   previewStatus,
   preview,
   previewError,
-  busy,
-  onBrowse,
-  onPreview,
-  onDownload,
   transferNotice = null,
 }: {
   selected: SftpBrowserEntry | null;
   previewStatus: SftpBrowserLoadStatus;
   preview: SftpTextPreview | null;
   previewError: string | null;
-  busy: boolean;
-  onBrowse: (entryHandle: string) => void;
-  onPreview: () => void;
-  onDownload?: () => void;
   transferNotice?: string | null;
 }) {
-  if (selected === null) {
-    return (
-      <section className="sftp-browser-detail" aria-label="条目详情">
-        <SftpBrowserEmpty title="未选择条目" detail="选择一个条目查看详情。" compact />
-      </section>
-    );
-  }
+  const previewing = selected?.action === "preview" &&
+    (previewStatus === "loading" || previewStatus === "error" || preview !== null);
+  if (transferNotice === null && !previewing) return null;
   return (
-    <section className="sftp-browser-detail" aria-label="条目详情">
-      <header className="sftp-browser-detail-header">
-        <div>
-          <span>{sftpBrowserKindLabel(selected.kind)} · {sftpBrowserActionLabel(selected)}</span>
-          <h2>{selected.name}</h2>
-          <p>{displaySftpBytes(selected.sizeBytes)} · {displaySftpModifiedAt(selected.modifiedAt)}</p>
-        </div>
-        {selected.action === "browse" ? (
-          <button type="button" disabled={busy} onClick={() => onBrowse(selected.entryHandle)}>
-            打开目录
-          </button>
-        ) : null}
-        {selected.action === "preview" ? (
-          <button type="button" disabled={busy} onClick={onPreview}>
-            {previewStatus === "loading" ? "读取中…" : "预览文本"}
-          </button>
-        ) : null}
-        {selected.kind === "file" && onDownload !== undefined ? (
-          <button type="button" disabled={busy} onClick={onDownload}>下载</button>
-        ) : null}
-      </header>
+    <section className="sftp-browser-detail" aria-label="预览">
       {transferNotice === null ? null : (
         <p className="sftp-browser-transfer" role="status">{transferNotice}</p>
       )}
-      {selected.nameTruncated ? (
-        <p className="sftp-browser-warning">此显示名称已按字节上限截断。</p>
+      {previewing ? (
+        <>
+          <p className="sftp-browser-preview-name">{selected?.name}</p>
+          {previewStatus === "loading" ? <SftpBrowserStatus label="正在读取文本…" compact />
+            : previewStatus === "error"
+              ? <SftpBrowserError message={previewError ?? "文本预览不可用。"} compact />
+              : preview === null ? null : <SftpTextPreviewView preview={preview} />}
+        </>
       ) : null}
-      {selected.action === "none" ? (
-        <SftpBrowserEmpty
-          title={selected.kind === "symlink" ? "符号链接不会跟随" : "此条目不可打开"}
-          detail="该条目不是目录，也不是可预览的文本文件。"
-          compact
-        />
-      ) : selected.action === "browse" ? null
-        : previewStatus === "loading" ? <SftpBrowserStatus label="正在读取文本…" compact />
-          : previewStatus === "error"
-            ? <SftpBrowserError message={previewError ?? "文本预览不可用。"} compact />
-            : preview === null ? null : <SftpTextPreviewView preview={preview} />}
     </section>
   );
 }

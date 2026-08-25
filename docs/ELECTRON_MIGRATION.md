@@ -130,8 +130,8 @@ Apache quick configuration 已记录 typed stack/remove/dependency cascade/reset
 | Window kind | 键/生命周期要求 | Electron 替代 | 状态 |
 | --- | --- | --- | --- |
 | Main | 单实例、main lifecycle、backend shutdown | 已有 secure BrowserWindow shell，仍需完整页面/overlay/发布 parity | Pending |
-| SSH terminal | 每目标会话窗口、tabs、resize/input/search/backpressure/cancel | 中央 keyed BrowserWindow + main-owned binding/token/handle + bundled offline xterm + main exact112/terminal exact7 typed API 已接线；真实 SSH/PTY、tabs/IME/CJK/package 矩阵仍 NOT_RUN | Pending |
-| SFTP | 每目标唯一窗口、transfer cancel、remote path safety | keyed BrowserWindow + typed SFTP API | Pending |
+| SSH terminal | 每目标会话窗口、tabs、resize/input/search/backpressure/cancel | 中央 keyed BrowserWindow + main-owned binding/token/handle + bundled offline xterm + main exact118/terminal exact18 typed API 已接线；真实 SSH/PTY、tabs/IME/CJK/package 矩阵仍 NOT_RUN | Pending |
+| SFTP | 每目标唯一窗口、transfer cancel、remote path safety | 并入 SSH 窗口的文件面板：terminal exact18 内的九个方法、main 拥有保存/打开对话框、写操作一律 plan/confirm/execute/verify/restore；真实 OpenSSH/Dropbear 传输与回滚矩阵仍 NOT_RUN | Pending |
 | Container terminal | target identity + generation + container identity | 精确 key 的 BrowserWindow + typed container stream API | Pending |
 
 当前 secure main shell 已完成，但“Main 窗口完整迁移”仍 Pending，因为导航、状态栏、全部页面/overlay、packaged platform 行为尚未完成。

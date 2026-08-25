@@ -42,6 +42,11 @@ export interface TerminalApi {
   listSftpDirectory(browserHandle: string, directoryHandle: string): Promise<unknown>;
   readSftpText(browserHandle: string, fileHandle: string): Promise<unknown>;
   downloadSftpEntry(browserHandle: string, fileHandle: string): Promise<unknown>;
+  planSftpOperation(browserHandle: string, input: unknown): Promise<unknown>;
+  confirmSftpOperation(planHandle: string): Promise<unknown>;
+  executeSftpOperation(planHandle: string): Promise<unknown>;
+  cancelSftpOperation(planHandle: string): Promise<unknown>;
+  stageSftpUpload(): Promise<unknown>;
   /** The operator's own machine, addressed by opaque directory handles. */
   openLocalBrowser(): Promise<unknown>;
   listLocalDirectory(directoryHandle: string): Promise<unknown>;

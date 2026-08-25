@@ -526,36 +526,31 @@ packaged 验收不足而继续为 `Pending` 的切片。每一条都必须按其
   目标切换矩阵。
   phase 1 不提供 arbitrary command、terminal、file、export、AI、mutation plan 或邻接动作；真实 SSH/Linux
   验收继续为 `NOT_RUN`，危险 mutation/审计/验证/恢复 parity 尚未迁移，因此页面继续计为 `Pending`。
-- SFTP standalone read-only Browser phase 1：
-  `crates/lovelyres-electron-backend/src/sftp_browser_api.rs`、
-  `electron/src/shared/sftp-browser-contract.ts`、`sftp-browser-state.ts`、
-  `sftp-browser-helpers.ts` 与 `SftpBrowserPage.tsx` 已建立独立的 target-bound capability 浏览边界。
-  Sidecar 从真实 opaque SSH binding 捕获完整 `BoundSshSession`/`TargetGuard`，并且只调用 core
-  `SftpService::bind_session`、`list`、`read_text`；固定从 `RemotePath("/")` 打开，renderer 没有 path
-  参数或 fallback。未来 public API 固定且仅为 `openSftpBrowser(bindingHandle)`、
-  `listSftpDirectory(bindingHandle,browserHandle,directoryHandle)` 与
-  `readSftpText(bindingHandle,browserHandle,fileHandle)`。Remote path、raw session/guard/generation/identity、
-  host/fingerprint、shell、local path 均不进入 DTO；父级导航也只由 sidecar registry 返回的 opaque
-  directory capability 表达。每个条目都有 target/browser-scoped handle；directory/file 分别只能用于
-  browse/preview，symlink/other 的 action 固定为 `none`，不会作为目录或文件读取。
-  Core 既有边界为单目录最多 50,000 项/64 MiB，`read_text` 只接受最多 2 MiB 的 UTF-8 常规非 symlink
-  文件；本切片另把公开目录压到 128 项/128 KiB、显示名称 256 bytes，把文本压到 2,000 行/256 KiB、
-  单行 4 KiB、serialized 384 KiB。Credential-like 名称和预览行使用固定 marker 整体遮蔽，hostile 名称/
-  文本只进入 React text node/`pre`。浏览器 TTL 固定 5 分钟，最多 4 个、每个 1 MiB、registry 总量 4 MiB；
-  打开全局并发 2，list/read 全局并发 4 且同 browser 1。刷新会保留同目录未变化条目的 handle 以稳定选择，
-  但重新打开会轮换 browser/token；断连、完整 target epoch 变化、TTL、淘汰、刷新替换和晚到结果均失败关闭。
-  Core `SftpService::list` 已最小加固为在 `read_dir` 前用 non-follow metadata 严格要求 Directory，并有测试
-  证明 regular file、symlink 与 stale TargetGuard 不会回退到 read_dir；这不能消除远端在检查和读取之间
-  替换对象的 TOCTOU。
-  owner 为 Electron SFTP browser migration；验收测试为 `sftp_browser_api_standalone.rs`、core
-  `sftp::tests::directory_list_refuses_files_symlinks_and_stale_targets_before_read_dir`、
-  `sftp-browser-contract.test.ts`、`sftp-browser-state.test.ts` 与 `sftp-browser-page.test.tsx`。仍缺
-  BackendState/RPC、main/preload 三个固定方法、aggregate API contract、keyed SFTP BrowserWindow 生命周期、
-  App/window registry、source gate feature 清单、Electron CDP/capturePage，以及真实 OpenSSH/Dropbear SFTP
-  的固定根目录不可读/不可列、空目录、50k/64 MiB core 上限、非 UTF-8/2 MiB 文件、权限拒绝、慢请求、
-  断连、目标切换、symlink 与 swap race 矩阵；这些真实 SFTP 验收继续为 `NOT_RUN`。Phase 1 不提供
-  download/upload/edit/create/rename/chmod/delete/archive/extract、terminal、native dialog、export 或 AI 的
-  API/按钮；中央接线和实机证据完成前整个 SFTP 页面继续计为 `UNWIRED`/`Pending`。
+- SFTP 文件管理（已并入 SSH 窗口，写操作走计划链）：
+  `crates/lovelyres-electron-backend/src/sftp_browser_api.rs` 已在 lib.rs 注册，对外是九个固定 RPC：
+  `sftp-browser.open`、`.directory.list`、`.text.read`、`.download`、`.operation.plan`、
+  `.operation.confirm`、`.operation.execute`、`.operation.cancel`、`.upload.stage`。SSH 窗口的 preload
+  面固定为 18 个方法（主窗口仍是 118），由 gate 与 CDP probe 双向钉住。renderer 全程只拿 opaque
+  handle：binding 由 main 依据发起窗口反查，终端 renderer 从不持有 binding handle，远端路径、raw
+  session/guard/generation/identity、host/fingerprint、本地路径都不进 DTO。
+  读取仍只调用 core `SftpService::bind_session`、`list`、`read_text`，固定从 `RemotePath("/")` 打开；
+  目录压到 128 项/128 KiB、名称 256 bytes，文本压到 2,000 行/256 KiB、单行 4 KiB、序列化 384 KiB。
+  下载由 main 打开系统保存对话框、再走 core `download_new(&session, &self.paths, …)`，本地目标由
+  `PathGuard::ensure_safe_download_target` 校验；上传先由 main 打开系统打开对话框，sidecar 以
+  `stage_upload` 把字节落到受管目录（单文件上限 64 MiB），renderer 始终不说出任何本地路径。
+  一切改动目标的操作只有一条路径：plan → confirm → execute_and_verify → 失败时 restore。计划单次
+  可用（取出即消费）、TTL 120 秒、同 target 最多 8 个、执行上限 90 秒；支持新建目录、重命名、
+  设置权限、删除、打包（tar / tar-gzip / tar-zstd）与上传。名称是唯一的自由输入，拒绝分隔符、
+  控制字符、`.`/`..` 与超长值。按“可信条件下不做主动隐藏”的约定，名称与预览一律原样呈现，只保留
+  控制字符净化与体积截断。
+  本地一侧由 `electron/src/main/local-browser.ts` 提供，同样只发 handle，`lstat` 描述软链接而不跟随。
+  验收测试为 `sftp_browser_api.rs` 内联测试（含 closed-core-surface、名称校验、格式白名单、计划作用域）、
+  core `sftp::tests::directory_list_refuses_files_symlinks_and_stale_targets_before_read_dir`、
+  `sftp-browser-contract.test.ts`、`sftp-browser-state.test.ts`、`sftp-browser-page.test.tsx` 与
+  `ssh-window.test.tsx`。仍缺真实 OpenSSH/Dropbear 的不可读根目录、空目录、50k/64 MiB core 上限、
+  非 UTF-8/2 MiB 文件、权限拒绝、慢请求、断连、目标切换、symlink 与 swap race 矩阵，以及上传/打包/
+  删除在真机上的验证与回滚证据；这些真实 SFTP 验收继续为 `NOT_RUN`，页面因此仍计为 `Pending`。
+  本切片不提供解压、就地编辑、终端跳转、导出与 AI 的 API/按钮。
 - Notification stack：`notification-state.ts` 与 `NotificationStack.tsx` 已实现去重、3/5 秒超时、64 项
   上限、持久项、手动关闭和 hostile plain-text。仍缺 App-level host、所有生产调用点、overlay stacking
   以及 Electron CDP timer/accessibility 证据。

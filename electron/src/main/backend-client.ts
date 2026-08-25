@@ -39,6 +39,10 @@ import {
   type EmergencyCommandCatalog,
   type EmergencyCommandResult,
   type SftpDirectorySnapshot,
+  type SftpOperationInput,
+  type SftpOperationPlan,
+  type SftpOperationReceipt,
+  type SftpStagedUpload,
   type SftpTextPreview,
   type PacketCaptureInterfaceList,
   type PacketCapturePoll,
@@ -167,6 +171,9 @@ import {
   isEmergencyCommandResult,
   isSftpBrowserOpaqueHandle,
   isSftpDirectorySnapshot,
+  isSftpOperationPlan,
+  isSftpOperationReceipt,
+  isSftpStagedUpload,
   isSftpTextPreview,
   isPacketCaptureCursor,
   isPacketCaptureInterfaceList,
@@ -309,6 +316,7 @@ const EMERGENCY_COMMAND_CATALOG_TIMEOUT_MS = 20_000;
 const EMERGENCY_COMMAND_RUN_TIMEOUT_MS = 45_000;
 const SFTP_BROWSER_TIMEOUT_MS = 30_000;
 const SFTP_TRANSFER_TIMEOUT_MS = 190_000;
+const SFTP_OPERATION_TIMEOUT_MS = 100_000;
 const PACKET_CAPTURE_LIST_TIMEOUT_MS = 20_000;
 const PACKET_CAPTURE_START_TIMEOUT_MS = 40_000;
 const PACKET_CAPTURE_POLL_TIMEOUT_MS = 20_000;
@@ -383,6 +391,11 @@ export const SFTP_BROWSER_RPC_METHODS = Object.freeze({
   listDirectory: "sftp-browser.directory.list",
   readText: "sftp-browser.text.read",
   download: "sftp-browser.download",
+  planOperation: "sftp-browser.operation.plan",
+  confirmOperation: "sftp-browser.operation.confirm",
+  executeOperation: "sftp-browser.operation.execute",
+  cancelOperation: "sftp-browser.operation.cancel",
+  stageUpload: "sftp-browser.upload.stage",
 } as const);
 
 export const PACKET_CAPTURE_LIVE_RPC_METHODS = Object.freeze({
@@ -2307,6 +2320,92 @@ export class BackendClient {
       throw new Error("The backend returned an invalid SFTP transfer result.");
     }
     return { bytes: (value as { bytes: string }).bytes };
+  }
+
+  async planSftpOperation(
+    bindingHandle: string,
+    browserHandle: string,
+    input: SftpOperationInput,
+  ): Promise<SftpOperationPlan> {
+    if (![bindingHandle, browserHandle, ...input.entryHandles].every(isSftpBrowserOpaqueHandle)) {
+      throw new Error("The SFTP operation request is invalid.");
+    }
+    const value = await this.#request(SFTP_BROWSER_RPC_METHODS.planOperation, {
+      bindingHandle,
+      browserHandle,
+      kind: input.kind,
+      entryHandles: input.entryHandles,
+      name: input.name ?? null,
+      mode: input.mode ?? null,
+      format: input.format ?? null,
+      stagedHandle: input.stagedHandle ?? null,
+    }, SFTP_BROWSER_TIMEOUT_MS);
+    if (!isSftpOperationPlan(value) || value.browserHandle !== browserHandle ||
+      value.kind !== input.kind) {
+      throw new Error("The backend returned an invalid SFTP operation plan.");
+    }
+    return value;
+  }
+
+  async confirmSftpOperation(bindingHandle: string, planHandle: string): Promise<SftpOperationPlan> {
+    if (![bindingHandle, planHandle].every(isSftpBrowserOpaqueHandle)) {
+      throw new Error("The SFTP confirmation request is invalid.");
+    }
+    const value = await this.#request(SFTP_BROWSER_RPC_METHODS.confirmOperation, {
+      bindingHandle,
+      planHandle,
+    }, SFTP_BROWSER_TIMEOUT_MS);
+    if (!isSftpOperationPlan(value) || value.planHandle !== planHandle ||
+      value.state !== "confirmed") {
+      throw new Error("The backend returned an invalid SFTP operation plan.");
+    }
+    return value;
+  }
+
+  async executeSftpOperation(
+    bindingHandle: string,
+    planHandle: string,
+  ): Promise<SftpOperationReceipt> {
+    if (![bindingHandle, planHandle].every(isSftpBrowserOpaqueHandle)) {
+      throw new Error("The SFTP execution request is invalid.");
+    }
+    const value = await this.#request(SFTP_BROWSER_RPC_METHODS.executeOperation, {
+      bindingHandle,
+      planHandle,
+    }, SFTP_OPERATION_TIMEOUT_MS);
+    if (!isSftpOperationReceipt(value) || value.planHandle !== planHandle) {
+      throw new Error("The backend returned an invalid SFTP operation receipt.");
+    }
+    return value;
+  }
+
+  async cancelSftpOperation(bindingHandle: string, planHandle: string): Promise<void> {
+    if (![bindingHandle, planHandle].every(isSftpBrowserOpaqueHandle)) {
+      throw new Error("The SFTP cancellation request is invalid.");
+    }
+    await this.#request(SFTP_BROWSER_RPC_METHODS.cancelOperation, {
+      bindingHandle,
+      planHandle,
+    }, SFTP_BROWSER_TIMEOUT_MS);
+  }
+
+  async stageSftpUpload(
+    bindingHandle: string,
+    localPath: string,
+    name: string,
+  ): Promise<SftpStagedUpload> {
+    if (!isSftpBrowserOpaqueHandle(bindingHandle)) {
+      throw new Error("The SFTP staging request is invalid.");
+    }
+    const value = await this.#request(SFTP_BROWSER_RPC_METHODS.stageUpload, {
+      bindingHandle,
+      localPath,
+      name,
+    }, SFTP_TRANSFER_TIMEOUT_MS);
+    if (!isSftpStagedUpload(value)) {
+      throw new Error("The backend returned an invalid staged upload.");
+    }
+    return value;
   }
 
   #request(

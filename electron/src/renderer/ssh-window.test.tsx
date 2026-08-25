@@ -114,14 +114,30 @@ describe("SSH window shell", () => {
     expect(preload).not.toContain("localPath");
   });
 
-  it("keeps write actions visibly unavailable instead of pretending", () => {
+  /** Nothing changes a target without a plan the operator read and approved. */
+  it("routes every write through plan, confirm and execute", () => {
     const page = source("SftpBrowserPage.tsx");
     expect(page).toContain("文件管理 (SFTP)");
     for (const label of ["上传", "下载", "删除", "新建文件夹", "打包"]) expect(page).toContain(label);
-    // They are rendered disabled with the reason, and nothing fakes progress.
-    expect((page.match(/disabled title=\{PENDING_WRITE\}/gu) ?? [])).toHaveLength(5);
-    expect(page).toContain("写操作尚未接入");
+    // The three steps are separate calls, in that order.
+    const plan = page.indexOf("api.planSftpOperation(browserHandle, input)");
+    const confirm = page.indexOf("api.confirmSftpOperation(plan.planHandle)");
+    const execute = page.indexOf("api.executeSftpOperation(plan.planHandle)");
+    expect(plan).toBeGreaterThan(-1);
+    expect(confirm).toBeGreaterThan(plan);
+    expect(execute).toBeGreaterThan(confirm);
+    // Dismissing a plan releases it instead of leaving it to expire.
+    expect(page).toContain("api.cancelSftpOperation(plan.planHandle)");
+    // A second click cannot start a second operation.
+    expect(page).toContain("if (operationInFlight.current || plan === null) return;");
+    // Nothing fakes a transfer rate.
     expect(page).not.toContain("MB/s");
     expect(page).not.toContain("传输速度");
+
+    const dialog = source("SftpOperationDialog.tsx");
+    // The plan is shown before it can be run, with its risk and its rollback.
+    expect(dialog).toContain("plan.summary");
+    expect(dialog).toContain("plan.restoreDescription ?? \"无备份，执行后不可自动还原\"");
+    expect(dialog).toContain("已回滚到操作前的状态。");
   });
 });

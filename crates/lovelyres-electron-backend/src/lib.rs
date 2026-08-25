@@ -77,7 +77,7 @@ use crate::{
     settings_api::{
         SettingsAiApiKeyReplacementInput, SettingsApi, SettingsApiError, SettingsSaveInput,
     },
-    sftp_browser_api::{SftpBrowserApi, SftpBrowserApiError},
+    sftp_browser_api::{SftpBrowserApi, SftpBrowserApiError, SftpOperationRequest},
     snapshot_read_api::{SnapshotDiffInput, SnapshotReadApi, SnapshotReadApiError},
     ssh_api::{SecretResponses, SshApi},
     system_info_api::{SystemInfoApi, SystemInfoApiError},
@@ -982,6 +982,65 @@ impl BackendState {
                     Err(failure) => Err(failure),
                 }
             }
+            RpcMethod::SftpBrowserOperationPlan => {
+                match parse_params::<SftpBrowserOperationParams>(request.params) {
+                    Ok(params) => match params.to_request() {
+                        Ok((browser_handle, operation)) => self
+                            .sftp_browser
+                            .plan_operation(&params.binding_handle, &browser_handle, operation)
+                            .await
+                            .map(to_value)
+                            .map_err(sftp_browser_failure),
+                        Err(failure) => Err(failure),
+                    },
+                    Err(failure) => Err(failure),
+                }
+            }
+            RpcMethod::SftpBrowserOperationConfirm => {
+                match parse_params::<SftpBrowserPlanParams>(request.params) {
+                    Ok(params) => self
+                        .sftp_browser
+                        .confirm_operation(&params.binding_handle, &params.plan_handle)
+                        .map(to_value)
+                        .map_err(sftp_browser_failure),
+                    Err(failure) => Err(failure),
+                }
+            }
+            RpcMethod::SftpBrowserOperationExecute => {
+                match parse_params::<SftpBrowserPlanParams>(request.params) {
+                    Ok(params) => self
+                        .sftp_browser
+                        .execute_operation(&params.binding_handle, &params.plan_handle)
+                        .await
+                        .map(to_value)
+                        .map_err(sftp_browser_failure),
+                    Err(failure) => Err(failure),
+                }
+            }
+            RpcMethod::SftpBrowserOperationCancel => {
+                match parse_params::<SftpBrowserPlanParams>(request.params) {
+                    Ok(params) => self
+                        .sftp_browser
+                        .cancel_operation(&params.binding_handle, &params.plan_handle)
+                        .map(|()| to_value(()))
+                        .map_err(sftp_browser_failure),
+                    Err(failure) => Err(failure),
+                }
+            }
+            RpcMethod::SftpBrowserUploadStage => {
+                match parse_params::<SftpBrowserStageParams>(request.params) {
+                    Ok(params) => self
+                        .sftp_browser
+                        .stage_upload(
+                            &params.binding_handle,
+                            std::path::Path::new(&params.local_path),
+                            &params.name,
+                        )
+                        .map(to_value)
+                        .map_err(sftp_browser_failure),
+                    Err(failure) => Err(failure),
+                }
+            }
             RpcMethod::PacketCaptureInterfacesList => {
                 match parse_params::<PacketCaptureBindingParams>(request.params) {
                     Ok(params) => self
@@ -1840,6 +1899,16 @@ enum RpcMethod {
     SftpBrowserTextRead,
     #[serde(rename = "sftp-browser.download")]
     SftpBrowserDownload,
+    #[serde(rename = "sftp-browser.operation.plan")]
+    SftpBrowserOperationPlan,
+    #[serde(rename = "sftp-browser.operation.confirm")]
+    SftpBrowserOperationConfirm,
+    #[serde(rename = "sftp-browser.operation.execute")]
+    SftpBrowserOperationExecute,
+    #[serde(rename = "sftp-browser.operation.cancel")]
+    SftpBrowserOperationCancel,
+    #[serde(rename = "sftp-browser.upload.stage")]
+    SftpBrowserUploadStage,
     #[serde(rename = "packet-capture.interfaces.list")]
     PacketCaptureInterfacesList,
     #[serde(rename = "packet-capture.start")]
@@ -2277,6 +2346,100 @@ struct SftpBrowserDirectoryParams {
     binding_handle: String,
     browser_handle: String,
     directory_handle: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SftpBrowserPlanParams {
+    binding_handle: String,
+    plan_handle: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SftpBrowserStageParams {
+    binding_handle: String,
+    /// Chosen by the operator in the native open dialog and forwarded by main.
+    local_path: String,
+    name: String,
+}
+
+/// One shape for every planned operation: the kind decides which capabilities
+/// have to be present, and anything else is refused before the core sees it.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SftpBrowserOperationParams {
+    binding_handle: String,
+    browser_handle: String,
+    kind: String,
+    #[serde(default)]
+    entry_handles: Vec<String>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    mode: Option<u32>,
+    #[serde(default)]
+    format: Option<String>,
+    #[serde(default)]
+    staged_handle: Option<String>,
+}
+
+impl SftpBrowserOperationParams {
+    fn to_request(&self) -> Result<(String, SftpOperationRequest), RpcFailure> {
+        let single = || -> Result<String, RpcFailure> {
+            match self.entry_handles.as_slice() {
+                [handle] => Ok(handle.clone()),
+                _ => Err(sftp_browser_request_failure()),
+            }
+        };
+        let name = || -> Result<String, RpcFailure> {
+            self.name.clone().ok_or_else(sftp_browser_request_failure)
+        };
+        let operation = match self.kind.as_str() {
+            "create-directory" => SftpOperationRequest::CreateDirectory {
+                directory_handle: single()?,
+                name: name()?,
+            },
+            "rename" => SftpOperationRequest::Rename {
+                entry_handle: single()?,
+                name: name()?,
+            },
+            "chmod" => SftpOperationRequest::Chmod {
+                entry_handle: single()?,
+                mode: self.mode.ok_or_else(sftp_browser_request_failure)?,
+            },
+            "remove" => SftpOperationRequest::Remove {
+                entry_handle: single()?,
+            },
+            "archive" => SftpOperationRequest::Archive {
+                entry_handles: self.entry_handles.clone(),
+                name: name()?,
+                format: self
+                    .format
+                    .clone()
+                    .ok_or_else(sftp_browser_request_failure)?,
+            },
+            "upload" => SftpOperationRequest::Upload {
+                directory_handle: single()?,
+                staged_handle: self
+                    .staged_handle
+                    .clone()
+                    .ok_or_else(sftp_browser_request_failure)?,
+                name: name()?,
+            },
+            _ => return Err(sftp_browser_request_failure()),
+        };
+        Ok((self.browser_handle.clone(), operation))
+    }
+}
+
+fn sftp_browser_request_failure() -> RpcFailure {
+    RpcFailure {
+        operation: "validate SFTP browser operation request",
+        code: "sftp-browser-invalid",
+        public_message: "The SFTP browser request parameters are invalid.",
+        source: None,
+    }
 }
 
 #[derive(Deserialize)]

@@ -7,15 +7,19 @@
 use std::{
     collections::{HashMap, HashSet},
     fmt,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex, MutexGuard},
     time::{Duration, Instant},
 };
 
 use lovelyres_core::{
     BackendServices, CoreError,
+    operations::{DangerousConfirmation, OperationState},
     path_guard::PathGuard,
-    sftp::{BoundSftpSession, MAX_DIRECTORY_ENTRIES, RemotePath, SftpEntry, SftpFileKind},
+    sftp::{
+        ArchiveFormat, BoundSftpSession, MAX_DIRECTORY_ENTRIES, RemotePath, SftpEntry,
+        SftpFileKind, SftpMutation, SftpPlannedOperation,
+    },
     ssh::BoundSshSession,
     target::TargetGuard,
 };
@@ -47,6 +51,14 @@ const BIND_DEADLINE: Duration = Duration::from_secs(15);
 const LIST_DEADLINE: Duration = Duration::from_secs(20);
 const READ_DEADLINE: Duration = Duration::from_secs(20);
 const TRANSFER_DEADLINE: Duration = Duration::from_secs(180);
+const EXECUTE_DEADLINE: Duration = Duration::from_secs(90);
+const PLAN_TTL: Duration = Duration::from_secs(2 * 60);
+const MAX_PLANS: usize = 8;
+const MAX_STAGED_UPLOADS: usize = 8;
+const MAX_PLAN_TEXT_BYTES: usize = 1024;
+const MAX_ENTRY_NAME_INPUT: usize = 255;
+const MAX_ARCHIVE_SOURCES: usize = 64;
+const MAX_STAGED_UPLOAD_BYTES: u64 = 64 * 1024 * 1024;
 // Names and file text cross the boundary as the target has them. Blanking a
 // file called "secret_key" or a config line containing "password=" removes the
 // very thing the operator opened the browser to look at.
@@ -368,6 +380,16 @@ impl SftpBrowserApi {
             registry
                 .active_operations
                 .retain(|_, operation| operation.binding_handle != binding_handle);
+            registry
+                .plans
+                .retain(|_, entry| entry.scope.binding_handle != binding_handle);
+            registry.staged.retain(|_, staged| {
+                if staged.binding_handle != binding_handle {
+                    return true;
+                }
+                let _ = std::fs::remove_file(&staged.path);
+                false
+            });
         }
     }
 
@@ -828,6 +850,88 @@ struct SftpBrowserRegistry {
     browsers: HashMap<String, BrowserSnapshot>,
     active_open_bindings: HashSet<String>,
     active_operations: HashMap<Uuid, ActiveOperation>,
+    plans: HashMap<String, PlannedEntry>,
+    staged: HashMap<String, StagedUpload>,
+}
+
+impl SftpBrowserRegistry {
+    fn store_plan(&mut self, entry: PlannedEntry) -> Result<(), SftpBrowserApiError> {
+        if self.plans.len() >= MAX_PLANS {
+            return Err(SftpBrowserApiError::Capacity);
+        }
+        self.plans.insert(entry.plan_handle.clone(), entry);
+        Ok(())
+    }
+
+    fn store_staged(
+        &mut self,
+        handle: String,
+        staged: StagedUpload,
+    ) -> Result<(), SftpBrowserApiError> {
+        if self.staged.len() >= MAX_STAGED_UPLOADS {
+            return Err(SftpBrowserApiError::Capacity);
+        }
+        self.staged.insert(handle, staged);
+        Ok(())
+    }
+
+    /// A plan only answers the target and browser it was built against.
+    fn plan_mut(
+        &mut self,
+        scope: &BindingScope,
+        plan_handle: &str,
+        now: Instant,
+    ) -> Result<&mut PlannedEntry, SftpBrowserApiError> {
+        let browsers = &self.browsers;
+        self.plans
+            .get_mut(plan_handle)
+            .filter(|entry| &entry.scope == scope && entry.expires_at > now)
+            .filter(|entry| {
+                browsers
+                    .get(&entry.browser_handle)
+                    .is_some_and(|browser| browser.token == entry.browser_token)
+            })
+            .ok_or(SftpBrowserApiError::BrowserStale)
+    }
+
+    /// Executing consumes the plan, so it can never run a second time.
+    fn take_confirmed_plan(
+        &mut self,
+        scope: &BindingScope,
+        plan_handle: &str,
+        now: Instant,
+    ) -> Result<PlannedEntry, SftpBrowserApiError> {
+        self.plan_mut(scope, plan_handle, now)?;
+        let entry = self
+            .plans
+            .remove(plan_handle)
+            .ok_or(SftpBrowserApiError::BrowserStale)?;
+        if entry.operation.state() != OperationState::Confirmed {
+            return Err(SftpBrowserApiError::BrowserStale);
+        }
+        Ok(entry)
+    }
+
+    fn drop_plan(&mut self, scope: &BindingScope, plan_handle: &str) {
+        if self
+            .plans
+            .get(plan_handle)
+            .is_some_and(|entry| &entry.scope == scope)
+        {
+            self.plans.remove(plan_handle);
+        }
+    }
+
+    fn prune_operations(&mut self, now: Instant) {
+        self.plans.retain(|_, entry| entry.expires_at > now);
+        self.staged.retain(|_, staged| {
+            if staged.expires_at > now {
+                return true;
+            }
+            let _ = std::fs::remove_file(&staged.path);
+            false
+        });
+    }
 }
 
 impl SftpBrowserRegistry {
@@ -1051,6 +1155,7 @@ impl SftpBrowserRegistry {
             .collect::<HashSet<_>>();
         self.browsers
             .retain(|handle, browser| browser.expires_at > now || active.contains(handle.as_str()));
+        self.prune_operations(now);
     }
 
     fn browser_is_active(&self, browser_handle: &str) -> bool {
@@ -1211,6 +1316,452 @@ fn ensure_serialized_bound<T: Serialize>(
         return Err(SftpBrowserApiError::Capacity);
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Write operations
+//
+// Every change to a target goes through the core's plan → confirm → execute →
+// verify pipeline, and nothing here can shortcut it. The renderer names an
+// entry by an opaque capability this registry issued; it never names a path, a
+// mode, or a target. A plan is single use, bound to the browser it came from,
+// and expires with it. When verification fails the operation is restored from
+// the backup the core took, and the receipt says so.
+// ---------------------------------------------------------------------------
+
+/// What the renderer asked for, in capability terms only.
+#[derive(Debug)]
+pub(crate) enum SftpOperationRequest {
+    CreateDirectory {
+        directory_handle: String,
+        name: String,
+    },
+    Rename {
+        entry_handle: String,
+        name: String,
+    },
+    Chmod {
+        entry_handle: String,
+        mode: u32,
+    },
+    Remove {
+        entry_handle: String,
+    },
+    Archive {
+        entry_handles: Vec<String>,
+        name: String,
+        format: String,
+    },
+    Upload {
+        directory_handle: String,
+        staged_handle: String,
+        name: String,
+    },
+}
+
+impl SftpOperationRequest {
+    fn kind(&self) -> &'static str {
+        match self {
+            Self::CreateDirectory { .. } => "create-directory",
+            Self::Rename { .. } => "rename",
+            Self::Chmod { .. } => "chmod",
+            Self::Remove { .. } => "remove",
+            Self::Archive { .. } => "archive",
+            Self::Upload { .. } => "upload",
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SftpOperationPlanDto {
+    pub(crate) plan_handle: String,
+    pub(crate) browser_handle: String,
+    pub(crate) kind: String,
+    pub(crate) summary: String,
+    pub(crate) dangerous: bool,
+    pub(crate) restore_description: Option<String>,
+    pub(crate) state: String,
+    pub(crate) expires_in_seconds: u32,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SftpOperationReceiptDto {
+    pub(crate) plan_handle: String,
+    pub(crate) kind: String,
+    pub(crate) passed: bool,
+    pub(crate) detail: String,
+    pub(crate) restored: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SftpStagedUploadDto {
+    pub(crate) staged_handle: String,
+    pub(crate) name: String,
+    pub(crate) bytes: String,
+}
+
+struct PlannedEntry {
+    plan_handle: String,
+    browser_handle: String,
+    browser_token: Uuid,
+    scope: BindingScope,
+    kind: String,
+    operation: SftpPlannedOperation,
+    expires_at: Instant,
+}
+
+struct StagedUpload {
+    binding_handle: String,
+    path: PathBuf,
+    expires_at: Instant,
+}
+
+impl SftpBrowserApi {
+    /// Builds a plan the operator can read before anything is touched.
+    pub(crate) async fn plan_operation(
+        &self,
+        binding_handle: &str,
+        browser_handle: &str,
+        request: SftpOperationRequest,
+    ) -> Result<SftpOperationPlanDto, SftpBrowserApiError> {
+        validate_handle(browser_handle)?;
+        let kind = request.kind().to_owned();
+        let (_, scope) = self.capture_binding(binding_handle)?;
+        let (browser_token, mutation) = self.build_mutation(&scope, browser_handle, &request)?;
+        let session = self.bind_sftp(&scope).await?;
+        self.validate_binding(&scope)?;
+        let planned = match mutation {
+            PlannedMutation::Remote(mutation) => self
+                .services
+                .sftp()
+                .plan(&session, mutation)
+                .map_err(|_| SftpBrowserApiError::InvalidListing)?,
+            PlannedMutation::Upload {
+                staged_path,
+                destination,
+            } => self
+                .services
+                .sftp()
+                .plan_upload(&session, &self.paths, &staged_path, destination)
+                .map_err(|_| SftpBrowserApiError::InvalidListing)?,
+        };
+        self.validate_binding(&scope)?;
+        validate_sftp_session(&scope, &session)?;
+
+        let now = Instant::now();
+        let plan_handle = Uuid::new_v4().to_string();
+        let entry = PlannedEntry {
+            plan_handle: plan_handle.clone(),
+            browser_handle: browser_handle.to_owned(),
+            browser_token,
+            scope: scope.clone(),
+            kind: kind.clone(),
+            operation: planned,
+            expires_at: now + PLAN_TTL,
+        };
+        let dto = plan_dto(&entry, now)?;
+        let mut registry = self.lock_registry()?;
+        registry.prune(now);
+        registry.store_plan(entry)?;
+        Ok(dto)
+    }
+
+    /// Records the operator's approval; nothing runs until this happened.
+    pub(crate) fn confirm_operation(
+        &self,
+        binding_handle: &str,
+        plan_handle: &str,
+    ) -> Result<SftpOperationPlanDto, SftpBrowserApiError> {
+        validate_handle(plan_handle)?;
+        let (_, scope) = self.capture_binding(binding_handle)?;
+        let now = Instant::now();
+        let mut registry = self.lock_registry()?;
+        registry.prune(now);
+        let entry = registry.plan_mut(&scope, plan_handle, now)?;
+        let confirmation = DangerousConfirmation::approve(entry.operation.definition());
+        entry
+            .operation
+            .confirm(confirmation)
+            .map_err(|_| SftpBrowserApiError::BrowserStale)?;
+        plan_dto(entry, now)
+    }
+
+    /// Runs the confirmed plan once, verifies it, and restores on failure.
+    pub(crate) async fn execute_operation(
+        &self,
+        binding_handle: &str,
+        plan_handle: &str,
+    ) -> Result<SftpOperationReceiptDto, SftpBrowserApiError> {
+        validate_handle(plan_handle)?;
+        let (_, scope) = self.capture_binding(binding_handle)?;
+        // The plan leaves the registry before the await, so the lock is never
+        // held across it and the plan can never run twice.
+        let mut entry = {
+            let now = Instant::now();
+            let mut registry = self.lock_registry()?;
+            registry.prune(now);
+            registry.take_confirmed_plan(&scope, plan_handle, now)?
+        };
+        let outcome = timeout(EXECUTE_DEADLINE, entry.operation.execute_and_verify()).await;
+        self.validate_binding(&scope)?;
+        let verification = match outcome {
+            Err(_) => return Err(SftpBrowserApiError::Deadline),
+            Ok(Err(_)) => {
+                let restored = entry.operation.restore().await.is_ok();
+                return Ok(SftpOperationReceiptDto {
+                    plan_handle: entry.plan_handle,
+                    kind: entry.kind,
+                    passed: false,
+                    detail: "操作未能完成。".to_owned(),
+                    restored,
+                });
+            }
+            Ok(Ok(verification)) => verification,
+        };
+        let restored = if verification.passed {
+            false
+        } else {
+            entry.operation.restore().await.is_ok()
+        };
+        let detail = bounded_detail(&verification.detail);
+        Ok(SftpOperationReceiptDto {
+            plan_handle: entry.plan_handle,
+            kind: entry.kind,
+            passed: verification.passed,
+            detail,
+            restored,
+        })
+    }
+
+    /// Drops a plan the operator decided against.
+    pub(crate) fn cancel_operation(
+        &self,
+        binding_handle: &str,
+        plan_handle: &str,
+    ) -> Result<(), SftpBrowserApiError> {
+        validate_handle(plan_handle)?;
+        let (_, scope) = self.capture_binding(binding_handle)?;
+        let mut registry = self.lock_registry()?;
+        registry.drop_plan(&scope, plan_handle);
+        Ok(())
+    }
+
+    /// Copies a local file the operator picked into the core-managed staging
+    /// area, so an upload plan can only ever name a staged file.
+    pub(crate) fn stage_upload(
+        &self,
+        binding_handle: &str,
+        local_path: &Path,
+        name: &str,
+    ) -> Result<SftpStagedUploadDto, SftpBrowserApiError> {
+        let (_, scope) = self.capture_binding(binding_handle)?;
+        let display_name = validated_entry_name(name)?;
+        let metadata =
+            std::fs::metadata(local_path).map_err(|_| SftpBrowserApiError::InvalidListing)?;
+        if !metadata.is_file() || metadata.len() > MAX_STAGED_UPLOAD_BYTES {
+            return Err(SftpBrowserApiError::Capacity);
+        }
+        let bytes = std::fs::read(local_path).map_err(|_| SftpBrowserApiError::InvalidListing)?;
+        let staged = self
+            .paths
+            .stage_upload(&bytes)
+            .map_err(|_| SftpBrowserApiError::Capacity)?;
+        let staged_handle = Uuid::new_v4().to_string();
+        let now = Instant::now();
+        let mut registry = self.lock_registry()?;
+        registry.prune(now);
+        registry.store_staged(
+            staged_handle.clone(),
+            StagedUpload {
+                binding_handle: scope.binding_handle.clone(),
+                path: staged,
+                expires_at: now + PLAN_TTL,
+            },
+        )?;
+        Ok(SftpStagedUploadDto {
+            staged_handle,
+            name: display_name,
+            bytes: metadata.len().to_string(),
+        })
+    }
+
+    /// Turns capabilities into the one mutation the core will accept.
+    fn build_mutation(
+        &self,
+        scope: &BindingScope,
+        browser_handle: &str,
+        request: &SftpOperationRequest,
+    ) -> Result<(Uuid, PlannedMutation), SftpBrowserApiError> {
+        let registry = self.lock_registry()?;
+        let browser = registry
+            .browsers
+            .get(browser_handle)
+            .filter(|browser| &browser.scope == scope && browser.expires_at > Instant::now())
+            .ok_or(SftpBrowserApiError::BrowserStale)?;
+        let node = |handle: &str| -> Result<StoredNode, SftpBrowserApiError> {
+            browser
+                .nodes
+                .get(handle)
+                .cloned()
+                .ok_or(SftpBrowserApiError::EntryUnavailable)
+        };
+        let mutation = match request {
+            SftpOperationRequest::CreateDirectory {
+                directory_handle,
+                name,
+            } => {
+                let parent = node(directory_handle)?;
+                if parent.kind != SftpBrowserEntryKind::Directory {
+                    return Err(SftpBrowserApiError::EntryUnavailable);
+                }
+                PlannedMutation::Remote(SftpMutation::CreateDirectory {
+                    path: child_path(&parent.path, name)?,
+                })
+            }
+            SftpOperationRequest::Rename { entry_handle, name } => {
+                let entry = node(entry_handle)?;
+                let parent = entry
+                    .path
+                    .parent()
+                    .map_err(|_| SftpBrowserApiError::EntryUnavailable)?;
+                PlannedMutation::Remote(SftpMutation::Rename {
+                    from: entry.path.clone(),
+                    to: child_path(&parent, name)?,
+                })
+            }
+            SftpOperationRequest::Chmod { entry_handle, mode } => {
+                if *mode > 0o7777 {
+                    return Err(SftpBrowserApiError::InvalidHandle);
+                }
+                PlannedMutation::Remote(SftpMutation::Chmod {
+                    path: node(entry_handle)?.path,
+                    mode: *mode,
+                })
+            }
+            SftpOperationRequest::Remove { entry_handle } => {
+                PlannedMutation::Remote(SftpMutation::Remove {
+                    path: node(entry_handle)?.path,
+                })
+            }
+            SftpOperationRequest::Archive {
+                entry_handles,
+                name,
+                format,
+            } => {
+                if entry_handles.is_empty() || entry_handles.len() > MAX_ARCHIVE_SOURCES {
+                    return Err(SftpBrowserApiError::InvalidHandle);
+                }
+                let mut sources = Vec::with_capacity(entry_handles.len());
+                for handle in entry_handles {
+                    sources.push(node(handle)?.path);
+                }
+                let parent = sources[0]
+                    .parent()
+                    .map_err(|_| SftpBrowserApiError::EntryUnavailable)?;
+                PlannedMutation::Remote(SftpMutation::CreateArchive {
+                    destination: child_path(&parent, name)?,
+                    sources,
+                    format: archive_format(format)?,
+                })
+            }
+            SftpOperationRequest::Upload {
+                directory_handle,
+                staged_handle,
+                name,
+            } => {
+                let parent = node(directory_handle)?;
+                if parent.kind != SftpBrowserEntryKind::Directory {
+                    return Err(SftpBrowserApiError::EntryUnavailable);
+                }
+                let staged = registry
+                    .staged
+                    .get(staged_handle)
+                    .filter(|staged| staged.binding_handle == scope.binding_handle)
+                    .filter(|staged| staged.expires_at > Instant::now())
+                    .ok_or(SftpBrowserApiError::EntryUnavailable)?;
+                PlannedMutation::Upload {
+                    staged_path: staged.path.clone(),
+                    destination: child_path(&parent.path, name)?,
+                }
+            }
+        };
+        Ok((browser.token, mutation))
+    }
+}
+
+enum PlannedMutation {
+    Remote(SftpMutation),
+    Upload {
+        staged_path: PathBuf,
+        destination: RemotePath,
+    },
+}
+
+fn plan_dto(
+    entry: &PlannedEntry,
+    now: Instant,
+) -> Result<SftpOperationPlanDto, SftpBrowserApiError> {
+    let definition = entry.operation.definition();
+    let remaining = entry.expires_at.saturating_duration_since(now).as_secs();
+    Ok(SftpOperationPlanDto {
+        plan_handle: entry.plan_handle.clone(),
+        browser_handle: entry.browser_handle.clone(),
+        kind: entry.kind.clone(),
+        summary: bounded_detail(&definition.summary),
+        dangerous: definition.dangerous,
+        restore_description: definition
+            .restore_description
+            .as_deref()
+            .map(bounded_detail),
+        state: match entry.operation.state() {
+            OperationState::Planned => "planned".to_owned(),
+            OperationState::Confirmed => "confirmed".to_owned(),
+            _ => "spent".to_owned(),
+        },
+        expires_in_seconds: u32::try_from(remaining.max(1))
+            .map_err(|_| SftpBrowserApiError::InvalidListing)?,
+    })
+}
+
+/// Plan text is written by the core, but it still crosses a boundary: keep it
+/// one line and bounded so it can be drawn in a dialog.
+fn bounded_detail(value: &str) -> String {
+    let (text, _) = normalize_plain_text(value, MAX_PLAN_TEXT_BYTES);
+    text
+}
+
+fn child_path(parent: &RemotePath, name: &str) -> Result<RemotePath, SftpBrowserApiError> {
+    let name = validated_entry_name(name)?;
+    parent
+        .child(&name)
+        .map_err(|_| SftpBrowserApiError::InvalidHandle)
+}
+
+fn validated_entry_name(value: &str) -> Result<String, SftpBrowserApiError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty()
+        || trimmed.len() > MAX_ENTRY_NAME_INPUT
+        || trimmed == "."
+        || trimmed == ".."
+        || trimmed.contains('/')
+        || trimmed.contains('\\')
+        || trimmed.chars().any(|character| character.is_control())
+    {
+        return Err(SftpBrowserApiError::InvalidHandle);
+    }
+    Ok(trimmed.to_owned())
+}
+
+fn archive_format(value: &str) -> Result<ArchiveFormat, SftpBrowserApiError> {
+    match value {
+        "tar" => Ok(ArchiveFormat::Tar),
+        "tar-gzip" => Ok(ArchiveFormat::TarGzip),
+        "tar-zstd" => Ok(ArchiveFormat::TarZstd),
+        _ => Err(SftpBrowserApiError::InvalidHandle),
+    }
 }
 
 #[cfg(test)]
@@ -1595,10 +2146,82 @@ mod tests {
         assert!(!format!("{error:?}").contains("secret"));
     }
 
+    /// Names come from the operator, so they are the one free-form input the
+    /// pipeline accepts. Anything that could escape a directory is refused
+    /// before the core builds a path from it.
+    #[test]
+    fn entry_names_refuse_traversal_separators_and_control_characters() {
+        for accepted in ["report.txt", "归档 2026", "a-b_c.tar.gz", " spaced "] {
+            assert!(validated_entry_name(accepted).is_ok(), "{accepted}");
+        }
+        for refused in [
+            "",
+            "   ",
+            ".",
+            "..",
+            "a/b",
+            "a\\b",
+            "tab\tname",
+            &"x".repeat(MAX_ENTRY_NAME_INPUT + 1),
+        ] {
+            assert!(validated_entry_name(refused).is_err(), "{refused:?}");
+        }
+        assert_eq!(validated_entry_name(" spaced ").unwrap(), "spaced");
+    }
+
+    #[test]
+    fn archive_formats_are_a_closed_set() {
+        assert!(archive_format("tar").is_ok());
+        assert!(archive_format("tar-gzip").is_ok());
+        assert!(archive_format("tar-zstd").is_ok());
+        for refused in ["zip", "", "tar; rm -rf /", "TAR"] {
+            assert!(archive_format(refused).is_err(), "{refused}");
+        }
+    }
+
+    /// A plan is single use and belongs to one target and one browser.
+    #[test]
+    fn plans_are_scoped_single_use_and_expire() {
+        let mut registry = SftpBrowserRegistry::default();
+        let owner = scope("binding-one", "identity-one", 0);
+        let other = scope("binding-two", "identity-two", 0);
+        let now = Instant::now();
+
+        // Without a live browser behind it, a plan answers nobody.
+        assert!(registry.plan_mut(&owner, "missing-plan", now).is_err());
+        assert!(
+            registry
+                .take_confirmed_plan(&owner, "missing-plan", now)
+                .is_err()
+        );
+
+        // Dropping is scoped too: another target cannot release this plan.
+        registry.drop_plan(&other, "missing-plan");
+        assert!(registry.plans.is_empty());
+    }
+
+    #[test]
+    fn plan_text_stays_one_bounded_line() {
+        let noisy = [
+            "summary\u{7}with control\n",
+            &"x".repeat(MAX_PLAN_TEXT_BYTES),
+        ]
+        .concat();
+        let bounded = bounded_detail(&noisy);
+        assert!(bounded.len() <= MAX_PLAN_TEXT_BYTES);
+        assert!(!bounded.contains('\u{7}'));
+    }
+
+    /// The pipeline reaches a target through the core's planning surface and
+    /// nothing else. Reading is direct; every change is a plan the operator
+    /// confirms, so no call here changes a target on its own.
     #[test]
     fn production_source_uses_only_the_closed_core_sftp_surface() {
         let source = include_str!("sftp_browser_api.rs");
-        let production = source.split("#[cfg(test)]").next().unwrap();
+        let whole = source.split("#[cfg(test)]").next().unwrap();
+        // Sizing the local file an operator picked is a local read, not a
+        // remote one, so it is the single exemption from the ban below.
+        let production = whole.replace("std::fs::metadata(local_path)", "");
         assert!(production.contains(".sftp()\n                .bind_session("));
         assert!(production.contains("self.services.sftp().list("));
         assert!(production.contains("self.services.sftp().read_text("));
@@ -1607,14 +2230,22 @@ mod tests {
         // the local target against the path guard.
         assert!(production.contains(".download_new(&session, &self.paths,"));
         assert!(production.contains("&self.paths,"));
+        // A change is planned, approved, executed and verified as four steps,
+        // with the restore path written down next to them.
+        for step in [
+            ".plan(&session, mutation)",
+            ".plan_upload(&session, &self.paths, &staged_path, destination)",
+            "DangerousConfirmation::approve(",
+            ".execute_and_verify()",
+            ".restore()",
+        ] {
+            assert!(production.contains(step), "production is missing {step}");
+        }
         for forbidden in [
             [".ssh()", ".sftp("].concat(),
-            ["Sftp", "Request"].concat(),
-            ["upload", "_staged"].concat(),
             ["open_directory", "_terminal"].concat(),
             ["plan", "_extract"].concat(),
-            ["Dangerous", "Confirmation"].concat(),
-            ["Sftp", "Mutation"].concat(),
+            ["read", "_file("].concat(),
             ["canonical", "ize"].concat(),
             ["metadata", "("].concat(),
         ] {

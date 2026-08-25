@@ -21,6 +21,11 @@ const api: TerminalApi = {
   listSftpDirectory: vi.fn(async () => ({})),
   readSftpText: vi.fn(async () => ({})),
   downloadSftpEntry: vi.fn(async () => ({})),
+  planSftpOperation: vi.fn(async () => ({})),
+  confirmSftpOperation: vi.fn(async () => ({})),
+  executeSftpOperation: vi.fn(async () => ({})),
+  cancelSftpOperation: vi.fn(async () => ({})),
+  stageSftpUpload: vi.fn(async () => ({})),
   openLocalBrowser: vi.fn(async () => ({})),
   listLocalDirectory: vi.fn(async () => ({})),
 };
