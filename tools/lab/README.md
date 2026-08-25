@@ -57,4 +57,7 @@ node tools/lab/probe-markers.mjs   # 全量扫一遍，确认没有任何遮蔽 
 LAB=alpine node tools/lab/probe-commands.mjs   # 同样的命令跑 busybox 靶机
 ```
 
+`probe-groundtruth.mjs` 是回归闸门：14 条植入物逐条断言仍被命中。降噪改动之后一定要跑它，
+证明去掉的是噪声不是信号。
+
 `probe-one.mjs` 会用 `!!` 标出被规则命中的行，是判断误报最快的方式。
