@@ -1238,6 +1238,9 @@ $expectedTerminalBindings = [ordered]@{
     search = 'lovelyres:terminal:search'
     copySelection = 'lovelyres:terminal:copy-selection'
     close = 'lovelyres:terminal:close'
+    openSftpBrowser = 'lovelyres:terminal:sftp:open'
+    listSftpDirectory = 'lovelyres:terminal:sftp:directory:list'
+    readSftpText = 'lovelyres:terminal:sftp:text:read'
 }
 if (-not $terminalPreloadMatch.Success) {
     Add-GateViolation 'electron/src/preload/terminal.ts must expose one frozen, typed terminal API object'
@@ -1245,7 +1248,7 @@ if (-not $terminalPreloadMatch.Success) {
     $terminalPreloadBody = $terminalPreloadMatch.Groups['body'].Value
     $terminalNames = @([regex]::Matches($terminalPreloadBody, '(?m)^\s{2}(?<name>[A-Za-z_$][A-Za-z0-9_$]*)\s*:') | ForEach-Object { $_.Groups['name'].Value })
     if (($terminalNames -join "`n") -cne (@($expectedTerminalBindings.Keys) -join "`n")) {
-        Add-GateViolation 'electron/src/preload/terminal.ts API keys must be exactly [open, poll, input, resize, search, copySelection, close]'
+        Add-GateViolation 'electron/src/preload/terminal.ts API keys must be exactly [open, poll, input, resize, search, copySelection, close, openSftpBrowser, listSftpDirectory, readSftpText]'
     }
     foreach ($binding in $expectedTerminalBindings.GetEnumerator()) {
         $pattern = '(?s)\b{0}\s*:.{{0,400}}?=>.{{0,400}}?ipcRenderer\.invoke\s*\(\s*["'']{1}["'']' -f [regex]::Escape($binding.Key), [regex]::Escape($binding.Value)
@@ -1256,8 +1259,8 @@ if (-not $terminalPreloadMatch.Success) {
             Add-GateViolation "electron/src/main/index.ts must register dedicated terminal channel $($binding.Value)"
         }
     }
-    if ([regex]::Matches($terminalPreloadBody, '\bipcRenderer\.invoke\s*\(').Count -ne 7) {
-        Add-GateViolation 'electron/src/preload/terminal.ts contains an IPC call outside the exact seven-method allowlist'
+    if ([regex]::Matches($terminalPreloadBody, '\bipcRenderer\.invoke\s*\(').Count -ne 10) {
+        Add-GateViolation 'electron/src/preload/terminal.ts contains an IPC call outside the exact ten-method allowlist'
     }
 }
 if ([regex]::Matches($terminalPreloadText, '\bcontextBridge\.exposeInMainWorld\s*\(').Count -ne 1 -or
@@ -1463,8 +1466,8 @@ foreach ($marker in @(
         Add-GateViolation "crates/lovelyres-electron-backend/src/lib.rs is missing Firewall boundary marker '$marker'"
     }
 }
-if ($backendLibText -notmatch '(?s)self\.snapshot_read\.close_binding\(&params\.binding_handle\);\s*self\.firewall_read\.close_binding\(&params\.binding_handle\);\s*self\.baseline_read\.close_binding\(&params\.binding_handle\);\s*self\.middleware_read\.close_binding\(&params\.binding_handle\);\s*self\.check_audit_read\.close_binding\(&params\.binding_handle\);\s*self\.integrity\.close_binding\(&params\.binding_handle\);\s*self\.log_analysis_read\.close_binding\(&params\.binding_handle\);\s*self\.kubernetes_read\.close_binding\(&params\.binding_handle\);\s*self\.emergency_command\.close_binding\(&params\.binding_handle\);\s*self\.docker_read\.close_binding\(&params\.binding_handle\);\s*self\.quick_detection\.close_binding\(&params\.binding_handle\);\s*self\.packet_capture_live\s*\.close_binding\(&params\.binding_handle\)\s*\.await;\s*self\.ssh\s*\.disconnect_binding') {
-    Add-GateViolation 'SSH disconnect must eagerly close Snapshot, Firewall, Baseline, Middleware, Check Audit, File Integrity, Log Analysis, Kubernetes, Emergency Commands, Docker, Quick Detection, and Packet Capture capabilities before the real disconnect'
+if ($backendLibText -notmatch '(?s)self\.snapshot_read\.close_binding\(&params\.binding_handle\);\s*self\.firewall_read\.close_binding\(&params\.binding_handle\);\s*self\.baseline_read\.close_binding\(&params\.binding_handle\);\s*self\.middleware_read\.close_binding\(&params\.binding_handle\);\s*self\.check_audit_read\.close_binding\(&params\.binding_handle\);\s*self\.integrity\.close_binding\(&params\.binding_handle\);\s*self\.log_analysis_read\.close_binding\(&params\.binding_handle\);\s*self\.kubernetes_read\.close_binding\(&params\.binding_handle\);\s*self\.emergency_command\.close_binding\(&params\.binding_handle\);\s*self\.docker_read\.close_binding\(&params\.binding_handle\);\s*self\.quick_detection\.close_binding\(&params\.binding_handle\);\s*self\.sftp_browser\.close_binding\(&params\.binding_handle\);\s*self\.packet_capture_live\s*\.close_binding\(&params\.binding_handle\)\s*\.await;\s*self\.ssh\s*\.disconnect_binding') {
+    Add-GateViolation 'SSH disconnect must eagerly close Snapshot, Firewall, Baseline, Middleware, Check Audit, File Integrity, Log Analysis, Kubernetes, Emergency Commands, Docker, Quick Detection, SFTP browser, and Packet Capture capabilities before the real disconnect'
 }
 foreach ($marker in @(
     'BoundSshSession',
@@ -2628,7 +2631,7 @@ foreach ($marker in @(
         Add-GateViolation "crates/lovelyres-electron-backend/src/lib.rs is missing Quick Detection boundary/redaction marker '$marker'"
     }
 }
-if ($backendLibText -notmatch '(?s)self\.quick_detection\.close_binding\(&params\.binding_handle\);\s*self\.packet_capture_live\s*\.close_binding\(&params\.binding_handle\)\s*\.await;\s*self\.ssh\s*\.disconnect_binding') {
+if ($backendLibText -notmatch '(?s)self\.quick_detection\.close_binding\(&params\.binding_handle\);\s*self\.sftp_browser\.close_binding\(&params\.binding_handle\);\s*self\.packet_capture_live\s*\.close_binding\(&params\.binding_handle\)\s*\.await;\s*self\.ssh\s*\.disconnect_binding') {
     Add-GateViolation 'Quick Detection capabilities must close before Packet Capture cleanup and the real SSH disconnect'
 }
 foreach ($marker in @(
@@ -3435,10 +3438,13 @@ if (-not $terminalApiMatch.Success) {
     Add-GateViolation 'electron/src/shared/terminal-contract.ts is missing TerminalApi'
 } else {
     $terminalApiNames = @([regex]::Matches($terminalApiMatch.Groups['body'].Value, '(?m)^\s{2}(?<name>[A-Za-z_$][A-Za-z0-9_$]*)\s*\(') | ForEach-Object { $_.Groups['name'].Value })
-    if (($terminalApiNames -join "`n") -cne (@('open', 'poll', 'input', 'resize', 'search', 'copySelection', 'close') -join "`n")) {
-        Add-GateViolation 'electron/src/shared/terminal-contract.ts TerminalApi must expose exactly seven methods'
+    if (($terminalApiNames -join "`n") -cne (@('open', 'poll', 'input', 'resize', 'search', 'copySelection', 'close', 'openSftpBrowser', 'listSftpDirectory', 'readSftpText') -join "`n")) {
+        Add-GateViolation 'electron/src/shared/terminal-contract.ts TerminalApi must expose exactly ten methods'
     }
-    if ($terminalApiMatch.Groups['body'].Value -match '(?i)\b(?:binding|session|guard|host|path|command|token|handle|snapshot|invoke)\b') {
+    # The browser capabilities are opaque, window-scoped handles; target
+    # identity stays forbidden.
+    $terminalApiBody = $terminalApiMatch.Groups['body'].Value -replace 'browserHandle|directoryHandle|fileHandle', 'capability'
+    if ($terminalApiBody -match '(?i)\b(?:binding|session|guard|host|path|command|token|handle|snapshot|invoke)\b') {
         Add-GateViolation 'electron/src/shared/terminal-contract.ts TerminalApi exposes a forbidden capability or internal field'
     }
 }
@@ -3526,6 +3532,7 @@ foreach ($marker in @(
     }
 }
 if ($terminalWindowText -notmatch '(?s)<TerminalSurface\s+api=\{window\.lovelyresTerminal\}\s+writeClipboard=\{window\.lovelyresTerminal\.copySelection\}\s*/>' -or
+    $terminalWindowText -notmatch '(?s)<SftpBrowserPage\s' -or
     $terminalWindowText -match '(?i)\b(?:binding|session|guard|host|path|command|token|handle)\b') {
     Add-GateViolation 'electron/src/renderer/TerminalWindow.tsx must mount only the handle-free dedicated terminal API and its trusted copy boundary'
 }

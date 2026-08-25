@@ -28,7 +28,7 @@ import {
 import "./sftp-browser.css";
 
 export interface SftpBrowserConnection {
-  bindingHandle: string;
+  scopeKey: string;
 }
 
 export interface SftpBrowserPageProps {
@@ -58,7 +58,6 @@ export function SftpBrowserPage({
   const [pendingPreview, setPendingPreview] = useState<PendingPreview | null>(null);
   const requestRef = useRef(0);
   const scope = connection === null ? null : sftpBrowserScope(connection);
-  const bindingHandle = connection?.bindingHandle ?? null;
   const enabled = active && connection !== null;
   const visibleState = state.scope === scope ? state : createSftpBrowserState(scope);
 
@@ -74,7 +73,7 @@ export function SftpBrowserPage({
   }, [enabled, scope]);
 
   useEffect(() => {
-    if (!enabled || scope === null || bindingHandle === null || state.scope !== scope) return;
+    if (!enabled || scope === null || state.scope !== scope) return;
     const request: SftpDirectoryRequest = {
       id: ++requestRef.current,
       mode: "open",
@@ -83,7 +82,7 @@ export function SftpBrowserPage({
     };
     let cancelled = false;
     dispatch({ type: "directory-started", scope, request });
-    void api.openSftpBrowser(bindingHandle).then((value) => {
+    void api.openSftpBrowser().then((value) => {
       if (cancelled) return;
       if (!isSftpDirectorySnapshot(value) || value.parentDirectoryHandle !== null) throw new Error();
       dispatch({ type: "directory-loaded", scope, request, directory: value });
@@ -98,16 +97,15 @@ export function SftpBrowserPage({
     return () => {
       cancelled = true;
     };
-  }, [api, bindingHandle, enabled, reopenVersion, scope, state.scope]);
+  }, [api, enabled, reopenVersion, scope, state.scope]);
 
   useEffect(() => {
-    if (!enabled || scope === null || bindingHandle === null || pendingDirectory?.scope !== scope ||
+    if (!enabled || scope === null || pendingDirectory?.scope !== scope ||
       pendingDirectory.request.mode !== "list") return;
     const request = pendingDirectory.request;
     let cancelled = false;
     dispatch({ type: "directory-started", scope, request });
     void api.listSftpDirectory(
-      bindingHandle,
       request.browserHandle!,
       request.directoryHandle!,
     ).then((value) => {
@@ -126,14 +124,14 @@ export function SftpBrowserPage({
     return () => {
       cancelled = true;
     };
-  }, [api, bindingHandle, enabled, pendingDirectory, scope]);
+  }, [api, enabled, pendingDirectory, scope]);
 
   useEffect(() => {
-    if (!enabled || scope === null || bindingHandle === null || pendingPreview?.scope !== scope) return;
+    if (!enabled || scope === null || pendingPreview?.scope !== scope) return;
     const request = pendingPreview.request;
     let cancelled = false;
     dispatch({ type: "preview-started", scope, request });
-    void api.readSftpText(bindingHandle, request.browserHandle, request.fileHandle).then((value) => {
+    void api.readSftpText(request.browserHandle, request.fileHandle).then((value) => {
       if (cancelled) return;
       if (!isSftpTextPreview(value) || value.browserHandle !== request.browserHandle ||
         value.fileHandle !== request.fileHandle) throw new Error();
@@ -149,7 +147,7 @@ export function SftpBrowserPage({
     return () => {
       cancelled = true;
     };
-  }, [api, bindingHandle, enabled, pendingPreview, scope]);
+  }, [api, enabled, pendingPreview, scope]);
 
   if (connection === null) {
     return (
@@ -278,9 +276,6 @@ export function SftpBrowserPage({
           {directory.truncated && <p className="sftp-browser-warning" role="status">
             目录共有 {directory.observedEntryCount} 项，当前只显示前 {directory.displayedEntryCount} 项。
           </p>}
-          {directory.directoryLabelRedacted && <p className="sftp-browser-redacted" role="status">
-            当前目录名称疑似包含凭据，已遮蔽。
-          </p>}
           {directory.directoryLabelTruncated && <p className="sftp-browser-warning" role="status">
             当前目录显示名称已按字节上限截断。
           </p>}
@@ -341,9 +336,7 @@ export function SftpBrowserWorkbench({
               <span className={`sftp-browser-entry-kind is-${entry.kind}`}>{sftpBrowserKindLabel(entry.kind)}</span>
               <strong>{entry.name}</strong>
               <small>{displaySftpBytes(entry.sizeBytes)} · {sftpBrowserActionLabel(entry)}</small>
-              {(entry.nameRedacted || entry.nameTruncated) && <em>
-                {entry.nameRedacted ? "名称已遮蔽" : "名称已截断"}
-              </em>}
+              {entry.nameTruncated && <em>名称已截断</em>}
             </button>
           ))}
       </aside>
@@ -361,7 +354,6 @@ export function SftpBrowserWorkbench({
               {selected.action === "preview" && <button type="button" disabled={busy}
                 onClick={onPreview}>{previewStatus === "loading" ? "读取中…" : "预览文本"}</button>}
             </header>
-            {selected.nameRedacted && <p className="sftp-browser-redacted">此名称包含 credential-like 内容，已遮蔽。</p>}
             {selected.nameTruncated && <p className="sftp-browser-warning">此显示名称已按字节上限截断。</p>}
             {selected.action === "none" ? <SftpBrowserEmpty
               title={selected.kind === "symlink" ? "符号链接不会跟随" : "此条目不可打开"}
@@ -388,10 +380,7 @@ export function SftpTextPreviewView({ preview }: { preview: SftpTextPreview }) {
         <span>{preview.displayedLineCount}/{preview.observedLineCount} 行</span>
       </header>
       {preview.truncated && <p className="sftp-browser-warning" role="status">
-        文本已按 Electron 行数、单行或总字节上限截断。
-      </p>}
-      {preview.redactedLineCount > 0 && <p className="sftp-browser-redacted" role="status">
-        已遮蔽 {preview.redactedLineCount} 行 credential-like 或目标能力文本。
+        文本已按行数或大小上限截断。
       </p>}
       {preview.text.length === 0 ? <SftpBrowserEmpty title="文件没有可显示文本"
         detail="常规 UTF-8 文件为空，或仅包含一个空行。" compact /> :

@@ -20,11 +20,11 @@ import {
 } from "./sftp-browser-state";
 
 const entries: SftpBrowserEntry[] = [
-  { entryHandle: "dir-handle", name: "配置目录", nameRedacted: false, nameTruncated: false,
+  { entryHandle: "dir-handle", name: "配置目录", nameTruncated: false,
     kind: "directory", action: "browse", sizeBytes: "4096", modifiedAt: null },
-  { entryHandle: "file-handle", name: "Evidence.LOG", nameRedacted: false, nameTruncated: false,
+  { entryHandle: "file-handle", name: "Evidence.LOG", nameTruncated: false,
     kind: "file", action: "preview", sizeBytes: "42", modifiedAt: "2026-08-24T10:00:00Z" },
-  { entryHandle: "link-handle", name: "latest", nameRedacted: false, nameTruncated: false,
+  { entryHandle: "link-handle", name: "latest", nameTruncated: false,
     kind: "symlink", action: "none", sizeBytes: "7", modifiedAt: null },
 ];
 
@@ -33,7 +33,6 @@ const root: SftpDirectorySnapshot = {
   directoryHandle: "root-handle",
   parentDirectoryHandle: null,
   directoryLabel: "根目录",
-  directoryLabelRedacted: false,
   directoryLabelTruncated: false,
   expiresInSeconds: 300,
   observedEntryCount: entries.length,
@@ -77,7 +76,7 @@ describe("sftp browser helpers and state", () => {
   });
 
   it("uses only the opaque binding handle as the renderer lifecycle scope", () => {
-    expect(sftpBrowserScope({ bindingHandle: "binding-one" })).toBe("binding-one");
+    expect(sftpBrowserScope({ scopeKey: "binding-one" })).toBe("binding-one");
   });
 
   it("opens a root snapshot and keeps a stable valid selection", () => {
@@ -112,7 +111,7 @@ describe("sftp browser helpers and state", () => {
     const request: SftpPreviewRequest = { id: 2, browserHandle: "browser-one", fileHandle: "file-handle" };
     state = sftpBrowserReducer(state, { type: "preview-started", scope, request });
     const preview: SftpTextPreview = { browserHandle: "browser-one", fileHandle: "file-handle", text: "plain",
-      observedLineCount: 1, displayedLineCount: 1, redactedLineCount: 0, truncated: false };
+      observedLineCount: 1, displayedLineCount: 1, truncated: false };
     state = sftpBrowserReducer(state, { type: "preview-loaded", scope, request, preview });
     expect(state.preview).toEqual(preview);
     expect(state.previewStatus).toBe("ready");
@@ -132,7 +131,7 @@ describe("sftp browser helpers and state", () => {
     state = sftpBrowserReducer(state, { type: "preview-started", scope, request: previewRequest });
     state = sftpBrowserReducer(state, { type: "entry-selected", entryHandle: "dir-handle" });
     const preview: SftpTextPreview = { browserHandle: "browser-one", fileHandle: "file-handle", text: "late",
-      observedLineCount: 1, displayedLineCount: 1, redactedLineCount: 0, truncated: false };
+      observedLineCount: 1, displayedLineCount: 1, truncated: false };
     expect(sftpBrowserReducer(state, { type: "preview-loaded", scope, request: previewRequest, preview }).preview)
       .toBeNull();
   });

@@ -5784,12 +5784,25 @@ async function probeUnauthorizedTerminalRenderer(
     assert(initial.apiFrozen === true, "terminal preload API is not frozen");
     assert(
       Array.isArray(initial.apiMethods) &&
-        initial.apiMethods.join(",") === "close,copySelection,input,open,poll,resize,search",
-      "terminal preload is not exact7",
+        initial.apiMethods.join(",") ===
+          "close,copySelection,input,listSftpDirectory,open,openSftpBrowser,poll,readSftpText," +
+            "resize,search",
+      "terminal preload is not the exact ten-method surface",
     );
     assert(
       JSON.stringify(initial.apiArities) ===
-        JSON.stringify({ close: 0, copySelection: 0, input: 0, open: 0, poll: 0, resize: 0, search: 0 }),
+        JSON.stringify({
+          close: 0,
+          copySelection: 0,
+          input: 0,
+          listSftpDirectory: 0,
+          open: 0,
+          openSftpBrowser: 0,
+          poll: 0,
+          readSftpText: 0,
+          resize: 0,
+          search: 0,
+        }),
       `terminal preload method arities changed: ${JSON.stringify(initial.apiArities)}`,
     );
     assert(initial.terminalWindow === 1, "terminal renderer root is missing");

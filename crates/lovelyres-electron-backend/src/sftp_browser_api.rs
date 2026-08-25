@@ -25,8 +25,9 @@ use crate::ssh_api::SshApi;
 
 const MAX_HANDLE_BYTES: usize = 128;
 const MAX_DISPLAYED_ENTRIES: usize = 128;
+// Entry names and directory labels cross the boundary through the same
+// normaliser, so they share one ceiling.
 const MAX_ENTRY_NAME_BYTES: usize = 256;
-const MAX_DIRECTORY_LABEL_BYTES: usize = 256;
 const MAX_NAVIGATION_DEPTH: usize = 64;
 const MAX_BROWSERS: usize = 4;
 const MAX_BROWSER_BYTES: usize = 1024 * 1024;
@@ -43,8 +44,9 @@ const BROWSER_TTL: Duration = Duration::from_secs(5 * 60);
 const BIND_DEADLINE: Duration = Duration::from_secs(15);
 const LIST_DEADLINE: Duration = Duration::from_secs(20);
 const READ_DEADLINE: Duration = Duration::from_secs(20);
-const REDACTED_NAME: &str = "[SENSITIVE NAME REDACTED]";
-const REDACTED_TEXT_LINE: &str = "[SENSITIVE SFTP TEXT REDACTED]";
+// Names and file text cross the boundary as the target has them. Blanking a
+// file called "secret_key" or a config line containing "password=" removes the
+// very thing the operator opened the browser to look at.
 const ROOT_LABEL: &str = "根目录";
 
 #[derive(Clone)]
@@ -196,21 +198,13 @@ impl SftpBrowserApi {
         validate_sftp_session(&scope, &session)?;
         self.verify_operation(&access)?;
 
-        let sensitive_literals = [
-            scope.binding_handle.as_str(),
-            scope.session_id.as_str(),
-            scope.connection_id.as_str(),
-            scope.target.identity.as_str(),
-            access.node.path.as_str(),
-        ];
-        let projected = project_text(&source, &sensitive_literals)?;
+        let projected = project_text(&source)?;
         let dto = SftpTextPreviewDto {
             browser_handle: access.browser_handle.clone(),
             file_handle: access.node.handle.clone(),
             text: projected.text,
             observed_line_count: projected.observed_line_count,
             displayed_line_count: projected.displayed_line_count,
-            redacted_line_count: projected.redacted_line_count,
             truncated: projected.truncated,
         };
         ensure_serialized_bound(&dto, MAX_TEXT_RESPONSE_BYTES)?;
@@ -316,6 +310,20 @@ impl SftpBrowserApi {
             revision,
             Instant::now(),
         )
+    }
+
+    /// Drops every browser that belonged to a target that is going away.
+    /// Drops every browser that belonged to a target that is going away.
+    pub(crate) fn close_binding(&self, binding_handle: &str) {
+        if let Ok(mut registry) = self.registry.lock() {
+            registry
+                .browsers
+                .retain(|_, browser| browser.scope.binding_handle != binding_handle);
+            registry.active_open_bindings.remove(binding_handle);
+            registry
+                .active_operations
+                .retain(|_, operation| operation.binding_handle != binding_handle);
+        }
     }
 
     fn invalidate_browser(&self, browser_handle: &str) {
@@ -440,7 +448,6 @@ pub(crate) struct SftpDirectoryDto {
     pub(crate) directory_handle: String,
     pub(crate) parent_directory_handle: Option<String>,
     pub(crate) directory_label: String,
-    pub(crate) directory_label_redacted: bool,
     pub(crate) directory_label_truncated: bool,
     pub(crate) expires_in_seconds: u64,
     pub(crate) observed_entry_count: u32,
@@ -454,7 +461,6 @@ pub(crate) struct SftpDirectoryDto {
 pub(crate) struct SftpBrowserEntryDto {
     pub(crate) entry_handle: String,
     pub(crate) name: String,
-    pub(crate) name_redacted: bool,
     pub(crate) name_truncated: bool,
     pub(crate) kind: SftpBrowserEntryKind,
     pub(crate) action: SftpBrowserEntryAction,
@@ -470,7 +476,6 @@ pub(crate) struct SftpTextPreviewDto {
     pub(crate) text: String,
     pub(crate) observed_line_count: u32,
     pub(crate) displayed_line_count: u32,
-    pub(crate) redacted_line_count: u32,
     pub(crate) truncated: bool,
 }
 
@@ -500,7 +505,6 @@ struct StoredNode {
     parent_handle: Option<String>,
     depth: usize,
     display_name: String,
-    name_redacted: bool,
     name_truncated: bool,
     size_bytes: String,
     modified_at: Option<String>,
@@ -521,7 +525,6 @@ impl StoredNode {
         SftpBrowserEntryDto {
             entry_handle: self.handle.clone(),
             name: self.display_name.clone(),
-            name_redacted: self.name_redacted,
             name_truncated: self.name_truncated,
             kind: self.kind,
             action: self.action.dto(),
@@ -539,7 +542,6 @@ struct BrowserSnapshot {
     root_handle: String,
     nodes: HashMap<String, StoredNode>,
     revision: u64,
-    created_at: Instant,
     expires_at: Instant,
     last_used_at: Instant,
     stored_bytes: usize,
@@ -561,7 +563,6 @@ impl BrowserSnapshot {
             parent_handle: None,
             depth: 0,
             display_name: ROOT_LABEL.to_owned(),
-            name_redacted: false,
             name_truncated: false,
             size_bytes: "0".to_owned(),
             modified_at: None,
@@ -575,7 +576,6 @@ impl BrowserSnapshot {
             root_handle: root_handle.clone(),
             nodes,
             revision: 0,
-            created_at: now,
             expires_at: now + BROWSER_TTL,
             last_used_at: now,
             stored_bytes: 0,
@@ -631,7 +631,7 @@ impl BrowserSnapshot {
                 SftpBrowserEntryKind::File => EntryAction::Preview,
                 _ => EntryAction::None,
             };
-            let (display_name, name_redacted, name_truncated) = project_name(&entry.name);
+            let (display_name, name_truncated) = project_name(&entry.name);
             let existing = old_children
                 .get(&entry.path)
                 .filter(|node| node.kind == kind);
@@ -646,7 +646,6 @@ impl BrowserSnapshot {
                 parent_handle: Some(directory_handle.to_owned()),
                 depth,
                 display_name,
-                name_redacted,
                 name_truncated,
                 size_bytes: entry.metadata.size.to_string(),
                 modified_at: entry.metadata.modified_at.map(|value| value.to_rfc3339()),
@@ -711,7 +710,6 @@ impl BrowserSnapshot {
             directory_handle: directory.handle.clone(),
             parent_directory_handle: directory.parent_handle.clone(),
             directory_label: directory.display_name.clone(),
-            directory_label_redacted: directory.name_redacted,
             directory_label_truncated: directory.name_truncated,
             expires_in_seconds: remaining_seconds(self.expires_at, now)?,
             observed_entry_count,
@@ -1037,14 +1035,10 @@ struct ProjectedText {
     text: String,
     observed_line_count: u32,
     displayed_line_count: u32,
-    redacted_line_count: u32,
     truncated: bool,
 }
 
-fn project_text(
-    source: &str,
-    sensitive_literals: &[&str],
-) -> Result<ProjectedText, SftpBrowserApiError> {
+fn project_text(source: &str) -> Result<ProjectedText, SftpBrowserApiError> {
     if source.len() > MAX_CORE_TEXT_BYTES {
         return Err(SftpBrowserApiError::InvalidText);
     }
@@ -1053,23 +1047,14 @@ fn project_text(
         u32::try_from(observed).map_err(|_| SftpBrowserApiError::InvalidText)?;
     let mut lines = Vec::with_capacity(observed.min(MAX_TEXT_LINES));
     let mut bytes = 0usize;
-    let mut redacted = 0usize;
     let mut truncated = false;
     for line in source.lines() {
         if lines.len() >= MAX_TEXT_LINES {
             truncated = true;
             break;
         }
-        let sensitive = line.contains(REDACTED_TEXT_LINE)
-            || contains_sensitive_material(line)
-            || sensitive_literals
-                .iter()
-                .any(|literal| !literal.is_empty() && line.contains(*literal));
-        let (projected, line_truncated) = if sensitive {
-            (REDACTED_TEXT_LINE.to_owned(), false)
-        } else {
-            normalize_plain_text(line, MAX_TEXT_LINE_BYTES)
-        };
+        // Only control characters and the per-line ceiling are applied.
+        let (projected, line_truncated) = normalize_plain_text(line, MAX_TEXT_LINE_BYTES);
         let separator = usize::from(!lines.is_empty());
         if bytes
             .saturating_add(separator)
@@ -1082,9 +1067,6 @@ fn project_text(
         bytes = bytes
             .saturating_add(separator)
             .saturating_add(projected.len());
-        if sensitive {
-            redacted = redacted.saturating_add(1);
-        }
         truncated |= line_truncated;
         lines.push(projected);
     }
@@ -1094,18 +1076,12 @@ fn project_text(
         observed_line_count,
         displayed_line_count: u32::try_from(lines.len())
             .map_err(|_| SftpBrowserApiError::InvalidText)?,
-        redacted_line_count: u32::try_from(redacted)
-            .map_err(|_| SftpBrowserApiError::InvalidText)?,
         truncated,
     })
 }
 
-fn project_name(value: &str) -> (String, bool, bool) {
-    if value.contains(REDACTED_NAME) || contains_sensitive_material(value) {
-        return (REDACTED_NAME.to_owned(), true, false);
-    }
-    let (name, truncated) = normalize_plain_text(value, MAX_ENTRY_NAME_BYTES);
-    (name, false, truncated)
+fn project_name(value: &str) -> (String, bool) {
+    normalize_plain_text(value, MAX_ENTRY_NAME_BYTES)
 }
 
 fn normalize_plain_text(value: &str, maximum_bytes: usize) -> (String, bool) {
@@ -1124,55 +1100,6 @@ fn normalize_plain_text(value: &str, maximum_bytes: usize) -> (String, bool) {
         output.push(replacement);
     }
     (output, truncated)
-}
-
-fn contains_sensitive_material(value: &str) -> bool {
-    let lower = value.to_ascii_lowercase();
-    [
-        "password=",
-        "password:",
-        "password_",
-        "_password",
-        "--password",
-        "passwd=",
-        "passphrase=",
-        "passphrase:",
-        "secret=",
-        "secret:",
-        "secret_",
-        "_secret",
-        "--secret",
-        "token=",
-        "token:",
-        "token_",
-        "_token",
-        "--token",
-        "authorization=",
-        "authorization:",
-        "api_key=",
-        "apikey=",
-        "private_key=",
-        "private-key",
-        "access_key",
-        "access-key",
-        "client_secret",
-        "client-secret",
-        "private key-----",
-        "credential=",
-        "cookie:",
-        "set-cookie:",
-        "session_id=",
-        "fingerprint=",
-        "bearer ",
-    ]
-    .iter()
-    .any(|marker| lower.contains(marker))
-        || lower.split_once("://").is_some_and(|(_, remainder)| {
-            remainder
-                .split('/')
-                .next()
-                .is_some_and(|part| part.contains('@'))
-        })
 }
 
 const fn entry_kind(value: SftpFileKind) -> SftpBrowserEntryKind {
@@ -1524,14 +1451,10 @@ mod tests {
                 .iter()
                 .any(|entry| entry.name.contains("<script>"))
         );
-        let redacted = dto
-            .entries
-            .iter()
-            .find(|entry| entry.name_redacted)
-            .unwrap();
-        assert_eq!(redacted.name, REDACTED_NAME);
+        // A name that merely looks credential-shaped is still the operator's
+        // evidence, so it crosses as written.
         assert!(
-            !serde_json::to_string(&dto)
+            serde_json::to_string(&dto)
                 .unwrap()
                 .contains("do-not-render")
         );
@@ -1544,30 +1467,22 @@ mod tests {
     }
 
     #[test]
-    fn text_preview_is_line_byte_control_and_credential_bounded_plain_text() {
+    fn text_preview_crosses_verbatim_within_line_byte_and_control_bounds() {
         let hostile = [
             "</pre><script>steal()</script><img src=x onerror=steal()>",
-            "password=do-not-render",
-            "binding-private appears here",
-            "session-private appears here",
-            "/private/path appears here",
-            REDACTED_TEXT_LINE,
+            "password=keep-this-visible",
+            "root:$6$salt$hash:19000:0:99999:7:::",
             "plain\u{0007}control",
             &"x".repeat(MAX_TEXT_LINE_BYTES + 20),
         ]
         .join("\n");
-        let projected = project_text(
-            &hostile,
-            &["binding-private", "session-private", "/private/path"],
-        )
-        .unwrap();
+        let projected = project_text(&hostile).unwrap();
+        // Markup stays inert text; the rest is what the file actually holds.
         assert!(projected.text.contains("</pre><script>steal()</script>"));
+        assert!(projected.text.contains("password=keep-this-visible"));
+        assert!(projected.text.contains("root:$6$salt$hash"));
+        // Only control characters are normalised, because they break rendering.
         assert!(projected.text.contains("plain\u{fffd}control"));
-        assert!(!projected.text.contains("do-not-render"));
-        assert!(!projected.text.contains("binding-private"));
-        assert!(!projected.text.contains("session-private"));
-        assert!(!projected.text.contains("/private/path"));
-        assert_eq!(projected.redacted_line_count, 5);
         assert!(projected.truncated);
         assert!(projected.displayed_line_count <= MAX_TEXT_LINES as u32);
         assert!(projected.text.len() <= MAX_TEXT_BYTES);
@@ -1585,7 +1500,7 @@ mod tests {
             .map(|index| format!("<line-{index}>\\\""))
             .collect::<Vec<_>>()
             .join("\n");
-        let projected = project_text(&source, &[]).unwrap();
+        let projected = project_text(&source).unwrap();
         assert_eq!(projected.displayed_line_count, MAX_TEXT_LINES as u32);
         assert!(projected.truncated);
         let dto = SftpTextPreviewDto {
@@ -1594,7 +1509,6 @@ mod tests {
             text: projected.text,
             observed_line_count: projected.observed_line_count,
             displayed_line_count: projected.displayed_line_count,
-            redacted_line_count: projected.redacted_line_count,
             truncated: projected.truncated,
         };
         ensure_serialized_bound(&dto, MAX_TEXT_RESPONSE_BYTES).unwrap();

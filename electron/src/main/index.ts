@@ -73,6 +73,7 @@ import {
   isDockerOpaqueHandle,
   isDockerResourceKind,
   isEmergencyCommandOpaqueHandle,
+  isSftpBrowserOpaqueHandle,
   isPacketCaptureCursor,
   isPacketCaptureOpaqueHandle,
   isPacketCaptureStartInput,
@@ -2083,6 +2084,41 @@ function registerIpc(): void {
       throw new Error("Invalid clipboard payload.");
     }
     clipboard.writeText(value);
+  });
+  // The SFTP browser answers only the terminal window, whose binding main
+  // resolves from the calling window; the renderer never sends target identity.
+  ipcMain.handle("lovelyres:terminal:sftp:open", async (event, ...values: unknown[]) => {
+    const context = terminalContextFor(event);
+    if (values.length !== 0) throw new Error("Invalid SFTP browser request.");
+    return backend.openSftpBrowser(context.bindingHandle);
+  });
+  ipcMain.handle("lovelyres:terminal:sftp:directory:list", async (event, ...values: unknown[]) => {
+    const context = terminalContextFor(event);
+    const value = values[0];
+    if (
+      values.length !== 1 ||
+      !isRecord(value) ||
+      !hasOnlyKeys(value, ["browserHandle", "directoryHandle"]) ||
+      !isSftpBrowserOpaqueHandle(value.browserHandle) ||
+      !isSftpBrowserOpaqueHandle(value.directoryHandle)
+    ) {
+      throw new Error("Invalid SFTP directory request.");
+    }
+    return backend.listSftpDirectory(context.bindingHandle, value.browserHandle, value.directoryHandle);
+  });
+  ipcMain.handle("lovelyres:terminal:sftp:text:read", async (event, ...values: unknown[]) => {
+    const context = terminalContextFor(event);
+    const value = values[0];
+    if (
+      values.length !== 1 ||
+      !isRecord(value) ||
+      !hasOnlyKeys(value, ["browserHandle", "fileHandle"]) ||
+      !isSftpBrowserOpaqueHandle(value.browserHandle) ||
+      !isSftpBrowserOpaqueHandle(value.fileHandle)
+    ) {
+      throw new Error("Invalid SFTP preview request.");
+    }
+    return backend.readSftpText(context.bindingHandle, value.browserHandle, value.fileHandle);
   });
   ipcMain.on("lovelyres:renderer-ready", (event) => {
     if (

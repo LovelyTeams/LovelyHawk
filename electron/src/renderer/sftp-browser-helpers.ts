@@ -4,13 +4,14 @@ import type {
 } from "../shared/sftp-browser-contract";
 
 export interface SftpBrowserConnectionScope {
-  bindingHandle: string;
+  /** Identifies the window the browser belongs to. */
+  scopeKey: string;
 }
 
 export type SftpBrowserKindFilter = SftpBrowserEntryKind | "all";
 
 export function sftpBrowserScope(connection: SftpBrowserConnectionScope): string {
-  return connection.bindingHandle;
+  return connection.scopeKey;
 }
 
 export function filterSftpBrowserEntries(

@@ -71,6 +71,17 @@ const terminalApi: TerminalApi = Object.freeze({
   copySelection: (text: string) =>
     ipcRenderer.invoke("lovelyres:terminal:copy-selection", text),
   close: () => ipcRenderer.invoke("lovelyres:terminal:close"),
+  openSftpBrowser: () => ipcRenderer.invoke("lovelyres:terminal:sftp:open"),
+  listSftpDirectory: (browserHandle: string, directoryHandle: string) =>
+    ipcRenderer.invoke("lovelyres:terminal:sftp:directory:list", {
+      browserHandle,
+      directoryHandle,
+    }),
+  readSftpText: (browserHandle: string, fileHandle: string) =>
+    ipcRenderer.invoke("lovelyres:terminal:sftp:text:read", {
+      browserHandle,
+      fileHandle,
+    }),
 });
 
 contextBridge.exposeInMainWorld("lovelyresTerminal", terminalApi);

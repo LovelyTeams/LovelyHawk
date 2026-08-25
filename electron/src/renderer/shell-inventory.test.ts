@@ -17,12 +17,10 @@ function source(name: string): string {
  * unbuilt; wiring it means deleting its line, and building a new page without
  * wiring it means adding one. Neither can happen silently.
  */
-const NOT_WIRED: Record<string, string> = {
-  // docs/ELECTRON_UI_LEDGER.json item "sftp" is Pending: the renderer page and
-  // crates/lovelyres-core/src/sftp.rs exist, but there is no preload binding,
-  // no main handler and no sidecar RPC, so the page has nothing to call.
-  SftpBrowserPage: "sftp",
-};
+const NOT_WIRED: Record<string, string> = {};
+
+/** Page components the SSH window hosts instead of the main shell. */
+const IN_TERMINAL_WINDOW = ["SftpBrowserPage"];
 
 describe("application shell inventory", () => {
   it("mounts every page component, or records why it cannot", () => {
@@ -32,27 +30,42 @@ describe("application shell inventory", () => {
       .map((name) => name.slice(0, -".tsx".length));
     expect(components.length).toBeGreaterThan(15);
 
+    const terminalWindow = source("TerminalWindow.tsx");
     for (const component of components) {
-      const mounted = app.includes(`<${component}`);
+      const mounted = app.includes(`<${component}`) || terminalWindow.includes(`<${component}`);
       const excused = component in NOT_WIRED;
       expect(mounted, `${component} must be mounted or listed as not wired`).toBe(!excused);
     }
-
-    const ledger = readFileSync(
-      path.join(rendererDir(), "..", "..", "..", "docs", "ELECTRON_UI_LEDGER.json"),
-      "utf8",
-    ) as string;
-    const sections = JSON.parse(ledger) as Record<string, unknown>;
-    const entries = Object.values(sections)
-      .filter((section): section is { id: string; status: string }[] => Array.isArray(section))
-      .flat()
-      .filter((entry) => typeof entry === "object" && entry !== null && "id" in entry);
-    for (const [component, ledgerId] of Object.entries(NOT_WIRED)) {
-      const entry = entries.find((item) => item.id === ledgerId);
-      expect(entry, `${component} claims ledger item ${ledgerId}`).toBeDefined();
-      // Once the ledger says it shipped, the page has to be reachable.
-      expect(entry!.status, `${ledgerId} is no longer pending`).not.toBe("Completed");
+    for (const component of IN_TERMINAL_WINDOW) {
+      expect(terminalWindow, `${component} belongs to the SSH window`).toContain(`<${component}`);
+      expect(app, `${component} must not also sit in the main shell`).not.toContain(`<${component}`);
     }
+
+  });
+
+  /** The read-only browser rides with the shell it belongs to. */
+  it("gives the SSH window a file browser that never holds target identity", () => {
+    const terminalWindow = source("TerminalWindow.tsx");
+    expect(terminalWindow).toContain('data-testid="toggle-remote-files"');
+    expect(terminalWindow).toContain("window.lovelyresTerminal");
+    expect(terminalWindow).not.toContain("bindingHandle");
+
+    const preload = readFileSync(
+      path.join(rendererDir(), "..", "preload", "terminal.ts"),
+      "utf8",
+    );
+    for (const channel of [
+      "lovelyres:terminal:sftp:open",
+      "lovelyres:terminal:sftp:directory:list",
+      "lovelyres:terminal:sftp:text:read",
+    ]) expect(preload).toContain(channel);
+    // Main resolves the binding from the calling window, so none is sent.
+    expect(preload).not.toContain("bindingHandle");
+
+    const main = readFileSync(path.join(rendererDir(), "..", "main", "index.ts"), "utf8");
+    const boundary = main.slice(main.indexOf('ipcMain.handle("lovelyres:terminal:sftp:open"'));
+    expect((boundary.match(/terminalContextFor\(event\)/gu) ?? [])).toHaveLength(3);
+    expect(boundary).toContain("context.bindingHandle");
   });
 
   it("offers a way to connect from any page that is waiting for a target", () => {

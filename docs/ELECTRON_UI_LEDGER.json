@@ -1946,13 +1946,14 @@
    "replacement": {
     "state": "planned",
     "targets": [
-     "Keyed Electron SFTP BrowserWindow",
-     "Typed SFTP navigation/transfer/plan backend methods"
+     "Read-only browser inside the SSH window (shipped: sftp-browser.open/directory.list/text.read, window-scoped so the renderer never holds a binding handle)",
+     "Typed SFTP transfer/plan backend methods (upload, download, atomic write, backup/restore) are still unbuilt"
     ]
    },
    "status": "Pending",
    "acceptance": [
-    "Window registry, navigation, listing, validated remote paths, upload/download, atomic writes, overwrite-race prevention, backup/restore, transfer bounds/cancellation, directory terminal intent, and stale-target/session cleanup are equivalent."
+    "Shipped: navigation, listing, validated remote paths bounded to opaque per-browser handles, UTF-8 text preview, stale-target and session cleanup on disconnect.",
+    "Still pending: upload/download, atomic writes, overwrite-race prevention, backup/restore, transfer bounds and cancellation, and the directory terminal intent."
    ],
    "tests": {
     "required": [

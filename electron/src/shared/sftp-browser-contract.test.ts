@@ -15,20 +15,19 @@ const directory: SftpDirectorySnapshot = {
   directoryHandle: "opaque-directory",
   parentDirectoryHandle: null,
   directoryLabel: "根目录",
-  directoryLabelRedacted: false,
   directoryLabelTruncated: false,
   expiresInSeconds: 300,
   observedEntryCount: 4,
   displayedEntryCount: 4,
   truncated: false,
   entries: [
-    { entryHandle: "opaque-dir", name: "etc", nameRedacted: false, nameTruncated: false,
+    { entryHandle: "opaque-dir", name: "etc", nameTruncated: false,
       kind: "directory", action: "browse", sizeBytes: "4096", modifiedAt: "2026-08-24T10:00:00+00:00" },
-    { entryHandle: "opaque-file", name: "<script>evidence()", nameRedacted: false, nameTruncated: false,
+    { entryHandle: "opaque-file", name: "<script>evidence()", nameTruncated: false,
       kind: "file", action: "preview", sizeBytes: "42", modifiedAt: null },
-    { entryHandle: "opaque-link", name: "latest", nameRedacted: false, nameTruncated: false,
+    { entryHandle: "opaque-link", name: "latest", nameTruncated: false,
       kind: "symlink", action: "none", sizeBytes: "12", modifiedAt: null },
-    { entryHandle: "opaque-secret-name", name: "[SENSITIVE NAME REDACTED]", nameRedacted: true,
+    { entryHandle: "opaque-secret-name", name: "[SENSITIVE NAME REDACTED]",
       nameTruncated: false, kind: "other", action: "none", sizeBytes: "0", modifiedAt: null },
   ],
 };
@@ -39,7 +38,6 @@ const preview: SftpTextPreview = {
   text: "<script>evidence()</script>\n[SENSITIVE SFTP TEXT REDACTED]",
   observedLineCount: 4,
   displayedLineCount: 2,
-  redactedLineCount: 1,
   truncated: true,
 };
 
@@ -48,14 +46,20 @@ describe("sftp browser standalone contract", () => {
     expect(isSftpDirectorySnapshot(directory)).toBe(true);
   });
 
-  it("accepts hostile names as data and rejects credential-like unredacted names", () => {
+  /**
+   * Remote names are the operator's evidence, so they cross as written. Only
+   * what breaks rendering is refused.
+   */
+  it("accepts hostile names as data and refuses only control characters", () => {
     expect(isSftpDirectorySnapshot(directory)).toBe(true);
-    const leaked = structuredClone(directory);
-    leaked.entries[1]!.name = "password=do-not-render";
-    expect(isSftpDirectorySnapshot(leaked)).toBe(false);
-    const spoofed = structuredClone(directory);
-    spoofed.entries[1]!.name = "[SENSITIVE NAME REDACTED]";
-    expect(isSftpDirectorySnapshot(spoofed)).toBe(false);
+    for (const verbatim of ["password=keep-this", "id_rsa", "secret_key.pem", "</pre><script>"]) {
+      const named = structuredClone(directory);
+      named.entries[1]!.name = verbatim;
+      expect(isSftpDirectorySnapshot(named), verbatim).toBe(true);
+    }
+    const control = structuredClone(directory);
+    control.entries[1]!.name = "tab\u0009name";
+    expect(isSftpDirectorySnapshot(control)).toBe(false);
   });
 
   it("rejects symlink/file actions and handle aliasing", () => {
@@ -89,14 +93,12 @@ describe("sftp browser standalone contract", () => {
     expect(isSftpTextPreview({ ...preview, text: "[SENSITIVE SFTP TEXT REDACTED] spoof",
       displayedLineCount: 1, redactedLineCount: 0 })).toBe(false);
     expect(isSftpTextPreview({ ...preview, text: "x".repeat(4 * 1_024 + 1),
-      observedLineCount: 1, displayedLineCount: 1, redactedLineCount: 0, truncated: true })).toBe(false);
+      observedLineCount: 1, displayedLineCount: 1, truncated: true })).toBe(false);
   });
 
   it("handles empty text without inventing content", () => {
-    expect(isSftpTextPreview({ ...preview, text: "", observedLineCount: 0, displayedLineCount: 0,
-      redactedLineCount: 0, truncated: false })).toBe(true);
-    expect(isSftpTextPreview({ ...preview, text: "", observedLineCount: 1, displayedLineCount: 1,
-      redactedLineCount: 0, truncated: false })).toBe(true);
+    expect(isSftpTextPreview({ ...preview, text: "", observedLineCount: 0, displayedLineCount: 0, truncated: false })).toBe(true);
+    expect(isSftpTextPreview({ ...preview, text: "", observedLineCount: 1, displayedLineCount: 1, truncated: false })).toBe(true);
   });
 
   it("restricts opaque handles to bounded inert tokens", () => {

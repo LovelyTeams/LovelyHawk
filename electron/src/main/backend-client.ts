@@ -38,6 +38,8 @@ import {
   type DockerSecurityAudit,
   type EmergencyCommandCatalog,
   type EmergencyCommandResult,
+  type SftpDirectorySnapshot,
+  type SftpTextPreview,
   type PacketCaptureInterfaceList,
   type PacketCapturePoll,
   type PacketCaptureStarted,
@@ -163,6 +165,9 @@ import {
   isEmergencyCommandCatalog,
   isEmergencyCommandOpaqueHandle,
   isEmergencyCommandResult,
+  isSftpBrowserOpaqueHandle,
+  isSftpDirectorySnapshot,
+  isSftpTextPreview,
   isPacketCaptureCursor,
   isPacketCaptureInterfaceList,
   isPacketCaptureOpaqueHandle,
@@ -302,6 +307,7 @@ const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 15_000;
 const EMERGENCY_COMMAND_CATALOG_TIMEOUT_MS = 20_000;
 const EMERGENCY_COMMAND_RUN_TIMEOUT_MS = 45_000;
+const SFTP_BROWSER_TIMEOUT_MS = 30_000;
 const PACKET_CAPTURE_LIST_TIMEOUT_MS = 20_000;
 const PACKET_CAPTURE_START_TIMEOUT_MS = 40_000;
 const PACKET_CAPTURE_POLL_TIMEOUT_MS = 20_000;
@@ -369,6 +375,12 @@ export const DOCKER_READ_RPC_METHODS = Object.freeze({
 export const EMERGENCY_COMMAND_RPC_METHODS = Object.freeze({
   loadCatalog: "emergency-command.catalog.load",
   run: "emergency-command.run",
+} as const);
+
+export const SFTP_BROWSER_RPC_METHODS = Object.freeze({
+  open: "sftp-browser.open",
+  listDirectory: "sftp-browser.directory.list",
+  readText: "sftp-browser.text.read",
 } as const);
 
 export const PACKET_CAPTURE_LIVE_RPC_METHODS = Object.freeze({
@@ -2205,6 +2217,65 @@ export class BackendClient {
     const value = await this.#request("notes.export", { id });
     if (!isNotesTextExport(value)) {
       throw new Error("The backend returned an invalid notes export.");
+    }
+    return value;
+  }
+
+  async openSftpBrowser(bindingHandle: string): Promise<SftpDirectorySnapshot> {
+    if (!isSftpBrowserOpaqueHandle(bindingHandle)) {
+      throw new Error("The SFTP browser request is invalid.");
+    }
+    const value = await this.#request(SFTP_BROWSER_RPC_METHODS.open, {
+      bindingHandle,
+    }, SFTP_BROWSER_TIMEOUT_MS);
+    if (!isSftpDirectorySnapshot(value)) {
+      throw new Error("The backend returned an invalid SFTP directory.");
+    }
+    return value;
+  }
+
+  async listSftpDirectory(
+    bindingHandle: string,
+    browserHandle: string,
+    directoryHandle: string,
+  ): Promise<SftpDirectorySnapshot> {
+    if (![bindingHandle, browserHandle, directoryHandle].every(isSftpBrowserOpaqueHandle)) {
+      throw new Error("The SFTP directory request is invalid.");
+    }
+    const value = await this.#request(SFTP_BROWSER_RPC_METHODS.listDirectory, {
+      bindingHandle,
+      browserHandle,
+      directoryHandle,
+    }, SFTP_BROWSER_TIMEOUT_MS);
+    if (
+      !isSftpDirectorySnapshot(value) ||
+      value.browserHandle !== browserHandle ||
+      value.directoryHandle !== directoryHandle
+    ) {
+      throw new Error("The backend returned an invalid SFTP directory.");
+    }
+    return value;
+  }
+
+  async readSftpText(
+    bindingHandle: string,
+    browserHandle: string,
+    fileHandle: string,
+  ): Promise<SftpTextPreview> {
+    if (![bindingHandle, browserHandle, fileHandle].every(isSftpBrowserOpaqueHandle)) {
+      throw new Error("The SFTP preview request is invalid.");
+    }
+    const value = await this.#request(SFTP_BROWSER_RPC_METHODS.readText, {
+      bindingHandle,
+      browserHandle,
+      fileHandle,
+    }, SFTP_BROWSER_TIMEOUT_MS);
+    if (
+      !isSftpTextPreview(value) ||
+      value.browserHandle !== browserHandle ||
+      value.fileHandle !== fileHandle
+    ) {
+      throw new Error("The backend returned an invalid SFTP preview.");
     }
     return value;
   }

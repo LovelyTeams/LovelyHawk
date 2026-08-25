@@ -29,6 +29,9 @@ function deferred<T>() {
 function createApi(overrides: Partial<TerminalApi> = {}): TerminalApi {
   return {
     open: vi.fn(async (columns, rows) => ({ columns, rows })),
+  openSftpBrowser: vi.fn(async () => ({})),
+  listSftpDirectory: vi.fn(async () => ({})),
+  readSftpText: vi.fn(async () => ({})),
     poll: vi.fn(async (): Promise<TerminalPoll> => ({
       events: [{ kind: "closed" as const, sequence: 1 }],
       rawBytes: 0,

@@ -17,6 +17,9 @@ const api: TerminalApi = {
   search: vi.fn(async () => ({ matches: [], limited: false })),
   copySelection: vi.fn(async () => undefined),
   close: vi.fn(async () => ({ closed: true as const })),
+  openSftpBrowser: vi.fn(async () => ({})),
+  listSftpDirectory: vi.fn(async () => ({})),
+  readSftpText: vi.fn(async () => ({})),
 };
 
 describe("standalone xterm surface", () => {

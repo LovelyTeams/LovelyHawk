@@ -21,6 +21,7 @@ mod notes_api;
 mod packet_capture_live_api;
 mod quick_detection_api;
 mod settings_api;
+mod sftp_browser_api;
 mod snapshot_read_api;
 mod ssh_api;
 mod system_info_api;
@@ -76,6 +77,7 @@ use crate::{
     settings_api::{
         SettingsAiApiKeyReplacementInput, SettingsApi, SettingsApiError, SettingsSaveInput,
     },
+    sftp_browser_api::{SftpBrowserApi, SftpBrowserApiError},
     snapshot_read_api::{SnapshotDiffInput, SnapshotReadApi, SnapshotReadApiError},
     ssh_api::{SecretResponses, SshApi},
     system_info_api::{SystemInfoApi, SystemInfoApiError},
@@ -105,6 +107,7 @@ pub struct BackendState {
     diagnostic_log: DiagnosticLogApi,
     docker_read: DockerReadApi,
     emergency_command: EmergencyCommandApi,
+    sftp_browser: SftpBrowserApi,
     firewall_read: FirewallReadApi,
     integrity: Arc<IntegrityApi>,
     kubernetes_read: KubernetesReadApi,
@@ -180,6 +183,7 @@ impl BackendState {
         let diagnostic_log = DiagnosticLogApi::new(diagnostic_capture);
         let docker_read = DockerReadApi::new(services.clone(), Arc::clone(&ssh));
         let emergency_command = EmergencyCommandApi::new(services.clone(), Arc::clone(&ssh));
+        let sftp_browser = SftpBrowserApi::new(services.clone(), Arc::clone(&ssh));
         let firewall_read = FirewallReadApi::new(services.clone(), Arc::clone(&ssh));
         let integrity = Arc::new(IntegrityApi::new(services.clone(), Arc::clone(&ssh)));
         let kubernetes_read = KubernetesReadApi::new(services.clone(), Arc::clone(&ssh));
@@ -203,6 +207,7 @@ impl BackendState {
             diagnostic_log,
             docker_read,
             emergency_command,
+            sftp_browser,
             firewall_read,
             integrity,
             kubernetes_read,
@@ -439,6 +444,7 @@ impl BackendState {
                             self.emergency_command.close_binding(&params.binding_handle);
                             self.docker_read.close_binding(&params.binding_handle);
                             self.quick_detection.close_binding(&params.binding_handle);
+                            self.sftp_browser.close_binding(&params.binding_handle);
                             self.packet_capture_live
                                 .close_binding(&params.binding_handle)
                                 .await;
@@ -916,6 +922,47 @@ impl BackendState {
                         .await
                         .map(to_value)
                         .map_err(emergency_command_failure),
+                    Err(failure) => Err(failure),
+                }
+            }
+            RpcMethod::SftpBrowserOpen => {
+                match parse_params::<SftpBrowserBindingParams>(request.params) {
+                    Ok(params) => self
+                        .sftp_browser
+                        .open_sftp_browser(&params.binding_handle)
+                        .await
+                        .map(to_value)
+                        .map_err(sftp_browser_failure),
+                    Err(failure) => Err(failure),
+                }
+            }
+            RpcMethod::SftpBrowserDirectoryList => {
+                match parse_params::<SftpBrowserDirectoryParams>(request.params) {
+                    Ok(params) => self
+                        .sftp_browser
+                        .list_sftp_directory(
+                            &params.binding_handle,
+                            &params.browser_handle,
+                            &params.directory_handle,
+                        )
+                        .await
+                        .map(to_value)
+                        .map_err(sftp_browser_failure),
+                    Err(failure) => Err(failure),
+                }
+            }
+            RpcMethod::SftpBrowserTextRead => {
+                match parse_params::<SftpBrowserFileParams>(request.params) {
+                    Ok(params) => self
+                        .sftp_browser
+                        .read_sftp_text(
+                            &params.binding_handle,
+                            &params.browser_handle,
+                            &params.file_handle,
+                        )
+                        .await
+                        .map(to_value)
+                        .map_err(sftp_browser_failure),
                     Err(failure) => Err(failure),
                 }
             }
@@ -1769,6 +1816,12 @@ enum RpcMethod {
     EmergencyCommandCatalogLoad,
     #[serde(rename = "emergency-command.run")]
     EmergencyCommandRun,
+    #[serde(rename = "sftp-browser.open")]
+    SftpBrowserOpen,
+    #[serde(rename = "sftp-browser.directory.list")]
+    SftpBrowserDirectoryList,
+    #[serde(rename = "sftp-browser.text.read")]
+    SftpBrowserTextRead,
     #[serde(rename = "packet-capture.interfaces.list")]
     PacketCaptureInterfacesList,
     #[serde(rename = "packet-capture.start")]
@@ -2192,6 +2245,28 @@ struct EmergencyCommandRunParams {
     binding_handle: String,
     snapshot_handle: String,
     command_handle: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SftpBrowserBindingParams {
+    binding_handle: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SftpBrowserDirectoryParams {
+    binding_handle: String,
+    browser_handle: String,
+    directory_handle: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SftpBrowserFileParams {
+    binding_handle: String,
+    browser_handle: String,
+    file_handle: String,
 }
 
 #[derive(Deserialize)]
@@ -3137,6 +3212,53 @@ fn docker_read_failure(error: DockerReadApiError) -> RpcFailure {
             operation: "bound Docker read investigation",
             code: "docker-capacity",
             public_message: "The bounded Docker read capacity has been reached.",
+            source: None,
+        },
+    }
+}
+
+fn sftp_browser_failure(error: SftpBrowserApiError) -> RpcFailure {
+    match error {
+        SftpBrowserApiError::Core | SftpBrowserApiError::RegistryUnavailable => RpcFailure {
+            operation: "run bounded SFTP browser operation",
+            code: "sftp-browser-operation-failed",
+            public_message: "LovelyRes could not complete the SFTP browser operation.",
+            source: None,
+        },
+        SftpBrowserApiError::BindingUnavailable => RpcFailure {
+            operation: "validate SFTP browser SSH binding",
+            code: "sftp-browser-binding-unavailable",
+            public_message: "The SFTP browser target binding is missing or stale.",
+            source: None,
+        },
+        SftpBrowserApiError::InvalidHandle => RpcFailure {
+            operation: "validate SFTP browser request",
+            code: "sftp-browser-invalid",
+            public_message: "The SFTP browser request parameters are invalid.",
+            source: None,
+        },
+        SftpBrowserApiError::BrowserStale | SftpBrowserApiError::EntryUnavailable => RpcFailure {
+            operation: "validate SFTP browser capability",
+            code: "sftp-browser-unavailable",
+            public_message: "The SFTP browser capability is missing, expired, or stale.",
+            source: None,
+        },
+        SftpBrowserApiError::InvalidListing | SftpBrowserApiError::InvalidText => RpcFailure {
+            operation: "project SFTP browser response",
+            code: "sftp-browser-invalid-response",
+            public_message: "The SFTP browser response could not be projected safely.",
+            source: None,
+        },
+        SftpBrowserApiError::Busy | SftpBrowserApiError::Capacity => RpcFailure {
+            operation: "bound SFTP browser operation",
+            code: "sftp-browser-capacity",
+            public_message: "The bounded SFTP browser capacity has been reached.",
+            source: None,
+        },
+        SftpBrowserApiError::Deadline => RpcFailure {
+            operation: "bound SFTP browser deadline",
+            code: "sftp-browser-timeout",
+            public_message: "The SFTP browser operation exceeded its deadline.",
             source: None,
         },
     }

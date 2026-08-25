@@ -34,6 +34,13 @@ export interface TerminalApi {
   ): Promise<TerminalSearch>;
   copySelection(text: string): Promise<void>;
   close(): Promise<TerminalClosed>;
+  /**
+   * The read-only file browser for the same target. Main resolves which target
+   * the calling window belongs to, so no target identity reaches this renderer.
+   */
+  openSftpBrowser(): Promise<unknown>;
+  listSftpDirectory(browserHandle: string, directoryHandle: string): Promise<unknown>;
+  readSftpText(browserHandle: string, fileHandle: string): Promise<unknown>;
 }
 
 export interface TerminalWindowLaunchResult {
