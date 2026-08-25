@@ -19,12 +19,12 @@ const PLANTED = [
   ["backdoor in /etc/profile", "全局登录脚本内容", /198\.51\.100\.7|curl/u],
   ["backdoor in a profile.d drop-in", "全局登录脚本内容", /pyshared|helper|198\.51\.100\.7/u],
   ["backdoor in root's bashrc", "用户登录脚本内容", /curl|198\.51\.100\.7/u],
-  ["LD_PRELOAD in /etc/environment", "环境变量文件", /LD_PRELOAD/u],
+  ["LD_PRELOAD in /etc/environment", "环境变量", /LD_PRELOAD/u],
   ["ld.so.preload entry", "动态库注入痕迹", /pyshared|preload/u],
 
   // ssh
   ["attacker key in root's authorized_keys", "SSH 授权公钥内容", /ssh-(ed25519|rsa)/u],
-  ["root login and password auth enabled", "SSH 服务配置", /PermitRootLogin|PasswordAuthentication/u],
+  ["root login and password auth enabled", "SSH 服务配置", /permitrootlogin|passwordauthentication/iu],
 
   // persistence
   ["cron drop-in calling out", "系统计划任务内容", /198\.51\.100\.7|curl/u],

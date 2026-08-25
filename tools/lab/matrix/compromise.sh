@@ -156,8 +156,6 @@ printf 'payload\n' > '/var/tmp/... /notes .txt' 2>/dev/null
 ln -sf /dev/null /root/.bash_history 2>/dev/null
 
 # --------------------------------------------------------------------- network --
-line "$ATTACKER security.ubuntu.com" /etc/hosts
-line "$ATTACKER updates.openeuler.org" /etc/hosts
 
 # ------------------------------------------------------------------------- web --
 for root in /var/www/html /var/www/localhost/htdocs /srv/www/htdocs /usr/share/nginx/html; do
