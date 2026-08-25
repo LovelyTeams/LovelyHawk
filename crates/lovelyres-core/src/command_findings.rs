@@ -520,14 +520,21 @@ pub fn risky_network_parameter(line: &str) -> bool {
         return false;
     };
     let (name, value) = (name.trim(), value.trim());
-    if name.ends_with("ip_forward")
-        || name.ends_with("accept_redirects")
-        || name.ends_with("send_redirects")
-        || name.ends_with("accept_source_route")
-    {
+    // Loopback cannot receive a redirect or a source-routed packet, so its
+    // settings say nothing about how exposed the host is.
+    if name.contains(".conf.lo.") {
+        return false;
+    }
+    // Match the leaf exactly. A suffix match reads arp_filter as rp_filter, and
+    // arp_filter=0 is the kernel default on every host.
+    let leaf = name.rsplit('.').next().unwrap_or(name);
+    if matches!(
+        leaf,
+        "ip_forward" | "accept_redirects" | "send_redirects" | "accept_source_route"
+    ) {
         return value == "1";
     }
-    (name.ends_with("rp_filter") || name.ends_with("syncookies")) && value == "0"
+    matches!(leaf, "rp_filter" | "tcp_syncookies") && value == "0"
 }
 
 /// An outbound proxy forced by the environment or a profile script.
@@ -1401,6 +1408,32 @@ mod tests {
         assert!(!super::locked_attribute("/etc/apt/sources.list.d:"));
         assert!(!super::locked_attribute("lsattr: Operation not supported"));
         assert!(!super::locked_attribute(""));
+    }
+
+    /// arp_filter ends with rp_filter, so a suffix match read the kernel's own
+    /// default as a disabled reverse-path filter on every host.
+    #[test]
+    fn risky_network_parameter_matches_the_leaf_name() {
+        assert!(!super::risky_network_parameter(
+            "net.ipv4.conf.all.arp_filter = 0"
+        ));
+        assert!(super::risky_network_parameter(
+            "net.ipv4.conf.all.rp_filter = 0"
+        ));
+        assert!(!super::risky_network_parameter(
+            "net.ipv4.conf.all.rp_filter = 2"
+        ));
+        assert!(super::risky_network_parameter("net.ipv4.ip_forward = 1"));
+        assert!(super::risky_network_parameter(
+            "net.ipv4.tcp_syncookies = 0"
+        ));
+        // Loopback cannot receive a redirect, so its settings say nothing.
+        assert!(!super::risky_network_parameter(
+            "net.ipv4.conf.lo.accept_redirects = 1"
+        ));
+        assert!(super::risky_network_parameter(
+            "net.ipv4.conf.eth0.accept_redirects = 1"
+        ));
     }
 
     /// Alpine ships around twenty locked system accounts, none of which carry
