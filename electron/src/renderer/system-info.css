@@ -43,6 +43,19 @@
 .system-info-risk.warning { color: var(--warning-text); background: var(--warning-soft); }
 .system-info-risk.high { color: var(--danger-text); background: var(--danger-soft); }
 .system-info-truncated { margin: 0; padding: 8px 10px; color: var(--warning-text); background: var(--warning-soft); font-size: 12px; }
+.system-info-file-scroll { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 10px; overflow: auto; scrollbar-width: thin; }
+.system-info-file { flex: none; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.system-info-file > header { position: sticky; z-index: 1; top: 0; display: flex; gap: 12px; align-items: baseline; padding: 8px 12px; background: var(--surface-inset); border-bottom: 1px solid var(--border); }
+.system-info-file > header strong { color: var(--text-primary); font: 13px "Cascadia Mono", monospace; }
+.system-info-file > header span { color: var(--muted); font-size: 12px; }
+.system-info-file pre { margin: 0; padding: 6px 0; background: var(--surface); font-family: "Cascadia Mono", monospace; font-size: 12px; }
+.system-info-file-line { display: flex; gap: 12px; padding: 1px 12px; }
+.system-info-file-line.warning { background: var(--warning-soft); }
+.system-info-file-line.high { background: var(--danger-soft); }
+.system-info-file-number { flex: none; width: 42px; color: var(--muted); text-align: right; user-select: none; }
+.system-info-file-text { color: var(--text-secondary); overflow-wrap: anywhere; white-space: pre-wrap; }
+.system-info-file-line.warning .system-info-file-text { color: var(--warning-text); }
+.system-info-file-line.high .system-info-file-text { color: var(--danger-text); }
 .system-info-connect-prompt { display: flex; min-height: 440px; flex-direction: column; align-items: center; justify-content: center; padding: 45px; text-align: center; background: var(--surface); border: 1px dashed var(--border); border-radius: 17px; }
 .system-info-connect-prompt > span { display: grid; width: 58px; height: 58px; place-items: center; color: var(--accent-text); background: var(--accent-soft); border-radius: 17px; font-size: 27px; }
 .system-info-connect-prompt h1 { margin: 18px 0 8px; font-size: 18px; }

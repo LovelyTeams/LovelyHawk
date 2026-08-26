@@ -6,12 +6,14 @@ import {
   isSystemInfoSummary,
   isSystemInfoTable,
   type SystemInfoApi,
+  type SystemInfoTable,
   type SystemInfoTabKey,
 } from "../shared/system-info-contract";
 import {
   buildSystemInfoSummaryCopy,
   buildSystemInfoTableCopy,
   formatSystemInfoValue,
+  groupShellConfigRows,
   groupSystemInfoCatalog,
   nextModalFocusIndex,
   SUMMARY_FIELDS,
@@ -50,6 +52,9 @@ export function SystemInfoPage({ connection, api, writeClipboard }: SystemInfoPa
   const detailState = stateIsCurrent ? state.detail : null;
   useModalScrim(detailState !== null);
   const groups = useMemo(() => groupSystemInfoCatalog(catalog), [catalog]);
+  // Most tabs have no detail behind any of their rows; the column is only worth
+  // its width where at least one row can answer.
+  const anyDetail = table?.rows.some((row) => row.detail) ?? false;
   // The summary is a renderer-only tab: it reuses the snapshot the page already
   // loaded, so it never sends a collect request or crosses the tab contract.
   const [summaryTabActive, setSummaryTabActive] = useState(true);
@@ -363,16 +368,27 @@ export function SystemInfoPage({ connection, api, writeClipboard }: SystemInfoPa
                 {state.tableStatus === "ready" && table?.rows.length === 0 ? (
                   <div className="system-info-table-state">当前目标没有返回条目。</div>
                 ) : null}
-                {state.tableStatus === "ready" && table !== null && table.rows.length > 0 ? (
+                {state.tableStatus === "ready" && table !== null && table.rows.length > 0
+                  && table.tab === "shell-configs" ? (
+                  <ShellConfigText table={table} />
+                ) : null}
+                {state.tableStatus === "ready" && table !== null && table.rows.length > 0
+                  && table.tab !== "shell-configs" ? (
                   <div className="system-info-table-scroll">
                     <table>
-                      <thead><tr>{table.columns.map((column) => <th key={column}>{column}</th>)}<th>级别</th><th>详情</th></tr></thead>
+                      <thead><tr>{table.columns.map((column) => <th key={column}>{column}</th>)}<th>级别</th>{anyDetail ? <th>详情</th> : null}</tr></thead>
                       <tbody>
                         {table.rows.map((row) => (
                           <tr key={row.id}>
                             {row.cells.map((cell, index) => <td key={`${row.id}:${index}`}>{cell}</td>)}
                             <td><span className={`system-info-risk ${row.risk}`}>{riskLabel(row.risk)}</span></td>
-                            <td><button type="button" onClick={() => openDetail(row.id)}>查看</button></td>
+                            {anyDetail ? (
+                              <td>
+                                {row.detail
+                                  ? <button type="button" onClick={() => openDetail(row.id)}>查看</button>
+                                  : null}
+                              </td>
+                            ) : null}
                           </tr>
                         ))}
                       </tbody>
@@ -415,6 +431,40 @@ export function SystemInfoPage({ connection, api, writeClipboard }: SystemInfoPa
         </div>
       ) : null}
     </section>
+  );
+}
+
+/**
+ * Shell configuration, shown as the files it is.
+ *
+ * The risky lines keep their marking — a `curl … | sh` in a login script is the
+ * whole reason to open this tab — but they are marked in place, where the lines
+ * around them give them their meaning.
+ */
+function ShellConfigText({ table }: { table: SystemInfoTable }) {
+  const files = useMemo(() => groupShellConfigRows(table), [table]);
+  return (
+    <div className="system-info-file-scroll">
+      {files.map((file) => (
+        <article className="system-info-file" key={file.path}>
+          <header>
+            <strong>{file.path}</strong>
+            <span>{file.owner}</span>
+            <span>{file.modified}</span>
+            <span>{file.lines.length} 行</span>
+          </header>
+          <pre>
+            {file.lines.map((line) => (
+              <div className={`system-info-file-line ${line.risk}`} key={`${file.path}:${line.number}`}>
+                <span className="system-info-file-number">{line.number}</span>
+                <span className="system-info-file-text">{line.text}</span>
+              </div>
+            ))}
+          </pre>
+        </article>
+      ))}
+      {table.truncated ? <p className="system-info-truncated">结果已在 500 行边界截断。</p> : null}
+    </div>
   );
 }
 

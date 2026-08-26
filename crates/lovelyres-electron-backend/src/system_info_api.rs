@@ -355,11 +355,16 @@ impl fmt::Debug for SystemInfoTableDto {
 
 impl SystemInfoTableDto {
     fn from_table(snapshot_handle: String, table: SystemInfoTable) -> Self {
+        let rows = table
+            .rows
+            .iter()
+            .map(|row| SystemInfoRowDto::from_row(&table, row))
+            .collect();
         Self {
             snapshot_handle,
             tab: tab_key(table.tab),
             columns: table.columns,
-            rows: table.rows.into_iter().map(SystemInfoRowDto::from).collect(),
+            rows,
             truncated: table.truncated,
         }
     }
@@ -371,14 +376,23 @@ struct SystemInfoRowDto {
     id: String,
     cells: Vec<String>,
     risk: &'static str,
+    /// Whether asking for this row's detail would return anything.
+    ///
+    /// Only eight kinds of row have a detail command behind them. The window
+    /// offered 查看 on every row of every tab regardless, so on a port, a shell
+    /// line or a firewall rule the button could do nothing but fail, and it
+    /// failed with a message about a stale snapshot — which sent the operator
+    /// looking for a connection problem that was not there.
+    detail: bool,
 }
 
-impl From<SystemInfoRow> for SystemInfoRowDto {
-    fn from(row: SystemInfoRow) -> Self {
+impl SystemInfoRowDto {
+    fn from_row(table: &SystemInfoTable, row: &SystemInfoRow) -> Self {
         Self {
-            id: row.id,
-            cells: row.cells,
+            id: row.id.clone(),
+            cells: row.cells.clone(),
             risk: risk_key(row.risk),
+            detail: table.row_has_detail(row),
         }
     }
 }

@@ -24,6 +24,7 @@ const SCROLL_LISTS: Record<string, string> = {
   ".baseline-card-grid": ".baseline-card-grid > *",
   ".baseline-file-pane": ".baseline-file-pane > *",
   ".log-analysis-list": ".log-analysis-group",
+  ".system-info-file-scroll": ".system-info-file",
 };
 
 function rule(css: string, selector: string): string {

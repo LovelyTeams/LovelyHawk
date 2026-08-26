@@ -1,4 +1,5 @@
 import type {
+  SystemInfoRisk,
   SystemInfoSummary,
   SystemInfoTabCatalogEntry,
   SystemInfoTable,
@@ -73,6 +74,56 @@ export function formatSystemInfoValue(
   if (format === "seconds" && typeof value === "number") return formatDuration(value);
   if (format === "list" && Array.isArray(value)) return value.join(" / ");
   return String(value);
+}
+
+/** A file's modification time as the host reports it: seconds since the epoch. */
+export function formatEpochSeconds(value: string): string {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds <= 0) return value;
+  const when = new Date(seconds * 1_000);
+  if (Number.isNaN(when.getTime())) return value;
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())} ` +
+    `${pad(when.getHours())}:${pad(when.getMinutes())}`;
+}
+
+export interface ShellConfigLine {
+  number: string;
+  text: string;
+  risk: SystemInfoRisk;
+}
+
+export interface ShellConfigFile {
+  path: string;
+  owner: string;
+  modified: string;
+  lines: ShellConfigLine[];
+}
+
+/**
+ * Shell configuration arrives as one table row per line of the file, repeating
+ * the path, the owner and the timestamp on every one of them.
+ *
+ * Read as a table that is four columns of the same value next to one column of
+ * shell, three hundred rows deep, and a login script is unreadable that way —
+ * the thing an operator is looking for is a line that does not belong, which
+ * only shows against the lines around it. Grouped back into the files it came
+ * from, it is the files.
+ */
+export function groupShellConfigRows(table: SystemInfoTable): ShellConfigFile[] {
+  const files: ShellConfigFile[] = [];
+  const byPath = new Map<string, ShellConfigFile>();
+  for (const row of table.rows) {
+    const [path = "", owner = "", modified = "", number = "", text = ""] = row.cells;
+    let file = byPath.get(path);
+    if (file === undefined) {
+      file = { path, owner, modified: formatEpochSeconds(modified), lines: [] };
+      byPath.set(path, file);
+      files.push(file);
+    }
+    file.lines.push({ number, text, risk: row.risk });
+  }
+  return files;
 }
 
 export function buildSystemInfoSummaryCopy(summary: SystemInfoSummary): string {

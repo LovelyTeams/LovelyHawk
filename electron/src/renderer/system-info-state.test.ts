@@ -28,7 +28,12 @@ function table(tab: "processes" | "network", snapshotHandle: string): SystemInfo
     snapshotHandle,
     tab,
     columns: definition.columns,
-    rows: [{ id: `${tab}:1`, cells: definition.columns.map(() => "plain"), risk: "normal" }],
+    rows: [{
+      id: `${tab}:1`,
+      cells: definition.columns.map(() => "plain"),
+      risk: "normal",
+      detail: false,
+    }],
     truncated: false,
   };
 }

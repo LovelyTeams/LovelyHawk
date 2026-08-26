@@ -71,6 +71,7 @@ describe("system-info pure helpers", () => {
         id: "opaque-row-id",
         cells: ["root\tadmin", "0", "0", "/root", "/bin/bash\n--login"],
         risk: "normal",
+        detail: true,
       }],
       truncated: false,
     };

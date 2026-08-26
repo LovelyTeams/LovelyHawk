@@ -78,6 +78,8 @@ export interface SystemInfoRow {
   id: string;
   cells: string[];
   risk: SystemInfoRisk;
+  /** Whether this row has a detail behind it. Most rows do not. */
+  detail: boolean;
 }
 
 export interface SystemInfoTable {
@@ -268,11 +270,12 @@ export function isSystemInfoTable(value: unknown): value is SystemInfoTable {
   for (const row of value.rows) {
     if (
       !isRecord(row) ||
-      !exact(row, ["id", "cells", "risk"]) ||
+      !exact(row, ["id", "cells", "risk", "detail"]) ||
       !utf8(row.id, 256) ||
       rowIds.has(row.id) ||
       !Array.isArray(row.cells) ||
       row.cells.length !== definition.columns.length ||
+      typeof row.detail !== "boolean" ||
       (row.risk !== "normal" && row.risk !== "warning" && row.risk !== "high")
     ) return false;
     rowIds.add(row.id);

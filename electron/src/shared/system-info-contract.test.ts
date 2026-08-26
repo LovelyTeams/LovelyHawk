@@ -55,7 +55,12 @@ function tableFixture(): Record<string, unknown> {
     snapshotHandle: "42d64555-d01d-458a-9b27-4bb84f467135",
     tab: "users",
     columns: ["用户名", "UID", "GID", "主目录", "Shell"],
-    rows: [{ id: "user:root", cells: ["root", "0", "0", "/root", "/bin/bash"], risk: "normal" }],
+    rows: [{
+      id: "user:root",
+      cells: ["root", "0", "0", "/root", "/bin/bash"],
+      risk: "normal",
+      detail: true,
+    }],
     truncated: false,
   };
 }
@@ -98,11 +103,32 @@ describe("system-info process-boundary validators", () => {
     expect(isSystemInfoTable({ ...table, columns: ["用户名"] })).toBe(false);
     expect(isSystemInfoTable({
       ...table,
-      rows: [{ id: "one", cells: ["root"], risk: "normal" }],
+      rows: [{ id: "one", cells: ["root"], risk: "normal", detail: true }],
     })).toBe(false);
     expect(isSystemInfoTable({
       ...table,
-      rows: [{ id: "one", cells: ["root", "0", "0", "/root", "/bin/bash"], risk: "critical" }],
+      rows: [{
+        id: "one",
+        cells: ["root", "0", "0", "/root", "/bin/bash"],
+        risk: "critical",
+        detail: true,
+      }],
+    })).toBe(false);
+    // Whether a row has a detail decides whether the window offers a button
+    // that can only fail, so it has to arrive as a boolean and not as
+    // something merely truthy.
+    expect(isSystemInfoTable({
+      ...table,
+      rows: [{
+        id: "one",
+        cells: ["root", "0", "0", "/root", "/bin/bash"],
+        risk: "normal",
+        detail: "yes",
+      }],
+    })).toBe(false);
+    expect(isSystemInfoTable({
+      ...table,
+      rows: [{ id: "one", cells: ["root", "0", "0", "/root", "/bin/bash"], risk: "normal" }],
     })).toBe(false);
     expect(isSystemInfoTable({
       ...table,
@@ -110,6 +136,7 @@ describe("system-info process-boundary validators", () => {
         id: `row-${index}`,
         cells: ["user", "1", "1", "/home/user", "/bin/sh"],
         risk: "normal",
+        detail: false,
       })),
     })).toBe(false);
   });
