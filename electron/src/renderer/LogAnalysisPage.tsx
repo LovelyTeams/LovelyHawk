@@ -1,5 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 
+import { targetFailureMessage } from "./target-lost";
+
 import {
   isLogCorrelationInput,
   isLogCorrelationResult,
@@ -92,7 +94,7 @@ export function LogAnalysisPage({ bindingHandle, api }: LogAnalysisPageProps) {
       if (cancelled) return;
       if (!isLogSourceSnapshot(result)) throw new Error();
       dispatch({ type: "snapshot-loaded", scope, request, snapshot: result });
-    }).catch(() => {
+    }).catch((reason: unknown) => {
       if (!cancelled) dispatch({
         type: "snapshot-failed",
         scope,
@@ -137,12 +139,12 @@ export function LogAnalysisPage({ bindingHandle, api }: LogAnalysisPageProps) {
       if (!isLogSourceReadResult(result) || result.snapshotHandle !== snapshotHandle ||
         result.sourceHandle !== selectedSource.sourceHandle || result.page !== state.page) throw new Error();
       dispatch({ type: "read-loaded", scope, request, result });
-    }).catch(() => {
+    }).catch((reason: unknown) => {
       if (!cancelled) dispatch({
         type: "read-failed",
         scope,
         request,
-        error: "日志源快照已过期、目标已变化或返回内容无效。",
+        error: targetFailureMessage(reason, "日志源快照已过期、目标已变化或返回内容无效。"),
       });
     });
     return () => {
@@ -183,7 +185,7 @@ export function LogAnalysisPage({ bindingHandle, api }: LogAnalysisPageProps) {
       if (activeScopeRef.current !== scope) return;
       if (!isLogCorrelationResult(result) || result.snapshotHandle !== snapshotHandle) throw new Error();
       dispatch({ type: "correlation-loaded", scope, request, result });
-    }).catch(() => {
+    }).catch((reason: unknown) => {
       if (activeScopeRef.current === scope) dispatch({
         type: "correlation-failed",
         scope,
@@ -214,7 +216,7 @@ export function LogAnalysisPage({ bindingHandle, api }: LogAnalysisPageProps) {
       if (activeScopeRef.current !== scope) return;
       if (!isLogIocSearchResult(result) || result.snapshotHandle !== snapshotHandle) throw new Error();
       dispatch({ type: "ioc-loaded", scope, request, result });
-    }).catch(() => {
+    }).catch((reason: unknown) => {
       if (activeScopeRef.current === scope) dispatch({
         type: "ioc-failed",
         scope,

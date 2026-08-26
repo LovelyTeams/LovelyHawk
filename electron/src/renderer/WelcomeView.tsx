@@ -4,7 +4,6 @@ import type { ConnectionSummary } from "../shared/contract";
 import type { ConnectionManagerIntent } from "./ConnectionManager";
 
 export interface WelcomeViewProps {
-  productName: string;
   connections: ConnectionSummary[];
   /**
    * Every action opens the connection manager with an intent instead of acting
@@ -78,29 +77,22 @@ const ACTIONS: readonly {
  * hands every action to the connection manager.
  */
 export function WelcomeView({
-  productName,
   connections,
   onConnectionAction,
   onCreateConnection,
 }: WelcomeViewProps) {
   return (
     <div className="page welcome-page" data-testid="welcome-view">
-      <section className="hero-card">
-        <div>
-          <span className="hero-mark" aria-hidden="true">L</span>
-          <p>应急响应</p>
-        </div>
-        <h2>{productName}</h2>
-        <p>
-          先在连接管理中建立一个 SSH 连接，左侧的功能页会随目标一起启用。
-          未连接目标时，所有远程采集与处置都保持关闭。
-        </p>
-      </section>
-
+      {/* The banner that used to sit here said the product name back to the
+          operator and cost a screenful. What it said that was worth keeping is
+          one sentence, so it sits with the list it is about. */}
       <div className="section-heading">
         <div>
           <h2>已保存连接</h2>
-          <p>选择一个连接进入连接管理，或新建一个。</p>
+          <p>
+            先在连接管理中建立一个 SSH 连接，左侧的功能页会随目标一起启用。
+            未连接目标时，所有远程采集与处置都保持关闭。
+          </p>
         </div>
         <span>{connections.length}</span>
       </div>

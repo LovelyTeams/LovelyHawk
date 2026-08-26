@@ -280,6 +280,12 @@ impl From<CoreError> for BaselineReadApiError {
         // The renderer only ever sees a fixed message, so without this the
         // reason a page failed is lost before anyone can read it.
         tracing::warn!(operation = "BaselineRead", error = %error, "core operation failed");
+        // A host that went away is not a failure of this feature. One lost
+        // connection reported once beats a dozen features each announcing
+        // their own breakage.
+        if matches!(error, CoreError::SshDisconnected { .. }) {
+            return Self::BindingUnavailable;
+        }
         Self::Core
     }
 }

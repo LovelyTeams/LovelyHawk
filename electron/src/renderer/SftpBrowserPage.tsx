@@ -1,5 +1,7 @@
 import { useEffect, useReducer, useRef, useState, type MouseEvent } from "react";
 
+import { targetFailureMessage } from "./target-lost";
+
 import {
   isSftpDirectorySnapshot,
   isSftpOperationPlan,
@@ -121,7 +123,7 @@ export function SftpBrowserPage({
       if (cancelled) return;
       if (!isSftpDirectorySnapshot(value) || value.parentDirectoryHandle !== null) throw new Error();
       dispatch({ type: "directory-loaded", scope, request, directory: value });
-    }).catch(() => {
+    }).catch((reason: unknown) => {
       if (!cancelled) dispatch({
         type: "directory-failed",
         scope,
@@ -148,12 +150,12 @@ export function SftpBrowserPage({
       if (!isSftpDirectorySnapshot(value) || value.browserHandle !== request.browserHandle ||
         value.directoryHandle !== request.directoryHandle) throw new Error();
       dispatch({ type: "directory-loaded", scope, request, directory: value });
-    }).catch(() => {
+    }).catch((reason: unknown) => {
       if (!cancelled) dispatch({
         type: "directory-failed",
         scope,
         request,
-        error: "目录读取失败；能力可能过期、目标已切换、权限不足或条目已变化。",
+        error: targetFailureMessage(reason, "目录读取失败；能力可能过期、目标已切换、权限不足或条目已变化。"),
       });
     });
     return () => {
@@ -171,7 +173,7 @@ export function SftpBrowserPage({
       if (!isSftpTextPreview(value) || value.browserHandle !== request.browserHandle ||
         value.fileHandle !== request.fileHandle) throw new Error();
       dispatch({ type: "preview-loaded", scope, request, preview: value });
-    }).catch(() => {
+    }).catch((reason: unknown) => {
       if (!cancelled) dispatch({
         type: "preview-failed",
         scope,

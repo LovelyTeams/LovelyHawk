@@ -727,7 +727,13 @@ impl fmt::Display for FirewallReadApiError {
 impl std::error::Error for FirewallReadApiError {}
 
 impl From<CoreError> for FirewallReadApiError {
-    fn from(_error: CoreError) -> Self {
+    fn from(error: CoreError) -> Self {
+        // A host that went away is not a failure of this feature. One lost
+        // connection reported once beats a dozen features each announcing
+        // their own breakage.
+        if matches!(error, CoreError::SshDisconnected { .. }) {
+            return Self::BindingUnavailable;
+        }
         Self::Core
     }
 }

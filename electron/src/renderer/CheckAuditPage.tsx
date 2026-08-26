@@ -1,5 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 
+import { targetFailureMessage } from "./target-lost";
+
 import {
   isCheckAuditCatalog,
   isCheckAuditLogResult,
@@ -66,12 +68,12 @@ export function CheckAuditPage({ bindingHandle, api }: CheckAuditPageProps) {
       if (cancelled) return;
       if (!isCheckAuditCatalog(result)) throw new Error();
       dispatch({ type: "catalog-loaded", scope, request, catalog: result });
-    }).catch(() => {
+    }).catch((reason: unknown) => {
       if (!cancelled) dispatch({
         type: "catalog-failed",
         scope,
         request,
-        error: "命令审计目录无效、目标已变化或当前绑定不可用。",
+        error: targetFailureMessage(reason, "命令审计目录无效、目标已变化或当前绑定不可用。"),
       });
     });
     return () => {
@@ -91,7 +93,7 @@ export function CheckAuditPage({ bindingHandle, api }: CheckAuditPageProps) {
       if (cancelled) return;
       if (!isCheckAuditStatus(result) || result.snapshotHandle !== snapshotHandle) throw new Error();
       dispatch({ type: "status-loaded", scope, request, status: result });
-    }).catch(() => {
+    }).catch((reason: unknown) => {
       if (!cancelled) dispatch({
         type: "status-failed",
         scope,
@@ -115,7 +117,7 @@ export function CheckAuditPage({ bindingHandle, api }: CheckAuditPageProps) {
       if (!isCheckAuditLogResult(result) || result.snapshotHandle !== snapshotHandle ||
         result.limit !== request.input.limit) throw new Error();
       dispatch({ type: "log-loaded", scope, request, result });
-    }).catch(() => {
+    }).catch((reason: unknown) => {
       if (!cancelled) dispatch({
         type: "log-failed",
         scope,

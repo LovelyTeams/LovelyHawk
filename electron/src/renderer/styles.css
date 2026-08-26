@@ -81,19 +81,15 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .page-heading > button { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
 .content { position: relative; min-width: 0; min-height: 0; overflow: auto; background: var(--bg); scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
 .content-page-loading { display: grid; min-height: 220px; place-items: center; color: var(--muted); font-size: 13px; }
-.page { width: min(1240px, calc(100% - 44px)); margin: 0 auto; padding: 24px 0 44px; }
+/* Full width, with only enough inset that content does not touch the frame.
+   A centred 1240px column reads well for prose and wastes a third of a wide
+   screen on the tables and lists this tool is actually made of. */
+.page { width: 100%; margin: 0; padding: 18px 20px 32px; }
 .page-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 20px; }
 .page-heading h1 { margin: 2px 0 5px; color: var(--text); font-size: 22px; font-weight: 600; letter-spacing: -.02em; }
 .page-heading p { max-width: 720px; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
 .eyebrow { color: var(--accent-text) !important; font-size: 13px !important; font-weight: 600; letter-spacing: .12em; }
 
-.hero-card { position: relative; overflow: hidden; padding: 24px 26px; color: var(--hero-text); background: var(--hero-gradient); border: 1px solid var(--border); border-radius: 12px; }
-.hero-card::after { position: absolute; right: -70px; top: -120px; width: 300px; height: 300px; content: ""; background: color-mix(in srgb, var(--hero-text) 8%, transparent); border: 1px solid color-mix(in srgb, var(--hero-text) 14%, transparent); border-radius: 50%; }
-.hero-card > div { display: flex; align-items: center; gap: 8px; }
-.hero-card > div p { margin: 0; color: var(--hero-muted); font-size: 13px; letter-spacing: .12em; text-transform: uppercase; }
-.hero-mark { display: grid; place-items: center; width: 23px; height: 23px; background: color-mix(in srgb, var(--hero-text) 14%, transparent); border: 1px solid color-mix(in srgb, var(--hero-text) 22%, transparent); border-radius: 7px; font-weight: 700; }
-.hero-card h2 { position: relative; z-index: 1; max-width: 650px; margin: 14px 0 7px; font-size: 19px; font-weight: 600; letter-spacing: -.015em; }
-.hero-card > p { position: relative; z-index: 1; max-width: 720px; margin: 0; color: var(--hero-muted); font-size: 13px; line-height: 1.65; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; margin: 31px 2px 13px; }
 .section-heading h2 { margin: 0 0 3px; font-size: 14px; font-weight: 600; }
 .section-heading p { margin: 0; color: var(--faint); font-size: 12px; }
@@ -326,7 +322,6 @@ button:disabled { cursor: not-allowed; opacity: .48; }
   .connection-form-grid.four-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
-.welcome-page .hero-card { margin-bottom: 4px; }
 .welcome-page .empty-state { display: flex; flex-direction: column; align-items: center; gap: 14px; }
 .welcome-page .empty-state p { margin: 0; }
 .welcome-create-button { padding: 8px 16px; color: var(--on-accent); background: var(--accent); border: 0; border-radius: 7px; font-size: 13px; font-weight: 500; }

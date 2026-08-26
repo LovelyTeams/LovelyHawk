@@ -457,7 +457,6 @@ export function App() {
           <Suspense fallback={<div className="content-page-loading" role="status">正在打开页面…</div>}>
           {activePage === null ? (
             <WelcomeView
-              productName={bootstrap.productName}
               connections={connections}
               onConnectionAction={(connectionId, intent, returnFocus) =>
                 openConnectionManager({ connectionId, startCreating: false, intent }, returnFocus)}

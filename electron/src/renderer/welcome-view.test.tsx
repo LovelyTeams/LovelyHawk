@@ -27,7 +27,6 @@ describe("WelcomeView", () => {
   it("lists saved connections as plain text without leaking secrets or handles", () => {
     const markup = renderToStaticMarkup(
       <WelcomeView
-        productName="LovelyRes"
         connections={[connection(), connection({ id: "connection-2", name: "数据库", host: "10.0.0.9" })]}
         onConnectionAction={() => undefined}
         onCreateConnection={() => undefined}
@@ -71,7 +70,6 @@ describe("WelcomeView", () => {
   it("renders hostile connection names as inert text", () => {
     const markup = renderToStaticMarkup(
       <WelcomeView
-        productName="LovelyRes"
         connections={[connection({ name: "</strong><script>steal()</script>" })]}
         onConnectionAction={() => undefined}
         onCreateConnection={() => undefined}
@@ -85,7 +83,6 @@ describe("WelcomeView", () => {
   it("offers connection creation when nothing is saved yet", () => {
     const markup = renderToStaticMarkup(
       <WelcomeView
-        productName="LovelyRes"
         connections={[]}
         onConnectionAction={() => undefined}
         onCreateConnection={() => undefined}

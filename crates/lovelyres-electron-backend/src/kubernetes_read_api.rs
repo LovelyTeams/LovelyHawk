@@ -497,6 +497,12 @@ impl std::error::Error for KubernetesReadApiError {
 
 impl From<CoreError> for KubernetesReadApiError {
     fn from(error: CoreError) -> Self {
+        // A host that went away is not a failure of this feature. One lost
+        // connection reported once beats a dozen features each announcing
+        // their own breakage.
+        if matches!(error, CoreError::SshDisconnected { .. }) {
+            return Self::BindingUnavailable;
+        }
         Self::Core(error)
     }
 }
@@ -523,6 +529,7 @@ fn core_error_kind(error: &CoreError) -> &'static str {
             "CoreSshHostKeyConfirmationRequired([REDACTED])"
         }
         CoreError::SshHostKeyChanged { .. } => "CoreSshHostKeyChanged([REDACTED])",
+        CoreError::SshDisconnected { .. } => "CoreSshDisconnected([REDACTED])",
         CoreError::SshKeyboardInteractiveRequired { .. } => {
             "CoreSshKeyboardInteractiveRequired([REDACTED])"
         }

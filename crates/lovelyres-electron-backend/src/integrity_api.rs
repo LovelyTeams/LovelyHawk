@@ -481,6 +481,12 @@ impl std::error::Error for IntegrityApiError {
 
 impl From<CoreError> for IntegrityApiError {
     fn from(error: CoreError) -> Self {
+        // A host that went away is not a failure of this feature. One lost
+        // connection reported once beats a dozen features each announcing
+        // their own breakage.
+        if matches!(error, CoreError::SshDisconnected { .. }) {
+            return Self::BindingUnavailable;
+        }
         Self::Core(error)
     }
 }

@@ -1,5 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 
+import { targetFailureMessage } from "./target-lost";
+
 import {
   isBaselineCatalog,
   isBaselineHistory,
@@ -85,7 +87,7 @@ export function BaselinePage({ bindingHandle, api, active = true, embedded = fal
       if (cancelled) return;
       if (!isBaselineCatalog(result)) throw new Error();
       dispatch({ type: "catalog-loaded", request, catalog: result });
-    }).catch(() => {
+    }).catch((reason: unknown) => {
       if (!cancelled) dispatch({
         type: "catalog-failed",
         request,
@@ -107,12 +109,12 @@ export function BaselinePage({ bindingHandle, api, active = true, embedded = fal
       if (cancelled) return;
       if (!isBaselineScan(result)) throw new Error();
       dispatch({ type: "scan-loaded", scope, request, scan: result });
-    }).catch(() => {
+    }).catch((reason: unknown) => {
       if (!cancelled) dispatch({
         type: "scan-failed",
         scope,
         request,
-        error: "无法读取当前目标的基线状态；绑定可能已变化、断开或权限不足。",
+        error: targetFailureMessage(reason, "无法读取当前目标的基线状态；绑定可能已变化、断开或权限不足。"),
       });
     });
     return () => {
@@ -130,12 +132,12 @@ export function BaselinePage({ bindingHandle, api, active = true, embedded = fal
       if (cancelled) return;
       if (!isBaselineHistory(result)) throw new Error();
       dispatch({ type: "history-loaded", scope, request, history: result });
-    }).catch(() => {
+    }).catch((reason: unknown) => {
       if (!cancelled) dispatch({
         type: "history-failed",
         scope,
         request,
-        error: "无法读取当前目标的基线历史；绑定可能已变化、断开或本地记录不可用。",
+        error: targetFailureMessage(reason, "无法读取当前目标的基线历史；绑定可能已变化、断开或本地记录不可用。"),
       });
     });
     return () => {

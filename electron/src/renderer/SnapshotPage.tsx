@@ -1,5 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 
+import { targetFailureMessage } from "./target-lost";
+
 import {
   forensicCollectors,
   isSnapshotDetail,
@@ -60,12 +62,12 @@ export function SnapshotPage({ bindingHandle, api }: SnapshotPageProps) {
       if (cancelled) return;
       if (!isSnapshotListResult(result)) throw new Error();
       dispatch({ type: "list-loaded", scope, request, list: result });
-    }).catch(() => {
+    }).catch((reason: unknown) => {
       if (!cancelled) dispatch({
         type: "list-failed",
         scope,
         request,
-        error: "快照索引不可用、目标已变化或当前绑定已失效。",
+        error: targetFailureMessage(reason, "快照索引不可用、目标已变化或当前绑定已失效。"),
       });
     });
     return () => {
@@ -89,7 +91,7 @@ export function SnapshotPage({ bindingHandle, api }: SnapshotPageProps) {
         throw new Error();
       }
       dispatch({ type: "detail-loaded", scope, request, detail: result });
-    }).catch(() => {
+    }).catch((reason: unknown) => {
       if (!cancelled) dispatch({
         type: "detail-failed",
         scope,
@@ -122,7 +124,7 @@ export function SnapshotPage({ bindingHandle, api }: SnapshotPageProps) {
       if (!isSnapshotDiffResult(result) || result.olderSnapshotHandle !== request.olderSnapshotHandle ||
         result.newerSnapshotHandle !== request.newerSnapshotHandle) throw new Error();
       dispatch({ type: "diff-loaded", scope, request, diff: result });
-    }).catch(() => {
+    }).catch((reason: unknown) => {
       if (!cancelled) dispatch({
         type: "diff-failed",
         scope,

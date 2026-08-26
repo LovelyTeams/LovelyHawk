@@ -1,5 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 
+import { targetFailureMessage } from "./target-lost";
+
 import {
   isDockerContainerSnapshot,
   isDockerLogs,
@@ -66,7 +68,7 @@ export function DockerPage({ bindingHandle, api }: DockerPageProps) {
       if (cancelled) return;
       if (!isDockerContainerSnapshot(result)) throw new Error();
       dispatch({ type: "snapshot-loaded", scope, request, snapshot: result });
-    }).catch(() => {
+    }).catch((reason: unknown) => {
       if (!cancelled) {
         dispatch({
           type: "snapshot-failed",
@@ -108,7 +110,7 @@ export function DockerPage({ bindingHandle, api }: DockerPageProps) {
         request,
         collection: result,
       });
-    }).catch(() => {
+    }).catch((reason: unknown) => {
       if (!cancelled) {
         dispatch({
           type: "collection-failed",
@@ -116,7 +118,7 @@ export function DockerPage({ bindingHandle, api }: DockerPageProps) {
           snapshotHandle,
           kind: collectionKind,
           request,
-          error: "资源快照已过期、目标已变化或 Docker 响应无效。",
+          error: targetFailureMessage(reason, "资源快照已过期、目标已变化或 Docker 响应无效。"),
         });
       }
     });
@@ -135,7 +137,7 @@ export function DockerPage({ bindingHandle, api }: DockerPageProps) {
       if (cancelled) return;
       if (!isDockerSecurityAudit(result) || result.snapshotHandle !== snapshotHandle) throw new Error();
       dispatch({ type: "audit-loaded", scope, snapshotHandle, request, audit: result });
-    }).catch(() => {
+    }).catch((reason: unknown) => {
       if (!cancelled) {
         dispatch({
           type: "audit-failed",
@@ -164,7 +166,7 @@ export function DockerPage({ bindingHandle, api }: DockerPageProps) {
       if (!isDockerReadInspection(result) || result.kind !== kind ||
         result.snapshotHandle !== snapshotHandle || result.resourceHandle !== handle) throw new Error();
       dispatch({ type: "inspection-loaded", scope, snapshotHandle, kind, handle, request, inspection: result });
-    }).catch(() => {
+    }).catch((reason: unknown) => {
       if (!cancelled) {
         dispatch({
           type: "inspection-failed",
@@ -173,7 +175,7 @@ export function DockerPage({ bindingHandle, api }: DockerPageProps) {
           kind,
           handle,
           request,
-          error: "所选资源已失效、目标已变化或调查结果无效。",
+          error: targetFailureMessage(reason, "所选资源已失效、目标已变化或调查结果无效。"),
         });
       }
     });

@@ -174,6 +174,15 @@ pub enum CoreError {
         operation: &'static str,
         message: String,
     },
+
+    /// The connection to the target is gone.
+    ///
+    /// Separate from [`CoreError::Ssh`] because it is not a failure of the
+    /// operation that reported it: a host that went away makes every feature
+    /// fail at once, and each of them saying so in its own words reads as a
+    /// dozen broken features rather than one lost connection.
+    #[error("SSH connection to the target is gone: {message}")]
+    SshDisconnected { message: String },
 }
 
 impl CoreError {
@@ -210,12 +219,79 @@ impl CoreError {
         }
     }
 
+    /// Classifies an SSH failure, so a lost connection is not reported as a
+    /// failure of whatever happened to ask for it first.
     pub(crate) fn ssh(operation: &'static str, message: impl Into<String>) -> Self {
-        Self::Ssh {
-            operation,
-            message: message.into(),
+        let message = message.into();
+        if transport_is_gone(&message) {
+            return Self::SshDisconnected { message };
         }
+        Self::Ssh { operation, message }
     }
 }
 
+/// Whether an SSH library error means the transport itself is gone.
+///
+/// The library reports this as ordinary errors on whatever call happened to be
+/// made next, so the shapes are matched here rather than guessed at each call
+/// site. Matching too little only leaves the old wording; matching too much
+/// would report a live connection as lost, so every entry below is a message
+/// the library only produces once the session task has ended.
+fn transport_is_gone(message: &str) -> bool {
+    const GONE: [&str; 6] = [
+        // The session task is no longer receiving, so nothing can be opened.
+        "Channel send error",
+        "channel send error",
+        // The peer closed, or the socket did.
+        "Connection closed",
+        "connection reset",
+        "broken pipe",
+        "Not connected",
+    ];
+    GONE.iter().any(|shape| message.contains(shape))
+}
+
 pub type CoreResult<T> = Result<T, CoreError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_lost_transport_is_not_reported_as_a_failed_operation() {
+        let lost = CoreError::ssh("open command channel", "Channel send error");
+        assert!(matches!(lost, CoreError::SshDisconnected { .. }));
+        assert!(
+            lost.to_string()
+                .contains("connection to the target is gone")
+        );
+    }
+
+    #[test]
+    fn an_ordinary_ssh_failure_keeps_saying_what_failed() {
+        let refused = CoreError::ssh("execute command", "remote probe exited with Some(1)");
+        assert!(matches!(refused, CoreError::Ssh { .. }));
+        assert!(refused.to_string().contains("execute command"));
+    }
+
+    #[test]
+    fn only_the_shapes_that_mean_the_session_ended_count_as_gone() {
+        for message in [
+            "Channel send error",
+            "Connection closed by peer",
+            "broken pipe",
+        ] {
+            assert!(transport_is_gone(message), "{message}");
+        }
+        // A refused channel, a timeout and a permission problem all happen on a
+        // connection that is still there.
+        for message in [
+            "channel open failure: administratively prohibited",
+            "command timed out",
+            "Permission denied (publickey)",
+            "host key confirmation required",
+        ] {
+            assert!(!transport_is_gone(message), "{message}");
+        }
+    }
+}

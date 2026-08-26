@@ -1,5 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 
+import { targetFailureMessage } from "./target-lost";
+
 import {
   isMiddlewareConfiguration,
   isMiddlewareDiscovery,
@@ -63,7 +65,7 @@ export function MiddlewarePage({ bindingHandle, api }: MiddlewarePageProps) {
       if (cancelled) return;
       if (!isMiddlewareDiscovery(result)) throw new Error();
       dispatch({ type: "discovery-loaded", scope, request, discovery: result });
-    }).catch(() => {
+    }).catch((reason: unknown) => {
       if (!cancelled) dispatch({
         type: "discovery-failed",
         scope,
@@ -90,12 +92,12 @@ export function MiddlewarePage({ bindingHandle, api }: MiddlewarePageProps) {
       if (cancelled) return;
       if (!isMiddlewareConfiguration(result)) throw new Error();
       dispatch({ type: "configuration-loaded", scope, request, configuration: result });
-    }).catch(() => {
+    }).catch((reason: unknown) => {
       if (!cancelled) dispatch({
         type: "configuration-failed",
         scope,
         request,
-        error: "无法安全读取所选实例配置；discovery 可能过期、目标已变化或配置图不满足边界。",
+        error: targetFailureMessage(reason, "无法安全读取所选实例配置；discovery 可能过期、目标已变化或配置图不满足边界。"),
       });
     });
     return () => {
@@ -121,7 +123,7 @@ export function MiddlewarePage({ bindingHandle, api }: MiddlewarePageProps) {
       if (cancelled) return;
       if (!isMiddlewareHistory(result)) throw new Error();
       dispatch({ type: "history-loaded", scope, request, history: result });
-    }).catch(() => {
+    }).catch((reason: unknown) => {
       if (!cancelled) dispatch({
         type: "history-failed",
         scope,

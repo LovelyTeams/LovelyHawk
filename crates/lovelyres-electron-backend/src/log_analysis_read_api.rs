@@ -127,7 +127,14 @@ impl LogAnalysisReadApi {
         );
         self.validate_binding(&scope)?;
         if files.is_err() && journal.is_err() {
-            return Err(LogAnalysisReadApiError::Core);
+            // Both probes failing because the host went away is one lost
+            // connection, not a log investigation that broke. Keeping the
+            // classification here rather than collapsing to `Core` is what
+            // lets the window say so.
+            return Err(match files.err().or_else(|| journal.err()) {
+                Some(reason) => LogAnalysisReadApiError::from(reason),
+                None => LogAnalysisReadApiError::Core,
+            });
         }
         let partial = files.is_err() || journal.is_err();
         let (entry, dto) =
@@ -455,6 +462,12 @@ impl From<CoreError> for LogAnalysisReadApiError {
         // The renderer only ever sees a fixed message, so without this the
         // reason a page failed is lost before anyone can read it.
         tracing::warn!(operation = "LogAnalysisRead", error = %error, "core operation failed");
+        // A host that went away is not a failure of this feature. One lost
+        // connection reported once beats a dozen features each announcing
+        // their own breakage.
+        if matches!(error, CoreError::SshDisconnected { .. }) {
+            return Self::BindingUnavailable;
+        }
         Self::Core
     }
 }

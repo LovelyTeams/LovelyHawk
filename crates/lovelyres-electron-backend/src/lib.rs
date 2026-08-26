@@ -3035,7 +3035,10 @@ fn system_info_failure(error: SystemInfoApiError) -> RpcFailure {
         ),
         SystemInfoApiError::BindingUnavailable => RpcFailure {
             operation: "validate system-information SSH binding",
-            code: "ssh-capability-not-found",
+            // Named the way every other target-bound capability names it, so a
+            // window can tell "the target is gone" from "this feature failed"
+            // without an entry per feature.
+            code: "system-info-binding-unavailable",
             public_message: "The SSH binding is missing or stale.",
             source: None,
         },
@@ -7500,9 +7503,11 @@ mod tests {
         )
         .await;
         assert!(!summary.ok);
+        // Named like every other target-bound capability, so the window can
+        // recognise a lost target without knowing which feature asked.
         assert_eq!(
             summary.error.as_ref().unwrap().code,
-            "ssh-capability-not-found"
+            "system-info-binding-unavailable"
         );
         assert!(
             !serde_json::to_string(&summary)

@@ -1,5 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 
+import { targetFailureMessage } from "./target-lost";
+
 import {
   isEmergencyCommandCatalog,
   isEmergencyCommandResult,
@@ -73,12 +75,12 @@ export function EmergencyCommandsPage({ bindingHandle, api }: EmergencyCommandsP
       if (cancelled) return;
       if (!isEmergencyCommandCatalog(value)) throw new Error();
       dispatch({ type: "catalog-loaded", scope, request, catalog: value });
-    }).catch(() => {
+    }).catch((reason: unknown) => {
       if (!cancelled) dispatch({
         type: "catalog-failed",
         scope,
         request,
-        error: "无法加载当前目标的内置应急命令目录；绑定可能已失效或系统识别失败。",
+        error: targetFailureMessage(reason, "无法加载当前目标的内置应急命令目录；绑定可能已失效或系统识别失败。"),
       });
     });
     return () => {
@@ -106,12 +108,12 @@ export function EmergencyCommandsPage({ bindingHandle, api }: EmergencyCommandsP
       if (!isEmergencyCommandResult(value) || value.snapshotHandle !== request.snapshotHandle ||
         value.commandHandle !== request.commandHandle) throw new Error();
       dispatch({ type: "run-loaded", scope, request, result: value });
-    }).catch(() => {
+    }).catch((reason: unknown) => {
       if (!cancelled) dispatch({
         type: "run-failed",
         scope,
         request,
-        error: "内置命令未能完成；能力可能过期、目标已变化或远端执行失败。",
+        error: targetFailureMessage(reason, "内置命令未能完成；能力可能过期、目标已变化或远端执行失败。"),
       });
     });
     return () => {
@@ -147,11 +149,11 @@ export function EmergencyCommandsPage({ bindingHandle, api }: EmergencyCommandsP
           if (!isEmergencyCommandResult(value) || value.snapshotHandle !== run.snapshotHandle ||
             value.commandHandle !== commandHandle) throw new Error();
           entry = { commandHandle, result: value, error: null, elapsedMs: Date.now() - startedAt };
-        } catch {
+        } catch (reason: unknown) {
           entry = {
             commandHandle,
             result: null,
-            error: "内置命令未能完成；能力可能过期、目标已变化或远端执行失败。",
+            error: targetFailureMessage(reason, "内置命令未能完成；能力可能过期、目标已变化或远端执行失败。"),
             elapsedMs: Date.now() - startedAt,
           };
         }
