@@ -21,6 +21,7 @@ redis|lab-base/redis:7|apt|redis|2237|redis-server /etc/redis/redis.conf
 mongo|lab-base/mongo:7|apt|mongo|2238|mongod --config /etc/mongod.conf
 opengauss|lab-base/opengauss:5.0.0|apt|opengauss|2239|/entrypoint.sh gaussdb
 tidb|lab-base/tidb:v7.5.0|dnf|tidb|2240|/tidb-server --config /etc/tidb/tidb.toml
+haproxy|lab-base/haproxy:3.0|apt|haproxy|2243|haproxy -f /usr/local/etc/haproxy/haproxy.cfg
 baseline-deb|debian:12|apt|baseline|2241|
 baseline-el|almalinux:9|dnf|baseline|2242|
 '

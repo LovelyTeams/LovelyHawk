@@ -1245,6 +1245,7 @@ const fn component_key(component: BaselineComponent) -> &'static str {
         BaselineComponent::Tomcat => "tomcat",
         BaselineComponent::OpenGauss => "opengauss",
         BaselineComponent::TiDb => "tidb",
+        BaselineComponent::HaProxy => "haproxy",
     }
 }
 

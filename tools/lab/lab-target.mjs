@@ -11,7 +11,7 @@ export const LAB_PORTS = {
 export const SERVICE_PORTS = {
   nginx: 2231, httpd: 2232, tomcat: 2233, mysql: 2234, mariadb: 2235,
   postgres: 2236, redis: 2237, mongo: 2238, opengauss: 2239, tidb: 2240,
-  "baseline-deb": 2241, "baseline-el": 2242,
+  "baseline-deb": 2241, "baseline-el": 2242, haproxy: 2243,
 };
 
 /**

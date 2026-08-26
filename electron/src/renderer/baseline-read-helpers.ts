@@ -31,7 +31,7 @@ export interface BaselineCheckGroup {
 /** The order the products are read in: the machine itself, then what it runs. */
 const COMPONENT_ORDER: readonly BaselineComponent[] = [
   "system", "ssh", "mysql", "postgresql", "redis", "mongodb", "nginx", "apache", "tomcat",
-  "opengauss", "tidb",
+  "opengauss", "tidb", "haproxy",
 ];
 
 /** A check on software the target does not run is neither passed nor failed. */
@@ -154,6 +154,7 @@ export function baselineComponentLabel(component: BaselineComponent): string {
     case "tomcat": return "Apache Tomcat";
     case "opengauss": return "openGauss";
     case "tidb": return "TiDB";
+    case "haproxy": return "HAProxy";
   }
 }
 

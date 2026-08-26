@@ -21,6 +21,7 @@ library/redis:7|lab-base/redis:7
 library/mongo:7|lab-base/mongo:7
 enmotech/opengauss:5.0.0|lab-base/opengauss:5.0.0
 pingcap/tidb:v7.5.0|lab-base/tidb:v7.5.0
+library/haproxy:3.0|lab-base/haproxy:3.0
 '
 
 ok=0

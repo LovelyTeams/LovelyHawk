@@ -117,10 +117,11 @@ pub enum BaselineComponent {
     /// so it is its own product rather than a path added to PostgreSQL's.
     OpenGauss,
     TiDb,
+    HaProxy,
 }
 
 impl BaselineComponent {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::System,
         Self::Ssh,
         Self::MySql,
@@ -132,6 +133,7 @@ impl BaselineComponent {
         Self::Tomcat,
         Self::OpenGauss,
         Self::TiDb,
+        Self::HaProxy,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -147,6 +149,7 @@ impl BaselineComponent {
             Self::Tomcat => "Apache Tomcat",
             Self::OpenGauss => "openGauss",
             Self::TiDb => "TiDB",
+            Self::HaProxy => "HAProxy",
         }
     }
 
@@ -200,6 +203,10 @@ impl BaselineComponent {
             Self::TiDb => Some(
                 "command -v tidb-server >/dev/null 2>&1 || [ -d /etc/tidb ] \
                  || [ -d /opt/tidb ]",
+            ),
+            Self::HaProxy => Some(
+                "command -v haproxy >/dev/null 2>&1 || [ -d /etc/haproxy ] \
+                 || [ -d /usr/local/etc/haproxy ]",
             ),
         }
     }
@@ -259,6 +266,9 @@ impl BaselineComponent {
             // openGauss ships `gs_guc check`, but it wants the cluster's data
             // directory and the omm account; TiDB has no offline check at all.
             // Neither is proven, so neither is claimed.
+            Self::HaProxy => Some(
+                "if command -v haproxy >/dev/null 2>&1; then haproxy -c -f {file} >/dev/null; fi",
+            ),
             Self::Redis | Self::Tomcat | Self::OpenGauss | Self::TiDb => None,
         }
     }
@@ -332,6 +342,13 @@ enum FileFormat {
     /// The key is written as the whole path, `security.authorization`, and the
     /// reader walks the indentation to find it.
     Yaml,
+    /// `section` on its own line, then `key value` indented under it — which
+    /// is how HAProxy writes `global` and `defaults`.
+    ///
+    /// There are no brackets to find the section by: a line that starts in
+    /// column one *is* a header, and everything indented below it belongs to
+    /// the one above.
+    IndentSection(&'static str),
     /// An attribute on an XML element — Tomcat's `server.xml`. The key is the
     /// attribute name and this is the element it sits on.
     ///
@@ -503,6 +520,12 @@ const TIDB_FILES: &[&str] = &[
     "/etc/tidb.toml",
     "/opt/tidb/conf/tidb.toml",
     "/tidb-deploy/*/conf/tidb.toml",
+];
+
+const HAPROXY_FILES: &[&str] = &[
+    "/etc/haproxy/haproxy.cfg",
+    "/usr/local/etc/haproxy/haproxy.cfg",
+    "/etc/haproxy/conf.d/*.cfg",
 ];
 
 const OPENGAUSS_PASSWORD_TYPE: &[&str] = &["0", "1", "2"];
@@ -2106,6 +2129,71 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
         format: FileFormat::XmlAttribute("Host"),
         reload: ReloadGroup::None,
     },
+    // ---- HAProxy -----------------------------------------------------------
+    BaselineDefinition {
+        id: "haproxy-log",
+        category: BaselineCategory::Logging,
+        component: BaselineComponent::HaProxy,
+        title: "把日志送出去",
+        description: "没有 log 目标时，经过这台代理的请求一条都不会被记下来。",
+        recommendation: PRESENCE_MARKER,
+        risk: BaselineRisk::High,
+        value_kind: BaselineValueKind::Presence,
+        reading: Reading::Files(HAPROXY_FILES),
+        implicit: None,
+        file: "/etc/haproxy/haproxy.cfg",
+        key: "log",
+        format: FileFormat::IndentSection("global"),
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "haproxy-user",
+        category: BaselineCategory::ServiceHardening,
+        component: BaselineComponent::HaProxy,
+        title: "降权运行",
+        description: "不指定 user 时进程留在 root 下，代理被打穿就直接是 root。",
+        recommendation: PRESENCE_MARKER,
+        risk: BaselineRisk::High,
+        value_kind: BaselineValueKind::Presence,
+        reading: Reading::Files(HAPROXY_FILES),
+        implicit: None,
+        file: "/etc/haproxy/haproxy.cfg",
+        key: "user",
+        format: FileFormat::IndentSection("global"),
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "haproxy-chroot",
+        category: BaselineCategory::ServiceHardening,
+        component: BaselineComponent::HaProxy,
+        title: "限制文件系统视野",
+        description: "chroot 之后进程看不到自己目录以外的文件系统。",
+        recommendation: PRESENCE_MARKER,
+        risk: BaselineRisk::Medium,
+        value_kind: BaselineValueKind::Presence,
+        reading: Reading::Files(HAPROXY_FILES),
+        implicit: None,
+        file: "/etc/haproxy/haproxy.cfg",
+        key: "chroot",
+        format: FileFormat::IndentSection("global"),
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "haproxy-ssl-bind-options",
+        category: BaselineCategory::Transport,
+        component: BaselineComponent::HaProxy,
+        title: "显式指定 TLS 下限",
+        description: "只检查是否写过；没写就跟随编译默认，可能仍然接受已被淘汰的版本。",
+        recommendation: PRESENCE_MARKER,
+        risk: BaselineRisk::Medium,
+        value_kind: BaselineValueKind::Presence,
+        reading: Reading::Files(HAPROXY_FILES),
+        implicit: None,
+        file: "/etc/haproxy/haproxy.cfg",
+        key: "ssl-default-bind-options",
+        format: FileFormat::IndentSection("global"),
+        reload: ReloadGroup::None,
+    },
     // ---- openGauss ---------------------------------------------------------
     BaselineDefinition {
         id: "opengauss-listen-addresses",
@@ -3267,6 +3355,9 @@ impl BaselineDefinition {
             FileFormat::Ini(section) => {
                 vec![format!("[{section}]"), format!("{} = {value}", self.key)]
             }
+            FileFormat::IndentSection(section) => {
+                vec![section.to_owned(), format!("    {} {value}", self.key)]
+            }
             FileFormat::XmlAttribute(element) => vec![format!(
                 "<{element} … {}=\"{value}\" …>（每一个未被注释掉的 {element}）",
                 self.key
@@ -3326,6 +3417,9 @@ impl BaselineDefinition {
                 BaselineComponent::Tomcat => Some("systemctl restart tomcat（需要重启才生效）"),
                 BaselineComponent::OpenGauss => Some("gs_ctl reload -D <数据目录>"),
                 BaselineComponent::TiDb => Some("重启 tidb-server（配置只在启动时读取）"),
+                BaselineComponent::HaProxy => {
+                    Some("haproxy -c -f <配置文件> && systemctl reload haproxy")
+                }
             },
         }
     }
@@ -3569,6 +3663,7 @@ const fn component_probe_key(component: BaselineComponent) -> &'static str {
         BaselineComponent::Tomcat => "tomcat",
         BaselineComponent::OpenGauss => "opengauss",
         BaselineComponent::TiDb => "tidb",
+        BaselineComponent::HaProxy => "haproxy",
     }
 }
 
@@ -3634,6 +3729,9 @@ fn reader_program(definition: &BaselineDefinition) -> String {
             "sub(/[[:space:]]*;[[:space:]]*$/,\"\",v); ",
         ),
         FileFormat::Ini(section) => ini_reader(section),
+        FileFormat::IndentSection(section) => {
+            indent_section_reader(section, "v=(p==\"\" ? \"on\" : p)")
+        }
         FileFormat::Yaml => YAML_READER.to_owned(),
         FileFormat::XmlAttribute(element) => xml_reader(element),
     };
@@ -3687,6 +3785,7 @@ fn witness_program(definition: &BaselineDefinition) -> String {
     let program = match definition.format {
         FileFormat::Yaml => YAML_READER.replace("v=val}", "v=FILENAME}"),
         FileFormat::XmlAttribute(element) => xml_witness(element),
+        FileFormat::IndentSection(section) => indent_section_reader(section, "v=FILENAME"),
         FileFormat::Ini(section) => {
             ini_reader(section).replace("v=(hasEq ? p : (p==\"\" ? \"on\" : p))", "v=FILENAME")
         }
@@ -3724,6 +3823,56 @@ fn ini_reader(section: &str) -> String {
           v=(hasEq ? p : (p==\"\" ? \"on\" : p))}}}} \
          END{{print v}}",
         start = ini_section_start(section),
+    )
+}
+
+/// A directive indented under an unbracketed section header.
+///
+/// HAProxy's `global` and `defaults` are named by a word in column one, and
+/// everything indented under one belongs to it. `capture` is the awk that runs
+/// once the value has been separated from the key.
+fn indent_section_reader(section: &str, capture: &str) -> String {
+    format!(
+        "BEGIN{{v=\"\";inS=0}} \
+         /^[[:space:]]*#/{{next}} \
+         /^[[:space:]]*$/{{next}} \
+         /^[^[:space:]]/{{s=$0; sub(/[[:space:]].*$/,\"\",s); \
+           gsub(/[[:space:]]+$/,\"\",s); \
+           inS=(tolower(s)==tolower(\"{section}\")); next}} \
+         inS{{p=$0; sub(/^[[:space:]]+/,\"\",p); t=p; sub(/[[:space:]].*$/,\"\",t); \
+          if(tolower(t)==tolower(k)){{sub(/^[^[:space:]]+[[:space:]]*/,\"\",p); \
+          sub(/[[:space:]]+#.*$/,\"\",p); \
+          gsub(/^[[:space:]]+|[[:space:]]+$/,\"\",p); {capture}}}}} \
+         END{{print v}}"
+    )
+}
+
+/// The same walk, replacing the first live line in the section rather than
+/// reading it. Two passes, for the same reason every other editor needs them:
+/// a second line in the same section would override the fix.
+fn indent_section_writer(section: &str) -> String {
+    format!(
+        "BEGIN{{done=0;inS=0;seen=0;scanIn=0;active=0;firstActive=0;pad=\"    \"}} \
+         NR==FNR{{if($0 ~ /^[^[:space:]]/){{s=$0; sub(/[[:space:]].*$/,\"\",s); \
+            scanIn=(tolower(s)==tolower(\"{section}\")); if(scanIn) seen=1; next}} \
+          if(!scanIn) next; \
+          p=$0; sub(/^[[:space:]]+/,\"\",p); \
+          if(p ~ /^#/) next; \
+          t=p; sub(/[[:space:]].*$/,\"\",t); \
+          if(tolower(t)==tolower(k)){{active++; \
+            if(firstActive==0){{firstActive=FNR; \
+              if(match($0,/[^ \\t]/)>1) pad=substr($0,1,RSTART-1)}}}} \
+          next}} \
+         /^[^[:space:]]/{{s=$0; sub(/[[:space:]].*$/,\"\",s); \
+           if(inS && !done && active==0){{print pad k \" \" v; done=1}} \
+           inS=(tolower(s)==tolower(\"{section}\")); print; next}} \
+         {{if(inS && active>0){{ \
+            if(FNR==firstActive){{print pad k \" \" v; done=1; next}} \
+            p=$0; sub(/^[[:space:]]+/,\"\",p); \
+            if(p !~ /^#/){{t=p; sub(/[[:space:]].*$/,\"\",t); \
+              if(tolower(t)==tolower(k)) next}} \
+          }} print}} \
+         END{{if(!done){{if(!seen) print \"{section}\"; print pad k \" \" v}}}}"
     )
 }
 
@@ -4474,6 +4623,7 @@ fn writer_program(definition: &BaselineDefinition) -> String {
         FileFormat::Equals => flat_writer("k \" = \" v"),
         FileFormat::Semicolon => flat_writer("k \" \" v \";\""),
         FileFormat::Ini(section) => ini_writer(section),
+        FileFormat::IndentSection(section) => indent_section_writer(section),
         FileFormat::Yaml => yaml_writer(definition.key),
         FileFormat::XmlAttribute(element) => xml_writer(element),
         // A presence check has nothing to write; `is_writable` refused it.
@@ -5112,7 +5262,7 @@ mod tests {
                 );
             }
         }
-        assert_eq!(BASELINE_CATALOG.len(), 104);
+        assert_eq!(BASELINE_CATALOG.len(), 108);
         // One plan carries every check this tool will write; the rest are read.
         assert!(
             BASELINE_CATALOG
@@ -5358,7 +5508,12 @@ mod tests {
         if std::env::var("LOVELYRES_DUMP_READERS").is_err() {
             return;
         }
-        for item_id in ["tomcat-allow-trace", "tomcat-shutdown-port"] {
+        for item_id in [
+            "tomcat-allow-trace",
+            "tomcat-shutdown-port",
+            "haproxy-log",
+            "haproxy-user",
+        ] {
             let definition = definition(item_id).unwrap();
             println!("=== {item_id}\n{}", reader_program(definition));
         }
@@ -6197,7 +6352,7 @@ mod tests {
                 // an attribute out of quotes; YAML strips its own comments.
                 FileFormat::Semicolon | FileFormat::XmlAttribute(_) | FileFormat::Yaml => true,
                 FileFormat::Ini(_) => program.contains("sub(/[[:space:]]+[#;].*$/"),
-                FileFormat::Whitespace | FileFormat::Equals => {
+                FileFormat::Whitespace | FileFormat::Equals | FileFormat::IndentSection(_) => {
                     program.contains("sub(/[[:space:]]+#.*$/")
                 }
             };
