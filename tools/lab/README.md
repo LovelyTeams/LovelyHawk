@@ -108,6 +108,7 @@ node tools/lab/probe-upload.mjs        # 上传字节到真机再清理
 node tools/lab/probe-system.mjs        # 系统信息摘要与 25 个标签页、核查审计
 node tools/lab/probe-switch.mjs        # 切换目标后旧能力必须全部失效
 node tools/lab/probe-markers.mjs       # 全量扫一遍，确认没有任何遮蔽 marker
+node tools/lab/probe-baseline.mjs      # 基线读值：先问 sshd -T，再看扫描读到的是不是同一个
 node tools/lab/probe-paths.mjs         # 输出行右键处置：属性 / 去执行位 / 隔离，逐步核对靶机
 node tools/lab/probe-ui.mjs            # 起真窗口连真靶机，走完右键到执行的全过程并截图
 ```

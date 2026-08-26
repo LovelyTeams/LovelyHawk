@@ -119,6 +119,17 @@ enum ReloadGroup {
     Sysctl,
 }
 
+/// Which occurrence of a repeated directive the program on the host obeys.
+///
+/// This is not a stylistic choice: reading the wrong one reports a value the
+/// host is not using. Both arms were settled by asking the real programs — see
+/// [`reader_program`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Precedence {
+    First,
+    Last,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BaselineDefinition {
     pub id: &'static str,
@@ -132,6 +143,29 @@ pub struct BaselineDefinition {
     key: &'static str,
     format: FileFormat,
     reload: ReloadGroup,
+}
+
+impl BaselineDefinition {
+    /// The file this setting lives in on the host.
+    ///
+    /// Fixed at compile time and the same on every target, so it is safe to
+    /// show; it is not a path a caller can choose.
+    pub const fn file(&self) -> &'static str {
+        self.file
+    }
+
+    /// The directive this setting is written as.
+    pub const fn key(&self) -> &'static str {
+        self.key
+    }
+
+    const fn precedence(&self) -> Precedence {
+        // Only sshd reads top-down and keeps the first value it sees.
+        match self.reload {
+            ReloadGroup::Sshd => Precedence::First,
+            ReloadGroup::None | ReloadGroup::Sysctl => Precedence::Last,
+        }
+    }
 }
 
 const YES_NO: &[&str] = &["yes", "no"];
@@ -1574,15 +1608,49 @@ fn scan_command() -> String {
              if [ -L \"$lr_file\" ] || {{ [ -e \"$lr_file\" ] && [ ! -f \"$lr_file\" ]; }}; then \
                lr_value=__unsupported__; \
              elif [ -f \"$lr_file\" ]; then \
-               lr_value=$(awk -v k=\"$lr_key\" 'BEGIN{{v=\"\"}} {{p=$0; sub(/^[[:space:]]*#[[:space:]]*/,\"\",p); t=p; sub(/[[:space:]=].*$/,\"\",t); if(tolower(t)==tolower(k)){{sub(/^[^[:space:]=]+[[:space:]=]+/,\"\",p); gsub(/^[[:space:]]+|[[:space:]]+$/,\"\",p); v=p}}}} END{{print v}}' \"$lr_file\" | tail -n 1); \
+               lr_value=$(awk -v k=\"$lr_key\" '{program}' \"$lr_file\" | tail -n 1); \
                lr_value=$(printf '%s' \"$lr_value\" | tr -cd 'A-Za-z0-9_-'); [ -n \"$lr_value\" ] || lr_value=__missing__; \
              fi; printf 'ITEM=%s\\t%s\\n' {id} \"$lr_value\"; ",
             file = shq(definition.file),
             key = shq(definition.key),
             id = shq(definition.id),
+            program = reader_program(definition.precedence()),
         ));
     }
     command
+}
+
+/// Reads the value a program on the host would actually obey for one key.
+///
+/// A commented line is not a setting. Reading through the comment marker made
+/// `PermitRootLogin yes` followed by the distribution's own
+/// `#PermitRootLogin no` report as compliant on a host that was letting root
+/// straight in, which is the exact opposite of what the check exists for.
+fn reader_program(precedence: Precedence) -> &'static str {
+    match precedence {
+        // `sshd -T` on a real host confirms sshd_config(5): "for each keyword,
+        // the first obtained value will be used".
+        Precedence::First => {
+            "BEGIN{v=\"\";f=0} \
+             /^[[:space:]]*#/{next} \
+             /^[[:space:]]*$/{next} \
+             {p=$0; sub(/^[[:space:]]+/,\"\",p); t=p; sub(/[[:space:]=].*$/,\"\",t); \
+              if(f==0 && tolower(t)==tolower(k)){sub(/^[^[:space:]=]+[[:space:]=]+/,\"\",p); \
+              gsub(/^[[:space:]]+|[[:space:]]+$/,\"\",p); v=p; f=1}} \
+             END{print v}"
+        }
+        // `sysctl -p` on a real host applies the later line; the parsers behind
+        // the remaining files likewise overwrite as they read.
+        Precedence::Last => {
+            "BEGIN{v=\"\"} \
+             /^[[:space:]]*#/{next} \
+             /^[[:space:]]*$/{next} \
+             {p=$0; sub(/^[[:space:]]+/,\"\",p); t=p; sub(/[[:space:]=].*$/,\"\",t); \
+              if(tolower(t)==tolower(k)){sub(/^[^[:space:]=]+[[:space:]=]+/,\"\",p); \
+              gsub(/^[[:space:]]+|[[:space:]]+$/,\"\",p); v=p}} \
+             END{print v}"
+        }
+    }
 }
 
 fn parse_scan(output: &str) -> CoreResult<Vec<BaselineStatus>> {
@@ -2865,5 +2933,58 @@ mod tests {
     #[test]
     fn baseline_history_has_a_dedicated_portable_store_file() {
         assert_eq!(StoreFile::Baseline.file_name(), "baseline-history.json");
+    }
+
+    #[test]
+    fn every_setting_is_read_the_way_its_own_program_reads_it() {
+        // sshd keeps the first value it is given; everything else is read by a
+        // parser that overwrites as it goes.
+        for definition in BASELINE_CATALOG {
+            let expected = if definition.file() == "/etc/ssh/sshd_config" {
+                Precedence::First
+            } else {
+                Precedence::Last
+            };
+            assert_eq!(
+                definition.precedence(),
+                expected,
+                "{} reads {} the wrong way round",
+                definition.id,
+                definition.file(),
+            );
+        }
+    }
+
+    #[test]
+    fn a_commented_line_is_never_read_as_a_setting() {
+        // The bug this guards against reported a host that was letting root
+        // log in as compliant, because the distribution's own commented
+        // default sat below the active line.
+        let command = scan_command();
+        assert!(command.contains("/^[[:space:]]*#/{next}"));
+        assert!(!command.contains("sub(/^[[:space:]]*#[[:space:]]*/"));
+        // Both readers have to skip them, not just one.
+        assert_eq!(command.matches("/^[[:space:]]*#/{next}").count(), 38);
+    }
+
+    #[test]
+    fn the_scan_asks_about_every_setting_exactly_once() {
+        let command = scan_command();
+        assert_eq!(BASELINE_CATALOG.len(), 38);
+        assert_eq!(command.matches("lr_file=").count(), 38);
+        for definition in BASELINE_CATALOG {
+            assert_eq!(
+                command.matches(&format!("printf 'ITEM=%s\\t%s\\n' '{}'", definition.id)).count(),
+                1,
+                "{} is not asked about exactly once",
+                definition.id,
+            );
+        }
+        // First-wins needs a found flag; last-wins must not have one, or it
+        // would silently become first-wins too.
+        let first = command.matches("BEGIN{v=\"\";f=0}").count();
+        let last = command.matches("BEGIN{v=\"\"} ").count();
+        assert_eq!(first, 11, "only the sshd_config settings read first-wins");
+        assert_eq!(first + last, 38);
     }
 }
