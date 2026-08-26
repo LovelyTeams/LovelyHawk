@@ -53,6 +53,18 @@ const MATRIX = [
   { component: "tomcat", images: ["tomcat:9.0", "tomcat:10.1", "tomcat:11.0"] },
 ];
 
+/**
+ * Products with no official multi-version image on a registry this can reach.
+ *
+ * They are verified against the lab host instead, which is one real version
+ * rather than none — and the lab is where their configuration was written to
+ * be wrong on purpose, so the readings can be checked against something.
+ */
+const FROM_LABS = [
+  { component: "opengauss", container: "svc-opengauss" },
+  { component: "tidb", container: "svc-tidb" },
+];
+
 const args = process.argv.slice(2);
 const pull = args.includes("--pull");
 const only = args.find((value) => !value.startsWith("--")) ?? null;
@@ -205,6 +217,45 @@ for (const entry of MATRIX) {
     for (const [id] of absent) {
       console.log(`      ${id.padEnd(30)} 未找到文件`);
     }
+  }
+  console.log("");
+}
+
+for (const entry of FROM_LABS) {
+  if (only !== null && entry.component !== only) continue;
+  const wanted = [...items].filter(([, value]) => value.component === entry.component);
+  console.log(`===== ${entry.component}（${wanted.length} 项检查，靶机 ${entry.container}）`);
+  const running = wsl(
+    `docker inspect -f '{{.State.Running}}' ${entry.container} 2>/dev/null || echo false`,
+  ).trim();
+  if (running !== "true") {
+    console.log(`  靶机没在跑，先 pnpm lab:services\n`);
+    continue;
+  }
+  let output;
+  try {
+    wsl(`docker cp ${inside} ${entry.container}:/lr.sh`);
+    output = wsl(`docker exec ${entry.container} sh /lr.sh 2>/dev/null`);
+  } catch (error) {
+    console.log(`  扫描没跑起来：${String(error.message).slice(0, 160)}\n`);
+    continue;
+  }
+  const rows = new Map();
+  for (const line of output.split(/\r?\n/u)) {
+    if (!line.startsWith("ITEM=")) continue;
+    const [id, value, file] = line.slice(5).split("\t");
+    rows.set(id, { value, file: file ?? "" });
+  }
+  const found = wanted.filter(([id]) => rows.get(id)?.value !== "__absent__");
+  const files = new Set(found.map(([id]) => rows.get(id)?.file).filter(Boolean));
+  if (found.length === 0) {
+    gaps += 1;
+    console.log(`  ✗ 一个配置文件都没找到 —— 这个版本的路径不在目录里\n`);
+    continue;
+  }
+  console.log(`  ✓ ${found.length}/${wanted.length} 项读到，文件 ${[...files].join(" ")}`);
+  for (const [id] of wanted) {
+    console.log(`      ${id.padEnd(34)} ${rows.get(id)?.value ?? "—"}`);
   }
   console.log("");
 }
