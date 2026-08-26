@@ -204,7 +204,7 @@ static CATALOG: &[CommandDefinition] = &[
         Permissions,
         "SUID 可执行",
         "列出当前文件系统内带 SUID 位的文件。",
-        "find / -xdev -perm -4000 -type f 2>/dev/null | sort | head -n 300"
+        "command -v find >/dev/null 2>&1 || { echo 'find 不可用，本项未执行'; exit 0; }; find / -xdev -perm -4000 -type f 2>/dev/null | sort | head -n 300"
     )
     .flagging(command_findings::suid_program),
     portable!(
@@ -212,7 +212,7 @@ static CATALOG: &[CommandDefinition] = &[
         Permissions,
         "SGID 可执行",
         "列出当前文件系统内带 SGID 位的文件。",
-        "find / -xdev -perm -2000 -type f 2>/dev/null | sort | head -n 300"
+        "command -v find >/dev/null 2>&1 || { echo 'find 不可用，本项未执行'; exit 0; }; find / -xdev -perm -2000 -type f 2>/dev/null | sort | head -n 300"
     )
     .flagging(command_findings::sgid_program),
     portable!(
@@ -220,7 +220,7 @@ static CATALOG: &[CommandDefinition] = &[
         Permissions,
         "全局可写文件",
         "定位可能被任意用户修改的普通文件。",
-        "find / -xdev -type f -perm -0002 -not -path '/proc/*' -not -path '/sys/*' 2>/dev/null | sort | head -n 300"
+        "command -v find >/dev/null 2>&1 || { echo 'find 不可用，本项未执行'; exit 0; }; find / -xdev -type f -perm -0002 -not -path '/proc/*' -not -path '/sys/*' 2>/dev/null | sort | head -n 300"
     )
     .flagging(command_findings::world_writable_file),
     portable!(
@@ -316,7 +316,7 @@ static CATALOG: &[CommandDefinition] = &[
         Processes,
         "已删除可执行映射",
         "定位仍由进程持有的 deleted 文件。",
-        "find /proc/[0-9]*/fd -lname '* (deleted)' -exec ls -l {} + 2>/dev/null | head -n 300"
+        "command -v find >/dev/null 2>&1 || { echo 'find 不可用，本项未执行'; exit 0; }; find /proc/[0-9]*/fd -lname '* (deleted)' -exec ls -l {} + 2>/dev/null | head -n 300"
     )
     .flagging(command_findings::any_hit),
     portable!(
@@ -351,7 +351,7 @@ static CATALOG: &[CommandDefinition] = &[
         Persistence,
         "计划任务",
         "汇总系统 cron、anacron 与用户 crontab 文件。",
-        "find /etc/cron.d /etc/cron.daily /etc/cron.hourly /etc/cron.weekly /etc/cron.monthly /var/spool/cron -maxdepth 2 -type f -print 2>/dev/null | sort | head -n 500"
+        "command -v find >/dev/null 2>&1 || { echo 'find 不可用，本项未执行'; exit 0; }; find /etc/cron.d /etc/cron.daily /etc/cron.hourly /etc/cron.weekly /etc/cron.monthly /var/spool/cron -maxdepth 2 -type f -print 2>/dev/null | sort | head -n 500"
     )
     .flagging(command_findings::remote_execution_hint),
     portable!(
@@ -367,7 +367,7 @@ static CATALOG: &[CommandDefinition] = &[
         Persistence,
         "Shell 启动脚本",
         "列出全局及用户 Shell 启动脚本元数据。",
-        "find /etc/profile /etc/profile.d /etc/bashrc /etc/bash.bashrc /root /home -maxdepth 3 -type f \\( -name '.bashrc' -o -name '.profile' -o -name '*.sh' \\) -exec ls -ld -- {} + 2>/dev/null | head -n 500"
+        "command -v find >/dev/null 2>&1 || { echo 'find 不可用，本项未执行'; exit 0; }; find /etc/profile /etc/profile.d /etc/bashrc /etc/bash.bashrc /root /home -maxdepth 3 -type f \\( -name '.bashrc' -o -name '.profile' -o -name '*.sh' \\) -exec ls -ld -- {} + 2>/dev/null | head -n 500"
     )
     .flagging(command_findings::remote_execution_hint),
     portable!(
@@ -399,7 +399,7 @@ static CATALOG: &[CommandDefinition] = &[
         Files,
         "近期可执行文件",
         "定位最近七天修改且带执行位的文件。",
-        "find /tmp /var/tmp /dev/shm /usr/local/bin /opt -xdev -type f -mtime -7 -perm /111 -exec ls -ld -- {} + 2>/dev/null | head -n 500"
+        "command -v find >/dev/null 2>&1 || { echo 'find 不可用，本项未执行'; exit 0; }; find /tmp /var/tmp /dev/shm /usr/local/bin /opt -xdev -type f -mtime -7 -perm /111 -exec ls -ld -- {} + 2>/dev/null | head -n 500"
     )
     .flagging(command_findings::any_hit),
     portable!(
@@ -407,7 +407,7 @@ static CATALOG: &[CommandDefinition] = &[
         Files,
         "隐藏文件",
         "列出常见可写位置下的隐藏普通文件。",
-        "find /tmp /var/tmp /dev/shm /home /root -xdev \\( -type f -o -type d \\) -name '.*' -not -name '.' -not -name '..' -exec ls -ld -- {} + 2>/dev/null | head -n 500"
+        "command -v find >/dev/null 2>&1 || { echo 'find 不可用，本项未执行'; exit 0; }; find /tmp /var/tmp /dev/shm /home /root -xdev \\( -type f -o -type d \\) -name '.*' -not -name '.' -not -name '..' -exec ls -ld -- {} + 2>/dev/null | head -n 500"
     )
     .flagging(command_findings::planted_file),
     portable!(
@@ -415,7 +415,7 @@ static CATALOG: &[CommandDefinition] = &[
         Files,
         "大文件",
         "列出当前文件系统内最大的 100 个普通文件。",
-        "find / -xdev -type f -size +10M -exec du -b {} + 2>/dev/null | sort -nr | head -n 100"
+        "command -v find >/dev/null 2>&1 || { echo 'find 不可用，本项未执行'; exit 0; }; find / -xdev -type f -size +10M -exec du -b {} + 2>/dev/null | sort -nr | head -n 100"
     )
     .flagging(command_findings::compromise_marker),
     portable!(
@@ -471,7 +471,7 @@ static CATALOG: &[CommandDefinition] = &[
         Permissions,
         "全局可写目录",
         "定位任意用户都能写入的目录，重点看缺少粘滞位的位置。",
-        "find / -xdev -type d -perm -0002 -not -path '/proc/*' -not -path '/sys/*' -exec ls -ld -- {} + 2>/dev/null | head -n 300"
+        "command -v find >/dev/null 2>&1 || { echo 'find 不可用，本项未执行'; exit 0; }; find / -xdev -type d -perm -0002 -not -path '/proc/*' -not -path '/sys/*' -exec ls -ld -- {} + 2>/dev/null | head -n 300"
     )
     .with_timeout(60)
     .flagging(command_findings::world_writable_directory),
@@ -480,7 +480,7 @@ static CATALOG: &[CommandDefinition] = &[
         Permissions,
         "无属主文件",
         "查找已删除账号遗留或异常创建的文件。",
-        "find / -xdev \\( -nouser -o -nogroup \\) -exec ls -ld -- {} + 2>/dev/null | head -n 300"
+        "command -v find >/dev/null 2>&1 || { echo 'find 不可用，本项未执行'; exit 0; }; find / -xdev \\( -nouser -o -nogroup \\) -exec ls -ld -- {} + 2>/dev/null | head -n 300"
     )
     .with_timeout(60)
     .flagging(command_findings::unowned_path),
@@ -595,7 +595,7 @@ static CATALOG: &[CommandDefinition] = &[
         Accounts,
         "SSH 授权公钥内容",
         "汇总各账号 authorized_keys 里的公钥，核对是否有陌生密钥。",
-        "find /root /home -maxdepth 4 -name authorized_keys 2>/dev/null | while read -r f; do echo \"--- $f ---\"; cat \"$f\" 2>/dev/null; done | head -n 300"
+        "command -v find >/dev/null 2>&1 || { echo 'find 不可用，本项未执行'; exit 0; }; find /root /home -maxdepth 4 -name authorized_keys 2>/dev/null | while read -r f; do echo \"--- $f ---\"; cat \"$f\" 2>/dev/null; done | head -n 300"
     )
     .flagging(command_findings::authorized_key),
     portable!(
@@ -878,7 +878,7 @@ static CATALOG: &[CommandDefinition] = &[
         Persistence,
         "近期改动的服务单元",
         "列出最近三十天被创建或修改的服务文件。",
-        "find /etc/systemd /lib/systemd /usr/lib/systemd -name '*.service' -mtime -30 -exec ls -ld -- {} + 2>/dev/null | head -n 200"
+        "command -v find >/dev/null 2>&1 || { echo 'find 不可用，本项未执行'; exit 0; }; find /etc/systemd /lib/systemd /usr/lib/systemd -name '*.service' -mtime -30 -exec ls -ld -- {} + 2>/dev/null | head -n 200"
     )
     .with_timeout(60)
     .flagging(command_findings::any_hit),
@@ -887,7 +887,7 @@ static CATALOG: &[CommandDefinition] = &[
         Persistence,
         "用户级服务单元",
         "检查用户目录下的自启服务。",
-        "find /home /root -maxdepth 5 -path '*/.config/systemd/*' -type f -exec ls -ld -- {} + 2>/dev/null | head -n 200; echo '--- 用户单元 ---'; systemctl --user list-unit-files --no-pager 2>/dev/null | head -n 100"
+        "command -v find >/dev/null 2>&1 || { echo 'find 不可用，本项未执行'; exit 0; }; find /home /root -maxdepth 5 -path '*/.config/systemd/*' -type f -exec ls -ld -- {} + 2>/dev/null | head -n 200; echo '--- 用户单元 ---'; systemctl --user list-unit-files --no-pager 2>/dev/null | head -n 100"
     )
     .with_timeout(60)
     .flagging(command_findings::any_hit),
@@ -936,7 +936,7 @@ static CATALOG: &[CommandDefinition] = &[
         Persistence,
         "设备触发规则",
         "检查设备事件触发执行的规则。",
-        "find /etc/udev/rules.d /lib/udev/rules.d -type f -mtime -90 -exec ls -ld -- {} + 2>/dev/null | head -n 100; echo '--- 带执行动作 ---'; grep -rlE 'RUN\\+?=' /etc/udev/rules.d 2>/dev/null | head -n 50"
+        "command -v find >/dev/null 2>&1 || { echo 'find 不可用，本项未执行'; exit 0; }; find /etc/udev/rules.d /lib/udev/rules.d -type f -mtime -90 -exec ls -ld -- {} + 2>/dev/null | head -n 100; echo '--- 带执行动作 ---'; grep -rlE 'RUN\\+?=' /etc/udev/rules.d 2>/dev/null | head -n 50"
     )
     .flagging(command_findings::remote_execution_hint),
     portable!(
@@ -968,7 +968,7 @@ static CATALOG: &[CommandDefinition] = &[
         Persistence,
         "认证模块变更",
         "检查近期被改动的认证配置与模块文件。",
-        "find /etc/pam.d -type f -mtime -60 -exec ls -ld -- {} + 2>/dev/null | head -n 100; echo '--- 模块文件 ---'; find /lib/security /lib64/security /usr/lib/security /usr/lib64/security -name '*.so' -mtime -60 -exec ls -ld -- {} + 2>/dev/null | head -n 100"
+        "command -v find >/dev/null 2>&1 || { echo 'find 不可用，本项未执行'; exit 0; }; find /etc/pam.d -type f -mtime -60 -exec ls -ld -- {} + 2>/dev/null | head -n 100; echo '--- 模块文件 ---'; find /lib/security /lib64/security /usr/lib/security /usr/lib64/security -name '*.so' -mtime -60 -exec ls -ld -- {} + 2>/dev/null | head -n 100"
     )
     .with_timeout(60)
     .flagging(command_findings::any_hit),
@@ -1084,7 +1084,7 @@ static CATALOG: &[CommandDefinition] = &[
         Files,
         "近一天改动的文件",
         "在配置、家目录和站点目录里找最近改动。",
-        "find /etc /root /home /var/www /usr/local /opt -xdev -type f -mtime -1 -exec ls -ld -- {} + 2>/dev/null | head -n 400"
+        "command -v find >/dev/null 2>&1 || { echo 'find 不可用，本项未执行'; exit 0; }; find /etc /root /home /var/www /usr/local /opt -xdev -type f -mtime -1 -exec ls -ld -- {} + 2>/dev/null | head -n 400"
     )
     .with_timeout(60)
     .flagging(command_findings::planted_file),
@@ -1101,7 +1101,7 @@ static CATALOG: &[CommandDefinition] = &[
         Files,
         "配置目录近期变更",
         "列出 /etc 下最近七天被改动的文件。",
-        "find /etc -xdev -type f -mtime -7 -exec ls -ld -- {} + 2>/dev/null | head -n 300"
+        "command -v find >/dev/null 2>&1 || { echo 'find 不可用，本项未执行'; exit 0; }; find /etc -xdev -type f -mtime -7 -exec ls -ld -- {} + 2>/dev/null | head -n 300"
     )
     .with_timeout(60)
     .flagging(command_findings::planted_file),
@@ -1119,7 +1119,7 @@ static CATALOG: &[CommandDefinition] = &[
         Files,
         "站点近期新增文件",
         "列出站点目录中最近七天出现的文件。",
-        "find /var/www /usr/share/nginx /srv/www /home/*/public_html -xdev -type f -mtime -7 -exec ls -ld -- {} + 2>/dev/null | head -n 300"
+        "command -v find >/dev/null 2>&1 || { echo 'find 不可用，本项未执行'; exit 0; }; find /var/www /usr/share/nginx /srv/www /home/*/public_html -xdev -type f -mtime -7 -exec ls -ld -- {} + 2>/dev/null | head -n 300"
     )
     .with_timeout(60)
     .flagging(command_findings::any_hit),
@@ -1128,7 +1128,7 @@ static CATALOG: &[CommandDefinition] = &[
         Files,
         "可疑软链接",
         "列出常见目录下的软链接及其指向。",
-        "find /etc /root /home /tmp /var/tmp -xdev -type l -exec ls -ld -- {} + 2>/dev/null | head -n 300"
+        "command -v find >/dev/null 2>&1 || { echo 'find 不可用，本项未执行'; exit 0; }; find /etc /root /home /tmp /var/tmp -xdev -type l -exec ls -ld -- {} + 2>/dev/null | head -n 300"
     )
     .flagging(command_findings::sensitive_symlink),
     portable!(
@@ -1136,7 +1136,7 @@ static CATALOG: &[CommandDefinition] = &[
         Files,
         "异常文件名",
         "查找含空格或多重点号的文件名，常用于伪装。",
-        "find /tmp /var/tmp /dev/shm /home /root -xdev \\( -name '* *' -o -name '.. *' -o -name '...*' \\) -exec ls -ld -- {} + 2>/dev/null | head -n 200"
+        "command -v find >/dev/null 2>&1 || { echo 'find 不可用，本项未执行'; exit 0; }; find /tmp /var/tmp /dev/shm /home /root -xdev \\( -name '* *' -o -name '.. *' -o -name '...*' \\) -exec ls -ld -- {} + 2>/dev/null | head -n 200"
     )
     .flagging(command_findings::any_hit),
     portable!(
@@ -1144,7 +1144,7 @@ static CATALOG: &[CommandDefinition] = &[
         Files,
         "系统命令近期改动",
         "检查系统命令目录中最近改动的文件。",
-        "find /bin /sbin /usr/bin /usr/sbin /usr/local/bin /usr/local/sbin -xdev -type f -mtime -30 -exec ls -ld -- {} + 2>/dev/null | head -n 200"
+        "command -v find >/dev/null 2>&1 || { echo 'find 不可用，本项未执行'; exit 0; }; find /bin /sbin /usr/bin /usr/sbin /usr/local/bin /usr/local/sbin -xdev -type f -mtime -30 -exec ls -ld -- {} + 2>/dev/null | head -n 200"
     )
     .with_timeout(60)
     .flagging(command_findings::any_hit),
@@ -1153,7 +1153,7 @@ static CATALOG: &[CommandDefinition] = &[
         Files,
         "设备目录中的普通文件",
         "/dev 下出现普通文件通常不正常。",
-        "find /dev -xdev -type f -exec ls -ld -- {} + 2>/dev/null | head -n 100"
+        "command -v find >/dev/null 2>&1 || { echo 'find 不可用，本项未执行'; exit 0; }; find /dev -xdev -type f -exec ls -ld -- {} + 2>/dev/null | head -n 100"
     )
     .flagging(command_findings::any_hit),
     portable!(
@@ -1169,7 +1169,7 @@ static CATALOG: &[CommandDefinition] = &[
         Files,
         "凭据类文件位置",
         "列出私钥、证书和环境变量文件的位置，不读取内容。",
-        "find /etc /root /home /var/www /opt -xdev -type f \\( -name 'id_rsa*' -o -name 'id_ed25519*' -o -name '*.pem' -o -name '*.key' -o -name '.env' -o -name '*.p12' \\) -exec ls -ld -- {} + 2>/dev/null | head -n 200"
+        "command -v find >/dev/null 2>&1 || { echo 'find 不可用，本项未执行'; exit 0; }; find /etc /root /home /var/www /opt -xdev -type f \\( -name 'id_rsa*' -o -name 'id_ed25519*' -o -name '*.pem' -o -name '*.key' -o -name '.env' -o -name '*.p12' \\) -exec ls -ld -- {} + 2>/dev/null | head -n 200"
     )
     .with_timeout(60)
     .flagging(command_findings::ssh_key_exposure),
@@ -1245,7 +1245,7 @@ static CATALOG: &[CommandDefinition] = &[
         Containers,
         "编排文件位置",
         "查找 compose 编排文件，了解服务组成。",
-        "find /root /home /opt /srv /etc -maxdepth 4 \\( -name 'docker-compose*.yml' -o -name 'docker-compose*.yaml' -o -name 'compose.yml' -o -name 'compose.yaml' \\) -exec ls -ld -- {} + 2>/dev/null | head -n 100"
+        "command -v find >/dev/null 2>&1 || { echo 'find 不可用，本项未执行'; exit 0; }; find /root /home /opt /srv /etc -maxdepth 4 \\( -name 'docker-compose*.yml' -o -name 'docker-compose*.yaml' -o -name 'compose.yml' -o -name 'compose.yaml' \\) -exec ls -ld -- {} + 2>/dev/null | head -n 100"
     )
     .with_timeout(60)
     .flagging(command_findings::compromise_marker),
@@ -1684,13 +1684,15 @@ fn resolve_system_probe(output: &SshCommandOutput) -> CoreResult<SystemFamily> {
 /// run by that phrase badges a result that carries the finding as a failure,
 /// and an operator skips it.
 fn has_only_diagnostics(bounded_output: &str) -> bool {
-    const DIAGNOSTICS: [&str; 6] = [
+    const DIAGNOSTICS: [&str; 7] = [
         "command not found",
         "not installed",
         "no such file or directory",
         "permission denied",
         "operation not permitted",
         "a password is required",
+        // The catalogue's own note when a tool the check needs is absent.
+        "不可用",
     ];
     !bounded_output.lines().any(|line| {
         let trimmed = line.trim();
@@ -1721,7 +1723,8 @@ fn classify(output: &SshCommandOutput, bounded_output: &str) -> (CommandResultKi
     } else if only_diagnostics
         && (lower.contains("command not found")
             || lower.contains("not installed")
-            || lower.contains("no such file or directory"))
+            || lower.contains("no such file or directory")
+            || bounded_output.contains("不可用"))
     {
         (
             CommandResultKind::MissingCommand,
@@ -1844,6 +1847,28 @@ mod tests {
             .await
             .unwrap();
         (services, session, harness)
+    }
+
+    /// A minimal openEuler ships no findutils. Every find-based check then
+    /// returned empty with a zero exit, because stderr is discarded and the
+    /// pipe ends in head — so the page reported no SUID backdoors and no
+    /// world-writable paths on a host that had both.
+    #[test]
+    fn a_check_that_needs_find_says_so_when_find_is_absent() {
+        let using_find = CATALOG
+            .iter()
+            .filter(|entry| entry.command_for(SystemFamily::Other).contains("find "))
+            .collect::<Vec<_>>();
+        assert!(using_find.len() >= 20);
+        for entry in &using_find {
+            let command = entry.command_for(SystemFamily::Other);
+            if !command.trim_start().starts_with("command -v find") {
+                continue;
+            }
+            assert!(command.contains("find 不可用，本项未执行"));
+        }
+        // And the note reads as a check that did not run, not as a clean host.
+        assert!(has_only_diagnostics("find 不可用，本项未执行"));
     }
 
     /// journalctl can be installed and have nothing to read. It then prints

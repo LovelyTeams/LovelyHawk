@@ -5106,6 +5106,12 @@ impl Drop for TestOperationGuard<'_> {
 
 #[cfg(test)]
 mod tests {
+    /// What these tests bound is "does not hang", not "is quick". A hundred
+    /// milliseconds is a coin toss on a loaded machine, and the blocked cases
+    /// below are held open indefinitely, so a wider bound still fails at once
+    /// when the property is actually broken.
+    const RESPONSIVE_BOUND: Duration = Duration::from_secs(2);
+
     use std::collections::BTreeSet;
     use std::sync::atomic::Ordering;
 
@@ -5629,7 +5635,7 @@ mod tests {
             .send(WorkerCommand::ListSessions { reply: list_reply })
             .await
             .unwrap();
-        let listed = tokio::time::timeout(Duration::from_millis(100), list_response)
+        let listed = tokio::time::timeout(RESPONSIVE_BOUND, list_response)
             .await
             .expect("session A work must not block listing")
             .unwrap();
@@ -5643,7 +5649,7 @@ mod tests {
             })
             .await
             .unwrap();
-        tokio::time::timeout(Duration::from_millis(100), disconnect_b_response)
+        tokio::time::timeout(RESPONSIVE_BOUND, disconnect_b_response)
             .await
             .expect("session A work must not block session B disconnect")
             .unwrap()
@@ -5657,7 +5663,7 @@ mod tests {
             })
             .await
             .unwrap();
-        tokio::time::timeout(Duration::from_millis(100), disconnect_a_response)
+        tokio::time::timeout(RESPONSIVE_BOUND, disconnect_a_response)
             .await
             .expect("session disconnect must be bounded")
             .unwrap()
@@ -5770,7 +5776,7 @@ mod tests {
             .unwrap();
         harness.wait_for_entered(1).await;
         drop(response);
-        tokio::time::timeout(Duration::from_millis(100), async {
+        tokio::time::timeout(RESPONSIVE_BOUND, async {
             while harness.cancelled_count.load(Ordering::SeqCst) == 0 {
                 tokio::task::yield_now().await;
             }
@@ -5787,7 +5793,7 @@ mod tests {
             .await
             .unwrap();
         drop(disconnect_response);
-        tokio::time::timeout(Duration::from_millis(100), async {
+        tokio::time::timeout(RESPONSIVE_BOUND, async {
             while !harness.disconnected.load(Ordering::SeqCst) {
                 tokio::task::yield_now().await;
             }
@@ -5826,7 +5832,7 @@ mod tests {
         tokio::task::yield_now().await;
         close.send_replace(true);
         assert!(
-            !tokio::time::timeout(Duration::from_millis(100), blocked)
+            !tokio::time::timeout(RESPONSIVE_BOUND, blocked)
                 .await
                 .expect("close must interrupt a saturated event send")
                 .unwrap()
@@ -5855,7 +5861,7 @@ mod tests {
         tokio::task::yield_now().await;
         terminal.close().await.unwrap();
         assert!(
-            tokio::time::timeout(Duration::from_millis(100), blocked_input)
+            tokio::time::timeout(RESPONSIVE_BOUND, blocked_input)
                 .await
                 .expect("close must interrupt blocked terminal input")
                 .unwrap()
