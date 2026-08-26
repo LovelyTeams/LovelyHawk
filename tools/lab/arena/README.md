@@ -5,8 +5,8 @@
 数据库、命令工作台，而不是开 21 个容器各管一摊。
 
 ```bash
-pnpm lab:arena     # 构建并启动（第一次装包要几分钟）
-pnpm lab:import    # 写进连接库
+pnpm lab:arena          # 构建、启动，并写进连接库
+pnpm lab:verify-import  # 核对连接库里 22 台一台不少
 ```
 
 端口 2250，`root` / `LabRoot#2026`。

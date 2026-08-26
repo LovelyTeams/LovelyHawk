@@ -13,7 +13,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { Sidecar } from "./rpc-harness.mjs";
-import { LAB_PORTS, SERVICE_PORTS } from "./lab-target.mjs";
+import { ARENA_PORT, LAB_PORTS, SERVICE_PORTS } from "./lab-target.mjs";
 
 const PASSWORD = "LabRoot#2026";
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -47,18 +47,36 @@ function labId(index) {
 }
 
 /**
- * The two families of lab. The intrusion hosts are nine distributions made to
- * look compromised; the service hosts each run one real product with a
- * deliberately bad configuration.
+ * The families of lab.
+ *
+ * The arena comes first because it is the one to start with: a single Ubuntu
+ * server with everything on it. The intrusion hosts are nine distributions
+ * made to look compromised, and the service hosts each run one real product
+ * with a deliberately bad configuration.
+ *
+ * Ids are numbered per family from a fixed base, so adding a family cannot
+ * shift the ids of the ones already in the store and leave orphans behind.
  */
 const FAMILIES = [
   {
+    base: 900,
+    ports: { arena: ARENA_PORT },
+    group: "实验靶机 · 综合",
+    label: () => "综合靶机 Ubuntu",
+    note: () => "WSL Docker 靶机 lab-arena：一台机器上跑齐 nginx / MariaDB / Redis / PostgreSQL，"
+      + "六个基线文件全是错的，还带几处入侵痕迹；见 tools/lab/arena/README.md。",
+  },
+  {
+    base: 0,
     ports: LAB_PORTS,
     group: "实验靶机 · 被入侵",
     label: (name) => `被入侵 ${name}`,
     note: (name) => `WSL Docker 靶机 lab-${name}，故意做成被入侵的样子；见 tools/lab/README.md。`,
   },
   {
+    // Follows straight on from the intrusion hosts: these ids are already in
+    // the store, and renumbering them would leave twelve orphans behind.
+    base: 9,
     ports: SERVICE_PORTS,
     group: "实验靶机 · 配置不合规",
     label: (name) => `配置不合规 ${name}`,
@@ -96,8 +114,8 @@ try {
   const existing = await sidecar.call("connections.list", {});
   const known = new Set(existing.map((entry) => entry.id));
 
-  let index = 0;
   for (const family of FAMILIES) {
+    let index = family.base;
     for (const name of Object.keys(family.ports)) {
       const id = labId(index);
       index += 1;

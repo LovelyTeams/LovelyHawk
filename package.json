@@ -29,6 +29,7 @@
     "lab:ui": "node ./tools/lab/probe-ui.mjs",
     "lab:down": "wsl.exe -d Ubuntu -u root -e bash -lc \"docker stop $(docker ps -q --filter name=lab-)\"",
     "lab:restart": "pwsh -NoProfile -Command \"wsl.exe -d Ubuntu -u root -e bash -lc 'bash /mnt/d/LovelyRes/tools/lab/services/restart.sh' ; node ./tools/lab/import-labs.mjs\"",
-    "lab:arena": "pwsh -NoProfile -Command \"wsl.exe -d Ubuntu -u root -e bash -lc 'rm -rf /opt/lab-arena && mkdir -p /opt/lab-arena && cp /mnt/d/LovelyRes/tools/lab/arena/* /opt/lab-arena/ && sed -i \\\"s/\r$//\\\" /opt/lab-arena/* && chmod +x /opt/lab-arena/*.sh && bash /opt/lab-arena/up.sh'\""
+    "lab:arena": "pwsh -NoProfile -Command \"wsl.exe -d Ubuntu -u root -e bash -lc 'rm -rf /opt/lab-arena && mkdir -p /opt/lab-arena && cp /mnt/d/LovelyRes/tools/lab/arena/* /opt/lab-arena/ && sed -i \\\"s/\r$//\\\" /opt/lab-arena/* && chmod +x /opt/lab-arena/*.sh && bash /opt/lab-arena/up.sh'\" ; node ./tools/lab/import-labs.mjs",
+    "lab:verify-import": "node ./tools/lab/verify-import.mjs"
   }
 }
