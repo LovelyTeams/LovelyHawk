@@ -42,7 +42,9 @@ const REAPPLY_MARKER: &str = "LR_BASELINE_REAPPLY_V1";
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(45);
 const MAX_HISTORY: usize = 256;
 const MAX_BASELINE_HISTORY_DOCUMENT_BYTES: usize = 4 * 1024 * 1024;
-const MAX_CHANGES: usize = 64;
+/// One plan may carry every check this tool can write, so "fix everything"
+/// is one reviewable operation with one backup set rather than several.
+const MAX_CHANGES: usize = 128;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -283,16 +285,12 @@ impl BaselineDefinition {
 
     /// Whether this tool will write the change as well as report it.
     ///
-    /// It writes to one fixed path. That is safe for the operating system's
-    /// own files, which are in the same place everywhere this runs, and unsafe
-    /// for everything else: a database keeps its configuration somewhere
-    /// different on every distribution, and writing the directive to the path
-    /// this tool happens to know would leave a correct-looking file that the
-    /// database never reads. Those checks report, and say where to go.
+    /// Everything except a presence check, which has no value to write: what
+    /// it reports is that a directive is set, and the directive's value is a
+    /// credential. Setting one would mean this tool handling the credential,
+    /// which it does not do — the operator is given the line to write instead.
     pub const fn is_writable(&self) -> bool {
-        matches!(self.format, FileFormat::Whitespace | FileFormat::Equals)
-            && !matches!(self.value_kind, BaselineValueKind::Presence)
-            && !self.component.is_optional()
+        !matches!(self.value_kind, BaselineValueKind::Presence)
     }
 
     /// Every path the scan will look in, in order, for this setting.
@@ -1730,6 +1728,11 @@ pub struct BaselineStatus {
     pub item_id: String,
     pub observed: BaselineObservedValue,
     pub compliant: bool,
+    /// The file on this target that decides this setting.
+    ///
+    /// Where the value was read from when it was found, and where a change
+    /// would go when it was not. Empty only when the software is absent.
+    pub source_file: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1812,6 +1815,18 @@ pub struct PlannedBaselineChange {
     pub item_id: String,
     pub before: BaselineObservedValue,
     pub after: String,
+    /// The file on this target the change is written to.
+    ///
+    /// Taken from the scan that found the current value, so the edit lands on
+    /// the file the target is actually obeying rather than on the one path
+    /// this tool was compiled knowing. It is backed up before it is touched
+    /// and restored from that backup if anything downstream fails.
+    ///
+    /// Absent from records written before changes could target anything but
+    /// the packaged path; those load with an empty string, which resolves back
+    /// to that path.
+    #[serde(default)]
+    pub file: String,
 }
 
 #[derive(Debug, Clone)]
@@ -2071,6 +2086,7 @@ impl BaselineService {
                 item_id: request.item_id,
                 before: status.observed.clone(),
                 after: request.value,
+                file: status.source_file.clone(),
             });
         }
         if changes.is_empty() {
@@ -2568,6 +2584,99 @@ pub fn definition(item_id: &str) -> CoreResult<&'static BaselineDefinition> {
         })
 }
 
+/// What to change, where, and what to run afterwards.
+///
+/// Derived from the check rather than written out beside it: a hand-written
+/// instruction next to seventy-five checks is seventy-five chances for the
+/// instruction and the check to say different things, and the one that goes
+/// stale is always the prose.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BaselineRemediation {
+    /// The file to edit on this target, as the scan found it.
+    pub file: String,
+    /// The exact lines to put in it.
+    pub lines: Vec<String>,
+    /// What makes the change take effect, if anything.
+    pub reload: Option<String>,
+    /// Set when this tool will not write the change itself.
+    pub manual_reason: Option<&'static str>,
+}
+
+impl BaselineDefinition {
+    /// The instruction for bringing one setting to its recommended value.
+    ///
+    /// `source_file` is where the scan found the setting on this target; pass
+    /// an empty string before a scan and the packaged path is used.
+    pub fn remediation(&self, source_file: &str) -> BaselineRemediation {
+        let file = if source_file.trim().is_empty() {
+            self.file.to_owned()
+        } else {
+            source_file.trim().to_owned()
+        };
+        let value = self.recommendation;
+        let lines = match self.format {
+            FileFormat::Whitespace => vec![format!("{} {value}", self.key)],
+            FileFormat::Equals => vec![format!("{} = {value}", self.key)],
+            FileFormat::Semicolon => vec![format!("{} {value};", self.key)],
+            FileFormat::Ini(section) => {
+                vec![format!("[{section}]"), format!("{} = {value}", self.key)]
+            }
+            FileFormat::Yaml => self
+                .key
+                .split('.')
+                .enumerate()
+                .map(|(level, part)| {
+                    let indent = "  ".repeat(level);
+                    if level + 1 == self.key.split('.').count() {
+                        format!("{indent}{part}: {value}")
+                    } else {
+                        format!("{indent}{part}:")
+                    }
+                })
+                .collect(),
+        };
+        let lines = if self.value_kind == BaselineValueKind::Presence {
+            // There is no value to print: the operator chooses it, and this
+            // tool must not see it.
+            lines
+                .iter()
+                .map(|line| line.replace(PRESENCE_MARKER, "<自行设定>"))
+                .collect()
+        } else {
+            lines
+        };
+        BaselineRemediation {
+            file,
+            lines,
+            reload: self.reload_command().map(str::to_owned),
+            manual_reason: if self.is_writable() {
+                None
+            } else {
+                Some("这一项的值是凭据，请自行填写后再重载服务。")
+            },
+        }
+    }
+
+    /// What makes a change to this setting take effect.
+    pub const fn reload_command(&self) -> Option<&'static str> {
+        match self.reload {
+            ReloadGroup::Sshd => Some("systemctl reload sshd（或 service ssh reload）"),
+            ReloadGroup::Sysctl => Some("sysctl --system"),
+            ReloadGroup::None => match self.component {
+                BaselineComponent::System | BaselineComponent::Ssh => None,
+                BaselineComponent::MySql => Some("systemctl restart mariadb（或 mysqld / mysql）"),
+                BaselineComponent::PostgreSql => Some("systemctl reload postgresql"),
+                BaselineComponent::Redis => Some("systemctl restart redis（或 redis-server）"),
+                BaselineComponent::MongoDb => Some("systemctl restart mongod"),
+                BaselineComponent::Nginx => Some("nginx -t && systemctl reload nginx"),
+                BaselineComponent::Apache => {
+                    Some("apachectl configtest && systemctl reload httpd（或 apache2）")
+                }
+            },
+        }
+    }
+}
+
 /// Whether what the target is doing matches what the check asks for.
 fn compliance_of(definition: &BaselineDefinition, observed: &BaselineObservedValue) -> bool {
     let effective = match observed {
@@ -2694,9 +2803,12 @@ fn item_command(definition: &BaselineDefinition) -> String {
              lr_read=$(printf '%s' \"$lr_read\" | tr -s '[:space:]' ' '); \
              lr_value=$(printf '%s' \"$lr_read\" | tr -cd '{allowed}'); \
              [ -n \"$lr_value\" ] || lr_value=__missing__; \
-             printf 'ITEM=%s\\t%s\\n' {id} \"$lr_value\"; ",
+             printf 'ITEM=%s\\t%s\\t%s\\n' {id} \"$lr_value\" {file}; ",
             key = shq(definition.key),
             allowed = OBSERVED_VALUE_CHARS,
+            // A kernel parameter is read from the kernel, but it is written to
+            // a file, and the operator is told which one.
+            file = shq(definition.file),
         ),
         // Every file that exists, read in the order the program reads them,
         // and the precedence rule applied across the whole set.
@@ -2722,17 +2834,23 @@ fn item_command(definition: &BaselineDefinition) -> String {
                      lr_files=\"$lr_files $lr_candidate\"; \
                    fi; \
                  done; \
-                 lr_key={key}; \
+                 lr_key={key}; lr_where={fallback}; \
                  if [ -n \"$lr_files\" ]; then \
                    lr_value=$(awk -v k=\"$lr_key\" '{program}' $lr_files | tail -n 1); \
                    lr_value=$(printf '%s' \"$lr_value\" | tr -cd '{allowed}'); \
                    [ -n \"$lr_value\" ] || lr_value=__missing__; \
+                   lr_where=$(awk -v k=\"$lr_key\" '{witness}' $lr_files | tail -n 1); \
+                   [ -n \"$lr_where\" ] || lr_where=$(printf '%s' \"$lr_files\" | awk '{{print $NF}}'); \
                  elif [ \"$lr_odd\" = 1 ]; then lr_value=__unsupported__; \
                  else lr_value=__absent__; fi; \
-                 printf 'ITEM=%s\\t%s\\n' {id} \"$lr_value\"; ",
+                 printf 'ITEM=%s\\t%s\\t%s\\n' {id} \"$lr_value\" \"$lr_where\"; ",
                 key = shq(definition.key),
                 program = reader_program(definition),
+                witness = witness_program(definition),
                 allowed = OBSERVED_VALUE_CHARS,
+                // Nothing on this target mentions the directive, so a change
+                // goes where the distribution would expect to find it.
+                fallback = shq(definition.file),
             )
         }
     }
@@ -2773,6 +2891,34 @@ fn reader_program(definition: &BaselineDefinition) -> String {
         | BaselineValueKind::Integer { .. }
         | BaselineValueKind::Boolean => body,
     }
+}
+
+/// Which file the value that won came from.
+///
+/// The operator is not told "the setting is wrong" and left to find it: with
+/// six candidate paths and include directories that override each other, the
+/// file that actually decides the value is the one piece of information a fix
+/// needs. It is also where this tool writes, so a change lands on the line the
+/// target is obeying rather than on a file it ignores.
+fn witness_program(definition: &BaselineDefinition) -> String {
+    // The same walk as the reader, recording which file the winning line was
+    // in instead of what it said.
+    let program = match definition.format {
+        FileFormat::Yaml => YAML_READER.replace("v=val}", "v=FILENAME}"),
+        FileFormat::Ini(section) => {
+            ini_reader(section).replace("v=(hasEq ? p : (p==\"\" ? \"on\" : p))", "v=FILENAME")
+        }
+        FileFormat::Whitespace | FileFormat::Equals | FileFormat::Semicolon => {
+            flat_reader(definition.precedence(), "")
+                .replace("v=p;", "v=FILENAME;")
+                .replace("v=p}", "v=FILENAME}")
+        }
+    };
+    debug_assert!(
+        program.contains("FILENAME"),
+        "the witness reads no filename"
+    );
+    program
 }
 
 /// A setting under a `[section]` header, which is how the my.cnf family works.
@@ -2989,6 +3135,71 @@ fn mentions_of(
     Ok(mentions)
 }
 
+/// The path the target says decides this setting, checked before it is kept.
+///
+/// The target is not trusted to name a file. A path only survives if this
+/// check could legitimately have read it — one of its compile-time candidates,
+/// with `*` matching within a single path segment — so a compromised host
+/// cannot answer a scan with a path this tool would later write to.
+fn resolved_source(definition: &BaselineDefinition, reported: &str) -> CoreResult<String> {
+    let reported = reported.trim();
+    if reported.is_empty() {
+        return Ok(definition.file.to_owned());
+    }
+    if reported.len() > 4_096
+        || !reported.starts_with('/')
+        || reported.contains("..")
+        || !reported.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'.' | b'_' | b'-' | b'+' | b'@')
+        })
+    {
+        return Err(CoreError::validation(
+            "baseline scan",
+            "the target named a configuration file this check cannot read",
+        ));
+    }
+    if reported == definition.file
+        || definition
+            .candidates()
+            .iter()
+            .any(|pattern| path_matches(pattern, reported))
+    {
+        return Ok(reported.to_owned());
+    }
+    Err(CoreError::validation(
+        "baseline scan",
+        "the target named a configuration file outside this check's catalogue",
+    ))
+}
+
+/// A path against one compile-time candidate. `*` matches within one segment.
+fn path_matches(pattern: &str, path: &str) -> bool {
+    let mut pattern_parts = pattern.split('/');
+    let mut path_parts = path.split('/');
+    loop {
+        match (pattern_parts.next(), path_parts.next()) {
+            (None, None) => return true,
+            (Some(expected), Some(actual)) => {
+                if !segment_matches(expected, actual) {
+                    return false;
+                }
+            }
+            _ => return false,
+        }
+    }
+}
+
+fn segment_matches(pattern: &str, segment: &str) -> bool {
+    let Some((prefix, suffix)) = pattern.split_once('*') else {
+        return pattern == segment;
+    };
+    // One star per segment is all the catalogue uses, and all this accepts.
+    !suffix.contains('*')
+        && segment.len() >= prefix.len() + suffix.len()
+        && segment.starts_with(prefix)
+        && segment.ends_with(suffix)
+}
+
 fn parse_scan(output: &str) -> CoreResult<Vec<BaselineStatus>> {
     if !output.lines().any(|line| line.trim() == SCAN_MARKER) {
         return Err(CoreError::validation(
@@ -2998,10 +3209,11 @@ fn parse_scan(output: &str) -> CoreResult<Vec<BaselineStatus>> {
     }
     let mut values = BTreeMap::new();
     for line in output.lines().filter(|line| line.starts_with("ITEM=")) {
-        let Some((item_id, value)) = line[5..].split_once('\t') else {
+        let Some((item_id, rest)) = line[5..].split_once('\t') else {
             return Err(CoreError::validation("baseline scan", "invalid item row"));
         };
-        definition(item_id)?;
+        let (value, source) = rest.split_once('\t').unwrap_or((rest, ""));
+        let definition = definition(item_id)?;
         let observed = match value {
             "__missing__" => BaselineObservedValue::Missing,
             "__unsupported__" => BaselineObservedValue::Unsupported,
@@ -3009,7 +3221,11 @@ fn parse_scan(output: &str) -> CoreResult<Vec<BaselineStatus>> {
             value => BaselineObservedValue::Value(value.to_owned()),
         };
         validate_observed(&observed)?;
-        if values.insert(item_id.to_owned(), observed).is_some() {
+        let source = resolved_source(definition, source)?;
+        if values
+            .insert(item_id.to_owned(), (observed, source))
+            .is_some()
+        {
             return Err(CoreError::validation("baseline scan", "duplicate item row"));
         }
     }
@@ -3022,7 +3238,7 @@ fn parse_scan(output: &str) -> CoreResult<Vec<BaselineStatus>> {
     BASELINE_CATALOG
         .iter()
         .map(|definition| {
-            let observed = values
+            let (observed, source_file) = values
                 .remove(definition.id)
                 .ok_or_else(|| CoreError::validation("baseline scan", "missing item row"))?;
             let compliant = compliance_of(definition, &observed);
@@ -3030,6 +3246,7 @@ fn parse_scan(output: &str) -> CoreResult<Vec<BaselineStatus>> {
                 item_id: definition.id.to_owned(),
                 observed,
                 compliant,
+                source_file,
             })
         })
         .collect()
@@ -3101,9 +3318,19 @@ fn parse_backup_evidence(
 fn files_for_changes(changes: &[PlannedBaselineChange]) -> CoreResult<Vec<String>> {
     let mut files = BTreeSet::new();
     for change in changes {
-        files.insert(definition(&change.item_id)?.file.to_owned());
+        files.insert(change_file(change)?);
     }
     Ok(files.into_iter().collect())
+}
+
+/// The file one change writes to, re-checked against the catalogue.
+///
+/// The plan carries the path the scan resolved, and this asks the same
+/// question again at the moment it is used: a path that is not one this check
+/// could have read never reaches a command.
+fn change_file(change: &PlannedBaselineChange) -> CoreResult<String> {
+    let definition = definition(&change.item_id)?;
+    resolved_source(definition, &change.file)
 }
 
 fn change_digest(
@@ -3338,29 +3565,163 @@ fn edit_body(
     if !definition.is_writable() {
         return Err(read_only_check(definition));
     }
-    let separator = match definition.format {
-        FileFormat::Whitespace => "space",
-        FileFormat::Equals => "equals",
-        // Rewriting a sectioned or nested file with a flat line editor would
-        // put the directive in the wrong section, or at the wrong depth, which
-        // is worse than not writing it. `is_writable` has already refused
-        // these; the arm is here so a new format cannot slip through.
-        FileFormat::Ini(_) | FileFormat::Semicolon | FileFormat::Yaml => {
-            return Err(read_only_check(definition));
-        }
-    };
+    let file = change_file(change)?;
     let temporary = format!("{remote_root}/edit-{index}.tmp");
     Ok(format!(
-        "lr_file={file}; lr_key={key}; lr_value={value}; lr_sep={separator}; lr_tmp={temporary}; \
+        "lr_file={file}; lr_key={key}; lr_value={value}; lr_tmp={temporary}; \
          lr_source=/dev/null; [ -f \"$lr_file\" ] && lr_source=\"$lr_file\"; \
-         awk -v k=\"$lr_key\" -v v=\"$lr_value\" -v s=\"$lr_sep\" 'BEGIN{{done=0}} {{line=$0; p=$0; sub(/^[[:space:]]*#[[:space:]]*/,\"\",p); t=p; sub(/[[:space:]=].*$/,\"\",t); if(!done && tolower(t)==tolower(k)){{if(s==\"equals\") print k \" = \" v; else print k \" \" v; done=1}} else print line}} END{{if(!done){{if(s==\"equals\") print k \" = \" v; else print k \" \" v}}}}' \"$lr_source\" > \"$lr_tmp\"; \
+         awk -v k=\"$lr_key\" -v v=\"$lr_value\" '{program}' \"$lr_source\" \"$lr_source\" > \"$lr_tmp\"; \
          if [ -f \"$lr_file\" ]; then cat -- \"$lr_tmp\" > \"$lr_file\"; else mkdir -p -- \"$(dirname -- \"$lr_file\")\"; install -m 0644 -- \"$lr_tmp\" \"$lr_file\"; fi; rm -f -- \"$lr_tmp\"; ",
-        file = shq(definition.file),
+        file = shq(&file),
         key = shq(definition.key),
         value = shq(&change.after),
-        separator = shq(separator),
+        program = writer_program(definition),
         temporary = shq(&temporary),
     ))
+}
+
+/// The awk that rewrites one directive, in the shape its file is written in.
+///
+/// Every one of them replaces the first line that already names the directive
+/// — commented or not, so the fix lands where the operator will look for it —
+/// and appends the line if the file never mentioned it.
+fn writer_program(definition: &BaselineDefinition) -> String {
+    match definition.format {
+        FileFormat::Whitespace => flat_writer("k \" \" v"),
+        FileFormat::Equals => flat_writer("k \" = \" v"),
+        FileFormat::Semicolon => flat_writer("k \" \" v \";\""),
+        FileFormat::Ini(section) => ini_writer(section),
+        FileFormat::Yaml => yaml_writer(definition.key),
+        // A presence check has nothing to write; `is_writable` refused it.
+    }
+}
+
+/// One directive per line, in a file with no sections and no nesting.
+///
+/// Read twice, because writing it in one pass got it wrong twice over.
+///
+/// The line that matters is the one the program obeys, and a file usually
+/// carries the packaged default commented out above the line someone actually
+/// set. Replacing the first line that mentioned the directive put the fix in
+/// the comment and left `log_connections = off` live underneath it — a change
+/// that reads as applied and does nothing. And a second live line further down
+/// would override the fix even once it landed in the right place, so the
+/// duplicates go.
+///
+/// A directive is also allowed to be indented — nginx indents all of them —
+/// and matching from the start of the line without stripping that whitespace
+/// meant nothing inside a block was ever recognised, so every nginx fix was
+/// appended to the end of the file instead of replacing the setting.
+fn flat_writer(rendered: &str) -> String {
+    format!(
+        "{FLAT_WRITER_SCAN} \
+         {{indent=\"\"; if(match($0,/[^ \\t]/)>1) indent=substr($0,1,RSTART-1); \
+          if(active>0){{ \
+            if(FNR==firstActive){{print indent {rendered}; done=1; next}} \
+            p=$0; sub(/^[[:space:]]+/,\"\",p); \
+            if(p !~ /^#/){{t=p; sub(/[[:space:]=].*$/,\"\",t); \
+              if(tolower(t)==tolower(k)) next}} \
+          }} else if(firstComment>0 && FNR==firstComment){{ \
+            print indent {rendered}; done=1; next}} \
+          print}} \
+         END{{if(!done) print {rendered}}}"
+    )
+}
+
+/// The counting pass shared by the flat writer: where the live occurrences of
+/// the directive are, and where the first commented one is.
+const FLAT_WRITER_SCAN: &str = "BEGIN{done=0;active=0;firstActive=0;firstComment=0} \
+     NR==FNR{p=$0; sub(/^[[:space:]]+/,\"\",p); \
+      if(p ~ /^#/){c=p; sub(/^#+[[:space:]]*/,\"\",c); t=c; \
+        sub(/[[:space:]=].*$/,\"\",t); \
+        if(tolower(t)==tolower(k) && firstComment==0) firstComment=FNR} \
+      else {t=p; sub(/[[:space:]=].*$/,\"\",t); \
+        if(tolower(t)==tolower(k)){active++; if(firstActive==0) firstActive=FNR}} \
+      next} ";
+
+/// A directive inside a `[section]`, which is how the my.cnf family works.
+///
+/// Writing it flat would have put `bind-address` under whatever section
+/// happened to come first in the file — `[client]` on a stock Debian install —
+/// where the server never reads it. The section is found first, the directive
+/// replaced inside it, and if the file has no such section one is appended.
+fn ini_writer(section: &str) -> String {
+    // Two passes, for the same reason the flat writer needs them: the live
+    // line wins over the commented default, and a second live line in the same
+    // section would override the fix.
+    let scan = format!(
+        "BEGIN{{done=0;inS=0;seen=0;active=0;firstActive=0;firstComment=0;endOfSection=0}} \
+         NR==FNR{{p=$0; sub(/^[[:space:]]+/,\"\",p); \
+          if(p ~ /^\\[/){{s=p; \
+            gsub(/^\\[|\\].*$/,\"\",s); gsub(/^[[:space:]]+|[[:space:]]+$/,\"\",s); \
+            if(scanIn) endOfSection=FNR; \
+            scanIn=(tolower(s)==tolower(\"{section}\")); if(scanIn) seen=1; next}} \
+          if(!scanIn) next; \
+          if(p ~ /^[#;]/){{c=p; sub(/^[#;]+[[:space:]]*/,\"\",c); t=c; \
+            sub(/[[:space:]=].*$/,\"\",t); tk=tolower(t); gsub(/-/,\"_\",tk); \
+            kk=tolower(k); gsub(/-/,\"_\",kk); \
+            if(tk==kk && firstComment==0) firstComment=FNR; next}} \
+          t=p; sub(/[[:space:]=].*$/,\"\",t); tk=tolower(t); gsub(/-/,\"_\",tk); \
+          kk=tolower(k); gsub(/-/,\"_\",kk); \
+          if(tk==kk){{active++; if(firstActive==0) firstActive=FNR}} \
+          next}} "
+    );
+    format!(
+        "{scan}\
+         /^[[:space:]]*\\[/{{s=$0; \
+           gsub(/^[[:space:]]*\\[|\\][[:space:]]*.*$/,\"\",s); \
+           gsub(/^[[:space:]]+|[[:space:]]+$/,\"\",s); \
+           if(inS && !done && active==0 && firstComment==0){{print k \" = \" v; done=1}} \
+           inS=(tolower(s)==tolower(\"{section}\")); print; next}} \
+         {{if(inS && active>0){{ \
+            if(FNR==firstActive){{print k \" = \" v; done=1; next}} \
+            p=$0; sub(/^[[:space:]]+/,\"\",p); \
+            if(p !~ /^[#;]/){{t=p; sub(/[[:space:]=].*$/,\"\",t); \
+              tk=tolower(t); gsub(/-/,\"_\",tk); kk=tolower(k); gsub(/-/,\"_\",kk); \
+              if(tk==kk) next}} \
+          }} else if(inS && firstComment>0 && FNR==firstComment){{ \
+            print k \" = \" v; done=1; next}} \
+          print}} \
+         END{{if(!done){{if(!seen) print \"[{section}]\"; print k \" = \" v}}}}"
+    )
+}
+
+/// A dotted path through indented YAML, which is how mongod.conf is written.
+///
+/// The path is walked the way the reader walks it. A path whose parents are
+/// already there has its leaf replaced in place at the indentation the file
+/// uses; a path with no parents at all is appended as a fresh block, so
+/// `security.authorization` becomes two lines rather than one wrong one.
+fn yaml_writer(key: &str) -> String {
+    let depth = key.split('.').count();
+    let leaf = key.rsplit('.').next().unwrap_or(key);
+    let mut block = String::new();
+    for (level, part) in key.split('.').enumerate() {
+        let indent = "  ".repeat(level);
+        if level + 1 == depth {
+            block.push_str(&format!("print \"{indent}{part}: \" v; "));
+        } else {
+            block.push_str(&format!("print \"{indent}{part}:\"; "));
+        }
+    }
+    format!(
+        "BEGIN{{done=0;top=0;at=0;pad=\"\"}} \
+         NR==FNR{{probe=$0; sub(/#.*$/,\"\",probe); \
+          if(probe ~ /^[[:space:]]*$/) next; \
+          ind=match(probe,/[^ ]/)-1; \
+          name=probe; sub(/^[[:space:]]*/,\"\",name); \
+          p=index(name,\":\"); if(p==0) next; \
+          name=substr(name,1,p-1); \
+          gsub(/^[[:space:]]+|[[:space:]]+$/,\"\",name); \
+          while(top>0 && ind_of[top]>=ind) top--; \
+          top++; ind_of[top]=ind; name_of[top]=name; \
+          path=name_of[1]; for(i=2;i<=top;i++) path=path \".\" name_of[i]; \
+          if(at==0 && tolower(path)==tolower(k)){{at=FNR; \
+            pad=\"\"; for(i=0;i<ind;i++) pad=pad \" \"}} \
+          next}} \
+         {{if(at>0 && FNR==at){{print pad \"{leaf}: \" v; done=1; next}} print}} \
+         END{{if(!done){{{block}}}}}"
+    )
 }
 
 fn configuration_validation(
@@ -3537,11 +3898,20 @@ fn validate_remote_root(remote_root: &str) -> CoreResult<()> {
     Ok(())
 }
 
+/// A path may be backed up, edited or restored only if some check in the
+/// catalogue could have read it.
+///
+/// The set is still closed — every candidate is a compile-time constant — but
+/// it is now the whole set rather than the one canonical path per check, since
+/// a change is written to the file the target was actually obeying.
 fn validate_catalog_file(file: &str) -> CoreResult<()> {
-    if BASELINE_CATALOG
-        .iter()
-        .any(|definition| definition.file == file)
-    {
+    if BASELINE_CATALOG.iter().any(|definition| {
+        definition.file == file
+            || definition
+                .candidates()
+                .iter()
+                .any(|pattern| path_matches(pattern, file))
+    }) {
         Ok(())
     } else {
         Err(CoreError::validation(
@@ -3702,6 +4072,7 @@ mod tests {
             item_id: "ssh-max-auth-tries".to_owned(),
             before: BaselineObservedValue::Value("6".to_owned()),
             after: "4".to_owned(),
+            file: "/etc/ssh/sshd_config".to_owned(),
         }];
         let files = files_for_changes(&changes).unwrap();
         let backups = files
@@ -3812,6 +4183,7 @@ mod tests {
                             item_id: definition.id.to_owned(),
                             before: BaselineObservedValue::Missing,
                             after: definition.recommendation.to_owned(),
+                            file: definition.file.to_owned(),
                         },
                         "/tmp",
                         0,
@@ -3876,34 +4248,121 @@ mod tests {
         );
     }
 
+    /// Each file shape is written the way that shape is written, and the line
+    /// goes into the file the scan said the target was obeying.
     #[test]
-    fn expanded_catalog_uses_only_supported_editor_formats() {
+    fn every_writable_check_edits_its_own_file_in_its_own_shape() {
         let remote_root = expected_remote_root("6f03708a-40f4-486f-8bf1-ff08e7e25457").unwrap();
-        for (item_id, separator) in [
-            ("ssh-permit-empty-passwords", "space"),
-            ("authentication-login-fail-delay", "space"),
-            ("authentication-faillock-deny", "equals"),
-            ("authentication-password-min-length", "equals"),
-            ("permissions-default-umask", "space"),
-            ("kernel-protected-hardlinks", "equals"),
-            ("network-tcp-syncookies", "equals"),
-            ("logging-audit-rotation-action", "equals"),
+        for (item_id, rendered) in [
+            ("ssh-permit-empty-passwords", "k \" \" v"),
+            ("authentication-login-fail-delay", "k \" \" v"),
+            ("authentication-faillock-deny", "k \" = \" v"),
+            ("permissions-default-umask", "k \" \" v"),
+            ("network-tcp-syncookies", "k \" = \" v"),
+            // The shapes the flat editor used to refuse outright.
+            ("nginx-server-tokens", "k \" \" v \";\""),
+            ("mysql-local-infile", "[mysqld]"),
+            ("mongodb-authorization", "  authorization: "),
         ] {
             let definition = definition(item_id).unwrap();
+            // The scan found it somewhere other than the compiled-in default.
+            let found_at = definition
+                .candidates()
+                .last()
+                .copied()
+                .unwrap_or(definition.file);
+            let elsewhere = found_at.replace('*', "written-here");
             let command = edit_body(
                 &PlannedBaselineChange {
                     item_id: item_id.to_owned(),
                     before: BaselineObservedValue::Missing,
                     after: definition.recommendation.to_owned(),
+                    file: elsewhere.clone(),
                 },
                 &remote_root,
                 0,
             )
             .unwrap();
-            assert!(command.contains(&format!("lr_file={}", shq(definition.file))));
+            assert!(
+                command.contains(&format!("lr_file={}", shq(&elsewhere))),
+                "{item_id} wrote somewhere other than where it read"
+            );
             assert!(command.contains(&format!("lr_key={}", shq(definition.key))));
-            assert!(command.contains(&format!("lr_sep={}", shq(separator))));
+            assert!(
+                command.contains(rendered),
+                "{item_id} is not written in the shape its file uses"
+            );
         }
+    }
+
+    /// The editor for every file shape is proved against real configuration
+    /// files by `tools/lab/probe-baseline-write.mjs`, which runs the awk on a
+    /// lab host and reads the result back with the real program. It can only
+    /// prove what it carries, so what it carries has to be this.
+    #[test]
+    fn the_lab_probe_runs_the_editors_this_file_builds() {
+        let probe = include_str!("../../../tools/lab/probe-baseline-write.mjs");
+        let dump = std::env::var("LOVELYRES_DUMP_WRITERS").is_ok();
+        for item_id in [
+            "ssh-permit-root-login",
+            "postgresql-log-connections",
+            "nginx-server-tokens",
+            "mysql-local-infile",
+            "mongodb-authorization",
+        ] {
+            let program = writer_program(definition(item_id).unwrap());
+            if dump {
+                println!("=== {item_id}\n{program}");
+                continue;
+            }
+            // The probe carries each program as a JavaScript single-quoted
+            // literal, where a backslash has to be doubled to survive.
+            let embedded = program.replace('\\', "\\\\");
+            assert!(
+                probe.contains(&embedded),
+                "the probe does not run the editor for {item_id}:\n{embedded}"
+            );
+        }
+        // Two passes over the file, so the probe has to hand awk the file twice.
+        assert!(probe.contains("/tmp/lr-write-test /tmp/lr-write-test"));
+    }
+
+    /// A path the target reports is only kept if this check could have read it.
+    #[test]
+    fn a_reported_configuration_file_is_checked_against_the_catalogue() {
+        let mysql = definition("mysql-local-infile").unwrap();
+        // A real include-directory match.
+        assert_eq!(
+            resolved_source(mysql, "/etc/mysql/mariadb.conf.d/99-override.cnf").unwrap(),
+            "/etc/mysql/mariadb.conf.d/99-override.cnf"
+        );
+        // Nothing said means the place the distribution would put it.
+        assert_eq!(resolved_source(mysql, "").unwrap(), mysql.file);
+        for hostile in [
+            "/etc/shadow",
+            "/etc/mysql/mariadb.conf.d/../../shadow",
+            "/etc/mysql/mariadb.conf.d/a/b.cnf",
+            "etc/my.cnf",
+            "/etc/mysql/mariadb.conf.d/x.cnf; rm -rf /",
+        ] {
+            assert!(
+                resolved_source(mysql, hostile).is_err(),
+                "{hostile} was accepted"
+            );
+            assert!(
+                validate_catalog_file(hostile).is_err(),
+                "{hostile} is backed up"
+            );
+        }
+        // The star matches inside one segment and never across a slash.
+        assert!(path_matches(
+            "/etc/nginx/conf.d/*.conf",
+            "/etc/nginx/conf.d/a.conf"
+        ));
+        assert!(!path_matches(
+            "/etc/nginx/conf.d/*.conf",
+            "/etc/nginx/conf.d/a/b.conf"
+        ));
     }
 
     #[tokio::test]
@@ -3932,7 +4391,21 @@ mod tests {
             .unwrap();
 
         assert_eq!(plan.changes.len(), writable.len());
-        assert_eq!(plan.files.len(), 6);
+        // One backup per distinct file, across everything the catalogue covers.
+        assert_eq!(
+            plan.files.len(),
+            writable
+                .iter()
+                .map(|definition| definition.file)
+                .collect::<BTreeSet<_>>()
+                .len()
+        );
+        for file in &plan.files {
+            assert!(
+                validate_catalog_file(file).is_ok(),
+                "{file} is not backed up"
+            );
+        }
     }
 
     #[test]
@@ -3946,6 +4419,7 @@ mod tests {
             item_id: "ssh-max-auth-tries".to_owned(),
             before: BaselineObservedValue::Value("6".to_owned()),
             after: "4".to_owned(),
+            file: "/etc/ssh/sshd_config".to_owned(),
         }];
         let files = files_for_changes(&changes).unwrap();
         let digest = change_digest(&changes, &files, BaselineReloadPolicy::ApplyNow).unwrap();
@@ -4294,6 +4768,7 @@ mod tests {
             item_id: "ssh-max-auth-tries".to_owned(),
             before: BaselineObservedValue::Value("6".to_owned()),
             after: "4".to_owned(),
+            file: "/etc/ssh/sshd_config".to_owned(),
         }];
         let files = files_for_changes(&changes).unwrap();
         let backups = vec![BaselineBackupEvidence {
@@ -4358,7 +4833,9 @@ mod tests {
         assert!(command.contains("/^[[:space:]]*#/{next}"));
         assert!(!command.contains("sub(/^[[:space:]]*#[[:space:]]*/"));
         // Every reader has to skip them, not just one. A kernel parameter is
-        // read from the running kernel and has no file to have comments in.
+        // read from the running kernel and has no file to have comments in;
+        // a file-backed check sends two programs, one for the value and one
+        // for which file it came from, and both have to skip comments.
         let from_files = BASELINE_CATALOG
             .iter()
             .filter(|definition| matches!(definition.reading, Reading::Files(_)))
@@ -4366,7 +4843,7 @@ mod tests {
         assert_eq!(
             command.matches("/^[[:space:]]*#/{next}").count()
                 + command.matches("/^[[:space:]]*[#;]/{next}").count(),
-            from_files
+            from_files * 2
         );
     }
 
@@ -4532,7 +5009,10 @@ mod tests {
         for definition in BASELINE_CATALOG {
             assert_eq!(
                 command
-                    .matches(&format!("printf 'ITEM=%s\\t%s\\n' '{}'", definition.id))
+                    .matches(&format!(
+                        "printf 'ITEM=%s\\t%s\\t%s\\n' '{}'",
+                        definition.id
+                    ))
                     .count(),
                 1,
                 "{} is not asked about exactly once",
@@ -4545,8 +5025,14 @@ mod tests {
             .iter()
             .filter(|definition| definition.reload == ReloadGroup::Sshd)
             .count();
+        // Twice each: once to read the value, once to record which file it
+        // came from.
         let first = command.matches("BEGIN{v=\"\";f=0}").count();
-        assert_eq!(first, sshd, "only the sshd_config settings read first-wins");
+        assert_eq!(
+            first,
+            sshd * 2,
+            "only the sshd_config settings read first-wins"
+        );
     }
 
     /// A kernel parameter can be set from any of half a dozen places, and a

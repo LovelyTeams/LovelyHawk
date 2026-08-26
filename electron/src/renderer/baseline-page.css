@@ -357,6 +357,18 @@
   overflow-wrap: anywhere;
 }
 
+/* The change itself, next to the file it goes in. */
+.baseline-fix { flex: none; padding: 10px 12px; background: var(--surface-inset); border: 1px solid var(--border); border-radius: 9px; }
+.baseline-fix > header { display: flex; gap: 10px; align-items: baseline; justify-content: space-between; }
+.baseline-fix > header strong { color: var(--text); font-size: 12.5px; }
+/* No right-to-left trick to keep the tail visible: it moved the leading slash
+   to the end and turned an absolute path into something that is not one. */
+.baseline-fix > header code { min-width: 0; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.baseline-fix pre { margin: 7px 0 0; padding: 8px 10px; overflow-x: auto; color: var(--text-secondary); background: var(--surface); border: 1px solid var(--border-subtle); border-radius: 7px; font: 12px "Cascadia Mono", monospace; }
+.baseline-fix-reload { margin: 7px 0 0; color: var(--muted); font-size: 12px; }
+.baseline-fix-reload code { color: var(--text-secondary); font-family: "Cascadia Mono", monospace; }
+.baseline-fix-manual { margin: 7px 0 0; color: var(--warning-text); font-size: 12px; }
+
 .baseline-file-facts { display: grid; gap: 6px; margin: 0; }
 .baseline-file-facts div { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 10px; align-items: baseline; }
 .baseline-file-facts dt { color: var(--muted); font-size: 12px; }

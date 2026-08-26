@@ -48,6 +48,18 @@ export interface BaselineCatalog {
   truncated: boolean;
 }
 
+/** What to change on this target, where, and what to run afterwards. */
+export interface BaselineFix {
+  /** The file on this target that decides the setting. A label, not an action. */
+  file: string;
+  /** The exact lines to put in it. */
+  lines: string[];
+  /** What makes the change take effect, if anything. */
+  reload: string | null;
+  /** Set when this tool will not make the change itself, and why. */
+  manualReason: string | null;
+}
+
 export interface BaselineStatus {
   itemHandle: string;
   observedKind: BaselineObservedKind;
@@ -55,6 +67,7 @@ export interface BaselineStatus {
   compliant: boolean;
   redacted: boolean;
   textTruncated: boolean;
+  fix: BaselineFix;
 }
 
 export interface BaselineScan {
@@ -256,10 +269,25 @@ export function isBaselineCatalog(value: unknown): value is BaselineCatalog {
     ]), 128 * 1_024) && withinSerializedBudget(value, 256 * 1_024);
 }
 
+function fix(value: unknown): value is BaselineFix {
+  if (!record(value) || !exact(value, ["file", "lines", "reload", "manualReason"]) ||
+    !publicText(value.file, 4 * 1_024, false) || !Array.isArray(value.lines) ||
+    value.lines.length === 0 || value.lines.length > 8 ||
+    !value.lines.every((line) => publicText(line, 256, false))) return false;
+  // A path is a label here. Anything that is not one would be a target trying
+  // to put something else in front of the operator.
+  if (!/^\/[\w./+@-]*$/u.test(value.file) || value.file.includes("..")) return false;
+  for (const optional of [value.reload, value.manualReason]) {
+    if (optional !== null && !publicText(optional, 256, false)) return false;
+  }
+  return true;
+}
+
 function status(value: unknown): value is BaselineStatus {
   if (!record(value) || !exact(value, [
-    "itemHandle", "observedKind", "observed", "compliant", "redacted", "textTruncated",
-  ]) || !isBaselineOpaqueHandle(value.itemHandle) || typeof value.observedKind !== "string" ||
+    "itemHandle", "observedKind", "observed", "compliant", "redacted", "textTruncated", "fix",
+  ]) || !fix(value.fix) ||
+    !isBaselineOpaqueHandle(value.itemHandle) || typeof value.observedKind !== "string" ||
     !observedKinds.has(value.observedKind as BaselineObservedKind) ||
     typeof value.compliant !== "boolean" || typeof value.redacted !== "boolean" ||
     typeof value.textTruncated !== "boolean" || !text(value.observed, 512, false)) return false;

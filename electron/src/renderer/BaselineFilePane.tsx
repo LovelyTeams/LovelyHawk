@@ -128,6 +128,26 @@ export function BaselineFilePane({
         <div><dt>目标机上的值</dt><dd><code>{status?.observed ?? "尚未扫描"}</code></dd></div>
       </dl>
 
+      {/* Whether the recommendation is right for this machine is the
+          operator's call. What the tool owes them either way is the change
+          itself: which file on this target, which lines, and what makes it
+          take effect. */}
+      {status !== null && (
+        <section className="baseline-fix" aria-label="怎么改">
+          <header>
+            <strong>怎么改</strong>
+            <code title={status.fix.file}>{status.fix.file}</code>
+          </header>
+          <pre>{status.fix.lines.join("\n")}</pre>
+          {status.fix.reload !== null && (
+            <p className="baseline-fix-reload">改完执行：<code>{status.fix.reload}</code></p>
+          )}
+          {status.fix.manualReason !== null && (
+            <p className="baseline-fix-manual">{status.fix.manualReason}</p>
+          )}
+        </section>
+      )}
+
       {!connected ? (
         <p className="baseline-file-note" role="status">连接目标后才能读取它的配置文件。</p>
       ) : fileStatus === "error" ? (

@@ -50,6 +50,12 @@ const scan = {
     compliant: false,
     redacted: false,
     textTruncated: false,
+    fix: {
+      file: "/etc/ssh/sshd_config",
+      lines: ["PasswordAuthentication no"],
+      reload: "systemctl reload sshd",
+      manualReason: null,
+    },
   }, {
     itemHandle: "baseline-item-2",
     observedKind: "missing",
@@ -57,6 +63,12 @@ const scan = {
     compliant: false,
     redacted: false,
     textTruncated: false,
+    fix: {
+      file: "/etc/sysctl.d/99-lovelyres-baseline.conf",
+      lines: ["kernel.randomize_va_space = 2"],
+      reload: "sysctl --system",
+      manualReason: null,
+    },
   }],
   displayed: 2,
   compliantCount: 0,
@@ -145,6 +157,42 @@ describe("baseline read strict contract", () => {
       }, scan.statuses[1]],
       redactedFieldCount: 1,
     })).toBe(true);
+  });
+
+  it("carries the fix for every row and refuses a path dressed up as one", () => {
+    expect(isBaselineScan(scan)).toBe(true);
+    // The instruction is what the operator acts on, so every row has to have
+    // one — a row without it would be a finding with nothing to do about it.
+    expect(isBaselineScan({
+      ...scan,
+      statuses: [{ ...scan.statuses[0], fix: undefined }, scan.statuses[1]],
+    })).toBe(false);
+    for (const badFile of [
+      "relative/path.conf",
+      "/etc/../root/.ssh/authorized_keys",
+      "/etc/ssh/sshd_config; rm -rf /",
+      "/etc/ssh/sshd_config\nPermitRootLogin yes",
+    ]) {
+      expect(isBaselineScan({
+        ...scan,
+        statuses: [{
+          ...scan.statuses[0],
+          fix: { ...scan.statuses[0]!.fix, file: badFile },
+        }, scan.statuses[1]],
+      }), badFile).toBe(false);
+    }
+    // Lines are configuration, not prose, and there are never many of them.
+    expect(isBaselineScan({
+      ...scan,
+      statuses: [{ ...scan.statuses[0], fix: { ...scan.statuses[0]!.fix, lines: [] } }, scan.statuses[1]],
+    })).toBe(false);
+    expect(isBaselineScan({
+      ...scan,
+      statuses: [{
+        ...scan.statuses[0],
+        fix: { ...scan.statuses[0]!.fix, lines: Array.from({ length: 9 }, () => "x") },
+      }, scan.statuses[1]],
+    })).toBe(false);
   });
 
   it("accepts safe hostile history summaries while rejecting every raw evidence field", () => {

@@ -45,6 +45,7 @@ const scan: BaselineScan = {
     compliant: false,
     redacted: false,
     textTruncated: false,
+    fix: { file: "/etc/ssh/sshd_config", lines: ["PasswordAuthentication no"], reload: "systemctl reload sshd", manualReason: null },
   }],
   displayed: 1,
   compliantCount: 0,

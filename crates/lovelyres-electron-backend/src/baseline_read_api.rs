@@ -16,8 +16,8 @@ use lovelyres_core::{
     BackendServices, CoreError,
     baseline::{
         BaselineCategory, BaselineChangeRecord, BaselineChangeState, BaselineComponent,
-        BaselineDefinition, BaselineFileView, BaselineObservedValue, BaselineRisk, BaselineScan,
-        BaselineValueKind, PRESENCE_MARKER,
+        BaselineDefinition, BaselineFileView, BaselineObservedValue, BaselineRemediation,
+        BaselineRisk, BaselineScan, BaselineValueKind, PRESENCE_MARKER,
     },
     ssh::BoundSshSession,
     target::TargetGuard,
@@ -58,6 +58,11 @@ const REDACTED_TEXT: &str = "[SENSITIVE BASELINE TEXT REDACTED]";
 /// What a check that only reports whether a directive is set says instead of
 /// the value, which for those checks is a credential.
 const PRESENCE_LABEL: &str = "已设置";
+/// The instruction beside a check: at most a handful of lines, each of them a
+/// configuration line rather than prose.
+const MAX_FIX_LINES: usize = 8;
+const MAX_FIX_LINE_BYTES: usize = 256;
+const MAX_FIX_FILE_BYTES: usize = 4 * 1024;
 /// A configuration file the operator is meant to read on screen. The core cuts
 /// at the same ceiling; this is the boundary saying so again.
 const MAX_FILE_TEXT_BYTES: usize = 256 * 1024;
@@ -421,6 +426,20 @@ struct BaselineStatusDto {
     compliant: bool,
     redacted: bool,
     text_truncated: bool,
+    /// What to change on this target to bring this setting to the recommended
+    /// value. A label and an instruction; the window cannot act on it.
+    fix: BaselineFixDto,
+}
+
+/// The instruction for one setting: which file, which lines, what to run.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BaselineFixDto {
+    file: String,
+    lines: Vec<String>,
+    reload: Option<String>,
+    /// Set when this tool will not make the change itself, and why.
+    manual_reason: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -907,6 +926,9 @@ fn project_scan(
             .get(&status.item_id)
             .cloned()
             .ok_or(BaselineReadApiError::InvalidData)?;
+        let definition = lovelyres_core::baseline::definition(&status.item_id)
+            .map_err(|_| BaselineReadApiError::InvalidData)?;
+        let fix = project_fix(&definition.remediation(&status.source_file))?;
         let (observed_kind, observed, redacted, text_truncated) = match status.observed {
             BaselineObservedValue::Missing => ("missing", "未设置".to_owned(), false, false),
             BaselineObservedValue::Unsupported => (
@@ -941,6 +963,7 @@ fn project_scan(
             compliant: status.compliant,
             redacted,
             text_truncated,
+            fix,
         });
     }
     let displayed = statuses.len();
@@ -954,6 +977,34 @@ fn project_scan(
         non_compliant_count: displayed.saturating_sub(compliant_count),
         redacted_field_count,
         truncated,
+    })
+}
+
+/// The remediation, bounded the way every other public string is.
+///
+/// It is built from the catalogue and from a path the core has already checked
+/// against that catalogue, so there is nothing here the target chose. The
+/// bounds are the boundary saying so anyway.
+fn project_fix(fix: &BaselineRemediation) -> Result<BaselineFixDto, BaselineReadApiError> {
+    if fix.lines.is_empty() || fix.lines.len() > MAX_FIX_LINES {
+        return Err(BaselineReadApiError::InvalidData);
+    }
+    let file = trusted_catalog_text(&fix.file, MAX_FIX_FILE_BYTES)?;
+    let mut lines = Vec::with_capacity(fix.lines.len());
+    for line in &fix.lines {
+        lines.push(trusted_catalog_text(line, MAX_FIX_LINE_BYTES)?);
+    }
+    Ok(BaselineFixDto {
+        file,
+        lines,
+        reload: match &fix.reload {
+            Some(reload) => Some(trusted_catalog_text(reload, MAX_FIX_LINE_BYTES)?),
+            None => None,
+        },
+        manual_reason: match fix.manual_reason {
+            Some(reason) => Some(trusted_catalog_text(reason, MAX_FIX_LINE_BYTES)?),
+            None => None,
+        },
     })
 }
 
@@ -1320,6 +1371,7 @@ mod tests {
                 item_id: BASELINE_CATALOG[0].id.to_owned(),
                 observed,
                 compliant: false,
+                source_file: BASELINE_CATALOG[0].file().to_owned(),
             }],
             captured_at: record(target, "no").created_at,
         }
@@ -1335,6 +1387,7 @@ mod tests {
                 "item_id": BASELINE_CATALOG[0].id,
                 "before": { "state": "missing" },
                 "after": after,
+                "file": "/etc/ssh/sshd_config",
             }],
             "files": ["/etc/ssh/sshd_config"],
             "backups": [{
