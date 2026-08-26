@@ -36,6 +36,7 @@ const WRITERS = {
   flatSemicolon: 'BEGIN{done=0;active=0;firstActive=0;firstComment=0} NR==FNR{p=$0; sub(/^[[:space:]]+/,"",p); if(p ~ /^#/){c=p; sub(/^#+[[:space:]]*/,"",c); t=c; sub(/[[:space:]=].*$/,"",t); if(tolower(t)==tolower(k) && firstComment==0) firstComment=FNR} else {t=p; sub(/[[:space:]=].*$/,"",t); if(tolower(t)==tolower(k)){active++; if(firstActive==0) firstActive=FNR}} next}  {indent=""; if(match($0,/[^ \\t]/)>1) indent=substr($0,1,RSTART-1); if(active>0){ if(FNR==firstActive){print indent k " " v ";"; done=1; next} p=$0; sub(/^[[:space:]]+/,"",p); if(p !~ /^#/){t=p; sub(/[[:space:]=].*$/,"",t); if(tolower(t)==tolower(k)) next} } else if(firstComment>0 && FNR==firstComment){ print indent k " " v ";"; done=1; next} print} END{if(!done) print k " " v ";"}',
   ini: 'BEGIN{done=0;inS=0;seen=0;active=0;firstActive=0;firstComment=0;endOfSection=0} NR==FNR{p=$0; sub(/^[[:space:]]+/,"",p); if(p ~ /^\\[/){s=p; gsub(/^\\[|\\].*$/,"",s); gsub(/^[[:space:]]+|[[:space:]]+$/,"",s); if(scanIn) endOfSection=FNR; scanIn=(tolower(s)==tolower("mysqld")); if(scanIn) seen=1; next} if(!scanIn) next; if(p ~ /^[#;]/){c=p; sub(/^[#;]+[[:space:]]*/,"",c); t=c; sub(/[[:space:]=].*$/,"",t); tk=tolower(t); gsub(/-/,"_",tk); kk=tolower(k); gsub(/-/,"_",kk); if(tk==kk && firstComment==0) firstComment=FNR; next} t=p; sub(/[[:space:]=].*$/,"",t); tk=tolower(t); gsub(/-/,"_",tk); kk=tolower(k); gsub(/-/,"_",kk); if(tk==kk){active++; if(firstActive==0) firstActive=FNR} next} /^[[:space:]]*\\[/{s=$0; gsub(/^[[:space:]]*\\[|\\][[:space:]]*.*$/,"",s); gsub(/^[[:space:]]+|[[:space:]]+$/,"",s); if(inS && !done && active==0 && firstComment==0){print k " = " v; done=1} inS=(tolower(s)==tolower("mysqld")); print; next} {if(inS && active>0){ if(FNR==firstActive){print k " = " v; done=1; next} p=$0; sub(/^[[:space:]]+/,"",p); if(p !~ /^[#;]/){t=p; sub(/[[:space:]=].*$/,"",t); tk=tolower(t); gsub(/-/,"_",tk); kk=tolower(k); gsub(/-/,"_",kk); if(tk==kk) next} } else if(inS && firstComment>0 && FNR==firstComment){ print k " = " v; done=1; next} print} END{if(!done){if(!seen) print "[mysqld]"; print k " = " v}}',
   yaml: 'BEGIN{done=0;top=0;at=0;pad=""} NR==FNR{probe=$0; sub(/#.*$/,"",probe); if(probe ~ /^[[:space:]]*$/) next; ind=match(probe,/[^ ]/)-1; name=probe; sub(/^[[:space:]]*/,"",name); p=index(name,":"); if(p==0) next; name=substr(name,1,p-1); gsub(/^[[:space:]]+|[[:space:]]+$/,"",name); while(top>0 && ind_of[top]>=ind) top--; top++; ind_of[top]=ind; name_of[top]=name; path=name_of[1]; for(i=2;i<=top;i++) path=path "." name_of[i]; if(at==0 && tolower(path)==tolower(k)){at=FNR; pad=""; for(i=0;i<ind;i++) pad=pad " "} next} {if(at>0 && FNR==at){print pad "authorization: " v; done=1; next} print} END{if(!done){print "security:"; print "  authorization: " v; }}',
+  xml: 'NR==FNR{s = s $0 "\\n"; next} {next} END{rest = s; out = ""; while (length(rest) > 0) { ci = index(rest, "<!--"); ei = index(rest, "<Server"); if (ci > 0 && (ei == 0 || ci < ei)) { r2 = substr(rest, ci + 4); j = index(r2, "-->"); if (j == 0) { out = out rest; rest = ""; break } out = out substr(rest, 1, ci + 3 + j + 2); rest = substr(r2, j + 3); continue } if (ei == 0) break; tagrest = substr(rest, ei); gt = index(tagrest, ">"); if (gt == 0) break; out = out substr(rest, 1, ei - 1); tag = substr(tagrest, 1, gt); rest = substr(tagrest, gt + 1); after = substr(tag, 7 + 1, 1); if (after != " " && after != "\\t" && after != "\\n" && after != "/" && after != ">") { out = out tag; continue } if (match(tag, "[ \\t\\n]" k "[ \\t\\n]*=[ \\t\\n]*\\"[^\\"]*\\"")) { tag = substr(tag, 1, RSTART) k "=\\"" v "\\"" substr(tag, RSTART + RLENGTH) } else { tag = substr(tag, 1, 7) " " k "=\\"" v "\\"" substr(tag, 7 + 1) } done = 1; out = out tag } out = out rest; printf "%s", out; if (!done) exit 3}',
 };
 
 // The readers, so a write can be proved by reading it back the way the tool
@@ -48,6 +49,10 @@ const INI_READ = (section) =>
 
 const YAML_READ =
   `BEGIN{v="";top=0} /^[[:space:]]*#/{next} /^[[:space:]]*$/{next} {line=$0; sub(/#.*$/,"",line); if(line ~ /^[[:space:]]*$/) next; ind=match(line,/[^ ]/)-1; name=line; sub(/^[[:space:]]*/,"",name); p=index(name,":"); if(p==0) next; val=substr(name,p+1); name=substr(name,1,p-1); gsub(/^[[:space:]]+|[[:space:]]+$/,"",val); gsub(/^[[:space:]]+|[[:space:]]+$/,"",name); while(top>0 && ind_of[top]>=ind) top--; top++; ind_of[top]=ind; name_of[top]=name; path=name_of[1]; for(i=2;i<=top;i++) path=path "." name_of[i]; if(tolower(path)==tolower(k) && val!="") v=val} END{print v}`;
+
+
+
+const XML_READ = '{s = s $0 "\\n"} END{rest = s; out = ""; while (length(rest) > 0) { ci = index(rest, "<!--"); ei = index(rest, "<Server"); if (ci > 0 && (ei == 0 || ci < ei)) { r2 = substr(rest, ci + 4); j = index(r2, "-->"); if (j == 0) { skip = rest; rest = ""; break } skip = substr(rest, 1, ci + 3 + j + 2); rest = substr(r2, j + 3); continue } if (ei == 0) break; tagrest = substr(rest, ei); gt = index(tagrest, ">"); if (gt == 0) break; skip = substr(rest, 1, ei - 1); tag = substr(tagrest, 1, gt); rest = substr(tagrest, gt + 1); after = substr(tag, 7 + 1, 1); if (after != " " && after != "\\t" && after != "\\n" && after != "/" && after != ">") { skip = tag; continue } if (match(tag, "[ \\t\\n]" k "[ \\t\\n]*=[ \\t\\n]*\\"[^\\"]*\\"")) { piece = substr(tag, RSTART, RLENGTH); sub(/^[^"]*"/, "", piece); sub(/".*$/, "", piece); if (first == "") first = piece; if (piece != r && best == "") best = piece } } print (best != "" ? best : first)}';
 
 const CASES = [
   {
@@ -102,6 +107,19 @@ const CASES = [
     writer: WRITERS.flatEquals,
     reader: FLAT_READ_LAST,
   },
+  {
+    name: "server.xml（XML 属性）",
+    source: "/usr/local/tomcat/conf/server.xml",
+    key: "port",
+    value: "-1",
+    element: "Server",
+    writer: WRITERS.xml,
+    reader: XML_READ,
+    // The element name is what the count looks for in an XML file, not the
+    // attribute — `port` appears on half a dozen elements.
+    countPattern: "<Server ",
+    countExpected: "1",
+  },
 ];
 
 console.log(`在 ${container} 上验证每种文件格式的改写\n`);
@@ -116,8 +134,10 @@ for (const entry of CASES) {
 set -e
 cp '${entry.source}' /tmp/lr-write-test
 awk -v k='${entry.key}' -v v='${entry.value}' '${entry.writer}' /tmp/lr-write-test /tmp/lr-write-test > /tmp/lr-write-out
-echo "READ<<<$(awk -v k='${entry.key}' '${entry.reader}' /tmp/lr-write-out)>>>"
-echo "COUNT<<<$(grep -c -iE '^[[:space:]]*${entry.key.split(".").pop()}[[:space:]=:]' /tmp/lr-write-out || true)>>>"
+echo "READ<<<$(awk -v k='${entry.key}' -v r='${entry.value}' '${entry.reader}' /tmp/lr-write-out)>>>"
+echo "COUNT<<<$(${entry.countPattern === undefined
+  ? `grep -c -iE '^[[:space:]]*${entry.key.split(".").pop()}[[:space:]=:]'`
+  : `grep -c -F '${entry.countPattern}'`} /tmp/lr-write-out || true)>>>"
 echo "LINESBEFORE<<<$(wc -l < /tmp/lr-write-test)>>>"
 echo "LINESAFTER<<<$(wc -l < /tmp/lr-write-out)>>>"
 ${entry.section ? `echo "SECTION<<<$(awk '/^[[:space:]]*\\[/{s=$0; gsub(/[][]/,"",s); last=s} /${entry.key}/{print last; exit}' /tmp/lr-write-out)>>>"` : ""}
@@ -134,7 +154,7 @@ rm -f /tmp/lr-write-test /tmp/lr-write-out /tmp/lr-valid
   }
   const field = (name) => output.match(new RegExp(`${name}<<<([\\s\\S]*?)>>>`, "u"))?.[1]?.trim() ?? "";
   check(`读回来就是刚写进去的值`, field("READ"), entry.expectRead ?? entry.value);
-  check(`只留下一处该指令`, field("COUNT"), "1");
+  check(`只留下一处该指令`, field("COUNT"), entry.countExpected ?? "1");
   const before = Number(field("LINESBEFORE"));
   const after = Number(field("LINESAFTER"));
   check(`文件其余部分没被动过（${before} 行 -> ${after} 行）`, after >= before && after - before <= 2, true);

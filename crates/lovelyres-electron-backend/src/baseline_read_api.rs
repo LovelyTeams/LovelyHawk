@@ -1242,6 +1242,7 @@ const fn component_key(component: BaselineComponent) -> &'static str {
         BaselineComponent::MongoDb => "mongodb",
         BaselineComponent::Nginx => "nginx",
         BaselineComponent::Apache => "apache",
+        BaselineComponent::Tomcat => "tomcat",
     }
 }
 

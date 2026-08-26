@@ -111,10 +111,11 @@ pub enum BaselineComponent {
     MongoDb,
     Nginx,
     Apache,
+    Tomcat,
 }
 
 impl BaselineComponent {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::System,
         Self::Ssh,
         Self::MySql,
@@ -123,6 +124,7 @@ impl BaselineComponent {
         Self::MongoDb,
         Self::Nginx,
         Self::Apache,
+        Self::Tomcat,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -135,6 +137,7 @@ impl BaselineComponent {
             Self::MongoDb => "MongoDB",
             Self::Nginx => "Nginx",
             Self::Apache => "Apache HTTP Server",
+            Self::Tomcat => "Apache Tomcat",
         }
     }
 
@@ -213,6 +216,19 @@ enum FileFormat {
     /// The key is written as the whole path, `security.authorization`, and the
     /// reader walks the indentation to find it.
     Yaml,
+    /// An attribute on an XML element — Tomcat's `server.xml`. The key is the
+    /// attribute name and this is the element it sits on.
+    ///
+    /// Three of the four `<Connector>` elements a stock Tomcat ships are
+    /// inside `<!-- -->`, so anything reading this file without tracking
+    /// comments reports the AJP connector as live. Both the reader and the
+    /// editor walk the comments.
+    ///
+    /// Where several elements of the same name are live — Tomcat has more than
+    /// one connector — the reader reports the worst of them, because the
+    /// question a check asks is whether *every* connector is configured
+    /// safely, and the editor fixes all of them.
+    XmlAttribute(&'static str),
 }
 
 /// Where a check's observed value comes from.
@@ -357,6 +373,18 @@ const NGINX_FILES: &[&str] = &[
     "/etc/nginx/conf.d/*.conf",
     "/etc/nginx/sites-enabled/*",
 ];
+// Tomcat is unpacked wherever whoever installed it decided; these are the
+// places the packages and the official image put it.
+const TOMCAT_SERVER_FILES: &[&str] = &[
+    "/usr/local/tomcat/conf/server.xml",
+    "/opt/tomcat/conf/server.xml",
+    "/opt/tomcat*/conf/server.xml",
+    "/etc/tomcat/server.xml",
+    "/etc/tomcat*/server.xml",
+    "/var/lib/tomcat*/conf/server.xml",
+    "/usr/share/tomcat*/conf/server.xml",
+];
+
 const APACHE_FILES: &[&str] = &[
     "/etc/httpd/conf/httpd.conf",
     "/etc/apache2/apache2.conf",
@@ -377,6 +405,7 @@ const MONGO_BIND: &[&str] = &["127.0.0.1", "::1", "localhost", "0.0.0.0"];
 const MONGO_TLS_MODE: &[&str] = &["requiretls", "prefertls", "allowtls", "disabled"];
 const APACHE_SERVER_TOKENS: &[&str] =
     &["prod", "productonly", "major", "minor", "min", "os", "full"];
+const TOMCAT_SHUTDOWN_PORT: &[&str] = &["-1", "8005"];
 
 const YES_NO: &[&str] = &["yes", "no"];
 const ROOT_LOGIN: &[&str] = &["yes", "no", "prohibit-password"];
@@ -1689,6 +1718,103 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
         format: FileFormat::Whitespace,
         reload: ReloadGroup::None,
     },
+    // ---- Apache Tomcat -----------------------------------------------------
+    BaselineDefinition {
+        id: "tomcat-shutdown-port",
+        category: BaselineCategory::AccessControl,
+        component: BaselineComponent::Tomcat,
+        title: "关闭关机端口",
+        description: "8005 端口收到一个固定单词就会停掉整个服务；设为 -1 可以彻底不监听它。",
+        recommendation: "-1",
+        risk: BaselineRisk::Critical,
+        value_kind: BaselineValueKind::Choice(TOMCAT_SHUTDOWN_PORT),
+        reading: Reading::Files(TOMCAT_SERVER_FILES),
+        implicit: None,
+        file: "/usr/local/tomcat/conf/server.xml",
+        key: "port",
+        format: FileFormat::XmlAttribute("Server"),
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "tomcat-allow-trace",
+        category: BaselineCategory::ServiceHardening,
+        component: BaselineComponent::Tomcat,
+        title: "关闭 TRACE 方法",
+        description: "TRACE 会把请求连同头部一起回显。检查每一个未被注释掉的连接器。",
+        recommendation: "off",
+        risk: BaselineRisk::Medium,
+        value_kind: BaselineValueKind::Boolean,
+        reading: Reading::Files(TOMCAT_SERVER_FILES),
+        implicit: Some("off"),
+        file: "/usr/local/tomcat/conf/server.xml",
+        key: "allowTrace",
+        format: FileFormat::XmlAttribute("Connector"),
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "tomcat-xpowered-by",
+        category: BaselineCategory::ServiceHardening,
+        component: BaselineComponent::Tomcat,
+        title: "不发 X-Powered-By",
+        description: "这个响应头会报出 Servlet 与 JSP 版本，等于告诉对方该找哪些漏洞。",
+        recommendation: "off",
+        risk: BaselineRisk::Low,
+        value_kind: BaselineValueKind::Boolean,
+        reading: Reading::Files(TOMCAT_SERVER_FILES),
+        implicit: Some("off"),
+        file: "/usr/local/tomcat/conf/server.xml",
+        key: "xpoweredBy",
+        format: FileFormat::XmlAttribute("Connector"),
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "tomcat-server-header",
+        category: BaselineCategory::ServiceHardening,
+        component: BaselineComponent::Tomcat,
+        title: "改掉 Server 响应头",
+        description: "不设置时响应头是 Apache-Coyote/1.1，一眼就能认出是 Tomcat。只检查是否设过。",
+        recommendation: PRESENCE_MARKER,
+        risk: BaselineRisk::Low,
+        value_kind: BaselineValueKind::Presence,
+        reading: Reading::Files(TOMCAT_SERVER_FILES),
+        implicit: None,
+        file: "/usr/local/tomcat/conf/server.xml",
+        key: "server",
+        format: FileFormat::XmlAttribute("Connector"),
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "tomcat-auto-deploy",
+        category: BaselineCategory::ServiceHardening,
+        component: BaselineComponent::Tomcat,
+        title: "关闭自动部署",
+        description: "开着自动部署时，往 webapps 里丢一个 war 就会被自动展开运行。",
+        recommendation: "off",
+        risk: BaselineRisk::High,
+        value_kind: BaselineValueKind::Boolean,
+        reading: Reading::Files(TOMCAT_SERVER_FILES),
+        implicit: Some("on"),
+        file: "/usr/local/tomcat/conf/server.xml",
+        key: "autoDeploy",
+        format: FileFormat::XmlAttribute("Host"),
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "tomcat-deploy-xml",
+        category: BaselineCategory::ServiceHardening,
+        component: BaselineComponent::Tomcat,
+        title: "不读应用自带的 context.xml",
+        description: "允许后，应用可以自己声明数据源、跨应用访问和特权配置。",
+        recommendation: "off",
+        risk: BaselineRisk::High,
+        value_kind: BaselineValueKind::Boolean,
+        reading: Reading::Files(TOMCAT_SERVER_FILES),
+        implicit: Some("on"),
+        file: "/usr/local/tomcat/conf/server.xml",
+        key: "deployXML",
+        format: FileFormat::XmlAttribute("Host"),
+        reload: ReloadGroup::None,
+    },
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2621,6 +2747,10 @@ impl BaselineDefinition {
             FileFormat::Ini(section) => {
                 vec![format!("[{section}]"), format!("{} = {value}", self.key)]
             }
+            FileFormat::XmlAttribute(element) => vec![format!(
+                "<{element} … {}=\"{value}\" …>（每一个未被注释掉的 {element}）",
+                self.key
+            )],
             FileFormat::Yaml => self
                 .key
                 .split('.')
@@ -2672,6 +2802,8 @@ impl BaselineDefinition {
                 BaselineComponent::Apache => {
                     Some("apachectl configtest && systemctl reload httpd（或 apache2）")
                 }
+                // Tomcat reads server.xml once at start; there is no reload.
+                BaselineComponent::Tomcat => Some("systemctl restart tomcat（需要重启才生效）"),
             },
         }
     }
@@ -2834,12 +2966,12 @@ fn item_command(definition: &BaselineDefinition) -> String {
                      lr_files=\"$lr_files $lr_candidate\"; \
                    fi; \
                  done; \
-                 lr_key={key}; lr_where={fallback}; \
+                 lr_key={key}; lr_where={fallback}; lr_want={want}; \
                  if [ -n \"$lr_files\" ]; then \
-                   lr_value=$(awk -v k=\"$lr_key\" '{program}' $lr_files | tail -n 1); \
+                   lr_value=$(awk -v k=\"$lr_key\" -v r=\"$lr_want\" '{program}' $lr_files | tail -n 1); \
                    lr_value=$(printf '%s' \"$lr_value\" | tr -cd '{allowed}'); \
                    [ -n \"$lr_value\" ] || lr_value=__missing__; \
-                   lr_where=$(awk -v k=\"$lr_key\" '{witness}' $lr_files | tail -n 1); \
+                   lr_where=$(awk -v k=\"$lr_key\" -v r=\"$lr_want\" '{witness}' $lr_files | tail -n 1); \
                    [ -n \"$lr_where\" ] || lr_where=$(printf '%s' \"$lr_files\" | awk '{{print $NF}}'); \
                  elif [ \"$lr_odd\" = 1 ]; then lr_value=__unsupported__; \
                  else lr_value=__absent__; fi; \
@@ -2851,6 +2983,9 @@ fn item_command(definition: &BaselineDefinition) -> String {
                 // Nothing on this target mentions the directive, so a change
                 // goes where the distribution would expect to find it.
                 fallback = shq(definition.file),
+                // What the check wants, so a reader over several elements of
+                // the same name can report the worst one rather than the first.
+                want = shq(definition.recommendation),
             )
         }
     }
@@ -2873,6 +3008,7 @@ fn reader_program(definition: &BaselineDefinition) -> String {
         ),
         FileFormat::Ini(section) => ini_reader(section),
         FileFormat::Yaml => YAML_READER.to_owned(),
+        FileFormat::XmlAttribute(element) => xml_reader(element),
     };
     match definition.value_kind {
         // The value is the secret the check is about. Whether it is set is the
@@ -2883,7 +3019,13 @@ fn reader_program(definition: &BaselineDefinition) -> String {
         // out through the one kind of check whose whole purpose is not to
         // carry values off the target.
         BaselineValueKind::Presence => {
-            let replaced = body.replace("print v}", "print (v==\"\" ? \"\" : \"configured\")}");
+            let replaced = body
+                .replace("print v}", "print (v==\"\" ? \"\" : \"configured\")}")
+                // The XML reader ends on the worst-of-them choice instead.
+                .replace(
+                    "print (best != \"\" ? best : first)}",
+                    "print (first == \"\" ? \"\" : \"configured\")}",
+                );
             debug_assert_ne!(replaced, body, "the presence reader did not take");
             replaced
         }
@@ -2905,6 +3047,7 @@ fn witness_program(definition: &BaselineDefinition) -> String {
     // in instead of what it said.
     let program = match definition.format {
         FileFormat::Yaml => YAML_READER.replace("v=val}", "v=FILENAME}"),
+        FileFormat::XmlAttribute(element) => xml_witness(element),
         FileFormat::Ini(section) => {
             ini_reader(section).replace("v=(hasEq ? p : (p==\"\" ? \"on\" : p))", "v=FILENAME")
         }
@@ -2940,6 +3083,93 @@ fn ini_reader(section: &str) -> String {
           gsub(/^[[:space:]]+|[[:space:]]+$/,\"\",p); \
           v=(hasEq ? p : (p==\"\" ? \"on\" : p))}}}} \
          END{{print v}}"
+    )
+}
+
+/// Walks an XML file past its comments, one element at a time.
+///
+/// Shared by the reader and the editor so there is one idea of where a comment
+/// begins and ends. `handle` is the awk that runs for each live element, with
+/// the tag in `tag`; `emit` decides whether the walked text is rebuilt.
+fn xml_walk(element: &str, handle: &str, emit: bool) -> String {
+    let keep = if emit { "out = out " } else { "skip = " };
+    // The editor is handed the same file twice, because the line-based editors
+    // need two passes; this one works on the whole text at once and would
+    // otherwise write the file out doubled. The reader is handed every file
+    // that exists and wants all of them.
+    let accumulate = if emit {
+        "NR==FNR{s = s $0 \"\\n\"; next} {next}"
+    } else {
+        "{s = s $0 \"\\n\"}"
+    };
+    format!(
+        "{accumulate} \
+         END{{rest = s; out = \"\"; \
+          while (length(rest) > 0) {{ \
+            ci = index(rest, \"<!--\"); ei = index(rest, \"<{element}\"); \
+            if (ci > 0 && (ei == 0 || ci < ei)) {{ \
+              r2 = substr(rest, ci + 4); j = index(r2, \"-->\"); \
+              if (j == 0) {{ {keep}rest; rest = \"\"; break }} \
+              {keep}substr(rest, 1, ci + 3 + j + 2); \
+              rest = substr(r2, j + 3); continue }} \
+            if (ei == 0) break; \
+            tagrest = substr(rest, ei); gt = index(tagrest, \">\"); \
+            if (gt == 0) break; \
+            {keep}substr(rest, 1, ei - 1); \
+            tag = substr(tagrest, 1, gt); rest = substr(tagrest, gt + 1); \
+            after = substr(tag, {name_length} + 1, 1); \
+            if (after != \" \" && after != \"\\t\" && after != \"\\n\" \
+                && after != \"/\" && after != \">\") {{ {keep}tag; continue }} \
+            {handle} }} \
+          {finish}}}",
+        name_length = element.len() + 1,
+        finish = if emit {
+            "out = out rest; printf \"%s\", out; if (!done) exit 3"
+        } else {
+            "print (best != \"\" ? best : first)"
+        },
+    )
+}
+
+/// The value an XML attribute has, or the worst of them when the file has
+/// several live elements of the same name.
+fn xml_reader(element: &str) -> String {
+    xml_walk(
+        element,
+        "if (match(tag, \"[ \\t\\n]\" k \"[ \\t\\n]*=[ \\t\\n]*\\\"[^\\\"]*\\\"\")) { \
+           piece = substr(tag, RSTART, RLENGTH); \
+           sub(/^[^\"]*\"/, \"\", piece); sub(/\".*$/, \"\", piece); \
+           if (first == \"\") first = piece; \
+           if (piece != r && best == \"\") best = piece }",
+        false,
+    )
+}
+
+/// Sets the attribute on every live element of that name, adding it where the
+/// element does not carry it yet.
+fn xml_writer(element: &str) -> String {
+    xml_walk(
+        element,
+        // The placeholder is bracketed so it cannot appear inside a name awk
+        // already uses: substituting a bare `LEN` turned `RLENGTH` into
+        // `R7GTH`, and every XML write would have failed on a syntax error.
+        "if (match(tag, \"[ \\t\\n]\" k \"[ \\t\\n]*=[ \\t\\n]*\\\"[^\\\"]*\\\"\")) { \
+           tag = substr(tag, 1, RSTART) k \"=\\\"\" v \"\\\"\" substr(tag, RSTART + RLENGTH) } \
+         else { tag = substr(tag, 1, @NAME@) \" \" k \"=\\\"\" v \"\\\"\" substr(tag, @NAME@ + 1) } \
+         done = 1; out = out tag"
+            .replace("@NAME@", &(element.len() + 1).to_string())
+            .as_str(),
+        true,
+    )
+}
+
+/// The file this element lives in, for the witness that names the file.
+fn xml_witness(element: &str) -> String {
+    xml_walk(
+        element,
+        "if (match(tag, \"[ \\t\\n]\" k \"[ \\t\\n]*=[ \\t\\n]*\\\"[^\\\"]*\\\"\") && first == \"\") \
+           first = FILENAME;",
+        false,
     )
 }
 
@@ -3592,6 +3822,7 @@ fn writer_program(definition: &BaselineDefinition) -> String {
         FileFormat::Semicolon => flat_writer("k \" \" v \";\""),
         FileFormat::Ini(section) => ini_writer(section),
         FileFormat::Yaml => yaml_writer(definition.key),
+        FileFormat::XmlAttribute(element) => xml_writer(element),
         // A presence check has nothing to write; `is_writable` refused it.
     }
 }
@@ -4114,7 +4345,11 @@ mod tests {
         for definition in BASELINE_CATALOG {
             assert!(ids.insert(definition.id));
             assert!(file_keys.insert((definition.file, definition.key)));
-            assert!(definition.file.starts_with("/etc/"));
+            // Most of these live under /etc; Tomcat lives wherever it was
+            // unpacked. What has to hold is that the path is absolute, inert,
+            // and one the check would also read.
+            assert!(definition.file.starts_with('/'));
+            assert!(resolved_source(definition, definition.file).is_ok());
             assert!(BaselineCategory::ALL.contains(&definition.category));
             assert!(
                 definition.key.len() <= 64
@@ -4194,7 +4429,7 @@ mod tests {
                 );
             }
         }
-        assert_eq!(BASELINE_CATALOG.len(), 75);
+        assert_eq!(BASELINE_CATALOG.len(), 81);
         // One plan carries every check this tool will write; the rest are read.
         assert!(
             BASELINE_CATALOG
@@ -4295,6 +4530,55 @@ mod tests {
         }
     }
 
+    /// Prints the readers a lab probe needs to run by hand. Not an assertion —
+    /// it does nothing unless asked.
+    #[test]
+    fn dump_readers_for_the_lab() {
+        if std::env::var("LOVELYRES_DUMP_READERS").is_err() {
+            return;
+        }
+        for item_id in ["tomcat-allow-trace", "tomcat-shutdown-port"] {
+            let definition = definition(item_id).unwrap();
+            println!("=== {item_id}\n{}", reader_program(definition));
+        }
+    }
+
+    /// No editor may carry a name awk does not know.
+    ///
+    /// One did: a placeholder substitution meant to carry the element name's
+    /// length rewrote `RLENGTH` into `R7GTH`, and every XML write would have
+    /// died on a syntax error the moment it ran.
+    #[test]
+    fn no_editor_carries_a_mangled_awk_builtin() {
+        for definition in BASELINE_CATALOG {
+            if !definition.is_writable() {
+                continue;
+            }
+            let program = writer_program(definition);
+            for builtin in [
+                "RSTART", "RLENGTH", "FILENAME", "FNR", "NR", "substr", "match",
+            ] {
+                let mangled = &builtin[1..];
+                assert!(
+                    !program.contains(&format!("R{mangled}")) || program.contains(builtin),
+                    "{} carries a mangled {builtin}",
+                    definition.id
+                );
+            }
+            // The one that actually happened, named so it cannot come back.
+            assert!(
+                !program.contains("R7GTH"),
+                "{} carries R7GTH",
+                definition.id
+            );
+            assert!(
+                !program.contains("@NAME@"),
+                "{} left a placeholder unsubstituted",
+                definition.id
+            );
+        }
+    }
+
     /// The editor for every file shape is proved against real configuration
     /// files by `tools/lab/probe-baseline-write.mjs`, which runs the awk on a
     /// lab host and reads the result back with the real program. It can only
@@ -4309,6 +4593,7 @@ mod tests {
             "nginx-server-tokens",
             "mysql-local-infile",
             "mongodb-authorization",
+            "tomcat-shutdown-port",
         ] {
             let program = writer_program(definition(item_id).unwrap());
             if dump {
@@ -4835,15 +5120,25 @@ mod tests {
         // Every reader has to skip them, not just one. A kernel parameter is
         // read from the running kernel and has no file to have comments in;
         // a file-backed check sends two programs, one for the value and one
-        // for which file it came from, and both have to skip comments.
-        let from_files = BASELINE_CATALOG
+        // for which file it came from, and both have to skip comments. XML
+        // comments are a region rather than a line, so they are counted by the
+        // walk that finds them.
+        let line_based = BASELINE_CATALOG
             .iter()
-            .filter(|definition| matches!(definition.reading, Reading::Files(_)))
+            .filter(|definition| {
+                matches!(definition.reading, Reading::Files(_))
+                    && !matches!(definition.format, FileFormat::XmlAttribute(_))
+            })
             .count();
+        let xml = BASELINE_CATALOG
+            .iter()
+            .filter(|definition| matches!(definition.format, FileFormat::XmlAttribute(_)))
+            .count();
+        assert_eq!(command.matches("index(rest, \"<!--\")").count(), xml * 2);
         assert_eq!(
             command.matches("/^[[:space:]]*#/{next}").count()
                 + command.matches("/^[[:space:]]*[#;]/{next}").count(),
-            from_files * 2
+            line_based * 2
         );
     }
 
@@ -5075,7 +5370,7 @@ mod tests {
         for definition in presence {
             let program = reader_program(definition);
             assert!(
-                program.contains("print (v==\"\" ? \"\" : \"configured\")"),
+                program.contains("\"configured\")"),
                 "{} would print the value it read",
                 definition.id
             );
