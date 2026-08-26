@@ -63,6 +63,9 @@ const MATRIX = [
 const FROM_LABS = [
   { component: "opengauss", container: "svc-opengauss" },
   { component: "tidb", container: "svc-tidb" },
+  // The official HAProxy image ships no configuration at all — you mount your
+  // own — so an image scan would only ever prove the binary is there.
+  { component: "haproxy", container: "svc-haproxy" },
 ];
 
 const args = process.argv.slice(2);
