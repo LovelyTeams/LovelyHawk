@@ -59,21 +59,38 @@ try {
   const status = await connect(sidecar, labTarget());
   if (status.stage !== "connected") throw new Error(JSON.stringify(status));
   const binding = status.bindingHandle;
-  const catalog = await sidecar.call("emergency-command.catalog.load", { bindingHandle: binding });
+  let catalog = await sidecar.call("emergency-command.catalog.load", { bindingHandle: binding });
+
+  // The catalogue is a five minute capability. A slow host can outlast it in
+  // the middle of a sweep, which in the window is a reload button.
+  const reload = async () => {
+    catalog = await sidecar.call("emergency-command.catalog.load", { bindingHandle: binding }, 180_000);
+  };
 
   // One run per command, reused across the rows that share it.
   const runs = new Map();
   const runFor = async (title) => {
     if (runs.has(title)) return runs.get(title);
-    const command = catalog.commands.find((entry) => entry.title === title);
+    let command = catalog.commands.find((entry) => entry.title === title);
     if (command === undefined) {
       runs.set(title, null);
       return null;
     }
-    const run = await sidecar.call("emergency-command.run", {
-      bindingHandle: binding, snapshotHandle: catalog.snapshotHandle,
-      commandHandle: command.commandHandle,
-    }, 90_000);
+    let run;
+    try {
+      run = await sidecar.call("emergency-command.run", {
+        bindingHandle: binding, snapshotHandle: catalog.snapshotHandle,
+        commandHandle: command.commandHandle,
+      }, 90_000);
+    } catch (error) {
+      if (!/catalog/u.test(error.message)) throw error;
+      await reload();
+      command = catalog.commands.find((entry) => entry.title === title);
+      run = await sidecar.call("emergency-command.run", {
+        bindingHandle: binding, snapshotHandle: catalog.snapshotHandle,
+        commandHandle: command.commandHandle,
+      }, 90_000);
+    }
     runs.set(title, run);
     return run;
   };

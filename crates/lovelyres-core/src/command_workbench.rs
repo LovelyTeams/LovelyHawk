@@ -375,7 +375,7 @@ static CATALOG: &[CommandDefinition] = &[
         Logs,
         "认证日志",
         "收集最近认证成功、失败和 sudo 线索。",
-        "journalctl -n 500 --no-pager -u ssh -u sshd -t sudo 2>/dev/null || tail -n 500 /var/log/auth.log /var/log/secure 2>/dev/null"
+        "lr=$(journalctl -n 500 --no-pager -u ssh -u sshd -t sudo 2>/dev/null); case \"$lr\" in ''|*'No entries'*|*'no entries'*) tail -n 500 /var/log/auth.log /var/log/secure 2>/dev/null;; *) printf '%s\\n' \"$lr\";; esac"
     )
     .flagging(command_findings::authentication_alert),
     portable!(
@@ -383,7 +383,7 @@ static CATALOG: &[CommandDefinition] = &[
         Logs,
         "系统错误",
         "收集本次启动的 error 级别日志。",
-        "journalctl -b -p err..alert -n 500 --no-pager 2>/dev/null || tail -n 500 /var/log/messages /var/log/syslog 2>/dev/null"
+        "lr=$(journalctl -b -p err..alert -n 500 --no-pager 2>/dev/null); case \"$lr\" in ''|*'No entries'*|*'no entries'*) tail -n 500 /var/log/messages /var/log/syslog 2>/dev/null;; *) printf '%s\\n' \"$lr\";; esac"
     )
     .flagging(command_findings::system_alert),
     portable!(
@@ -391,7 +391,7 @@ static CATALOG: &[CommandDefinition] = &[
         Logs,
         "内核日志",
         "收集最近内核告警和驱动异常。",
-        "journalctl -k -n 500 --no-pager 2>/dev/null || dmesg 2>/dev/null | tail -n 500"
+        "lr=$(journalctl -k -n 500 --no-pager 2>/dev/null); case \"$lr\" in ''|*'No entries'*|*'no entries'*) dmesg 2>/dev/null | tail -n 500;; *) printf '%s\\n' \"$lr\";; esac"
     )
     .flagging(command_findings::system_alert),
     portable!(
@@ -1844,6 +1844,31 @@ mod tests {
             .await
             .unwrap();
         (services, session, harness)
+    }
+
+    /// journalctl can be installed and have nothing to read. It then prints
+    /// "-- No entries --" and exits zero, so an `||` fallback never fires and
+    /// the page reports no authentication history on a host whose auth.log is
+    /// full of failed logins.
+    #[test]
+    fn journal_commands_fall_back_on_empty_output_not_just_failure() {
+        let journal = CATALOG
+            .iter()
+            .filter(|entry| {
+                entry
+                    .command_for(SystemFamily::Other)
+                    .contains("journalctl -")
+            })
+            .collect::<Vec<_>>();
+        assert!(journal.len() >= 3);
+        for entry in journal {
+            let command = entry.command_for(SystemFamily::Other);
+            if !command.starts_with("lr=$(journalctl") {
+                continue;
+            }
+            assert!(command.contains("'No entries'"));
+            assert!(command.contains("case "));
+        }
     }
 
     /// A command that reads a list of paths hits a missing one all the time.
