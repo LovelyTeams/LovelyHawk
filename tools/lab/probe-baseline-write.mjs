@@ -163,5 +163,77 @@ rm -f /tmp/lr-write-test /tmp/lr-write-out /tmp/lr-valid
   console.log("");
 }
 
+// The other half of writing a file: asking the product whether it will have
+// it. A validator is only worth having if it answers differently for a file
+// the product accepts and one it refuses — `mariadbd --validate-config`
+// answers non-zero for both, which is why it is not one of these.
+const VALIDATORS = [
+  {
+    name: "nginx -t",
+    command: "if command -v nginx >/dev/null 2>&1; then nginx -t; fi",
+    file: "/etc/nginx/nginx.conf",
+    breakWith: "this_is_not_a_directive on;",
+  },
+  {
+    name: "apachectl configtest",
+    command: "if command -v apachectl >/dev/null 2>&1; then apachectl configtest; " +
+      "elif command -v httpd >/dev/null 2>&1; then httpd -t; " +
+      "elif command -v apache2ctl >/dev/null 2>&1; then apache2ctl configtest; fi",
+    file: "/usr/local/apache2/conf/httpd.conf",
+    breakWith: "ThisIsNotADirective on",
+  },
+  {
+    name: "mysqld --validate-config",
+    command: "if command -v mysqld >/dev/null 2>&1; then mysqld --validate-config; fi",
+    file: "/etc/my.cnf",
+    // Under [mysqld], or the server never looks at it.
+    breakInSection: "mysqld",
+    breakWith: "totally_unknown_option = 1",
+  },
+  {
+    name: "mongod --outputConfig",
+    command: "if command -v mongod >/dev/null 2>&1; then " +
+      "mongod --config /etc/mongod.conf --outputConfig >/dev/null; fi",
+    file: "/etc/mongod.conf",
+    breakWith: "  notAKey: [[[",
+  },
+];
+
+console.log("校验器：好配置放行、坏配置拦下\n");
+for (const entry of VALIDATORS) {
+  const exists = run(`[ -f '${entry.file}' ] && echo yes || echo no`).trim();
+  if (exists !== "yes") {
+    console.log(`  跳过 ${entry.name}：这台机器上没有 ${entry.file}`);
+    continue;
+  }
+  const insert = entry.breakInSection === undefined
+    ? `printf '%s\\n' '${entry.breakWith}' >> '${entry.file}'`
+    : `awk '/^\\[${entry.breakInSection}\\]/{print; print "${entry.breakWith}"; next} {print}' ` +
+      `/tmp/lr-valid-good > '${entry.file}'`;
+  const script = `
+cp '${entry.file}' /tmp/lr-valid-good
+${entry.command} >/dev/null 2>&1 && echo "GOOD<<<0>>>" || echo "GOOD<<<$?>>>"
+${insert}
+${entry.command} >/dev/null 2>&1 && echo "BROKEN<<<0>>>" || echo "BROKEN<<<nonzero>>>"
+cp /tmp/lr-valid-good '${entry.file}'
+${entry.command} >/dev/null 2>&1 && echo "AFTER<<<0>>>" || echo "AFTER<<<$?>>>"
+rm -f /tmp/lr-valid-good
+`;
+  let output;
+  try {
+    output = run(script);
+  } catch (error) {
+    failures += 1;
+    console.log(`  FAIL ${entry.name} 脚本没跑起来：${String(error.message).slice(0, 160)}`);
+    continue;
+  }
+  const field = (name) => output.match(new RegExp(`${name}<<<([\\s\\S]*?)>>>`, "u"))?.[1]?.trim() ?? "";
+  console.log(`${entry.name} — ${entry.file}`);
+  check("好配置放行", field("GOOD"), "0");
+  check("坏配置被拦下", field("BROKEN"), "nonzero");
+  check("还原后又放行", field("AFTER"), "0");
+  console.log("");
+}
+
 console.log(failures === 0 ? "ALL CHECKS PASSED" : `${failures} CHECK(S) FAILED`);
 process.exitCode = failures === 0 ? 0 : 1;

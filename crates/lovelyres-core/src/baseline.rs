@@ -183,6 +183,62 @@ impl BaselineComponent {
             ),
         }
     }
+
+    /// The product's own check that the file it has just been handed is valid.
+    ///
+    /// Writing a file the program will refuse is worse than not writing it at
+    /// all: the change reads as applied, and the next reload — which may be a
+    /// reboot, in the middle of an incident — is where it fails. Every change
+    /// this tool makes is now offered to the product's own parser first, and a
+    /// refusal rolls the file back through the backup the operation already
+    /// takes.
+    ///
+    /// `{file}` is replaced with the file the change was written to.
+    ///
+    /// Only validators proven on a real host to answer zero for a good file
+    /// and non-zero for a broken one are here. `mariadbd --validate-config` is
+    /// not one of them: it refuses to run as root, and as the mysql user it
+    /// still answers non-zero on a file it accepts — encoding it would have
+    /// rolled back every MariaDB change ever made. Redis and Tomcat have no
+    /// offline validator at all, which is the same thing `MiddlewareValidator`
+    /// records for them in `middleware.rs`.
+    ///
+    /// Each one skips silently when the program is not installed, so a check
+    /// written on a host that does not run the product cannot fail on the
+    /// absence of its validator.
+    pub const fn validate_command(self) -> Option<&'static str> {
+        match self {
+            // login.defs, faillock, auditd and sysctl have no parser to ask.
+            Self::System => None,
+            Self::Ssh => Some("if command -v sshd >/dev/null 2>&1; then sshd -t; fi"),
+            Self::Nginx => Some("if command -v nginx >/dev/null 2>&1; then nginx -t; fi"),
+            Self::Apache => Some(
+                "if command -v apachectl >/dev/null 2>&1; then apachectl configtest; \
+                 elif command -v httpd >/dev/null 2>&1; then httpd -t; \
+                 elif command -v apache2ctl >/dev/null 2>&1; then apache2ctl configtest; fi",
+            ),
+            // MySQL only. On a MariaDB host `mysqld` is absent and this skips.
+            Self::MySql => {
+                Some("if command -v mysqld >/dev/null 2>&1; then mysqld --validate-config; fi")
+            }
+            Self::MongoDb => Some(
+                "if command -v mongod >/dev/null 2>&1; then \
+                   mongod --config {file} --outputConfig >/dev/null; fi",
+            ),
+            // `postgres` is not on the path on Debian; it lives beside its own
+            // version. The file's own directory is the configuration directory.
+            Self::PostgreSql => Some(
+                "for lr_pg in /usr/lib/postgresql/*/bin/postgres /usr/pgsql-*/bin/postgres \
+                   /usr/local/pgsql/bin/postgres; do \
+                   [ -x \"$lr_pg\" ] || continue; \
+                   su postgres -s /bin/sh -c \"$lr_pg -C listen_addresses -D $(dirname {file})\" \
+                     >/dev/null 2>&1 || exit 42; \
+                   break; \
+                 done",
+            ),
+            Self::Redis | Self::Tomcat => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -4100,20 +4156,46 @@ fn yaml_writer(key: &str) -> String {
     )
 }
 
+/// Ask each product whether it accepts the file it was just given, then reload
+/// what this tool is responsible for reloading.
+///
+/// Validation used to be one line, `sshd -t`, from when every check this tool
+/// could write lived in `sshd_config` or a sysctl file. The catalogue grew to
+/// databases and web servers without the validation growing with it, so a
+/// change to `nginx.conf` or `my.cnf` was written and left: forty-eight of the
+/// eighty-one checks were applied with nothing asked and nothing reloaded. A
+/// file the program refuses is worse than no change at all, because it reads
+/// as done and fails later, at a reload nobody chose the timing of.
+///
+/// Reloading is deliberately narrower than validating. This tool reloads what
+/// it owns — sshd and the kernel parameters it writes — and does not restart
+/// somebody's database because a directive changed. The remediation beside
+/// each check already tells the operator what to run and when.
 fn configuration_validation(
     changes: &[PlannedBaselineChange],
     reload_policy: BaselineReloadPolicy,
 ) -> CoreResult<String> {
+    let mut command = String::new();
+    // One validation per product, against a file that product actually owns.
+    let mut validated = BTreeMap::new();
+    for change in changes {
+        let definition = definition(&change.item_id)?;
+        let Some(validator) = definition.component.validate_command() else {
+            continue;
+        };
+        validated
+            .entry(validator)
+            .or_insert_with(|| change_file(change));
+    }
+    for (validator, file) in validated {
+        command.push_str(&validator.replace("{file}", &shq(&file?)));
+        command.push_str("; ");
+    }
+
     let groups = changes
         .iter()
         .map(|change| definition(&change.item_id).map(|definition| definition.reload))
         .collect::<CoreResult<BTreeSet<_>>>()?;
-    let mut command = String::new();
-    if groups.contains(&ReloadGroup::Sshd) {
-        command.push_str(
-            "if command -v sshd >/dev/null 2>&1; then sshd -t -f /etc/ssh/sshd_config; fi; ",
-        );
-    }
     if reload_policy == BaselineReloadPolicy::ApplyNow {
         if groups.contains(&ReloadGroup::Sysctl) {
             command.push_str("sysctl -p /etc/sysctl.d/99-lovelyres-baseline.conf >/dev/null; ");
@@ -4626,6 +4708,100 @@ mod tests {
                 .compliant,
             "closed choice values are compared by their canonical form"
         );
+    }
+
+    /// Nothing this tool writes is left without asking the program about it.
+    ///
+    /// Validation was written when every writable check lived in sshd_config
+    /// or a sysctl file, and the catalogue grew to databases and web servers
+    /// without it: forty-eight of eighty-one checks were applied with nothing
+    /// asked. Each product that has a validator must use it; each product that
+    /// has none must be named here, so adding a product is a decision about
+    /// validation rather than an omission.
+    #[test]
+    fn every_writable_product_is_asked_or_is_named_as_having_no_validator() {
+        // Proven on a real host: zero for a file the product accepts, non-zero
+        // for one it refuses. See the commit that added them.
+        const NO_VALIDATOR: [BaselineComponent; 3] = [
+            // login.defs, faillock, auditd and sysctl have no parser to ask.
+            BaselineComponent::System,
+            // `redis-server` has no offline check.
+            BaselineComponent::Redis,
+            // Tomcat parses server.xml only at start; `MiddlewareValidator`
+            // records the same thing as `StructuralOnly`.
+            BaselineComponent::Tomcat,
+        ];
+        for component in BaselineComponent::ALL {
+            let writable = BASELINE_CATALOG
+                .iter()
+                .any(|definition| definition.component == component && definition.is_writable());
+            if !writable {
+                continue;
+            }
+            assert_eq!(
+                component.validate_command().is_none(),
+                NO_VALIDATOR.contains(&component),
+                "{} is neither validated nor named as unvalidatable",
+                component.label()
+            );
+        }
+        // Every validator has to survive a target that does not run the
+        // product: an absent binary is a skip, never a failure.
+        for component in BaselineComponent::ALL {
+            let Some(validator) = component.validate_command() else {
+                continue;
+            };
+            assert!(
+                validator.contains("command -v") || validator.contains("[ -x"),
+                "{} would fail on a host that does not run it",
+                component.label()
+            );
+        }
+    }
+
+    /// The validation the apply step sends, for a change to each product.
+    #[test]
+    fn the_apply_step_asks_the_product_about_the_file_it_wrote() {
+        for (item_id, expected) in [
+            ("ssh-permit-root-login", "sshd -t"),
+            ("nginx-server-tokens", "nginx -t"),
+            ("apache-server-tokens", "apachectl configtest"),
+            ("mysql-local-infile", "mysqld --validate-config"),
+            ("mongodb-authorization", "mongod --config"),
+            ("postgresql-ssl", "-C listen_addresses -D"),
+        ] {
+            let definition = definition(item_id).unwrap();
+            let change = PlannedBaselineChange {
+                item_id: item_id.to_owned(),
+                before: BaselineObservedValue::Missing,
+                after: definition.recommendation.to_owned(),
+                file: definition.file.to_owned(),
+            };
+            let validation =
+                configuration_validation(&[change], BaselineReloadPolicy::Defer).unwrap();
+            assert!(
+                validation.contains(expected),
+                "{item_id} is applied without asking {expected}:\n{validation}"
+            );
+            // The file the change wrote, not a path compiled in beside it.
+            if expected.contains("{file}") || expected.contains("-D") {
+                assert!(validation.contains(definition.file));
+            }
+        }
+        // A product with no validator sends nothing rather than something that
+        // always succeeds — an empty check reads as a check that ran.
+        let redis = definition("redis-protected-mode").unwrap();
+        let validation = configuration_validation(
+            &[PlannedBaselineChange {
+                item_id: redis.id.to_owned(),
+                before: BaselineObservedValue::Missing,
+                after: redis.recommendation.to_owned(),
+                file: redis.file.to_owned(),
+            }],
+            BaselineReloadPolicy::Defer,
+        )
+        .unwrap();
+        assert_eq!(validation, "");
     }
 
     /// Each file shape is written the way that shape is written, and the line
