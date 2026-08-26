@@ -71,12 +71,14 @@ export function newDataRoot() {
   return mkdtempSync(path.join(tmpdir(), "lovelyres-lab-"));
 }
 
-export async function connect(sidecar, { host, port, username, password }, attempts = 6) {
-  const connectionId = "11111111-1111-4111-8111-111111111111";
+export async function connect(sidecar, { host, port, username, password, id, name }, attempts = 6) {
+  // A caller recording several labs into one store needs one entry each; the
+  // single-target probes keep the original id.
+  const connectionId = id ?? "11111111-1111-4111-8111-111111111111";
   try {
     await sidecar.call("connections.create", {
       connection: {
-        id: connectionId, name: "lab-web", host, port, username,
+        id: connectionId, name: name ?? "lab-web", host, port, username,
         authMethod: "password", privateKeyPath: null, certificatePath: null,
         agentIdentityFingerprint: null, jumpHost: null, tags: [], notes: null,
         environment: null, role: null, group: null,

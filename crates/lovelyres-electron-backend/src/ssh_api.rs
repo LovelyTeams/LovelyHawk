@@ -163,7 +163,15 @@ impl SshApi {
             .services
             .target()
             .clear_if_current(binding.session.target())?;
-        disconnected?;
+        // A connection that is already gone has already been disconnected.
+        // Reporting that as a failure left the window still showing a target
+        // it had in fact just let go of, with no way to let go of it again —
+        // the one action whose whole purpose is to clean up was the one action
+        // that could not be completed once there was something to clean up.
+        match disconnected {
+            Ok(()) | Err(CoreError::SshDisconnected { .. }) => {}
+            Err(error) => return Err(error),
+        }
         Ok(BindingDisconnectedDto {
             disconnected: true,
             target_cleared: cleared,
@@ -1137,5 +1145,50 @@ mod tests {
         ] {
             assert!(!encoded.contains(forbidden));
         }
+    }
+
+    /// Disconnecting is asked for most often when there is something to clean
+    /// up, and a transport that has already gone is exactly that case. It used
+    /// to be the one case that failed: the binding was let go and the caller
+    /// was told the operation had not worked, so the window went on showing a
+    /// target it no longer had.
+    #[test]
+    fn a_connection_that_is_already_gone_counts_as_disconnected() {
+        let already_gone: CoreResult<()> = Err(CoreError::SshDisconnected {
+            message: "Channel send error".to_owned(),
+        });
+        assert!(matches!(
+            already_gone,
+            Ok(()) | Err(CoreError::SshDisconnected { .. })
+        ));
+
+        // Anything else still has to be reported: a disconnect that failed for
+        // another reason may have left the far end holding the session open.
+        let refused: CoreResult<()> = Err(CoreError::Ssh {
+            operation: "disconnect",
+            message: "permission denied".to_owned(),
+        });
+        assert!(!matches!(
+            refused,
+            Ok(()) | Err(CoreError::SshDisconnected { .. })
+        ));
+    }
+
+    #[test]
+    fn the_disconnect_path_lets_a_gone_connection_through_and_nothing_else() {
+        let source = include_str!("ssh_api.rs");
+        let body = source
+            .split("pub async fn disconnect_binding")
+            .nth(1)
+            .and_then(|rest| rest.split("\n    pub").next())
+            .unwrap_or_default();
+        // The registry entry and the target guard are released before the
+        // disconnect result is judged, so a failure cannot strand either.
+        let take = body.find("take_binding").unwrap();
+        let clear = body.find("clear_if_current").unwrap();
+        let judge = body.find("match disconnected").unwrap();
+        assert!(take < clear && clear < judge);
+        assert!(body.contains("Ok(()) | Err(CoreError::SshDisconnected { .. }) => {}"));
+        assert!(body.contains("Err(error) => return Err(error),"));
     }
 }

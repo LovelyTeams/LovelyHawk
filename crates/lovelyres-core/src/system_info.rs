@@ -7239,8 +7239,8 @@ awk -F'[: ]+' 'NR>2 && $1!="lo"{rx+=$3;tx+=$11} END{printf "rx\t%.0f\ntx\t%.0f\n
 const PROCESS_COMMAND: &str = r#"ps -eo pid=,ppid=,user=,stat=,pcpu=,pmem=,etimes=,args= --no-headers 2>/dev/null | head -n 500 | awk '{risk="normal"; cmd=""; for(i=8;i<=NF;i++) cmd=cmd (i==8?"":" ") $i; if($4 ~ /^Z/ || $5+0>=80) risk="warning"; gsub(/\t/," ",cmd); print risk"\t"$1"\t"$2"\t"$3"\t"$4"\t"$5"\t"$6"\t"$7"\t"cmd}'"#;
 const NETWORK_COMMAND: &str = r#"if command -v ss >/dev/null 2>&1; then ss -H -tunap 2>/dev/null | head -n 500 | awk '{proc=""; for(i=7;i<=NF;i++) proc=proc (i==7?"":" ") $i; gsub(/\t/," ",proc); pid=proc; sub(/^.*pid=/,"",pid); sub(/,.*/,"",pid); if(pid !~ /^[0-9]+$/) pid=""; print $1"\t"$5"\t"$6"\t"$2"\t"pid"\t"proc}'; else netstat -tunap 2>/dev/null | tail -n +3 | head -n 500 | awk '{proc=$7; gsub(/\t/," ",proc); pid=proc; sub(/\/.*/,"",pid); if(pid !~ /^[0-9]+$/) pid=""; print $1"\t"$4"\t"$5"\t"$6"\t"pid"\t"proc}'; fi"#;
 const SERVICES_COMMAND: &str = r#"systemctl list-units --type=service --all --no-pager --no-legend 2>/dev/null | head -n 500 | awk '{desc=""; for(i=5;i<=NF;i++) desc=desc (i==5?"":" ") $i; gsub(/\t/," ",desc); print $1"\t"$4"\t"$3"\t"desc}'"#;
-const ESTABLISHED_COMMAND: &str = r#"if command -v ss >/dev/null 2>&1; then ss -H -tnp state established 2>/dev/null | head -n 500 | awk '{proc=""; for(i=6;i<=NF;i++) proc=proc (i==6?"":" ") $i; gsub(/\t/," ",proc); pid=proc; sub(/^.*pid=/,"",pid); sub(/,.*/,"",pid); if(pid !~ /^[0-9]+$/) pid=""; port=$5; sub(/^.*:/,"",port); print $4"\t"$5"\t"port"\t"pid"\t"proc"\t""}'; else netstat -tnp 2>/dev/null | awk '$6=="ESTABLISHED" {proc=$7; gsub(/\t/," ",proc); pid=proc; sub(/\/.*/,"",pid); if(pid !~ /^[0-9]+$/) pid=""; port=$5; sub(/^.*:/,"",port); print $4"\t"$5"\t"port"\t"pid"\t"proc"\t""}' | head -n 500; fi"#;
-const OPEN_PORTS_COMMAND: &str = r#"if command -v ss >/dev/null 2>&1; then ss -H -tulnp 2>/dev/null | head -n 500 | awk '{local=$5; port=local; sub(/^.*:/,"",port); addr=substr(local,1,length(local)-length(port)-1); gsub(/^\[/,"",addr); gsub(/\]$/,"",addr); proc=""; for(i=7;i<=NF;i++) proc=proc (i==7?"":" ") $i; gsub(/\t/," ",proc); pid=proc; sub(/^.*pid=/,"",pid); sub(/,.*/,"",pid); if(pid !~ /^[0-9]+$/) pid=""; print $1"\t"addr"\t"port"\t"pid"\t"proc"\t""}'; else netstat -tulnp 2>/dev/null | tail -n +3 | head -n 500 | awk '{local=$4; port=local; sub(/^.*:/,"",port); addr=substr(local,1,length(local)-length(port)-1); gsub(/^\[/,"",addr); gsub(/\]$/,"",addr); proc=$7; gsub(/\t/," ",proc); pid=proc; sub(/\/.*/,"",pid); if(pid !~ /^[0-9]+$/) pid=""; print $1"\t"addr"\t"port"\t"pid"\t"proc"\t""}'; fi"#;
+const ESTABLISHED_COMMAND: &str = r#"if command -v ss >/dev/null 2>&1; then ss -H -tnp state established 2>/dev/null | head -n 500 | awk '{proc=""; for(i=6;i<=NF;i++) proc=proc (i==6?"":" ") $i; gsub(/\t/," ",proc); pid=proc; sub(/^.*pid=/,"",pid); sub(/,.*/,"",pid); if(pid !~ /^[0-9]+$/) pid=""; port=$5; sub(/^.*:/,"",port); print $4"\t"$5"\t"port"\t"pid"\t"proc"\t"}'; else netstat -tnp 2>/dev/null | awk '$6=="ESTABLISHED" {proc=$7; gsub(/\t/," ",proc); pid=proc; sub(/\/.*/,"",pid); if(pid !~ /^[0-9]+$/) pid=""; port=$5; sub(/^.*:/,"",port); print $4"\t"$5"\t"port"\t"pid"\t"proc"\t"}' | head -n 500; fi"#;
+const OPEN_PORTS_COMMAND: &str = r#"if command -v ss >/dev/null 2>&1; then ss -H -tulnp 2>/dev/null | head -n 500 | awk '{local=$5; port=local; sub(/^.*:/,"",port); addr=substr(local,1,length(local)-length(port)-1); gsub(/^\[/,"",addr); gsub(/\]$/,"",addr); proc=""; for(i=7;i<=NF;i++) proc=proc (i==7?"":" ") $i; gsub(/\t/," ",proc); pid=proc; sub(/^.*pid=/,"",pid); sub(/,.*/,"",pid); if(pid !~ /^[0-9]+$/) pid=""; print $1"\t"addr"\t"port"\t"pid"\t"proc"\t"}'; else netstat -tulnp 2>/dev/null | tail -n +3 | head -n 500 | awk '{local=$4; port=local; sub(/^.*:/,"",port); addr=substr(local,1,length(local)-length(port)-1); gsub(/^\[/,"",addr); gsub(/\]$/,"",addr); proc=$7; gsub(/\t/," ",proc); pid=proc; sub(/\/.*/,"",pid); if(pid !~ /^[0-9]+$/) pid=""; print $1"\t"addr"\t"port"\t"pid"\t"proc"\t"}'; fi"#;
 const USERS_COMMAND: &str =
     r#"getent passwd 2>/dev/null | head -n 500 | awk -F: '{print $1"\t"$3"\t"$4"\t"$6"\t"$7}'"#;
 const AUTOSTART_COMMAND: &str = r#"systemctl list-unit-files --type=service --state=enabled --no-pager --no-legend 2>/dev/null | head -n 500 | awk '{print $1"\t"$1"\t"$2"\tsystemd"}'"#;
@@ -7271,6 +7271,43 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
+
+    /// Every quote in an awk program has to close.
+    ///
+    /// The open-ports and established-connection programs both ended with one
+    /// quote too many: it opened a string that swallowed the closing brace, so
+    /// awk saw neither a block end nor a terminated string and refused the
+    /// whole program. Both tabs showed the parser error where the ports should
+    /// have been, on every target, for as long as they had existed. A stray
+    /// quote is invisible in a line this long, so it is counted here instead.
+    #[test]
+    fn every_awk_program_is_balanced_and_closes_its_block() {
+        for tab in SystemInfoTab::ALL {
+            let command = tab.command();
+            for (index, program) in command.split('\'').enumerate() {
+                // Odd chunks are what sits inside the shell's single quotes,
+                // which is where the awk programs live.
+                if index % 2 == 0 || !program.contains("print ") {
+                    continue;
+                }
+                let quotes = program.matches('"').count();
+                assert_eq!(
+                    quotes % 2,
+                    0,
+                    "{tab:?} has an unbalanced quote in: {program}",
+                );
+                assert!(
+                    program.trim_end().ends_with('}'),
+                    "{tab:?} does not close its awk block: {program}",
+                );
+                assert_eq!(
+                    program.matches('{').count(),
+                    program.matches('}').count(),
+                    "{tab:?} has unbalanced braces in: {program}",
+                );
+            }
+        }
+    }
     use crate::{
         BackendServices, PortableStore,
         ssh::{SshConnectionStatus, TestSessionHarness},
