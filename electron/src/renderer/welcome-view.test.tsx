@@ -46,6 +46,28 @@ describe("WelcomeView", () => {
     expect(markup).not.toMatch(/password|secret|bindingHandle|sessionId|authMethod/iu);
   });
 
+  /**
+   * The grid packed four cards across a wide window. A card that narrow has no
+   * room left for a name once the three actions are laid out, and a squeezed
+   * column wraps Chinese one character per line — so "实验靶机 alma" read
+   * downwards and root@host:port was clipped to a single letter.
+   */
+  it("gives a card enough width to show its name and target on one line", () => {
+    const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+    const grid = css.match(/\.connection-grid \{[^}]*\}/u)?.[0] ?? "";
+    expect(grid).toContain("repeat(2, minmax(0, 1fr))");
+    expect(grid).not.toContain("auto-fit");
+    // One column once two cards can no longer hold their own content.
+    expect(css).toMatch(/@media \(max-width: 1080px\) \{\s*\.connection-grid \{ grid-template-columns: minmax\(0, 1fr\); \}/u);
+
+    const card = css.match(/\.connection-card \{[^}]*\}/u)?.[0] ?? "";
+    expect(card).toContain("36px minmax(0, 1fr) auto");
+    // The name is clipped rather than wrapped, like the target line beside it.
+    const name = css.match(/\.connection-card strong \{[^}]*\}/u)?.[0] ?? "";
+    expect(name).toContain("white-space: nowrap");
+    expect(name).toContain("text-overflow: ellipsis");
+  });
+
   it("renders hostile connection names as inert text", () => {
     const markup = renderToStaticMarkup(
       <WelcomeView

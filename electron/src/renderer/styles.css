@@ -98,12 +98,20 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .section-heading h2 { margin: 0 0 3px; font-size: 14px; font-weight: 600; }
 .section-heading p { margin: 0; color: var(--faint); font-size: 12px; }
 .section-heading > span { display: grid; place-items: center; min-width: 27px; height: 24px; color: var(--accent-text); background: var(--accent-soft); border-radius: 8px; font-size: 13px; }
-.connection-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
-.connection-card { display: grid; grid-template-columns: 36px 1fr auto; align-items: center; gap: 11px; padding: 13px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
-.connection-avatar { display: grid; place-items: center; width: 36px; height: 36px; color: var(--accent-text); background: var(--accent-soft); border-radius: 8px; font-size: 13px; font-weight: 600; }
+/* Two to a row. Auto-fit packed four across a wide window, and a card that
+   narrow has no room left for a name once the three actions are laid out. */
+.connection-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.connection-card { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: 11px; padding: 13px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
+.connection-avatar { display: grid; flex: none; place-items: center; width: 36px; height: 36px; color: var(--accent-text); background: var(--accent-soft); border-radius: 8px; font-size: 13px; font-weight: 600; }
 .connection-card > div:nth-child(2) { display: flex; min-width: 0; flex-direction: column; }
-.connection-card strong { font-size: 13px; font-weight: 600; }
+/* A squeezed column wraps Chinese one character per line, which is how the
+   name ended up reading downwards. */
+.connection-card strong { overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
 .connection-card span { overflow: hidden; color: var(--faint); font-family: "Cascadia Mono", monospace; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 1080px) {
+  .connection-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
 .connection-card button { padding: 6px 11px; color: var(--accent-text); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 7px; font-size: 12px; font-weight: 500; }
 .empty-state { margin-top: 12px; padding: 34px; color: var(--faint); text-align: center; background: var(--surface); border: 1px dashed var(--border-strong); border-radius: 10px; font-size: 13px; }
 
