@@ -27,6 +27,7 @@
     "lab:verify": "node ./tools/lab/verify-services.mjs",
     "lab:paths": "node ./tools/lab/probe-paths.mjs",
     "lab:ui": "node ./tools/lab/probe-ui.mjs",
-    "lab:down": "wsl.exe -d Ubuntu -u root -e bash -lc \"docker stop $(docker ps -q --filter name=lab-)\""
+    "lab:down": "wsl.exe -d Ubuntu -u root -e bash -lc \"docker stop $(docker ps -q --filter name=lab-)\"",
+    "lab:restart": "pwsh -NoProfile -Command \"wsl.exe -d Ubuntu -u root -e bash -lc 'bash /mnt/d/LovelyRes/tools/lab/services/restart.sh' ; node ./tools/lab/import-labs.mjs\""
   }
 }
