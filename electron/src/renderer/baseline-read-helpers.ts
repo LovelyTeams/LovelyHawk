@@ -31,6 +31,7 @@ export interface BaselineCheckGroup {
 /** The order the products are read in: the machine itself, then what it runs. */
 const COMPONENT_ORDER: readonly BaselineComponent[] = [
   "system", "ssh", "mysql", "postgresql", "redis", "mongodb", "nginx", "apache", "tomcat",
+  "opengauss", "tidb",
 ];
 
 /** A check on software the target does not run is neither passed nor failed. */
@@ -41,7 +42,7 @@ export function baselineApplies(status: BaselineStatus | null): boolean {
 /**
  * Groups what is on screen by the software each check is about.
  *
- * Seventy-five checks in one flat list is a scroll, not a picture, and the
+ * Ninety-odd checks in one flat list is a scroll, not a picture, and the
  * grouping that helps is the one that matches the question: an operator sent
  * to harden the database wants the database's checks together. Which kind of
  * hardening each is stays available as a filter.
@@ -151,6 +152,8 @@ export function baselineComponentLabel(component: BaselineComponent): string {
     case "nginx": return "Nginx";
     case "apache": return "Apache";
     case "tomcat": return "Apache Tomcat";
+    case "opengauss": return "openGauss";
+    case "tidb": return "TiDB";
   }
 }
 

@@ -20,7 +20,9 @@ export type BaselineComponent =
   | "mongodb"
   | "nginx"
   | "apache"
-  | "tomcat";
+  | "tomcat"
+  | "opengauss"
+  | "tidb";
 
 export type BaselineRisk = "critical" | "high" | "medium" | "low";
 export type BaselineObservedKind = "missing" | "unsupported" | "value" | "not-installed";
@@ -156,6 +158,7 @@ const categories = new Set<BaselineCategory>([
 ]);
 const components = new Set<BaselineComponent>([
   "system", "ssh", "mysql", "postgresql", "redis", "mongodb", "nginx", "apache", "tomcat",
+  "opengauss", "tidb",
 ]);
 const risks = new Set<BaselineRisk>(["critical", "high", "medium", "low"]);
 const observedKinds = new Set<BaselineObservedKind>([

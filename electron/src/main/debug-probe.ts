@@ -803,7 +803,7 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
         typeof baselineBoundary.readFileArity === "number",
       "Baseline contextBridge methods do not expose callable function metadata",
     );
-    assert(baselineBoundary.catalogDisplayed === 81, "bounded Baseline catalog did not load");
+    assert(baselineBoundary.catalogDisplayed === 95, "bounded Baseline catalog did not load");
     assert(
       baselineBoundary.catalogUnknownStripped === true,
       "catalog extra ingredients crossed the arity-zero preload boundary",
@@ -835,7 +835,7 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
         return button instanceof HTMLButtonElement;
       })()`,
     );
-    await waitFor(client, "document.querySelectorAll('.baseline-card').length === 81");
+    await waitFor(client, "document.querySelectorAll('.baseline-card').length === 95");
     const baselineDisconnected = await evaluate<Record<string, unknown>>(
       client,
       `(() => {
@@ -912,7 +912,7 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
         baselineDisconnected.prompt.includes("连接 SSH 目标后才能扫描"),
       "the checking half did not render its honest disconnected state",
     );
-    assert(baselineDisconnected.catalogCards === 81, "Baseline local catalog is incomplete");
+    assert(baselineDisconnected.catalogCards === 95, "Baseline local catalog is incomplete");
     assert(baselineDisconnected.compliantRows === 0, "Baseline page invented remote scan results");
     assert(baselineDisconnected.historyRows === 0, "Baseline page invented remote history");
     assert(baselineDisconnected.scanButtonDisabled === true, "Baseline scan is enabled disconnected");
@@ -980,7 +980,7 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
         return button instanceof HTMLButtonElement;
       })()`,
     );
-    await waitFor(client, "document.querySelectorAll('.baseline-card').length === 81");
+    await waitFor(client, "document.querySelectorAll('.baseline-card').length === 95");
     const baselineLifecycle = await evaluate<Record<string, unknown>>(
       client,
       `(() => ({
@@ -992,7 +992,7 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
       }))()`,
     );
     assert(baselineLifecycle.remounted === true, "Baseline page did not remount cleanly");
-    assert(baselineLifecycle.catalogCards === 81, "Baseline catalog drifted after remount");
+    assert(baselineLifecycle.catalogCards === 95, "Baseline catalog drifted after remount");
     assert(baselineLifecycle.noRemoteRows === true, "Baseline page retained remote state");
     assert(
       baselineLifecycle.mode === "检查这台主机",

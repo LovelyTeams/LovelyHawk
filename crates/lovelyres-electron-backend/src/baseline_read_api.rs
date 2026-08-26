@@ -1243,6 +1243,8 @@ const fn component_key(component: BaselineComponent) -> &'static str {
         BaselineComponent::Nginx => "nginx",
         BaselineComponent::Apache => "apache",
         BaselineComponent::Tomcat => "tomcat",
+        BaselineComponent::OpenGauss => "opengauss",
+        BaselineComponent::TiDb => "tidb",
     }
 }
 

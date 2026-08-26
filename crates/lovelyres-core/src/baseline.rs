@@ -112,10 +112,15 @@ pub enum BaselineComponent {
     Nginx,
     Apache,
     Tomcat,
+    /// openGauss keeps a PostgreSQL-shaped file with directives of its own —
+    /// `password_encryption_type`, `audit_enabled`, the login-lockout trio —
+    /// so it is its own product rather than a path added to PostgreSQL's.
+    OpenGauss,
+    TiDb,
 }
 
 impl BaselineComponent {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 11] = [
         Self::System,
         Self::Ssh,
         Self::MySql,
@@ -125,6 +130,8 @@ impl BaselineComponent {
         Self::Nginx,
         Self::Apache,
         Self::Tomcat,
+        Self::OpenGauss,
+        Self::TiDb,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -138,6 +145,8 @@ impl BaselineComponent {
             Self::Nginx => "Nginx",
             Self::Apache => "Apache HTTP Server",
             Self::Tomcat => "Apache Tomcat",
+            Self::OpenGauss => "openGauss",
+            Self::TiDb => "TiDB",
         }
     }
 
@@ -180,6 +189,17 @@ impl BaselineComponent {
             Self::Tomcat => Some(
                 "[ -d /usr/local/tomcat ] || [ -d /opt/tomcat ] \
                  || ls -d /etc/tomcat* /usr/share/tomcat* /var/lib/tomcat* >/dev/null 2>&1",
+            ),
+            // openGauss ships `gaussdb`, not `postgres`, and keeps its cluster
+            // under its own directory — so a host running it answers no to
+            // PostgreSQL's probe and its PostgreSQL checks stay out of the way.
+            Self::OpenGauss => Some(
+                "command -v gaussdb >/dev/null 2>&1 || command -v gs_ctl >/dev/null 2>&1 \
+                 || [ -d /var/lib/opengauss ] || [ -d /opt/opengauss ]",
+            ),
+            Self::TiDb => Some(
+                "command -v tidb-server >/dev/null 2>&1 || [ -d /etc/tidb ] \
+                 || [ -d /opt/tidb ]",
             ),
         }
     }
@@ -236,7 +256,10 @@ impl BaselineComponent {
                    break; \
                  done",
             ),
-            Self::Redis | Self::Tomcat => None,
+            // openGauss ships `gs_guc check`, but it wants the cluster's data
+            // directory and the omm account; TiDB has no offline check at all.
+            // Neither is proven, so neither is claimed.
+            Self::Redis | Self::Tomcat | Self::OpenGauss | Self::TiDb => None,
         }
     }
 }
@@ -466,6 +489,25 @@ const NGINX_FILES: &[&str] = &[
     "/etc/nginx/conf.d/*.conf",
     "/etc/nginx/sites-enabled/*",
 ];
+// openGauss keeps a PostgreSQL-shaped file under its own tree. Its own
+// directives live in the same file, so one candidate list covers both.
+const OPENGAUSS_FILES: &[&str] = &[
+    "/var/lib/opengauss/data/postgresql.conf",
+    "/var/lib/opengauss/*/data/postgresql.conf",
+    "/opt/opengauss/data/postgresql.conf",
+    "/gaussdb/data/*/postgresql.conf",
+];
+
+const TIDB_FILES: &[&str] = &[
+    "/etc/tidb/tidb.toml",
+    "/etc/tidb.toml",
+    "/opt/tidb/conf/tidb.toml",
+    "/tidb-deploy/*/conf/tidb.toml",
+];
+
+const OPENGAUSS_PASSWORD_TYPE: &[&str] = &["0", "1", "2"];
+const TIDB_LOG_LEVEL: &[&str] = &["debug", "info", "warn", "error", "fatal"];
+
 // Tomcat is unpacked wherever whoever installed it decided; these are the
 // places the packages and the official image put it.
 const TOMCAT_SERVER_FILES: &[&str] = &[
@@ -1917,6 +1959,235 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
         format: FileFormat::XmlAttribute("Host"),
         reload: ReloadGroup::None,
     },
+    // ---- openGauss ---------------------------------------------------------
+    BaselineDefinition {
+        id: "opengauss-listen-addresses",
+        category: BaselineCategory::AccessControl,
+        component: BaselineComponent::OpenGauss,
+        title: "只监听本机",
+        description: "监听 * 或 0.0.0.0 表示任何能到达这台机器的人都能尝试认证。",
+        recommendation: "localhost",
+        risk: BaselineRisk::Critical,
+        value_kind: BaselineValueKind::Choice(PG_LISTEN),
+        reading: Reading::Files(OPENGAUSS_FILES),
+        implicit: Some("localhost"),
+        file: "/var/lib/opengauss/data/postgresql.conf",
+        key: "listen_addresses",
+        format: FileFormat::Equals,
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "opengauss-password-encryption-type",
+        category: BaselineCategory::Password,
+        component: BaselineComponent::OpenGauss,
+        title: "口令只用 SHA-256 存放",
+        description: "0 表示只存 MD5，1 表示同时存 MD5 与 SHA-256，两者都留下可离线爆破的散列。2 只存 SHA-256。",
+        recommendation: "2",
+        risk: BaselineRisk::High,
+        value_kind: BaselineValueKind::Choice(OPENGAUSS_PASSWORD_TYPE),
+        reading: Reading::Files(OPENGAUSS_FILES),
+        implicit: None,
+        file: "/var/lib/opengauss/data/postgresql.conf",
+        key: "password_encryption_type",
+        format: FileFormat::Equals,
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "opengauss-ssl",
+        category: BaselineCategory::Transport,
+        component: BaselineComponent::OpenGauss,
+        title: "启用传输加密",
+        description: "不开 SSL 时，口令与查询结果在网络上是明文。",
+        recommendation: "on",
+        risk: BaselineRisk::High,
+        value_kind: BaselineValueKind::Boolean,
+        reading: Reading::Files(OPENGAUSS_FILES),
+        implicit: Some("off"),
+        file: "/var/lib/opengauss/data/postgresql.conf",
+        key: "ssl",
+        format: FileFormat::Equals,
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "opengauss-audit-enabled",
+        category: BaselineCategory::Logging,
+        component: BaselineComponent::OpenGauss,
+        title: "开启审计",
+        description: "openGauss 自带审计，关掉之后登录、授权与结构变更都不会留下记录。",
+        recommendation: "on",
+        risk: BaselineRisk::High,
+        value_kind: BaselineValueKind::Boolean,
+        reading: Reading::Files(OPENGAUSS_FILES),
+        implicit: Some("on"),
+        file: "/var/lib/opengauss/data/postgresql.conf",
+        key: "audit_enabled",
+        format: FileFormat::Equals,
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "opengauss-log-connections",
+        category: BaselineCategory::Logging,
+        component: BaselineComponent::OpenGauss,
+        title: "记录连接建立",
+        description: "不记录连接，就无从知道是谁在什么时候连过这个库。",
+        recommendation: "on",
+        risk: BaselineRisk::High,
+        value_kind: BaselineValueKind::Boolean,
+        reading: Reading::Files(OPENGAUSS_FILES),
+        implicit: Some("off"),
+        file: "/var/lib/opengauss/data/postgresql.conf",
+        key: "log_connections",
+        format: FileFormat::Equals,
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "opengauss-failed-login-attempts",
+        category: BaselineCategory::Authentication,
+        component: BaselineComponent::OpenGauss,
+        title: "限制连续认证失败次数",
+        description: "设为 0 表示不锁定，账号可以被无限次尝试口令。",
+        recommendation: "5",
+        risk: BaselineRisk::High,
+        value_kind: BaselineValueKind::Integer {
+            minimum: 1,
+            maximum: 10,
+        },
+        reading: Reading::Files(OPENGAUSS_FILES),
+        implicit: None,
+        file: "/var/lib/opengauss/data/postgresql.conf",
+        key: "failed_login_attempts",
+        format: FileFormat::Equals,
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "opengauss-log-statement",
+        category: BaselineCategory::Logging,
+        component: BaselineComponent::OpenGauss,
+        title: "记录结构变更语句",
+        description: "至少记下建表、改表、授权这类语句，事后才看得出库结构被谁动过。",
+        recommendation: "ddl",
+        risk: BaselineRisk::Medium,
+        value_kind: BaselineValueKind::Choice(PG_LOG_STATEMENT),
+        reading: Reading::Files(OPENGAUSS_FILES),
+        implicit: Some("none"),
+        file: "/var/lib/opengauss/data/postgresql.conf",
+        key: "log_statement",
+        format: FileFormat::Equals,
+        reload: ReloadGroup::None,
+    },
+    // ---- TiDB --------------------------------------------------------------
+    BaselineDefinition {
+        id: "tidb-host",
+        category: BaselineCategory::AccessControl,
+        component: BaselineComponent::TiDb,
+        title: "只监听本机",
+        description: "绑定 0.0.0.0 会把 MySQL 协议端口暴露给整个网络。",
+        recommendation: "127.0.0.1",
+        risk: BaselineRisk::Critical,
+        value_kind: BaselineValueKind::Choice(MYSQL_BIND),
+        reading: Reading::Files(TIDB_FILES),
+        implicit: Some("0.0.0.0"),
+        file: "/etc/tidb/tidb.toml",
+        key: "host",
+        format: FileFormat::Ini(""),
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "tidb-status-host",
+        category: BaselineCategory::AccessControl,
+        component: BaselineComponent::TiDb,
+        title: "状态端口只对本机开放",
+        description: "状态端口会吐出完整配置与运行指标，不需要认证就能读。",
+        recommendation: "127.0.0.1",
+        risk: BaselineRisk::Critical,
+        value_kind: BaselineValueKind::Choice(MYSQL_BIND),
+        reading: Reading::Files(TIDB_FILES),
+        implicit: Some("0.0.0.0"),
+        file: "/etc/tidb/tidb.toml",
+        key: "status-host",
+        format: FileFormat::Ini(""),
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "tidb-skip-grant-table",
+        category: BaselineCategory::Authentication,
+        component: BaselineComponent::TiDb,
+        title: "不要跳过权限表",
+        description: "打开之后任何人不用口令就是管理员，并且可以读取服务器上的任意文件。",
+        recommendation: "off",
+        risk: BaselineRisk::Critical,
+        value_kind: BaselineValueKind::Boolean,
+        reading: Reading::Files(TIDB_FILES),
+        implicit: Some("off"),
+        file: "/etc/tidb/tidb.toml",
+        key: "skip-grant-table",
+        format: FileFormat::Ini("security"),
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "tidb-ssl-ca",
+        category: BaselineCategory::Transport,
+        component: BaselineComponent::TiDb,
+        title: "客户端连接加密",
+        description: "只检查是否配了 CA 证书；留空表示客户端与服务器之间是明文。",
+        recommendation: PRESENCE_MARKER,
+        risk: BaselineRisk::High,
+        value_kind: BaselineValueKind::Presence,
+        reading: Reading::Files(TIDB_FILES),
+        implicit: None,
+        file: "/etc/tidb/tidb.toml",
+        key: "ssl-ca",
+        format: FileFormat::Ini("security"),
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "tidb-cluster-ssl-ca",
+        category: BaselineCategory::Transport,
+        component: BaselineComponent::TiDb,
+        title: "集群内部通信加密",
+        description: "TiDB 与 PD、TiKV 之间也要加密，否则内网抓包即可读到全部数据。",
+        recommendation: PRESENCE_MARKER,
+        risk: BaselineRisk::High,
+        value_kind: BaselineValueKind::Presence,
+        reading: Reading::Files(TIDB_FILES),
+        implicit: None,
+        file: "/etc/tidb/tidb.toml",
+        key: "cluster-ssl-ca",
+        format: FileFormat::Ini("security"),
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "tidb-log-level",
+        category: BaselineCategory::Logging,
+        component: BaselineComponent::TiDb,
+        title: "日志级别不要调得太高",
+        description: "只记 error 时，连接、认证与慢查询都不会写进日志，事后无从追查。",
+        recommendation: "info",
+        risk: BaselineRisk::Medium,
+        value_kind: BaselineValueKind::Choice(TIDB_LOG_LEVEL),
+        reading: Reading::Files(TIDB_FILES),
+        implicit: Some("info"),
+        file: "/etc/tidb/tidb.toml",
+        key: "level",
+        format: FileFormat::Ini("log"),
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "tidb-log-file",
+        category: BaselineCategory::Logging,
+        component: BaselineComponent::TiDb,
+        title: "日志写到文件",
+        description: "不指定文件时日志只写标准输出，容器里通常等于没有留存。",
+        recommendation: PRESENCE_MARKER,
+        risk: BaselineRisk::Medium,
+        value_kind: BaselineValueKind::Presence,
+        reading: Reading::Files(TIDB_FILES),
+        implicit: None,
+        file: "/etc/tidb/tidb.toml",
+        key: "filename",
+        format: FileFormat::Ini("log.file"),
+        reload: ReloadGroup::None,
+    },
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2906,6 +3177,8 @@ impl BaselineDefinition {
                 }
                 // Tomcat reads server.xml once at start; there is no reload.
                 BaselineComponent::Tomcat => Some("systemctl restart tomcat（需要重启才生效）"),
+                BaselineComponent::OpenGauss => Some("gs_ctl reload -D <数据目录>"),
+                BaselineComponent::TiDb => Some("重启 tidb-server（配置只在启动时读取）"),
             },
         }
     }
@@ -2993,6 +3266,10 @@ fn normalize_requested_value(definition: &BaselineDefinition, value: &str) -> Co
 /// of, and no further — nothing here can start a command, close a quote or
 /// carry a newline.
 const OBSERVED_VALUE_CHARS: &str = "A-Za-z0-9_.:*/,+-";
+
+/// The same set, written for an awk bracket expression: the slash is escaped
+/// and the hyphen sits last so it is a character and not a range.
+const PRESENCE_VALUE_CHARS: &str = "A-Za-z0-9_.:*\\/,+-";
 
 fn validate_observed(value: &BaselineObservedValue) -> CoreResult<()> {
     if let BaselineObservedValue::Value(value) = value
@@ -3143,6 +3420,8 @@ const fn component_probe_key(component: BaselineComponent) -> &'static str {
         BaselineComponent::Nginx => "nginx",
         BaselineComponent::Apache => "apache",
         BaselineComponent::Tomcat => "tomcat",
+        BaselineComponent::OpenGauss => "opengauss",
+        BaselineComponent::TiDb => "tidb",
     }
 }
 
@@ -3220,12 +3499,24 @@ fn reader_program(definition: &BaselineDefinition) -> String {
         // out through the one kind of check whose whole purpose is not to
         // carry values off the target.
         BaselineValueKind::Presence => {
+            // The punctuation is dropped before the emptiness is judged, or a
+            // directive set to a pair of quotes reads as set. `ssl-ca = ""` in
+            // a TiDB config and `logfile ""` in a Redis one both mean "not
+            // configured", and both were reported as configured — on the two
+            // checks whose entire job is to notice that they are not.
+            let strip = format!("gsub(/[^{}]/,\"\",v); ", PRESENCE_VALUE_CHARS);
             let replaced = body
-                .replace("print v}", "print (v==\"\" ? \"\" : \"configured\")}")
+                .replace(
+                    "print v}",
+                    &format!("{strip}print (v==\"\" ? \"\" : \"configured\")}}"),
+                )
                 // The XML reader ends on the worst-of-them choice instead.
                 .replace(
                     "print (best != \"\" ? best : first)}",
-                    "print (first == \"\" ? \"\" : \"configured\")}",
+                    &format!(
+                        "{}print (first == \"\" ? \"\" : \"configured\")}}",
+                        strip.replace(",\"\",v)", ",\"\",first)")
+                    ),
                 );
             debug_assert_ne!(replaced, body, "the presence reader did not take");
             replaced
@@ -3270,7 +3561,7 @@ fn witness_program(definition: &BaselineDefinition) -> String {
 /// lines outside the section are not this setting at all.
 fn ini_reader(section: &str) -> String {
     format!(
-        "BEGIN{{v=\"\";inS=0}} \
+        "BEGIN{{v=\"\";inS={start}}} \
          /^[[:space:]]*[#;]/{{next}} \
          /^[[:space:]]*$/{{next}} \
          /^[[:space:]]*\\[/{{s=$0; \
@@ -3281,10 +3572,22 @@ fn ini_reader(section: &str) -> String {
           tk=tolower(t); gsub(/-/,\"_\",tk); kk=tolower(k); gsub(/-/,\"_\",kk); \
           if(tk==kk){{hasEq=(p ~ /^[^[:space:]=]+[[:space:]]*=/); \
           sub(/^[^[:space:]=]+[[:space:]]*=?[[:space:]]*/,\"\",p); \
+          sub(/[[:space:]]+[#;].*$/,\"\",p); \
           gsub(/^[[:space:]]+|[[:space:]]+$/,\"\",p); \
           v=(hasEq ? p : (p==\"\" ? \"on\" : p))}}}} \
-         END{{print v}}"
+         END{{print v}}",
+        start = ini_section_start(section),
     )
+}
+
+/// Whether a sectioned file is "inside the section" before it has seen one.
+///
+/// An empty section name means the keys above the first header — which is
+/// where TOML puts a file's top-level settings, and where TiDB keeps the two
+/// addresses it listens on. Everything else starts outside and waits for its
+/// header.
+const fn ini_section_start(section: &str) -> u8 {
+    if section.is_empty() { 1 } else { 0 }
 }
 
 /// Walks an XML file past its comments, one element at a time.
@@ -3417,6 +3720,7 @@ fn flat_reader_body(precedence: Precedence) -> &'static str {
              /^[[:space:]]*$/{next} \
              {p=$0; sub(/^[[:space:]]+/,\"\",p); t=p; sub(/[[:space:]=].*$/,\"\",t); \
               if(f==0 && tolower(t)==tolower(k)){sub(/^[^[:space:]=]+[[:space:]=]+/,\"\",p); \
+              sub(/[[:space:]]+#.*$/,\"\",p); \
               gsub(/^[[:space:]]+|[[:space:]]+$/,\"\",p); v=p; f=1}} \
              END{print v}"
         }
@@ -3428,6 +3732,7 @@ fn flat_reader_body(precedence: Precedence) -> &'static str {
              /^[[:space:]]*$/{next} \
              {p=$0; sub(/^[[:space:]]+/,\"\",p); t=p; sub(/[[:space:]=].*$/,\"\",t); \
               if(tolower(t)==tolower(k)){sub(/^[^[:space:]=]+[[:space:]=]+/,\"\",p); \
+              sub(/[[:space:]]+#.*$/,\"\",p); \
               gsub(/^[[:space:]]+|[[:space:]]+$/,\"\",p); v=p}} \
              END{print v}"
         }
@@ -4081,8 +4386,12 @@ fn ini_writer(section: &str) -> String {
     // Two passes, for the same reason the flat writer needs them: the live
     // line wins over the commented default, and a second live line in the same
     // section would override the fix.
+    // The top-level keys of a TOML file are "the section before the first
+    // header", so both passes start inside it and the first header ends it.
+    let start = ini_section_start(section);
     let scan = format!(
-        "BEGIN{{done=0;inS=0;seen=0;active=0;firstActive=0;firstComment=0;endOfSection=0}} \
+        "BEGIN{{done=0;inS={start};seen={start};scanIn={start};\
+          active=0;firstActive=0;firstComment=0;endOfSection=0}} \
          NR==FNR{{p=$0; sub(/^[[:space:]]+/,\"\",p); \
           if(p ~ /^\\[/){{s=p; \
             gsub(/^\\[|\\].*$/,\"\",s); gsub(/^[[:space:]]+|[[:space:]]+$/,\"\",s); \
@@ -4656,7 +4965,7 @@ mod tests {
                 );
             }
         }
-        assert_eq!(BASELINE_CATALOG.len(), 81);
+        assert_eq!(BASELINE_CATALOG.len(), 95);
         // One plan carries every check this tool will write; the rest are read.
         assert!(
             BASELINE_CATALOG
@@ -4722,7 +5031,7 @@ mod tests {
     fn every_writable_product_is_asked_or_is_named_as_having_no_validator() {
         // Proven on a real host: zero for a file the product accepts, non-zero
         // for one it refuses. See the commit that added them.
-        const NO_VALIDATOR: [BaselineComponent; 3] = [
+        const NO_VALIDATOR: [BaselineComponent; 5] = [
             // login.defs, faillock, auditd and sysctl have no parser to ask.
             BaselineComponent::System,
             // `redis-server` has no offline check.
@@ -4730,6 +5039,10 @@ mod tests {
             // Tomcat parses server.xml only at start; `MiddlewareValidator`
             // records the same thing as `StructuralOnly`.
             BaselineComponent::Tomcat,
+            // openGauss ships `gs_guc check`, but it wants the cluster data
+            // directory and the omm account; TiDB has none at all.
+            BaselineComponent::OpenGauss,
+            BaselineComponent::TiDb,
         ];
         for component in BaselineComponent::ALL {
             let writable = BASELINE_CATALOG
@@ -5719,6 +6032,34 @@ mod tests {
         }
         // And when there is no sysctl binary, straight from /proc.
         assert!(command.contains("cat /proc/sys/$(printf '%s'"));
+    }
+
+    /// A comment after a value is a comment, not part of the value.
+    ///
+    /// `postgresql.conf` annotates almost every line it ships, and openGauss
+    /// with it. Reading `log_connections = off  # log connection requirement`
+    /// gave back the whole tail glued together once the punctuation had been
+    /// filtered out, so a setting that was plainly `off` was reported as a
+    /// value nothing could match and the check could only ever fail.
+    #[test]
+    fn a_comment_after_a_value_is_not_part_of_the_value() {
+        for definition in BASELINE_CATALOG {
+            let program = reader_program(definition);
+            let strips = match definition.format {
+                // nginx ends its values at the semicolon; the XML reader takes
+                // an attribute out of quotes; YAML strips its own comments.
+                FileFormat::Semicolon | FileFormat::XmlAttribute(_) | FileFormat::Yaml => true,
+                FileFormat::Ini(_) => program.contains("sub(/[[:space:]]+[#;].*$/"),
+                FileFormat::Whitespace | FileFormat::Equals => {
+                    program.contains("sub(/[[:space:]]+#.*$/")
+                }
+            };
+            assert!(
+                strips || !matches!(definition.reading, Reading::Files(_)),
+                "{} would read a trailing comment as part of the value",
+                definition.id
+            );
+        }
     }
 
     /// A presence check must never print what it found.
