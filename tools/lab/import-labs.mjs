@@ -13,7 +13,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { Sidecar } from "./rpc-harness.mjs";
-import { LAB_PORTS } from "./lab-target.mjs";
+import { LAB_PORTS, SERVICE_PORTS } from "./lab-target.mjs";
 
 const PASSWORD = "LabRoot#2026";
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -46,10 +46,30 @@ function labId(index) {
   return `1ab1ab1a-0000-4000-8000-${suffix}`;
 }
 
-function draft(name, host, port, id) {
+/**
+ * The two families of lab. The intrusion hosts are nine distributions made to
+ * look compromised; the service hosts each run one real product with a
+ * deliberately bad configuration.
+ */
+const FAMILIES = [
+  {
+    ports: LAB_PORTS,
+    group: "实验靶机 · 被入侵",
+    label: (name) => `被入侵 ${name}`,
+    note: (name) => `WSL Docker 靶机 lab-${name}，故意做成被入侵的样子；见 tools/lab/README.md。`,
+  },
+  {
+    ports: SERVICE_PORTS,
+    group: "实验靶机 · 配置不合规",
+    label: (name) => `配置不合规 ${name}`,
+    note: (name) => `WSL Docker 靶机 svc-${name}，配置故意留了典型问题；见 tools/lab/services/README.md。`,
+  },
+];
+
+function draft(family, name, host, port, id) {
   return {
     id,
-    name: `实验靶机 ${name}`,
+    name: family.label(name),
     host,
     port,
     username: "root",
@@ -59,10 +79,10 @@ function draft(name, host, port, id) {
     agentIdentityFingerprint: null,
     jumpHost: null,
     tags: ["lab"],
-    notes: `WSL Docker 靶机 lab-${name}，故意做成被入侵的样子；见 tools/lab/README.md。`,
+    notes: family.note(name),
     environment: "lab",
     role: null,
-    group: "实验靶机",
+    group: family.group,
   };
 }
 
@@ -76,26 +96,29 @@ try {
   const existing = await sidecar.call("connections.list", {});
   const known = new Set(existing.map((entry) => entry.id));
 
-  const names = Object.keys(LAB_PORTS);
-  for (const [index, name] of names.entries()) {
-    const id = labId(index);
-    if (removing) {
-      if (!known.has(id)) continue;
-      const plan = await sidecar.call("connections.delete.plan", { id });
-      await sidecar.call("connections.delete.confirm", { handle: plan.handle });
-      removed += 1;
-      continue;
-    }
-    const input = {
-      connection: draft(name, host, LAB_PORTS[name], id),
-      secrets: { password: { action: "replace", value: PASSWORD } },
-    };
-    if (known.has(id)) {
-      await sidecar.call("connections.update", input);
-      updated += 1;
-    } else {
-      await sidecar.call("connections.create", input);
-      created += 1;
+  let index = 0;
+  for (const family of FAMILIES) {
+    for (const name of Object.keys(family.ports)) {
+      const id = labId(index);
+      index += 1;
+      if (removing) {
+        if (!known.has(id)) continue;
+        const plan = await sidecar.call("connections.delete.plan", { id });
+        await sidecar.call("connections.delete.confirm", { handle: plan.handle });
+        removed += 1;
+        continue;
+      }
+      const input = {
+        connection: draft(family, name, host, family.ports[name], id),
+        secrets: { password: { action: "replace", value: PASSWORD } },
+      };
+      if (known.has(id)) {
+        await sidecar.call("connections.update", input);
+        updated += 1;
+      } else {
+        await sidecar.call("connections.create", input);
+        created += 1;
+      }
     }
   }
 
