@@ -7,6 +7,7 @@ import {
   type EmergencyCommandCatalog,
   type EmergencyCommandCatalogItem,
   type EmergencyCommandCategory,
+  type EmergencyCommandPathOffer,
   type EmergencyCommandResult,
 } from "../shared/emergency-command-contract";
 import {
@@ -35,6 +36,9 @@ import {
   type EmergencyCommandGroupRun,
   type EmergencyCommandLoadStatus,
 } from "./emergency-command-state";
+import { EmergencyPathDialog, EmergencyPathProperties } from "./EmergencyPathDialog";
+import { EmergencyPathMenu } from "./EmergencyPathMenu";
+import { useEmergencyPathActions } from "./emergency-path-actions";
 import "./emergency-commands.css";
 
 export interface EmergencyCommandsPageProps {
@@ -176,6 +180,8 @@ export function EmergencyCommandsPage({ bindingHandle, api }: EmergencyCommandsP
   const selected = state.catalog?.commands.find((command) =>
     command.commandHandle === state.selectedCommandHandle) ?? null;
   const busy = state.runStatus === "loading" || state.groupRun?.status === "loading";
+  const pathActions = useEmergencyPathActions(api, bindingHandle);
+  const acting = pathActions.state;
   return (
     <main className="emergency-commands-page">
       <div className="emergency-commands-toolbar">
@@ -224,15 +230,39 @@ export function EmergencyCommandsPage({ bindingHandle, api }: EmergencyCommandsP
           onSelect={(commandHandle) => dispatch({ type: "command-selected", commandHandle })}
           onRun={() => setRunVersion((value) => value + 1)}
           onRunGroup={(category) => setGroupRun((value) => ({ version: (value?.version ?? 0) + 1, category }))}
+          onPathMenu={pathActions.openMenu}
         />
       )}
+      {pathActions.menu !== null && <EmergencyPathMenu
+        position={pathActions.menu.position}
+        offer={pathActions.menu.offer}
+        busy={acting !== null}
+        onAction={(action) => {
+          const { offer } = pathActions.menu ?? { offer: null };
+          if (offer !== null) void pathActions.start(action, offer);
+        }}
+        onDismiss={pathActions.dismissMenu} />}
+      {acting !== null && (acting.action === null ? <EmergencyPathProperties
+        path={acting.offer.path}
+        detail={acting.detail}
+        error={acting.error}
+        onClose={pathActions.close} /> : <EmergencyPathDialog
+        path={acting.offer.path}
+        action={acting.action}
+        detail={acting.detail}
+        plan={acting.plan}
+        receipt={acting.receipt}
+        busy={acting.busy}
+        error={acting.error}
+        onConfirm={() => void pathActions.confirm()}
+        onClose={pathActions.close} />)}
     </main>
   );
 }
 
 export function EmergencyCommandWorkbench({ groups, commands = [], collapsed = [], selected, selectedHandle,
   runStatus, result, runError, search, elapsedMs = null, groupRun = null, busy = false,
-  onToggleCategory = () => undefined, onSelect, onRun, onRunGroup = () => undefined }: {
+  onToggleCategory = () => undefined, onSelect, onRun, onRunGroup = () => undefined, onPathMenu }: {
   groups: EmergencyCommandGroup[];
   commands?: readonly EmergencyCommandCatalogItem[];
   collapsed?: readonly EmergencyCommandCategory[];
@@ -249,6 +279,7 @@ export function EmergencyCommandWorkbench({ groups, commands = [], collapsed = [
   onSelect: (commandHandle: string) => void;
   onRun: () => void;
   onRunGroup?: (category: EmergencyCommandCategory) => void;
+  onPathMenu?: ((event: MouseEvent, offer: EmergencyCommandPathOffer) => void) | undefined;
 }) {
   return (
     <div className="emergency-commands-workbench">
@@ -263,7 +294,8 @@ export function EmergencyCommandWorkbench({ groups, commands = [], collapsed = [
             onRunGroup={() => onRunGroup(group.category)} />)}
       </aside>
       <section className="emergency-command-detail">
-        {groupRun !== null ? <EmergencyCommandGroupView run={groupRun} commands={commands} /> :
+        {groupRun !== null ? <EmergencyCommandGroupView run={groupRun} commands={commands}
+          onPathMenu={onPathMenu} /> :
           selected === null ? <EmergencyCommandEmpty title="未选择调查项" detail="从左侧选择一项内置命令。" /> : (
           <>
             <header>
@@ -293,7 +325,8 @@ export function EmergencyCommandWorkbench({ groups, commands = [], collapsed = [
             {runStatus === "loading" ? <EmergencyCommandStatus label="正在等待远端结果…" compact /> :
               runStatus === "error" ? <EmergencyCommandError message={runError ?? "命令执行失败。"} compact /> :
                 result === null ? <EmergencyCommandEmpty title="尚未执行" detail="结果将在这里以纯文本显示。" compact /> :
-                  <EmergencyCommandResultView result={result} elapsedMs={elapsedMs} />}
+                  <EmergencyCommandResultView result={result} elapsedMs={elapsedMs}
+                    onPathMenu={onPathMenu} />}
           </>) }
       </section>
     </div>
@@ -346,9 +379,10 @@ function EmergencyCommandBranch({ group, collapsed, selectedHandle, busy, runnin
 }
 
 /** Sequential group run: one result block per finished step. */
-export function EmergencyCommandGroupView({ run, commands }: {
+export function EmergencyCommandGroupView({ run, commands, onPathMenu }: {
   run: EmergencyCommandGroupRun;
   commands: readonly EmergencyCommandCatalogItem[];
+  onPathMenu?: ((event: MouseEvent, offer: EmergencyCommandPathOffer) => void) | undefined;
 }) {
   const total = run.commandHandles.length;
   const done = run.entries.length;
@@ -380,7 +414,8 @@ export function EmergencyCommandGroupView({ run, commands }: {
           <p className="emergency-command-step"><span>{index + 1}</span>{title(entry.commandHandle)}</p>
           {entry.error !== null ? <EmergencyCommandError message={entry.error} compact /> :
             entry.result === null ? null :
-              <EmergencyCommandResultView result={entry.result} elapsedMs={entry.elapsedMs} />}
+              <EmergencyCommandResultView result={entry.result} elapsedMs={entry.elapsedMs}
+                onPathMenu={onPathMenu} />}
         </li>)}
         {pending !== null && <li>
           <p className="emergency-command-step"><span>{done + 1}</span>{title(pending)}</p>
@@ -391,9 +426,10 @@ export function EmergencyCommandGroupView({ run, commands }: {
   );
 }
 
-export function EmergencyCommandResultView({ result, elapsedMs = null }: {
+export function EmergencyCommandResultView({ result, elapsedMs = null, onPathMenu }: {
   result: EmergencyCommandResult;
   elapsedMs?: number | null;
+  onPathMenu?: ((event: MouseEvent, offer: EmergencyCommandPathOffer) => void) | undefined;
 }) {
   const successful = result.resultKind === "success" || result.resultKind === "empty";
   return (
@@ -408,6 +444,9 @@ export function EmergencyCommandResultView({ result, elapsedMs = null }: {
         {result.findingLines.length > 0 && <span className="emergency-command-abnormal">
           {result.findingLines.length} 处需要关注
         </span>}
+        {onPathMenu !== undefined && result.paths.length > 0 && <span className="emergency-command-counts">
+          {result.paths.length} 行可右键处置
+        </span>}
         <span className="emergency-command-counts">exit {emergencyExitCodeLabel(result.exitCode)}</span>
         <span className="emergency-command-counts">{result.displayedLineCount}/{result.observedLineCount} 行</span>
       </header>
@@ -416,7 +455,8 @@ export function EmergencyCommandResultView({ result, elapsedMs = null }: {
       {result.truncated && <p className="emergency-command-warning" role="status">输出已按行数或大小上限截断。</p>}
       {result.output.length === 0 ? <EmergencyCommandEmpty title="命令没有输出"
         detail="固定调查项已完成，但没有可显示的匹配内容。" compact /> :
-        <EmergencyCommandOutput output={result.output} findingLines={result.findingLines} />}
+        <EmergencyCommandOutput output={result.output} findingLines={result.findingLines}
+          paths={result.paths} onPathMenu={onPathMenu} />}
     </div>
   );
 }
@@ -424,21 +464,38 @@ export function EmergencyCommandResultView({ result, elapsedMs = null }: {
 /**
  * Numbered output with the abnormal lines marked. The gutter is pinned so it
  * survives horizontal scrolling.
+ *
+ * A line the run read a file path out of is right-clickable. The menu acts
+ * through the handle that came back with the result, so the window never names
+ * a path of its own.
  */
-export function EmergencyCommandOutput({ output, findingLines = [] }: {
+export function EmergencyCommandOutput({ output, findingLines = [], paths = [], onPathMenu }: {
   output: string;
   findingLines?: readonly number[];
+  paths?: readonly EmergencyCommandPathOffer[];
+  onPathMenu?: ((event: MouseEvent, offer: EmergencyCommandPathOffer) => void) | undefined;
 }) {
   const lines = output.split("\n");
   const abnormal = new Set(findingLines);
+  const offers = new Map(paths.map((offer) => [offer.line, offer]));
+  const actionable = onPathMenu !== undefined;
   return (
     <div className="emergency-command-output">
       <span className="emergency-command-gutter" aria-hidden="true">
         {lines.map((_line, index) => <span key={index}
           className={abnormal.has(index) ? "is-abnormal" : undefined}>{index + 1}</span>)}
       </span>
-      <pre>{lines.map((line, index) => <span key={index}
-        className={abnormal.has(index) ? "is-abnormal" : undefined}>{line}{"\n"}</span>)}</pre>
+      <pre>{lines.map((line, index) => {
+        const offer = actionable ? offers.get(index) : undefined;
+        const marks = [
+          abnormal.has(index) ? "is-abnormal" : null,
+          offer === undefined ? null : "has-path",
+        ].filter((mark) => mark !== null);
+        return <span key={index} className={marks.length === 0 ? undefined : marks.join(" ")}
+          title={offer === undefined ? undefined : `右键可对 ${offer.path} 处置`}
+          onContextMenu={offer === undefined || onPathMenu === undefined ? undefined
+            : (event) => onPathMenu(event.nativeEvent, offer)}>{line}{"\n"}</span>;
+      })}</pre>
     </div>
   );
 }

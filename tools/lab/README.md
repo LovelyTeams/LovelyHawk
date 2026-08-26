@@ -108,6 +108,8 @@ node tools/lab/probe-upload.mjs        # 上传字节到真机再清理
 node tools/lab/probe-system.mjs        # 系统信息摘要与 25 个标签页、核查审计
 node tools/lab/probe-switch.mjs        # 切换目标后旧能力必须全部失效
 node tools/lab/probe-markers.mjs       # 全量扫一遍，确认没有任何遮蔽 marker
+node tools/lab/probe-paths.mjs         # 输出行右键处置：属性 / 去执行位 / 隔离，逐步核对靶机
+node tools/lab/probe-ui.mjs            # 起真窗口连真靶机，走完右键到执行的全过程并截图
 ```
 
 单台探针用 `LAB=alpine` 之类切换（见 `lab-target.mjs`）。
@@ -117,3 +119,8 @@ node tools/lab/probe-markers.mjs       # 全量扫一遍，确认没有任何遮
 一台不报其余都报是检测缺口。
 
 `probe-one.mjs` 会用 `!!` 标出被规则命中的行，是判断误报最快的方式。
+
+**改了输出行右键处置就跑 `probe-paths.mjs` 和 `probe-ui.mjs`**：前者走 RPC，
+每一步都回到容器里 `stat` 一次，所以"验证通过"是真的改到了靶机；后者起真窗口
+连真靶机，把右键、计划、确认、回执整条路走完，截图落在 `target/lab-ui/`。
+两者都会先种一个 4755 的假后门，结束时删掉。

@@ -6,8 +6,14 @@ import {
   isEmergencyCommandCatalog,
   isEmergencyCommandOpaqueHandle,
   isEmergencyCommandResult,
+  isEmergencyPathDetail,
+  isEmergencyPathPlan,
+  isEmergencyPathReceipt,
   type EmergencyCommandCatalog,
   type EmergencyCommandResult,
+  type EmergencyPathDetail,
+  type EmergencyPathPlan,
+  type EmergencyPathReceipt,
 } from "./emergency-command-contract";
 
 const catalog: EmergencyCommandCatalog = {
@@ -33,6 +39,40 @@ const result: EmergencyCommandResult = {
   findingLines: [],
   findingReason: null,
   truncated: false,
+  paths: [],
+};
+
+const detail: EmergencyPathDetail = {
+  pathHandle: "path-opaque",
+  path: "/usr/local/bin/.sysd",
+  kind: "file",
+  size: "125688",
+  mode: "4755",
+  ownerId: 0,
+  groupId: 0,
+  modifiedAt: "2026-08-25T23:31:00+00:00",
+  executable: true,
+};
+
+const plan: EmergencyPathPlan = {
+  planHandle: "plan-opaque",
+  pathHandle: "path-opaque",
+  path: "/usr/local/bin/.sysd",
+  action: "disarm",
+  summary: "change /usr/local/bin/.sysd permissions from 4755 to 0644",
+  dangerous: true,
+  restoreDescription: "restore the captured permission bits",
+  state: "planned",
+  expiresInSeconds: 300,
+};
+
+const receipt: EmergencyPathReceipt = {
+  planHandle: "plan-opaque",
+  path: "/usr/local/bin/.sysd",
+  action: "disarm",
+  passed: true,
+  detail: "remote mode is 0644",
+  restored: false,
 };
 
 describe("emergency command contract", () => {
@@ -146,12 +186,76 @@ describe("emergency command contract", () => {
     })).toBe(false);
   });
 
-  it("declares exactly two finite methods and no raw execution arguments", () => {
+  it("declares exactly seven finite methods and no raw execution arguments", () => {
     const source = readFileSync(new URL("./emergency-command-contract.ts", import.meta.url), "utf8");
     const api = source.slice(source.indexOf("export interface EmergencyCommandApi"), source.indexOf("type JsonRecord"));
-    expect(api.match(/^\s{2}[a-zA-Z].*Promise<unknown>;/gmu)).toHaveLength(2);
+    // Seven methods: six fit on one line, planEmergencyPathAction does not.
+    expect(api.match(/^  [a-zA-Z][A-Za-z]*\(/gmu)).toHaveLength(7);
+    expect(api.match(/^\s{2}[a-zA-Z].*Promise<(?:unknown|void)>;/gmu)).toHaveLength(6);
     expect(api).toContain("loadEmergencyCommandCatalog(bindingHandle: string)");
     expect(api).toContain("runEmergencyCommand(bindingHandle: string, snapshotHandle: string, commandHandle: string)");
-    expect(api).not.toMatch(/\b(?:commandId|family|sessionId|generation|guard|host|path|shell|commandText)\b/u);
+    expect(api).toContain("inspectEmergencyPath(bindingHandle: string, pathHandle: string)");
+    expect(api).toContain("confirmEmergencyPathAction(bindingHandle: string, planHandle: string)");
+    expect(api).toContain("executeEmergencyPathAction(bindingHandle: string, planHandle: string)");
+    expect(api).toContain("cancelEmergencyPathAction(bindingHandle: string, planHandle: string)");
+    // Every parameter is a handle or the closed action name. A window cannot
+    // put a path of its own into any of these.
+    expect(api).not.toMatch(/\b(?:commandId|family|sessionId|generation|guard|host|shell|commandText)\b/u);
+    expect(api).not.toMatch(/path: string/u);
+  });
+
+  it("offers a path only where the output actually shows one", () => {
+    const named = {
+      ...result,
+      output: "-rwsr-xr-x 1 root root 125688 Jan  1  2024 /usr/local/bin/.sysd\nplain evidence",
+      paths: [{ pathHandle: "path-opaque", line: 0, path: "/usr/local/bin/.sysd" }],
+    };
+    expect(isEmergencyCommandResult(named)).toBe(true);
+    // A mark past the end of the output, or on a line that does not mention
+    // the file, is a mismatch the window must not draw a menu from.
+    expect(isEmergencyCommandResult({ ...named, paths: [{ ...named.paths[0], line: 9 }] })).toBe(false);
+    expect(isEmergencyCommandResult({ ...named, paths: [{ ...named.paths[0], line: 1 }] })).toBe(false);
+    // Two offers on one line, or one handle reused, cannot both be acted on.
+    expect(isEmergencyCommandResult({
+      ...named,
+      paths: [named.paths[0], { pathHandle: "other-opaque", line: 0, path: "/usr/local/bin/.sysd" }],
+    })).toBe(false);
+    expect(isEmergencyCommandResult({ ...named, paths: [{ ...named.paths[0], path: "relative" }] })).toBe(false);
+    expect(isEmergencyCommandResult({ ...named, paths: [{ ...named.paths[0], path: "" }] })).toBe(false);
+    expect(isEmergencyCommandResult({
+      ...named,
+      paths: [{ ...named.paths[0], path: "/usr/local/bin/.sy\u0007sd" }],
+    })).toBe(false);
+    // The field itself is required, so an older reply cannot pass silently.
+    const { paths: _dropped, ...without } = named;
+    expect(isEmergencyCommandResult(without)).toBe(false);
+  });
+
+  it("bounds what the target may say about one file", () => {
+    expect(isEmergencyPathDetail(detail)).toBe(true);
+    expect(isEmergencyPathDetail({ ...detail, mode: null, ownerId: null, groupId: null, modifiedAt: null }))
+      .toBe(true);
+    expect(isEmergencyPathDetail({ ...detail, kind: "socket" })).toBe(false);
+    expect(isEmergencyPathDetail({ ...detail, mode: "8755" })).toBe(false);
+    expect(isEmergencyPathDetail({ ...detail, mode: "755" })).toBe(false);
+    expect(isEmergencyPathDetail({ ...detail, size: "-1" })).toBe(false);
+    expect(isEmergencyPathDetail({ ...detail, path: "../etc/passwd" })).toBe(false);
+    expect(isEmergencyPathDetail({ ...detail, extra: true })).toBe(false);
+  });
+
+  it("bounds the plan and the receipt to the closed action set", () => {
+    expect(isEmergencyPathPlan(plan)).toBe(true);
+    expect(isEmergencyPathPlan({ ...plan, restoreDescription: null })).toBe(true);
+    expect(isEmergencyPathPlan({ ...plan, state: "confirmed" })).toBe(true);
+    expect(isEmergencyPathPlan({ ...plan, action: "delete" })).toBe(false);
+    expect(isEmergencyPathPlan({ ...plan, state: "running" })).toBe(false);
+    expect(isEmergencyPathPlan({ ...plan, expiresInSeconds: 0 })).toBe(false);
+    expect(isEmergencyPathPlan({ ...plan, expiresInSeconds: 301 })).toBe(false);
+    expect(isEmergencyPathPlan({ ...plan, summary: "x".repeat(513) })).toBe(false);
+
+    expect(isEmergencyPathReceipt(receipt)).toBe(true);
+    expect(isEmergencyPathReceipt({ ...receipt, passed: false, restored: true })).toBe(true);
+    expect(isEmergencyPathReceipt({ ...receipt, action: "shred" })).toBe(false);
+    expect(isEmergencyPathReceipt({ ...receipt, detail: "line\nbreak" })).toBe(false);
   });
 });

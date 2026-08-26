@@ -38,6 +38,10 @@ import {
   type DockerSecurityAudit,
   type EmergencyCommandCatalog,
   type EmergencyCommandResult,
+  type EmergencyPathAction,
+  type EmergencyPathDetail,
+  type EmergencyPathPlan,
+  type EmergencyPathReceipt,
   type SftpDirectorySnapshot,
   type SftpOperationInput,
   type SftpOperationPlan,
@@ -161,6 +165,10 @@ import {
   isEmergencyCommandCatalog,
   isEmergencyCommandOpaqueHandle,
   isEmergencyCommandResult,
+  isEmergencyPathAction,
+  isEmergencyPathDetail,
+  isEmergencyPathPlan,
+  isEmergencyPathReceipt,
   isSftpBrowserOpaqueHandle,
   isSftpDirectorySnapshot,
   isSftpOperationPlan,
@@ -381,6 +389,11 @@ export const DOCKER_READ_RPC_METHODS = Object.freeze({
 export const EMERGENCY_COMMAND_RPC_METHODS = Object.freeze({
   loadCatalog: "emergency-command.catalog.load",
   run: "emergency-command.run",
+  inspectPath: "emergency-command.path.inspect",
+  planPath: "emergency-command.path.plan",
+  confirmPath: "emergency-command.path.confirm",
+  executePath: "emergency-command.path.execute",
+  cancelPath: "emergency-command.path.cancel",
 } as const);
 
 export const SFTP_BROWSER_RPC_METHODS = Object.freeze({
@@ -1444,6 +1457,84 @@ export class BackendClient {
       throw new Error("The backend returned an invalid emergency command result.");
     }
     return value;
+  }
+
+  async inspectEmergencyPath(
+    bindingHandle: string,
+    pathHandle: string,
+  ): Promise<EmergencyPathDetail> {
+    if (![bindingHandle, pathHandle].every(isEmergencyCommandOpaqueHandle)) {
+      throw new Error("The emergency path request is invalid.");
+    }
+    const value = await this.#request(EMERGENCY_COMMAND_RPC_METHODS.inspectPath, {
+      bindingHandle,
+      pathHandle,
+    });
+    if (!isEmergencyPathDetail(value) || value.pathHandle !== pathHandle) {
+      throw new Error("The backend returned invalid emergency path details.");
+    }
+    return value;
+  }
+
+  async planEmergencyPathAction(
+    bindingHandle: string,
+    pathHandle: string,
+    action: EmergencyPathAction,
+  ): Promise<EmergencyPathPlan> {
+    if (![bindingHandle, pathHandle].every(isEmergencyCommandOpaqueHandle) ||
+      !isEmergencyPathAction(action)) {
+      throw new Error("The emergency path plan request is invalid.");
+    }
+    const value = await this.#request(EMERGENCY_COMMAND_RPC_METHODS.planPath, {
+      bindingHandle,
+      pathHandle,
+      action,
+    });
+    if (!isEmergencyPathPlan(value) || value.pathHandle !== pathHandle || value.action !== action) {
+      throw new Error("The backend returned an invalid emergency path plan.");
+    }
+    return value;
+  }
+
+  async confirmEmergencyPathAction(
+    bindingHandle: string,
+    planHandle: string,
+  ): Promise<EmergencyPathPlan> {
+    if (![bindingHandle, planHandle].every(isEmergencyCommandOpaqueHandle)) {
+      throw new Error("The emergency path confirmation is invalid.");
+    }
+    const value = await this.#request(EMERGENCY_COMMAND_RPC_METHODS.confirmPath, {
+      bindingHandle,
+      planHandle,
+    });
+    if (!isEmergencyPathPlan(value) || value.planHandle !== planHandle) {
+      throw new Error("The backend returned an invalid emergency path plan.");
+    }
+    return value;
+  }
+
+  async executeEmergencyPathAction(
+    bindingHandle: string,
+    planHandle: string,
+  ): Promise<EmergencyPathReceipt> {
+    if (![bindingHandle, planHandle].every(isEmergencyCommandOpaqueHandle)) {
+      throw new Error("The emergency path execution request is invalid.");
+    }
+    const value = await this.#request(EMERGENCY_COMMAND_RPC_METHODS.executePath, {
+      bindingHandle,
+      planHandle,
+    }, EMERGENCY_COMMAND_RUN_TIMEOUT_MS);
+    if (!isEmergencyPathReceipt(value) || value.planHandle !== planHandle) {
+      throw new Error("The backend returned an invalid emergency path receipt.");
+    }
+    return value;
+  }
+
+  async cancelEmergencyPathAction(bindingHandle: string, planHandle: string): Promise<void> {
+    if (![bindingHandle, planHandle].every(isEmergencyCommandOpaqueHandle)) {
+      throw new Error("The emergency path cancellation is invalid.");
+    }
+    await this.#request(EMERGENCY_COMMAND_RPC_METHODS.cancelPath, { bindingHandle, planHandle });
   }
 
   async listPacketCaptureInterfaces(

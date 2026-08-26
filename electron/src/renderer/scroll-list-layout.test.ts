@@ -20,6 +20,7 @@ const SCROLL_LISTS: Record<string, string> = {
   ".notes-list": ".note-row",
   ".connection-list": ".connection-list-row",
   ".sftp-operation-dialog": ".sftp-operation-dialog > *",
+  ".emergency-path-dialog": ".emergency-path-dialog > *",
   ".log-analysis-list": ".log-analysis-group",
 };
 

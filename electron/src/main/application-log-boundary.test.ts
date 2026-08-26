@@ -56,11 +56,11 @@ function expectLiteralErrorsOnly(source: string, expectedCount: number): void {
 }
 
 describe("central Application Log Electron boundary", () => {
-  it("keeps exact five fixed-arity methods in the frozen exact111 preload", () => {
+  it("keeps exact five fixed-arity methods in the frozen exact116 preload", () => {
     const body = frozenApiBody();
     const names = [...body.matchAll(/^  (?<name>[A-Za-z_$][A-Za-z0-9_$]*):/gmu)]
       .map((match) => match.groups?.name);
-    expect(names).toHaveLength(111);
+    expect(names).toHaveLength(116);
     for (const name of methodNames) {
       expect(names.filter((candidate) => candidate === name)).toEqual([name]);
     }

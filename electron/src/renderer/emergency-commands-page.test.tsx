@@ -17,10 +17,17 @@ import {
   EmergencyCommandStatus,
   EmergencyCommandWorkbench,
 } from "./EmergencyCommandsPage";
+import { EmergencyPathDialog, EmergencyPathProperties, symbolicMode } from "./EmergencyPathDialog";
+import { EmergencyPathMenu } from "./EmergencyPathMenu";
 
 const api: EmergencyCommandApi = {
   loadEmergencyCommandCatalog: async () => { throw new Error(); },
   runEmergencyCommand: async () => { throw new Error(); },
+  inspectEmergencyPath: async () => { throw new Error(); },
+  planEmergencyPathAction: async () => { throw new Error(); },
+  confirmEmergencyPathAction: async () => { throw new Error(); },
+  executeEmergencyPathAction: async () => { throw new Error(); },
+  cancelEmergencyPathAction: async () => { throw new Error(); },
 };
 
 const command: EmergencyCommandCatalogItem = {
@@ -45,7 +52,10 @@ const result: EmergencyCommandResult = {
   findingLines: [0],
   findingReason: "标红的行不在发行版自带的 SUID 名单内。",
   truncated: true,
+  paths: [],
 };
+
+const offer = { pathHandle: "opaque-path", line: 1, path: "/usr/local/lib/pyshared/.helper" };
 
 describe("EmergencyCommandsPage", () => {
   it("renders an honest disconnected state", () => {
@@ -140,10 +150,125 @@ describe("EmergencyCommandsPage", () => {
     expect(quiet).not.toContain("标红的行");
   });
 
+  it("offers a right-click only on the lines that named a file", () => {
+    const named = {
+      ...result,
+      resultKind: "success" as const,
+      exitCode: 0,
+      output: "总用量 4\n-rwsr-xr-x 1 root root 17 8月 25 23:36 /usr/local/lib/pyshared/.helper",
+      observedLineCount: 2,
+      displayedLineCount: 2,
+      findingLines: [1],
+      truncated: false,
+      paths: [offer],
+    };
+    const html = renderToStaticMarkup(
+      <EmergencyCommandResultView result={named} onPathMenu={() => undefined} />,
+    );
+    expect(html).toContain("1 行可右键处置");
+    expect(html).toContain('class="is-abnormal has-path"');
+    expect(html).toContain("右键可对 /usr/local/lib/pyshared/.helper 处置");
+    // The line above named nothing, so it stays an ordinary line.
+    expect(html).toContain("<span>总用量 4");
+
+    // Without a handler there is nothing to right-click, and no promise of one.
+    const inert = renderToStaticMarkup(<EmergencyCommandResultView result={named} />);
+    expect(inert).not.toContain("has-path");
+    expect(inert).not.toContain("行可右键处置");
+    expect(inert).not.toContain("右键可对");
+  });
+
+  it("names the file in the menu without offering to run anything", () => {
+    const html = renderToStaticMarkup(
+      <EmergencyPathMenu position={{ x: 10, y: 20 }} offer={offer} busy={false}
+        onAction={() => undefined} onDismiss={() => undefined} />,
+    );
+    expect(html).toContain("/usr/local/lib/pyshared/.helper");
+    expect(html).toContain("查看属性");
+    expect(html).toContain("去掉执行权限");
+    expect(html).toContain("隔离");
+    expect(html).toContain('role="menu"');
+    // Every item leads to a plan the operator still has to read.
+    expect(html).not.toContain("立即");
+    expect(html).not.toContain("彻底删除");
+  });
+
+  it("shows what will happen before it happens, and what happened after", () => {
+    const detail = {
+      pathHandle: offer.pathHandle,
+      path: offer.path,
+      kind: "file" as const,
+      size: "125688",
+      mode: "4755",
+      ownerId: 0,
+      groupId: 0,
+      modifiedAt: "2026-08-25T23:31:00+00:00",
+      executable: true,
+    };
+    const plan = {
+      planHandle: "opaque-plan",
+      pathHandle: offer.pathHandle,
+      path: offer.path,
+      action: "disarm" as const,
+      summary: "change /usr/local/lib/pyshared/.helper permissions from 4755 to 0644",
+      dangerous: true,
+      restoreDescription: "restore the captured permission bits",
+      state: "planned" as const,
+      expiresInSeconds: 300,
+    };
+    const planned = renderToStaticMarkup(
+      <EmergencyPathDialog path={offer.path} action="disarm" detail={detail} plan={plan}
+        receipt={null} busy={false} error={null}
+        onConfirm={() => undefined} onClose={() => undefined} />,
+    );
+    expect(planned).toContain("去掉执行权限");
+    expect(planned).toContain("4755（rwsr-xr-x）");
+    expect(planned).toContain("change /usr/local/lib/pyshared/.helper permissions");
+    expect(planned).toContain("restore the captured permission bits");
+    expect(planned).toContain("确认并执行");
+
+    const done = renderToStaticMarkup(
+      <EmergencyPathDialog path={offer.path} action="disarm" detail={detail} plan={plan}
+        receipt={{ planHandle: "opaque-plan", path: offer.path, action: "disarm",
+          passed: true, detail: "remote mode is 0644", restored: false }}
+        busy={false} error={null} onConfirm={() => undefined} onClose={() => undefined} />,
+    );
+    expect(done).toContain("已完成，并在目标机上核对过。");
+    expect(done).toContain("remote mode is 0644");
+    expect(done).not.toContain("确认并执行");
+
+    const failed = renderToStaticMarkup(
+      <EmergencyPathDialog path={offer.path} action="quarantine" detail={detail} plan={plan}
+        receipt={{ planHandle: "opaque-plan", path: offer.path, action: "quarantine",
+          passed: false, detail: "original path is still present", restored: true }}
+        busy={false} error={null} onConfirm={() => undefined} onClose={() => undefined} />,
+    );
+    expect(failed).toContain("没有完成。");
+    expect(failed).toContain("已还原到操作前的状态");
+
+    const properties = renderToStaticMarkup(
+      <EmergencyPathProperties path={offer.path} detail={detail} error={null}
+        onClose={() => undefined} />,
+    );
+    expect(properties).toContain("可以，任何人都跑得起来");
+    expect(properties).toContain("122.7 KB（125688 字节）");
+    expect(properties).not.toContain("确认并执行");
+  });
+
+  it("reads a mode the way a listing on the target does", () => {
+    expect(symbolicMode("4755")).toBe("rwsr-xr-x");
+    expect(symbolicMode("0644")).toBe("rw-r--r--");
+    expect(symbolicMode("1777")).toBe("rwxrwxrwt");
+    expect(symbolicMode("2755")).toBe("rwxr-sr-x");
+    // A set bit without the matching execute bit is the capital letter.
+    expect(symbolicMode("4644")).toBe("rwSr--r--");
+    expect(symbolicMode("nope")).toBe("nope");
+  });
+
   it("exposes loading, error, empty and empty-output states", () => {
     const emptyResult = { ...result, resultKind: "empty" as const, exitCode: 0, output: "",
       observedLineCount: 0, displayedLineCount: 0, findingLines: [], findingReason: null,
-      truncated: false };
+      truncated: false, paths: [] };
     const html = [
       renderToStaticMarkup(<EmergencyCommandStatus label="执行中…" />),
       renderToStaticMarkup(<EmergencyCommandError message="固定公开错误" />),

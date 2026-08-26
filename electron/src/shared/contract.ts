@@ -108,6 +108,10 @@ import type {
 import type {
   EmergencyCommandCatalog,
   EmergencyCommandResult,
+  EmergencyPathAction,
+  EmergencyPathDetail,
+  EmergencyPathPlan,
+  EmergencyPathReceipt,
 } from "./emergency-command-contract.js";
 import type {
   LocalDirectorySnapshot,
@@ -545,6 +549,18 @@ export interface LovelyResApi {
     snapshotHandle: string,
     commandHandle: string,
   ): Promise<EmergencyCommandResult>;
+  inspectEmergencyPath(bindingHandle: string, pathHandle: string): Promise<EmergencyPathDetail>;
+  planEmergencyPathAction(
+    bindingHandle: string,
+    pathHandle: string,
+    action: EmergencyPathAction,
+  ): Promise<EmergencyPathPlan>;
+  confirmEmergencyPathAction(bindingHandle: string, planHandle: string): Promise<EmergencyPathPlan>;
+  executeEmergencyPathAction(
+    bindingHandle: string,
+    planHandle: string,
+  ): Promise<EmergencyPathReceipt>;
+  cancelEmergencyPathAction(bindingHandle: string, planHandle: string): Promise<void>;
   listPacketCaptureInterfaces(bindingHandle: string): Promise<PacketCaptureInterfaceList>;
   startPacketCapture(
     bindingHandle: string,

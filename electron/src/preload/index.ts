@@ -8,6 +8,7 @@ import type {
   CheckAuditLogInput,
   DockerCollectionKind,
   DockerResourceKind,
+  EmergencyPathAction,
   LogCorrelationInput,
   LogIocSearchInput,
   LogSourceReadInput,
@@ -223,6 +224,35 @@ const api: LovelyResApi = Object.freeze({
     snapshotHandle,
     commandHandle,
   }),
+  inspectEmergencyPath: (bindingHandle: string, pathHandle: string) =>
+    ipcRenderer.invoke("lovelyres:emergency-command:path:inspect", {
+      bindingHandle,
+      pathHandle,
+    }),
+  planEmergencyPathAction: (
+    bindingHandle: string,
+    pathHandle: string,
+    action: EmergencyPathAction,
+  ) => ipcRenderer.invoke("lovelyres:emergency-command:path:plan", {
+    bindingHandle,
+    pathHandle,
+    action,
+  }),
+  confirmEmergencyPathAction: (bindingHandle: string, planHandle: string) =>
+    ipcRenderer.invoke("lovelyres:emergency-command:path:confirm", {
+      bindingHandle,
+      planHandle,
+    }),
+  executeEmergencyPathAction: (bindingHandle: string, planHandle: string) =>
+    ipcRenderer.invoke("lovelyres:emergency-command:path:execute", {
+      bindingHandle,
+      planHandle,
+    }),
+  cancelEmergencyPathAction: (bindingHandle: string, planHandle: string) =>
+    ipcRenderer.invoke("lovelyres:emergency-command:path:cancel", {
+      bindingHandle,
+      planHandle,
+    }),
   listPacketCaptureInterfaces: (bindingHandle: string) =>
     ipcRenderer.invoke("lovelyres:packet-capture:interfaces:list", { bindingHandle }),
   startPacketCapture: (

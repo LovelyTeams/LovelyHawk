@@ -12,6 +12,7 @@ mod diagnostic_log_api;
 mod disposal_report_api;
 mod docker_read_api;
 mod emergency_command_api;
+mod emergency_path_api;
 mod firewall_read_api;
 mod integrity_api;
 mod kubernetes_read_api;
@@ -60,6 +61,7 @@ use crate::{
     disposal_report_api::{DisposalReportApi, DisposalReportApiError, DisposalReportPreviewFormat},
     docker_read_api::{DockerReadApi, DockerReadApiError},
     emergency_command_api::{EmergencyCommandApi, EmergencyCommandApiError},
+    emergency_path_api::{EmergencyPathAction, EmergencyPathApiError},
     firewall_read_api::{FirewallReadApi, FirewallReadApiError},
     integrity_api::{IntegrityApi, IntegrityApiError},
     kubernetes_read_api::{KubernetesListInput, KubernetesReadApi, KubernetesReadApiError},
@@ -916,6 +918,64 @@ impl BackendState {
                         .await
                         .map(to_value)
                         .map_err(emergency_command_failure),
+                    Err(failure) => Err(failure),
+                }
+            }
+            RpcMethod::EmergencyCommandPathInspect => {
+                match parse_params::<EmergencyCommandPathParams>(request.params) {
+                    Ok(params) => self
+                        .emergency_command
+                        .paths()
+                        .inspect(&params.binding_handle, &params.path_handle)
+                        .await
+                        .map(to_value)
+                        .map_err(emergency_path_failure),
+                    Err(failure) => Err(failure),
+                }
+            }
+            RpcMethod::EmergencyCommandPathPlan => {
+                match parse_params::<EmergencyCommandPathPlanParams>(request.params) {
+                    Ok(params) => self
+                        .emergency_command
+                        .paths()
+                        .plan(&params.binding_handle, &params.path_handle, params.action)
+                        .await
+                        .map(to_value)
+                        .map_err(emergency_path_failure),
+                    Err(failure) => Err(failure),
+                }
+            }
+            RpcMethod::EmergencyCommandPathConfirm => {
+                match parse_params::<EmergencyCommandPathPlanHandleParams>(request.params) {
+                    Ok(params) => self
+                        .emergency_command
+                        .paths()
+                        .confirm(&params.binding_handle, &params.plan_handle)
+                        .map(to_value)
+                        .map_err(emergency_path_failure),
+                    Err(failure) => Err(failure),
+                }
+            }
+            RpcMethod::EmergencyCommandPathExecute => {
+                match parse_params::<EmergencyCommandPathPlanHandleParams>(request.params) {
+                    Ok(params) => self
+                        .emergency_command
+                        .paths()
+                        .execute(&params.binding_handle, &params.plan_handle)
+                        .await
+                        .map(to_value)
+                        .map_err(emergency_path_failure),
+                    Err(failure) => Err(failure),
+                }
+            }
+            RpcMethod::EmergencyCommandPathCancel => {
+                match parse_params::<EmergencyCommandPathPlanHandleParams>(request.params) {
+                    Ok(params) => self
+                        .emergency_command
+                        .paths()
+                        .cancel(&params.binding_handle, &params.plan_handle)
+                        .map(|()| to_value(()))
+                        .map_err(emergency_path_failure),
                     Err(failure) => Err(failure),
                 }
             }
@@ -1830,6 +1890,16 @@ enum RpcMethod {
     EmergencyCommandCatalogLoad,
     #[serde(rename = "emergency-command.run")]
     EmergencyCommandRun,
+    #[serde(rename = "emergency-command.path.inspect")]
+    EmergencyCommandPathInspect,
+    #[serde(rename = "emergency-command.path.plan")]
+    EmergencyCommandPathPlan,
+    #[serde(rename = "emergency-command.path.confirm")]
+    EmergencyCommandPathConfirm,
+    #[serde(rename = "emergency-command.path.execute")]
+    EmergencyCommandPathExecute,
+    #[serde(rename = "emergency-command.path.cancel")]
+    EmergencyCommandPathCancel,
     #[serde(rename = "sftp-browser.open")]
     SftpBrowserOpen,
     #[serde(rename = "sftp-browser.directory.list")]
@@ -2257,6 +2327,28 @@ struct EmergencyCommandRunParams {
     binding_handle: String,
     snapshot_handle: String,
     command_handle: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EmergencyCommandPathParams {
+    binding_handle: String,
+    path_handle: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EmergencyCommandPathPlanParams {
+    binding_handle: String,
+    path_handle: String,
+    action: EmergencyPathAction,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EmergencyCommandPathPlanHandleParams {
+    binding_handle: String,
+    plan_handle: String,
 }
 
 #[derive(Deserialize)]
@@ -3381,6 +3473,47 @@ fn emergency_command_failure(error: EmergencyCommandApiError) -> RpcFailure {
             operation: "validate emergency command result",
             code: "emergency-command-result-invalid",
             public_message: "The emergency command result was rejected.",
+            source: None,
+        },
+    }
+}
+
+fn emergency_path_failure(error: EmergencyPathApiError) -> RpcFailure {
+    match error {
+        EmergencyPathApiError::Core | EmergencyPathApiError::RegistryUnavailable => RpcFailure {
+            operation: "act on a path an emergency command named",
+            code: "emergency-path-operation-failed",
+            public_message: "LovelyRes could not act on that path.",
+            source: None,
+        },
+        EmergencyPathApiError::BindingUnavailable => RpcFailure {
+            operation: "validate emergency path SSH binding",
+            code: "emergency-command-binding-unavailable",
+            public_message: "The emergency command target binding is missing or stale.",
+            source: None,
+        },
+        EmergencyPathApiError::InvalidHandle => RpcFailure {
+            operation: "validate emergency path request",
+            code: "invalid-params",
+            public_message: "The emergency command request parameters are invalid.",
+            source: None,
+        },
+        EmergencyPathApiError::PathStale | EmergencyPathApiError::PlanStale => RpcFailure {
+            operation: "validate emergency path capability",
+            code: "emergency-path-unavailable",
+            public_message: "That path capability is missing, expired, or already used.",
+            source: None,
+        },
+        EmergencyPathApiError::Capacity => RpcFailure {
+            operation: "bound emergency path operation",
+            code: "emergency-command-capacity",
+            public_message: "The bounded emergency command capacity has been reached.",
+            source: None,
+        },
+        EmergencyPathApiError::Deadline => RpcFailure {
+            operation: "bound emergency path deadline",
+            code: "emergency-command-timeout",
+            public_message: "The emergency command operation exceeded its deadline.",
             source: None,
         },
     }

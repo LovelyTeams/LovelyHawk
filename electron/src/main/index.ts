@@ -73,6 +73,7 @@ import {
   isDockerOpaqueHandle,
   isDockerResourceKind,
   isEmergencyCommandOpaqueHandle,
+  isEmergencyPathAction,
   isLocalBrowserOpaqueHandle,
   isLocalDirectorySnapshot,
   isSftpBrowserOpaqueHandle,
@@ -1336,6 +1337,77 @@ function registerIpc(): void {
       value.snapshotHandle,
       value.commandHandle,
     );
+  });
+  ipcMain.handle("lovelyres:emergency-command:path:inspect", async (event, ...values: unknown[]) => {
+    validateSender(event);
+    const value = values[0];
+    if (
+      values.length !== 1 ||
+      !isRecord(value) ||
+      !hasExactKeys(value, ["bindingHandle", "pathHandle"]) ||
+      !isEmergencyCommandOpaqueHandle(value.bindingHandle) ||
+      !isEmergencyCommandOpaqueHandle(value.pathHandle)
+    ) {
+      throw new Error("Invalid emergency path request.");
+    }
+    return backend.inspectEmergencyPath(value.bindingHandle, value.pathHandle);
+  });
+  ipcMain.handle("lovelyres:emergency-command:path:plan", async (event, ...values: unknown[]) => {
+    validateSender(event);
+    const value = values[0];
+    if (
+      values.length !== 1 ||
+      !isRecord(value) ||
+      !hasExactKeys(value, ["bindingHandle", "pathHandle", "action"]) ||
+      !isEmergencyCommandOpaqueHandle(value.bindingHandle) ||
+      !isEmergencyCommandOpaqueHandle(value.pathHandle) ||
+      !isEmergencyPathAction(value.action)
+    ) {
+      throw new Error("Invalid emergency path plan request.");
+    }
+    return backend.planEmergencyPathAction(value.bindingHandle, value.pathHandle, value.action);
+  });
+  ipcMain.handle("lovelyres:emergency-command:path:confirm", async (event, ...values: unknown[]) => {
+    validateSender(event);
+    const value = values[0];
+    if (
+      values.length !== 1 ||
+      !isRecord(value) ||
+      !hasExactKeys(value, ["bindingHandle", "planHandle"]) ||
+      !isEmergencyCommandOpaqueHandle(value.bindingHandle) ||
+      !isEmergencyCommandOpaqueHandle(value.planHandle)
+    ) {
+      throw new Error("Invalid emergency path confirmation.");
+    }
+    return backend.confirmEmergencyPathAction(value.bindingHandle, value.planHandle);
+  });
+  ipcMain.handle("lovelyres:emergency-command:path:execute", async (event, ...values: unknown[]) => {
+    validateSender(event);
+    const value = values[0];
+    if (
+      values.length !== 1 ||
+      !isRecord(value) ||
+      !hasExactKeys(value, ["bindingHandle", "planHandle"]) ||
+      !isEmergencyCommandOpaqueHandle(value.bindingHandle) ||
+      !isEmergencyCommandOpaqueHandle(value.planHandle)
+    ) {
+      throw new Error("Invalid emergency path execution request.");
+    }
+    return backend.executeEmergencyPathAction(value.bindingHandle, value.planHandle);
+  });
+  ipcMain.handle("lovelyres:emergency-command:path:cancel", async (event, ...values: unknown[]) => {
+    validateSender(event);
+    const value = values[0];
+    if (
+      values.length !== 1 ||
+      !isRecord(value) ||
+      !hasExactKeys(value, ["bindingHandle", "planHandle"]) ||
+      !isEmergencyCommandOpaqueHandle(value.bindingHandle) ||
+      !isEmergencyCommandOpaqueHandle(value.planHandle)
+    ) {
+      throw new Error("Invalid emergency path cancellation.");
+    }
+    return backend.cancelEmergencyPathAction(value.bindingHandle, value.planHandle);
   });
   ipcMain.handle("lovelyres:packet-capture:interfaces:list", async (event, ...values: unknown[]) => {
     validateSender(event);

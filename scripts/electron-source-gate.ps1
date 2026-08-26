@@ -95,6 +95,11 @@ $expectedPreloadBindings = @(
     @{ Name = 'getDockerLogs'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:docker:container:logs:get' },
     @{ Name = 'loadEmergencyCommandCatalog'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:emergency-command:catalog:load' },
     @{ Name = 'runEmergencyCommand'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:emergency-command:run' },
+    @{ Name = 'inspectEmergencyPath'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:emergency-command:path:inspect' },
+    @{ Name = 'planEmergencyPathAction'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:emergency-command:path:plan' },
+    @{ Name = 'confirmEmergencyPathAction'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:emergency-command:path:confirm' },
+    @{ Name = 'executeEmergencyPathAction'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:emergency-command:path:execute' },
+    @{ Name = 'cancelEmergencyPathAction'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:emergency-command:path:cancel' },
     @{ Name = 'listPacketCaptureInterfaces'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:packet-capture:interfaces:list' },
     @{ Name = 'startPacketCapture'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:packet-capture:start' },
     @{ Name = 'pollPacketCapture'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:packet-capture:poll' },
@@ -157,8 +162,8 @@ $expectedPreloadBindings = @(
     @{ Name = 'notifyRendererReady'; Method = 'send'; Registration = 'on'; Channel = 'lovelyres:renderer-ready' }
 )
 
-if ($expectedPreloadBindings.Count -ne 111) {
-    throw "Electron main preload allowlist must contain exactly 111 methods; found $($expectedPreloadBindings.Count)."
+if ($expectedPreloadBindings.Count -ne 116) {
+    throw "Electron main preload allowlist must contain exactly 116 methods; found $($expectedPreloadBindings.Count)."
 }
 
 function Get-CspPolicyViolation {
@@ -548,6 +553,9 @@ $requiredFiles = @(
     (Join-Path $electronRoot 'src/renderer/emergency-commands.css'),
     (Join-Path $electronRoot 'src/renderer/emergency-command-helpers.ts'),
     (Join-Path $electronRoot 'src/renderer/emergency-command-state.ts'),
+    (Join-Path $electronRoot 'src/renderer/EmergencyPathMenu.tsx'),
+    (Join-Path $electronRoot 'src/renderer/EmergencyPathDialog.tsx'),
+    (Join-Path $electronRoot 'src/renderer/emergency-path-actions.ts'),
     (Join-Path $electronRoot 'src/renderer/PacketCapturePage.tsx'),
     (Join-Path $electronRoot 'src/renderer/packet-capture-page.css'),
     (Join-Path $electronRoot 'src/renderer/packet-capture-live-helpers.ts'),
@@ -597,6 +605,7 @@ $requiredFiles = @(
     (Join-Path $backendRoot 'src/kubernetes_read_api.rs'),
     (Join-Path $backendRoot 'src/docker_read_api.rs'),
     (Join-Path $backendRoot 'src/emergency_command_api.rs'),
+    (Join-Path $backendRoot 'src/emergency_path_api.rs'),
     (Join-Path $backendRoot 'src/packet_capture_live_api.rs'),
     (Join-Path $backendRoot 'src/diagnostic_log_api.rs'),
     (Join-Path $backendRoot 'src/integrity_api.rs'),
@@ -604,7 +613,8 @@ $requiredFiles = @(
     (Join-Path $backendRoot 'src/main.rs'),
     (Join-Path $root 'crates/lovelyres-core/src/firewall.rs'),
     (Join-Path $root 'crates/lovelyres-core/src/baseline.rs'),
-    (Join-Path $root 'crates/lovelyres-core/src/integrity.rs')
+    (Join-Path $root 'crates/lovelyres-core/src/integrity.rs'),
+    (Join-Path $root 'crates/lovelyres-core/src/command_paths.rs')
 )
 foreach ($file in $requiredFiles) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
@@ -2257,8 +2267,16 @@ if (-not $emergencyCommandApiMatch.Success) {
     Add-GateViolation 'electron/src/shared/emergency-command-contract.ts is missing EmergencyCommandApi'
 } else {
     $emergencyCommandNames = @([regex]::Matches($emergencyCommandApiMatch.Groups['body'].Value, '(?m)^\s{2}(?<name>[A-Za-z_$][A-Za-z0-9_$]*)\s*\(') | ForEach-Object { $_.Groups['name'].Value })
-    if (($emergencyCommandNames -join "`n") -cne (@('loadEmergencyCommandCatalog', 'runEmergencyCommand') -join "`n")) {
-        Add-GateViolation 'electron/src/shared/emergency-command-contract.ts must expose exactly catalog-load and closed-run'
+    if (($emergencyCommandNames -join "`n") -cne (@(
+        'loadEmergencyCommandCatalog',
+        'runEmergencyCommand',
+        'inspectEmergencyPath',
+        'planEmergencyPathAction',
+        'confirmEmergencyPathAction',
+        'executeEmergencyPathAction',
+        'cancelEmergencyPathAction'
+    ) -join "`n")) {
+        Add-GateViolation 'electron/src/shared/emergency-command-contract.ts must expose exactly catalog-load, closed-run and the five path capabilities'
     }
     if ($emergencyCommandApiMatch.Groups['body'].Value -notmatch 'loadEmergencyCommandCatalog\(bindingHandle:\s*string\):\s*Promise<unknown>;' -or
         $emergencyCommandApiMatch.Groups['body'].Value -notmatch '(?s)runEmergencyCommand\(\s*bindingHandle:\s*string,\s*snapshotHandle:\s*string,\s*commandHandle:\s*string,?\s*\):\s*Promise<unknown>;' -or
@@ -2290,15 +2308,24 @@ $emergencyCommandMainBoundary = $mainText.Substring(
     $mainText.IndexOf('ipcMain.handle("lovelyres:packet-capture:interfaces:list"', [System.StringComparison]::Ordinal) -
         $mainText.IndexOf('ipcMain.handle("lovelyres:emergency-command:catalog:load"', [System.StringComparison]::Ordinal)
 )
-if ([regex]::Matches($emergencyCommandMainBoundary, 'validateSender\(event\)').Count -ne 2 -or
-    [regex]::Matches($emergencyCommandMainBoundary, 'values\.length\s*!==\s*1').Count -ne 2 -or
-    [regex]::Matches($emergencyCommandMainBoundary, 'isEmergencyCommandOpaqueHandle').Count -ne 4 -or
+if ([regex]::Matches($emergencyCommandMainBoundary, 'validateSender\(event\)').Count -ne 7 -or
+    [regex]::Matches($emergencyCommandMainBoundary, 'values\.length\s*!==\s*1').Count -ne 7 -or
+    [regex]::Matches($emergencyCommandMainBoundary, 'isEmergencyCommandOpaqueHandle').Count -ne 14 -or
+    [regex]::Matches($emergencyCommandMainBoundary, 'isEmergencyPathAction\(value\.action\)').Count -ne 1 -or
+    [regex]::Matches($emergencyCommandMainBoundary, [regex]::Escape('hasExactKeys(value, ["bindingHandle", "pathHandle", "action"])')).Count -ne 1 -or
     [regex]::Matches($emergencyCommandMainBoundary, [regex]::Escape('hasOnlyKeys(value, ["bindingHandle", "snapshotHandle", "commandHandle"])')).Count -ne 1 -or
     $emergencyCommandMainBoundary -match '(?i)\b(?:commandText|shellText|filePath|remotePath|targetIdentity|targetGeneration|connectionId|sessionId|mutationHandle|exportPath|terminalHandle|genericInvoke)\b') {
     Add-GateViolation 'electron/src/main/index.ts must reject unknown Emergency Commands IPC ingredients and accept only binding/catalog/command opaque handles'
 }
 foreach ($marker in @(
     'mod emergency_command_api;',
+    'mod emergency_path_api;',
+    'fn emergency_path_failure(error: EmergencyPathApiError)',
+    'emergency-command.path.inspect',
+    'emergency-command.path.plan',
+    'emergency-command.path.confirm',
+    'emergency-command.path.execute',
+    'emergency-command.path.cancel',
     'EmergencyCommandApi::new(services.clone(), Arc::clone(&ssh))',
     'self.emergency_command.close_binding(&params.binding_handle);',
     'EmergencyCommandBindingParams',
@@ -2327,11 +2354,40 @@ foreach ($marker in @(
     'EXECUTION_DEADLINE: Duration = Duration::from_secs(75)',
     'pub(crate) fn close_binding(&self, binding_handle: &str)',
     'self.validate_binding(&scope)?;',
-    'normalize_plain_line'
+    'normalize_plain_line',
+    '.offer(&scope.to_path_scope(), &dto.output, &clipped_lines)',
+    'clipped_lines: Vec<u32>'
 )) {
     if (-not $emergencyCommandApiText.Contains($marker, [System.StringComparison]::Ordinal)) {
         Add-GateViolation "crates/lovelyres-electron-backend/src/emergency_command_api.rs is missing bounded/redacted Emergency Commands marker '$marker'"
     }
+}
+$emergencyPathApiPath = Join-Path $backendRoot 'src/emergency_path_api.rs'
+$emergencyPathApiText = Get-Content -LiteralPath $emergencyPathApiPath -Raw
+foreach ($marker in @(
+    'MAX_STORED_PATHS: usize = 2_000',
+    'MAX_PLANS: usize = 16',
+    'PATH_TTL: Duration = Duration::from_secs(15 * 60)',
+    'PLAN_TTL: Duration = Duration::from_secs(5 * 60)',
+    'EXECUTE_DEADLINE: Duration = Duration::from_secs(60)',
+    'EXECUTE_BITS: u32 = 0o6111',
+    'PERMISSION_BITS: u32 = 0o7777',
+    'pub(crate) fn close_binding(&self, binding_handle: &str)',
+    'self.validate_binding(&scope)?;',
+    'fn take_confirmed_plan(',
+    'DangerousConfirmation::approve(plan.operation.definition())',
+    'plan.operation.execute_and_verify()',
+    'plan.operation.restore().await.is_ok()',
+    'SftpMutation::ChmodIfMode',
+    'SftpMutation::Remove'
+)) {
+    if (-not $emergencyPathApiText.Contains($marker, [System.StringComparison]::Ordinal)) {
+        Add-GateViolation "crates/lovelyres-electron-backend/src/emergency_path_api.rs is missing bounded path-capability marker '$marker'"
+    }
+}
+# A path only ever enters through the core's own reading of its own output.
+if ($emergencyPathApiText -match '(?m)^\s*pub\(crate\) (?:async )?fn \w+\([^)]*\bpath: (?:&str|String)\b') {
+    Add-GateViolation 'crates/lovelyres-electron-backend/src/emergency_path_api.rs must not accept a caller-supplied path'
 }
 foreach ($marker in @(
     'export function isEmergencyCommandOpaqueHandle',
@@ -2341,7 +2397,13 @@ foreach ($marker in @(
     'serializedWithin(value, 256 * 1_024)',
     'text(value.output, 256 * 1_024)',
     'unsigned(value.displayedLineCount, 2_000)',
-    'function outputLine'
+    'function outputLine',
+    'export function isEmergencyPathDetail',
+    'export function isEmergencyPathPlan',
+    'export function isEmergencyPathReceipt',
+    'export function isEmergencyPathAction',
+    'value.paths.length > 500',
+    'function offeredPath'
 )) {
     if (-not $emergencyCommandContractText.Contains($marker, [System.StringComparison]::Ordinal)) {
         Add-GateViolation "electron/src/shared/emergency-command-contract.ts is missing strict bounded/redacted validator marker '$marker'"
@@ -2359,6 +2421,8 @@ foreach ($marker in @(
     'const scope = bindingHandle === null ? null : emergencyCommandScope(bindingHandle);',
     'api.loadEmergencyCommandCatalog(bindingHandle)',
     'api.runEmergencyCommand(bindingHandle, request.snapshotHandle, request.commandHandle)',
+    'onPathMenu={pathActions.openMenu}',
+    'paths={result.paths}',
     'cancelled = true;'
 )) {
     if (-not $emergencyCommandPageText.Contains($marker, [System.StringComparison]::Ordinal)) {
@@ -2368,6 +2432,28 @@ foreach ($marker in @(
 if (-not $emergencyCommandHelpersText.Contains('export function emergencyCommandScope(bindingHandle: string): string', [System.StringComparison]::Ordinal) -or
     -not $emergencyCommandStateText.Contains('| { type: "scope-changed"; scope: string | null }', [System.StringComparison]::Ordinal)) {
     Add-GateViolation 'Emergency Commands renderer lifecycle must scope only by opaque binding handle'
+}
+$emergencyPathActionsPath = Join-Path $electronRoot 'src/renderer/emergency-path-actions.ts'
+$emergencyPathActionsText = Get-Content -LiteralPath $emergencyPathActionsPath -Raw
+foreach ($marker in @(
+    'api.inspectEmergencyPath(bindingHandle, offer.pathHandle)',
+    'api.planEmergencyPathAction(bindingHandle, offer.pathHandle, action)',
+    'api.confirmEmergencyPathAction(bindingHandle, planHandle)',
+    'api.executeEmergencyPathAction(bindingHandle, planHandle)',
+    'api.cancelEmergencyPathAction(bindingHandle, abandoned)',
+    'isEmergencyPathDetail(detail)',
+    'isEmergencyPathPlan(plan)',
+    'isEmergencyPathPlan(confirmed)',
+    'isEmergencyPathReceipt(receipt)',
+    'inFlight.current'
+)) {
+    if (-not $emergencyPathActionsText.Contains($marker, [System.StringComparison]::Ordinal)) {
+        Add-GateViolation "electron/src/renderer/emergency-path-actions.ts is missing capability marker '$marker'"
+    }
+}
+# The window shows the path and acts on the handle. It never sends the path.
+if ($emergencyPathActionsText -match 'api\.\w+\([^)]*offer\.path[^H]') {
+    Add-GateViolation 'electron/src/renderer/emergency-path-actions.ts must act through the path handle, never a path string'
 }
 $packetCaptureApiMatch = [regex]::Match(
     $packetCaptureLiveContractText,

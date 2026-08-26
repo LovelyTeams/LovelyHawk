@@ -15,11 +15,11 @@ function frozenApiBody(): string {
 }
 
 describe("central Baseline Electron boundary", () => {
-  it("keeps all three Baseline methods in the central exact 111 preload", () => {
+  it("keeps all three Baseline methods in the central exact 116 preload", () => {
     const body = frozenApiBody();
     const names = [...body.matchAll(/^  (?<name>[A-Za-z_$][A-Za-z0-9_$]*):/gmu)]
       .map((match) => match.groups?.name);
-    expect(names).toHaveLength(111);
+    expect(names).toHaveLength(116);
     for (const name of ["getBaselineCatalog", "scanBaseline", "listBaselineHistory"]) {
       expect(names.filter((candidate) => candidate === name)).toEqual([name]);
     }

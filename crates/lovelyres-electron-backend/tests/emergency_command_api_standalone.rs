@@ -4,5 +4,7 @@
 mod connections_api;
 #[path = "../src/emergency_command_api.rs"]
 mod emergency_command_api;
+#[path = "../src/emergency_path_api.rs"]
+mod emergency_path_api;
 #[path = "../src/ssh_api.rs"]
 mod ssh_api;

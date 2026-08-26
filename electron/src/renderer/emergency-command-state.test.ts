@@ -28,6 +28,7 @@ const result: EmergencyCommandResult = {
   findingLines: [],
   findingReason: null,
   truncated: false,
+  paths: [],
 };
 
 function loaded() {

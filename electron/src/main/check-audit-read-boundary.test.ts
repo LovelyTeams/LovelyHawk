@@ -16,11 +16,11 @@ function frozenApiBody(): string {
 }
 
 describe("central Check Audit Electron boundary", () => {
-  it("keeps the exact three read methods in the frozen exact 111 preload", () => {
+  it("keeps the exact three read methods in the frozen exact 116 preload", () => {
     const body = frozenApiBody();
     const names = [...body.matchAll(/^  (?<name>[A-Za-z_$][A-Za-z0-9_$]*):/gmu)]
       .map((match) => match.groups?.name);
-    expect(names).toHaveLength(111);
+    expect(names).toHaveLength(116);
     for (const name of [
       "getCheckAuditCatalog",
       "collectCheckAuditStatus",

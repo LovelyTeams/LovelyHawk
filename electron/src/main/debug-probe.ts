@@ -7,7 +7,7 @@ import { DEFAULT_THEME_ID, themeDefinition } from "../shared/theme-contract.js";
 
 const PROBE_TIMEOUT_MS = 15_000;
 const COMMAND_TIMEOUT_MS = 5_000;
-const MAIN_PRELOAD_API_COUNT = 111;
+const MAIN_PRELOAD_API_COUNT = 116;
 const UNAUTHORIZED_TERMINAL_URL = "lovelyres://app/?window=terminal";
 
 /** The default theme's chrome color as the renderer reports it, so a repalette
@@ -148,7 +148,7 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
     assert(
       Array.isArray(initial.apiMethods) &&
         initial.apiMethods.join(",") ===
-          "addNoteTag,bootstrap,cancelAiHistoryMutation,cancelCommandHistoryMutation,cancelConnectionDelete,cancelIntegrityComparison,cancelNoteDelete,cancelSettingsMutation,cancelSshAttempt,clearApplicationLogBuffer,closeConfigDraft,collectCheckAuditStatus,collectSystemInfo,confirmAiHistoryMutation,confirmCommandHistoryMutation,confirmConnectionDelete,confirmNoteDelete,confirmSettingsMutation,confirmSshHostKey,copyConfig,correlateLogSources,createConnection,createNote,diffForensicSnapshots,disconnectSshBinding,discoverLogSources,discoverMiddleware,exportAiHistory,exportApplicationLogs,exportConfigArtifact,exportConnections,exportDisposalReport,exportNotes,generateConfig,generateDisposalReport,getAiHistoryRecord,getApplicationLogPreview,getBaselineCatalog,getCheckAuditCatalog,getCommandHistory,getConfigCatalog,getConnection,getDisposalReportContent,getDockerCollection,getDockerLogs,getDockerSecurityAudit,getIntegrityPresets,getKubernetesAvailability,getKubernetesPodLogs,getKubernetesResourceDetail,getNote,getSnapshotDetail,getSshAttempt,getSystemInfoCatalog,getSystemInfoDetail,getSystemInfoSummary,importConnections,inspectDockerResource,inspectFirewall,listAiHistory,listApplicationLogs,listBaselineHistory,listCommandHistory,listConnections,listFirewallChangeHistory,listIntegrityBaselines,listKubernetesResources,listMiddlewareHistory,listNotes,listPacketCaptureInterfaces,listSnapshots,loadEmergencyCommandCatalog,loadMiddlewareConfiguration,loadSettings,notifyRendererReady,onBeforeClose,openSshTerminal,planAiHistoryClear,planAiHistoryRemove,planCommandHistoryClear,planCommandHistoryRemove,planCommandReplay,planConnectionDelete,planNoteDelete,planSettingsAiApiKeyClear,planSettingsAiProviderRemoval,pollIntegrityComparison,pollPacketCapture,readCheckAuditLog,readLogSource,refreshDockerContainers,removeNoteTag,replaceSettingsAiApiKey,respondSshMfa,reviseConfig,runEmergencyCommand,saveSettings,scanBaseline,searchLogIocs,setApplicationLogLevel,setNotePinned,setSecurityReferenceFavorites,setWindowTheme,startIntegrityComparison,startPacketCapture,startSshConnect,startSshProbe,stopPacketCapture,updateConnection,updateNote,writeClipboard",
+          "addNoteTag,bootstrap,cancelAiHistoryMutation,cancelCommandHistoryMutation,cancelConnectionDelete,cancelEmergencyPathAction,cancelIntegrityComparison,cancelNoteDelete,cancelSettingsMutation,cancelSshAttempt,clearApplicationLogBuffer,closeConfigDraft,collectCheckAuditStatus,collectSystemInfo,confirmAiHistoryMutation,confirmCommandHistoryMutation,confirmConnectionDelete,confirmEmergencyPathAction,confirmNoteDelete,confirmSettingsMutation,confirmSshHostKey,copyConfig,correlateLogSources,createConnection,createNote,diffForensicSnapshots,disconnectSshBinding,discoverLogSources,discoverMiddleware,executeEmergencyPathAction,exportAiHistory,exportApplicationLogs,exportConfigArtifact,exportConnections,exportDisposalReport,exportNotes,generateConfig,generateDisposalReport,getAiHistoryRecord,getApplicationLogPreview,getBaselineCatalog,getCheckAuditCatalog,getCommandHistory,getConfigCatalog,getConnection,getDisposalReportContent,getDockerCollection,getDockerLogs,getDockerSecurityAudit,getIntegrityPresets,getKubernetesAvailability,getKubernetesPodLogs,getKubernetesResourceDetail,getNote,getSnapshotDetail,getSshAttempt,getSystemInfoCatalog,getSystemInfoDetail,getSystemInfoSummary,importConnections,inspectDockerResource,inspectEmergencyPath,inspectFirewall,listAiHistory,listApplicationLogs,listBaselineHistory,listCommandHistory,listConnections,listFirewallChangeHistory,listIntegrityBaselines,listKubernetesResources,listMiddlewareHistory,listNotes,listPacketCaptureInterfaces,listSnapshots,loadEmergencyCommandCatalog,loadMiddlewareConfiguration,loadSettings,notifyRendererReady,onBeforeClose,openSshTerminal,planAiHistoryClear,planAiHistoryRemove,planCommandHistoryClear,planCommandHistoryRemove,planCommandReplay,planConnectionDelete,planEmergencyPathAction,planNoteDelete,planSettingsAiApiKeyClear,planSettingsAiProviderRemoval,pollIntegrityComparison,pollPacketCapture,readCheckAuditLog,readLogSource,refreshDockerContainers,removeNoteTag,replaceSettingsAiApiKey,respondSshMfa,reviseConfig,runEmergencyCommand,saveSettings,scanBaseline,searchLogIocs,setApplicationLogLevel,setNotePinned,setSecurityReferenceFavorites,setWindowTheme,startIntegrityComparison,startPacketCapture,startSshConnect,startSshProbe,stopPacketCapture,updateConnection,updateNote,writeClipboard",
       "preload exposed an unexpected API surface",
     );
     await waitFor(client, "document.fonts.status === 'loaded'");
@@ -3010,6 +3010,111 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
     assert(
       emergencyCommandBoundary.markerInDom === false,
       "Emergency Commands hostile marker entered the DOM",
+    );
+
+    // Acting on a file the catalogue printed. A capability the sidecar never
+    // minted names nothing, so every one of these has to fail closed. They run
+    // together because each is a round trip and this call is time-bounded.
+    const emergencyPathBoundary = await evaluate<Record<string, unknown>>(
+      client,
+      `(async () => {
+        const marker = 'forged-emergency-path-capability-must-not-echo';
+        const rejected = async (operation) => {
+          try {
+            await operation();
+            return { rejected: false, echoed: false };
+          } catch (error) {
+            return { rejected: true, echoed: String(error).includes(marker) };
+          }
+        };
+        const attempts = {
+          inspectPath: () => window.lovelyres.inspectEmergencyPath(marker, marker),
+          planPath: () => window.lovelyres.planEmergencyPathAction(marker, marker, 'disarm'),
+          confirmPath: () => window.lovelyres.confirmEmergencyPathAction(marker, marker),
+          executePath: () => window.lovelyres.executeEmergencyPathAction(marker, marker),
+          cancelPath: () => window.lovelyres.cancelEmergencyPathAction(marker, marker),
+          planUnknownAction: () =>
+            window.lovelyres.planEmergencyPathAction(marker, marker, 'delete'),
+          planWithPath: () => window.lovelyres.planEmergencyPathAction(
+            marker,
+            { pathHandle: marker, path: '/etc/shadow' },
+            'quarantine'
+          ),
+          planWithExtraKeys: () => window.lovelyres.planEmergencyPathAction(
+            { bindingHandle: marker, remotePath: '/etc/shadow' },
+            marker,
+            'disarm'
+          )
+        };
+        const names = Object.keys(attempts);
+        const outcomes = await Promise.all(names.map(name => rejected(attempts[name])));
+        const results = {};
+        names.forEach((name, index) => { results[name] = outcomes[index]; });
+        return {
+          ...results,
+          inspectPathType: typeof window.lovelyres.inspectEmergencyPath,
+          planPathType: typeof window.lovelyres.planEmergencyPathAction,
+          confirmPathType: typeof window.lovelyres.confirmEmergencyPathAction,
+          executePathType: typeof window.lovelyres.executeEmergencyPathAction,
+          cancelPathType: typeof window.lovelyres.cancelEmergencyPathAction,
+          inspectPathArity: window.lovelyres.inspectEmergencyPath.length,
+          planPathArity: window.lovelyres.planEmergencyPathAction.length,
+          quarantineMethod: typeof window.lovelyres.quarantineEmergencyPath,
+          removeMethod: typeof window.lovelyres.removeEmergencyPath,
+          chmodMethod: typeof window.lovelyres.chmodEmergencyPath,
+          markerInDom: document.documentElement.textContent.includes(marker)
+        };
+      })()`,
+    );
+    for (const name of [
+      "inspectPathType",
+      "planPathType",
+      "confirmPathType",
+      "executePathType",
+      "cancelPathType",
+    ]) {
+      assert(
+        emergencyPathBoundary[name] === "function",
+        "Emergency path API is unavailable: " + name,
+      );
+    }
+    for (const name of ["inspectPathArity", "planPathArity"]) {
+      assert(
+        typeof emergencyPathBoundary[name] === "number",
+        "Emergency path contextBridge method has no callable metadata: " + name,
+      );
+    }
+    for (const name of [
+      "inspectPath",
+      "planPath",
+      "confirmPath",
+      "executePath",
+      "cancelPath",
+      "planUnknownAction",
+      "planWithPath",
+      "planWithExtraKeys",
+    ]) {
+      const result = emergencyPathBoundary[name];
+      assert(
+        isRecord(result) && result.rejected === true,
+        "Emergency path " + name + " did not fail closed",
+      );
+      assert(
+        isRecord(result) && result.echoed === false,
+        "Emergency path " + name + " echoed hostile input",
+      );
+    }
+    // A file is disarmed or quarantined through a plan, never by a method that
+    // does it outright.
+    for (const name of ["quarantineMethod", "removeMethod", "chmodMethod"]) {
+      assert(
+        emergencyPathBoundary[name] === "undefined",
+        "Emergency path exposed forbidden " + name,
+      );
+    }
+    assert(
+      emergencyPathBoundary.markerInDom === false,
+      "Emergency path hostile marker entered the DOM",
     );
 
     await evaluate(

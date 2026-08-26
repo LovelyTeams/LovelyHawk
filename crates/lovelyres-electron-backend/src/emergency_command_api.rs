@@ -24,7 +24,10 @@ use serde::Serialize;
 use tokio::time::timeout;
 use uuid::Uuid;
 
-use crate::ssh_api::SshApi;
+use crate::{
+    emergency_path_api::{EmergencyPathApi, EmergencyPathDto, PathScope},
+    ssh_api::SshApi,
+};
 
 const MAX_HANDLE_BYTES: usize = 128;
 const MAX_CATALOG_COMMANDS: usize = 256;
@@ -59,6 +62,7 @@ const _: () = assert!(MAX_TIMEOUT_SECONDS < EXECUTION_DEADLINE.as_secs());
 pub(crate) struct EmergencyCommandApi {
     services: BackendServices,
     ssh_api: Arc<SshApi>,
+    paths: EmergencyPathApi,
     registry: Arc<Mutex<EmergencyRegistry>>,
 }
 
@@ -89,13 +93,20 @@ impl fmt::Debug for EmergencyCommandApi {
 impl EmergencyCommandApi {
     pub(crate) fn new(services: BackendServices, ssh_api: Arc<SshApi>) -> Self {
         Self {
+            paths: EmergencyPathApi::new(services.clone(), Arc::clone(&ssh_api)),
             services,
             ssh_api,
             registry: Arc::new(Mutex::new(EmergencyRegistry::default())),
         }
     }
 
+    /// The surface that acts on a path one of these runs printed.
+    pub(crate) fn paths(&self) -> &EmergencyPathApi {
+        &self.paths
+    }
+
     pub(crate) fn close_binding(&self, binding_handle: &str) {
+        self.paths.close_binding(binding_handle);
         if let Ok(mut registry) = self.registry.lock() {
             registry.close_binding(binding_handle);
         }
@@ -175,7 +186,12 @@ impl EmergencyCommandApi {
         self.validate_binding(&scope)?;
         self.verify_run(&access, &command)?;
         validate_receipt(&command, &receipt)?;
-        let dto = project_receipt(&access, &command, receipt)?;
+        let (mut dto, clipped_lines) = project_receipt(&access, &command, receipt)?;
+        // Read from what the window will display, so a line the operator
+        // clicks is the line the path was taken from.
+        dto.paths = self
+            .paths
+            .offer(&scope.to_path_scope(), &dto.output, &clipped_lines);
         ensure_serialized_bound(&dto, MAX_RUN_RESPONSE_BYTES)?;
         self.validate_binding(&scope)?;
         self.verify_run(&access, &command)?;
@@ -335,6 +351,15 @@ impl BindingScope {
         }
     }
 
+    fn to_path_scope(&self) -> PathScope {
+        PathScope {
+            binding_handle: self.binding_handle.clone(),
+            session_id: self.session_id.clone(),
+            connection_id: self.connection_id.clone(),
+            target: self.target.clone(),
+        }
+    }
+
     fn estimated_bytes(&self) -> usize {
         std::mem::size_of::<Self>()
             .saturating_add(self.binding_handle.len())
@@ -401,6 +426,9 @@ pub(crate) struct EmergencyCommandResultDto {
     pub(crate) finding_lines: Vec<u32>,
     pub(crate) finding_reason: Option<String>,
     pub(crate) truncated: bool,
+    /// One entry per displayed line that named a file, so the window can offer
+    /// an action on the line the operator points at.
+    pub(crate) paths: Vec<EmergencyPathDto>,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -790,20 +818,25 @@ fn project_receipt(
     access: &RunAccess,
     command: &StoredCommand,
     receipt: CommandExecutionReceipt,
-) -> Result<EmergencyCommandResultDto, EmergencyCommandApiError> {
+) -> Result<(EmergencyCommandResultDto, Vec<u32>), EmergencyCommandApiError> {
     let projected = project_output(&receipt.output, &receipt.finding_lines)?;
-    Ok(EmergencyCommandResultDto {
-        snapshot_handle: access.snapshot_handle.clone(),
-        command_handle: command.command_handle.clone(),
-        result_kind: result_kind(receipt.kind),
-        exit_code: receipt.exit_code,
-        output: projected.output,
-        observed_line_count: projected.observed_line_count,
-        displayed_line_count: projected.displayed_line_count,
-        finding_lines: projected.finding_lines,
-        finding_reason: receipt.finding_reason,
-        truncated: receipt.truncated || projected.truncated,
-    })
+    let clipped_lines = projected.clipped_lines;
+    Ok((
+        EmergencyCommandResultDto {
+            snapshot_handle: access.snapshot_handle.clone(),
+            command_handle: command.command_handle.clone(),
+            result_kind: result_kind(receipt.kind),
+            exit_code: receipt.exit_code,
+            output: projected.output,
+            observed_line_count: projected.observed_line_count,
+            displayed_line_count: projected.displayed_line_count,
+            finding_lines: projected.finding_lines,
+            finding_reason: receipt.finding_reason,
+            truncated: receipt.truncated || projected.truncated,
+            paths: Vec::new(),
+        },
+        clipped_lines,
+    ))
 }
 
 struct ProjectedOutput {
@@ -811,6 +844,10 @@ struct ProjectedOutput {
     observed_line_count: u32,
     displayed_line_count: u32,
     finding_lines: Vec<u32>,
+    /// Displayed lines that lost their tail to the per-line ceiling. What is
+    /// left of such a line is a fragment, and a path read out of a fragment
+    /// would name the wrong file.
+    clipped_lines: Vec<u32>,
     truncated: bool,
 }
 
@@ -826,6 +863,7 @@ fn project_output(
         u32::try_from(observed).map_err(|_| EmergencyCommandApiError::InvalidReceipt)?;
     let mut lines = Vec::with_capacity(observed.min(MAX_OUTPUT_LINES));
     let mut finding_lines = Vec::new();
+    let mut clipped_lines = Vec::new();
     let mut bytes = 0usize;
     let mut truncated = false;
     for (index, line) in source.lines().enumerate() {
@@ -849,6 +887,9 @@ fn project_output(
             .saturating_add(separator)
             .saturating_add(projected.len());
         truncated |= line_truncated;
+        if line_truncated && let Ok(displayed) = u32::try_from(lines.len()) {
+            clipped_lines.push(displayed);
+        }
         // Marks follow the line to its displayed position, and a redacted line
         // keeps none of them because its content is gone.
         if u32::try_from(index).is_ok_and(|index| findings.binary_search(&index).is_ok())
@@ -865,6 +906,7 @@ fn project_output(
         displayed_line_count: u32::try_from(lines.len())
             .map_err(|_| EmergencyCommandApiError::InvalidReceipt)?,
         finding_lines,
+        clipped_lines,
         truncated,
     })
 }
@@ -1419,7 +1461,8 @@ mod tests {
             &"x".repeat(MAX_OUTPUT_LINE_BYTES + 20),
         ]
         .join("\n");
-        let dto = project_receipt(&access, &command, receipt(&command, hostile)).unwrap();
+        let (dto, clipped) =
+            project_receipt(&access, &command, receipt(&command, hostile)).unwrap();
         // Markup is inert text, never markup; the rest reaches the operator
         // exactly as the target printed it.
         assert!(dto.output.contains("</pre><script>steal()</script>"));
@@ -1438,6 +1481,9 @@ mod tests {
                 .lines()
                 .all(|line| line.len() <= MAX_OUTPUT_LINE_BYTES)
         );
+        // A line that lost its tail is named, so no action is offered on the
+        // fragment that is left of it.
+        assert_eq!(clipped, vec![4]);
         let encoded = serde_json::to_string(&dto).unwrap();
         for forbidden in [
             "network-listen",
