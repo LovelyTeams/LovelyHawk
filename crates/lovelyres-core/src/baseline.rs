@@ -146,6 +146,43 @@ impl BaselineComponent {
     pub const fn is_optional(self) -> bool {
         !matches!(self, Self::System | Self::Ssh)
     }
+
+    /// A shell test for whether this software is on the target at all.
+    ///
+    /// Having no configuration file is not the same as not being installed,
+    /// and treating it as the same was wrong on exactly the machines this tool
+    /// is for: the official Redis image ships no `redis.conf` and runs on the
+    /// built-in defaults, so every Redis check reported the software missing
+    /// on a host that was running it — and `protected-mode` defaulting to yes
+    /// is a real answer, not an absence.
+    ///
+    /// `None` for the things every Linux has.
+    pub const fn presence_probe(self) -> Option<&'static str> {
+        match self {
+            Self::System | Self::Ssh => None,
+            Self::MySql => Some(
+                "command -v mysqld >/dev/null 2>&1 || command -v mariadbd >/dev/null 2>&1 \
+                 || command -v mysqld_safe >/dev/null 2>&1 || [ -d /var/lib/mysql ]",
+            ),
+            Self::PostgreSql => Some(
+                "command -v postgres >/dev/null 2>&1 || command -v postmaster >/dev/null 2>&1 \
+                 || [ -d /var/lib/postgresql ] || [ -d /var/lib/pgsql ]",
+            ),
+            Self::Redis => Some(
+                "command -v redis-server >/dev/null 2>&1 || command -v valkey-server >/dev/null 2>&1",
+            ),
+            Self::MongoDb => Some("command -v mongod >/dev/null 2>&1"),
+            Self::Nginx => Some("command -v nginx >/dev/null 2>&1 || [ -d /etc/nginx ]"),
+            Self::Apache => Some(
+                "command -v httpd >/dev/null 2>&1 || command -v apache2 >/dev/null 2>&1 \
+                 || [ -d /usr/local/apache2 ]",
+            ),
+            Self::Tomcat => Some(
+                "[ -d /usr/local/tomcat ] || [ -d /opt/tomcat ] \
+                 || ls -d /etc/tomcat* /usr/share/tomcat* /var/lib/tomcat* >/dev/null 2>&1",
+            ),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1165,7 +1202,10 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
         risk: BaselineRisk::High,
         value_kind: BaselineValueKind::Choice(YES_NO),
         reading: Reading::Files(SSHD_FILES),
-        implicit: Some("yes"),
+        // OpenSSH itself defaults this to no; the distributions ship it set to
+        // yes. Assuming the distribution's habit would call a host built from
+        // upstream compliant while its lockout policy did nothing.
+        implicit: None,
         file: "/etc/ssh/sshd_config",
         key: "UsePAM",
         format: FileFormat::Whitespace,
@@ -1291,7 +1331,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
         risk: BaselineRisk::Critical,
         value_kind: BaselineValueKind::Boolean,
         reading: Reading::Files(MYSQL_FILES),
-        implicit: Some("off"),
+        // On by default in MySQL 5.7 and MariaDB, off in MySQL 8. Assuming
+        // either one is wrong on the other, so this asks to see it written.
+        implicit: None,
         file: "/etc/mysql/mariadb.conf.d/50-server.cnf",
         key: "local_infile",
         format: FileFormat::Ini("mysqld"),
@@ -1404,7 +1446,11 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
         risk: BaselineRisk::High,
         value_kind: BaselineValueKind::Choice(PG_PASSWORD_ENCRYPTION),
         reading: Reading::Files(POSTGRESQL_FILES),
-        implicit: Some("scram-sha-256"),
+        // No default is assumed: PostgreSQL 14 changed it from md5 to
+        // scram-sha-256, and assuming the newer one called a 13 using md5
+        // compliant. A setting whose meaning depends on the version is a
+        // setting worth writing down.
+        implicit: None,
         file: "/etc/postgresql/postgresql.conf",
         key: "password_encryption",
         format: FileFormat::Equals,
@@ -2909,12 +2955,53 @@ fn validate_observed(value: &BaselineObservedValue) -> CoreResult<()> {
     Ok(())
 }
 
-fn scan_command() -> String {
-    let mut command = format!("set -u; printf '%s\\n' {SCAN_MARKER}; ");
-    for definition in BASELINE_CATALOG {
-        command.push_str(&item_command(definition));
+/// The distinct awk programs, written once and referred to by name.
+///
+/// Every check used to carry its own copy of the program that reads it, and at
+/// eighty-one checks that came to 135 kB. A Linux kernel will not accept a
+/// single argument longer than 128 kB, so the login shell rejected the whole
+/// scan with "Argument list too long" before a single file was read — the
+/// catalogue had quietly grown past what one command could carry. There are
+/// only a handful of distinct programs; the repetition was all of the size.
+#[derive(Default)]
+struct ProgramTable {
+    programs: Vec<String>,
+}
+
+impl ProgramTable {
+    /// The shell expansion for this program, adding it if it is new.
+    fn name(&mut self, program: &str) -> String {
+        let index = self
+            .programs
+            .iter()
+            .position(|existing| existing == program)
+            .unwrap_or_else(|| {
+                self.programs.push(program.to_owned());
+                self.programs.len() - 1
+            });
+        format!("\"$LR_P{index}\"")
     }
-    command
+
+    fn prelude(&self) -> String {
+        self.programs
+            .iter()
+            .enumerate()
+            .map(|(index, program)| format!("LR_P{index}={}; ", shq(program)))
+            .collect()
+    }
+}
+
+fn scan_command() -> String {
+    let mut table = ProgramTable::default();
+    let mut items = String::new();
+    for definition in BASELINE_CATALOG {
+        items.push_str(&item_command(definition, &mut table));
+    }
+    format!(
+        "set -u; printf '%s\\n' {SCAN_MARKER}; {}{}{items}",
+        table.prelude(),
+        scan_functions(),
+    )
 }
 
 /// The shell that reads one setting and prints one row.
@@ -2924,70 +3011,128 @@ fn scan_command() -> String {
 /// that has never had that software installed is noise, and forty rows of it
 /// is enough noise to hide the findings. A configuration file that is nowhere
 /// to be found reports absent, and the check is not counted against the target.
-fn item_command(definition: &BaselineDefinition) -> String {
+/// The two shapes of read, written once as shell functions.
+///
+/// The rest of the size was here: the same forty lines of shell repeated once
+/// per check. Each check is one call now.
+fn scan_functions() -> String {
+    format!(
+        // lr_file id key want fallback reader witness installed candidates…
+        "lr_file() {{ lr_id=$1; lr_key=$2; lr_want=$3; lr_where=$4; lr_fallback=$4; \
+           lr_reader=$5; lr_witness=$6; lr_installed=$7; shift 7; \
+           lr_files=; lr_odd=0; \
+           for lr_candidate in \"$@\"; do \
+             for lr_match in $lr_candidate; do \
+               if [ -L \"$lr_match\" ] || {{ [ -e \"$lr_match\" ] && [ ! -f \"$lr_match\" ]; }}; then \
+                 lr_odd=1; \
+               elif [ -f \"$lr_match\" ]; then lr_files=\"$lr_files $lr_match\"; fi; \
+             done; \
+           done; \
+           lr_seen=0; \
+           for lr_candidate in $lr_files; do \
+             [ \"$lr_candidate\" = \"$lr_fallback\" ] && lr_seen=1; \
+           done; \
+           if [ \"$lr_seen\" = 0 ] && [ -n \"$lr_files\" ]; then \
+             for lr_candidate in $lr_files; do lr_where=$lr_candidate; done; \
+           fi; \
+           if [ -n \"$lr_files\" ]; then \
+             lr_value=$(awk -v k=\"$lr_key\" -v r=\"$lr_want\" \"$lr_reader\" $lr_files | tail -n 1); \
+             lr_value=$(printf '%s' \"$lr_value\" | tr -cd '{allowed}'); \
+             [ -n \"$lr_value\" ] || lr_value=__missing__; \
+             lr_found=$(awk -v k=\"$lr_key\" -v r=\"$lr_want\" \"$lr_witness\" $lr_files | tail -n 1); \
+             [ -z \"$lr_found\" ] || lr_where=$lr_found; \
+           elif [ \"$lr_odd\" = 1 ]; then lr_value=__unsupported__; \
+           elif lr_present \"$lr_installed\"; then lr_value=__missing__; \
+           else lr_value=__absent__; fi; \
+           printf 'ITEM=%s\\t%s\\t%s\\n' \"$lr_id\" \"$lr_value\" \"$lr_where\"; }}; \
+         lr_sysctl() {{ lr_id=$1; lr_key=$2; lr_where=$3; \
+           if command -v sysctl >/dev/null 2>&1; then \
+             lr_read=$(sysctl -n \"$lr_key\" 2>/dev/null || true); \
+           else lr_read=$(cat /proc/sys/$(printf '%s' \"$lr_key\" | tr . /) 2>/dev/null || true); fi; \
+           lr_read=$(printf '%s' \"$lr_read\" | tr -s '[:space:]' ' '); \
+           lr_value=$(printf '%s' \"$lr_read\" | tr -cd '{allowed}'); \
+           [ -n \"$lr_value\" ] || lr_value=__missing__; \
+           printf 'ITEM=%s\\t%s\\t%s\\n' \"$lr_id\" \"$lr_value\" \"$lr_where\"; }}; \
+         lr_present() {{ case $1 in {cases} *) return 1;; esac; }}; ",
+        allowed = OBSERVED_VALUE_CHARS,
+        cases = presence_cases(),
+    )
+}
+
+/// Whether each optional product is on the target, as one `case` rather than
+/// as a copy of the test beside every check that needs it.
+fn presence_cases() -> String {
+    let mut cases = String::new();
+    for component in BaselineComponent::ALL {
+        let Some(probe) = component.presence_probe() else {
+            continue;
+        };
+        cases.push_str(&format!(
+            "{key}) {probe};; ",
+            key = shq(component_probe_key(component)),
+        ));
+    }
+    // Anything with no probe of its own is part of every Linux.
+    cases.push_str("'always') return 0;; ");
+    cases
+}
+
+const fn component_probe_key(component: BaselineComponent) -> &'static str {
+    match component {
+        BaselineComponent::System | BaselineComponent::Ssh => "always",
+        BaselineComponent::MySql => "mysql",
+        BaselineComponent::PostgreSql => "postgresql",
+        BaselineComponent::Redis => "redis",
+        BaselineComponent::MongoDb => "mongodb",
+        BaselineComponent::Nginx => "nginx",
+        BaselineComponent::Apache => "apache",
+        BaselineComponent::Tomcat => "tomcat",
+    }
+}
+
+/// One line per check: the call, and everything that differs between them.
+///
+/// Every file that exists is read, in the order the program reads them, with
+/// the precedence rule applied across the whole set. Reading only the first
+/// one found reported what the packaged default says — MySQL's `!includedir`
+/// means a later file overrides an earlier one, and on a lab host with
+/// `bind-address = 127.0.0.1` in the packaged file and an override elsewhere,
+/// the check said the database was bound to the loopback while the server was
+/// listening on every interface. sshd is the same shape read the other way
+/// round: its `Include` sits at the top and it keeps the first value it sees,
+/// so the dropped-in files win and are listed first.
+fn item_command(definition: &BaselineDefinition, table: &mut ProgramTable) -> String {
     let id = shq(definition.id);
     match definition.reading {
+        // A kernel parameter is read from the kernel, but it is written to a
+        // file, and the operator is told which one.
         Reading::RunningSysctl => format!(
-            "lr_value=__missing__; \
-             if command -v sysctl >/dev/null 2>&1; then \
-               lr_read=$(sysctl -n {key} 2>/dev/null || true); \
-             else lr_read=$(cat /proc/sys/$(printf '%s' {key} | tr . /) 2>/dev/null || true); fi; \
-             lr_read=$(printf '%s' \"$lr_read\" | tr -s '[:space:]' ' '); \
-             lr_value=$(printf '%s' \"$lr_read\" | tr -cd '{allowed}'); \
-             [ -n \"$lr_value\" ] || lr_value=__missing__; \
-             printf 'ITEM=%s\\t%s\\t%s\\n' {id} \"$lr_value\" {file}; ",
+            "lr_sysctl {id} {key} {file}; ",
             key = shq(definition.key),
-            allowed = OBSERVED_VALUE_CHARS,
-            // A kernel parameter is read from the kernel, but it is written to
-            // a file, and the operator is told which one.
             file = shq(definition.file),
         ),
-        // Every file that exists, read in the order the program reads them,
-        // and the precedence rule applied across the whole set.
-        //
-        // Reading only the first one found reported what the packaged default
-        // says. MySQL's `!includedir` means a later file overrides an earlier
-        // one, and on a lab host with `bind-address = 127.0.0.1` in the
-        // packaged file and an override elsewhere, the check said the database
-        // was bound to the loopback while the server was in fact listening on
-        // every interface. sshd is the same shape read the other way round:
-        // its `Include` sits at the top and it keeps the first value it sees,
-        // so the dropped-in files win and are listed first here.
-        Reading::Files(_) => {
-            // The candidates are compile-time constants restricted to path
-            // characters, so they go in unquoted and a `*` in one of them is a
-            // glob the shell resolves. See the catalogue test that pins it.
-            let candidates = definition.candidates().join(" ");
-            format!(
-                "lr_files=; lr_odd=0; for lr_candidate in {candidates}; do \
-                   if [ -L \"$lr_candidate\" ] || {{ [ -e \"$lr_candidate\" ] && [ ! -f \"$lr_candidate\" ]; }}; then \
-                     lr_odd=1; \
-                   elif [ -f \"$lr_candidate\" ]; then \
-                     lr_files=\"$lr_files $lr_candidate\"; \
-                   fi; \
-                 done; \
-                 lr_key={key}; lr_where={fallback}; lr_want={want}; \
-                 if [ -n \"$lr_files\" ]; then \
-                   lr_value=$(awk -v k=\"$lr_key\" -v r=\"$lr_want\" '{program}' $lr_files | tail -n 1); \
-                   lr_value=$(printf '%s' \"$lr_value\" | tr -cd '{allowed}'); \
-                   [ -n \"$lr_value\" ] || lr_value=__missing__; \
-                   lr_where=$(awk -v k=\"$lr_key\" -v r=\"$lr_want\" '{witness}' $lr_files | tail -n 1); \
-                   [ -n \"$lr_where\" ] || lr_where=$(printf '%s' \"$lr_files\" | awk '{{print $NF}}'); \
-                 elif [ \"$lr_odd\" = 1 ]; then lr_value=__unsupported__; \
-                 else lr_value=__absent__; fi; \
-                 printf 'ITEM=%s\\t%s\\t%s\\n' {id} \"$lr_value\" \"$lr_where\"; ",
-                key = shq(definition.key),
-                program = reader_program(definition),
-                witness = witness_program(definition),
-                allowed = OBSERVED_VALUE_CHARS,
-                // Nothing on this target mentions the directive, so a change
-                // goes where the distribution would expect to find it.
-                fallback = shq(definition.file),
-                // What the check wants, so a reader over several elements of
-                // the same name can report the worst one rather than the first.
-                want = shq(definition.recommendation),
-            )
-        }
+        Reading::Files(paths) => format!(
+            "lr_file {id} {key} {want} {fallback} {program} {witness} {installed} {candidates}; ",
+            key = shq(definition.key),
+            program = table.name(&reader_program(definition)),
+            witness = table.name(&witness_program(definition)),
+            // Nothing on this target mentions the directive, so a change goes
+            // where the distribution would expect to find it.
+            fallback = shq(definition.file),
+            // What the check wants, so a reader over several elements of the
+            // same name can report the worst one rather than the first.
+            want = shq(definition.recommendation),
+            // Software with no configuration file is still software: its
+            // settings are at their defaults, which is an answer.
+            installed = shq(component_probe_key(definition.component)),
+            // Quoted here and split by the function, so a `*` is a glob the
+            // target's shell resolves and nothing else in the path can be.
+            candidates = paths
+                .iter()
+                .map(|path| shq(path))
+                .collect::<Vec<_>>()
+                .join(" "),
+        ),
     }
 }
 
@@ -4530,6 +4675,46 @@ mod tests {
         }
     }
 
+    /// A command the target's shell will refuse is not a command.
+    ///
+    /// Linux caps a single argument at 128 kB, and SSH hands the whole script
+    /// to the login shell as one. At eighty-one checks, each carrying its own
+    /// copy of the program that reads it, the scan reached 135 kB and bash
+    /// answered "Argument list too long" — every check on every target,
+    /// failing before a file was opened. The programs are written once now.
+    #[test]
+    fn the_scan_fits_in_one_argument_with_room_to_grow() {
+        const KERNEL_LIMIT: usize = 128 * 1024;
+        let scan = scan_command();
+        assert!(
+            scan.len() < KERNEL_LIMIT / 2,
+            "the scan is {} bytes, over half of what a single argument may carry",
+            scan.len()
+        );
+        // The saving is the deduplication, so it has to actually be happening.
+        let distinct = scan.matches("LR_P").count();
+        assert!(distinct > 0, "the programs are not written once");
+        assert!(
+            !scan.contains("BEGIN{v=\"\";f=0} /^[[:space:]]*#/{next} /^[[:space:]]*$/{next} {p=$0; sub(/^[[:space:]]+/,\"\",p); t=p; sub(/[[:space:]=].*$/,\"\",t); if(f==0 && tolower(t)==tolower(k)){sub(/^[^[:space:]=]+[[:space:]=]+/,\"\",p); gsub(/^[[:space:]]+|[[:space:]]+$/,\"\",p); v=p; f=1}} END{print v}' $lr_files"),
+            "a program is still written out beside the check that uses it"
+        );
+    }
+
+    /// Prints the whole scan, so a lab probe can run the exact script the tool
+    /// sends inside an official image and see what this catalogue makes of a
+    /// version nobody has tried it against. Not an assertion.
+    const SCAN_DUMP_MARKER: &str = "----LOVELYRES-SCAN----";
+
+    #[test]
+    fn dump_scan_command_for_the_lab() {
+        if std::env::var("LOVELYRES_DUMP_SCAN").is_err() {
+            return;
+        }
+        println!("{SCAN_DUMP_MARKER}");
+        println!("{}", scan_command());
+        println!("{SCAN_DUMP_MARKER}");
+    }
+
     /// Prints the readers a lab probe needs to run by hand. Not an assertion —
     /// it does nothing unless asked.
     #[test]
@@ -5114,32 +5299,31 @@ mod tests {
         // The bug this guards against reported a host that was letting root
         // log in as compliant, because the distribution's own commented
         // default sat below the active line.
-        let command = scan_command();
-        assert!(command.contains("/^[[:space:]]*#/{next}"));
-        assert!(!command.contains("sub(/^[[:space:]]*#[[:space:]]*/"));
-        // Every reader has to skip them, not just one. A kernel parameter is
-        // read from the running kernel and has no file to have comments in;
-        // a file-backed check sends two programs, one for the value and one
-        // for which file it came from, and both have to skip comments. XML
-        // comments are a region rather than a line, so they are counted by the
-        // walk that finds them.
-        let line_based = BASELINE_CATALOG
-            .iter()
-            .filter(|definition| {
-                matches!(definition.reading, Reading::Files(_))
-                    && !matches!(definition.format, FileFormat::XmlAttribute(_))
-            })
-            .count();
-        let xml = BASELINE_CATALOG
-            .iter()
-            .filter(|definition| matches!(definition.format, FileFormat::XmlAttribute(_)))
-            .count();
-        assert_eq!(command.matches("index(rest, \"<!--\")").count(), xml * 2);
-        assert_eq!(
-            command.matches("/^[[:space:]]*#/{next}").count()
-                + command.matches("/^[[:space:]]*[#;]/{next}").count(),
-            line_based * 2
-        );
+        // Asked of every program rather than counted in the script, so the
+        // property holds however the script is arranged.
+        for definition in BASELINE_CATALOG {
+            if !matches!(definition.reading, Reading::Files(_)) {
+                continue;
+            }
+            for program in [reader_program(definition), witness_program(definition)] {
+                let skips = match definition.format {
+                    // An XML comment is a region, not a line: it is skipped by
+                    // the walk that finds where it ends.
+                    FileFormat::XmlAttribute(_) => program.contains("index(rest, \"<!--\")"),
+                    _ => {
+                        program.contains("/^[[:space:]]*#/{next}")
+                            || program.contains("/^[[:space:]]*[#;]/{next}")
+                            || program.contains("sub(/#.*$/,\"\",probe)")
+                    }
+                };
+                assert!(skips, "{} reads commented lines as settings", definition.id);
+                assert!(
+                    !program.contains("sub(/^[[:space:]]*#[[:space:]]*/"),
+                    "{} strips the comment marker before matching",
+                    definition.id
+                );
+            }
+        }
     }
 
     fn sshd_definition() -> &'static BaselineDefinition {
@@ -5302,32 +5486,33 @@ mod tests {
     fn the_scan_asks_about_every_setting_exactly_once() {
         let command = scan_command();
         for definition in BASELINE_CATALOG {
+            let call = match definition.reading {
+                Reading::RunningSysctl => format!("lr_sysctl '{}'", definition.id),
+                Reading::Files(_) => format!("lr_file '{}'", definition.id),
+            };
             assert_eq!(
-                command
-                    .matches(&format!(
-                        "printf 'ITEM=%s\\t%s\\t%s\\n' '{}'",
-                        definition.id
-                    ))
-                    .count(),
+                command.matches(&call).count(),
                 1,
                 "{} is not asked about exactly once",
                 definition.id,
             );
         }
+        // Every row the scan prints, it prints the same way.
+        assert_eq!(command.matches("printf 'ITEM=%s\\t%s\\t%s\\n'").count(), 2);
         // First-wins needs a found flag; last-wins must not have one, or it
         // would silently become first-wins too.
-        let sshd = BASELINE_CATALOG
-            .iter()
-            .filter(|definition| definition.reload == ReloadGroup::Sshd)
-            .count();
-        // Twice each: once to read the value, once to record which file it
-        // came from.
-        let first = command.matches("BEGIN{v=\"\";f=0}").count();
-        assert_eq!(
-            first,
-            sshd * 2,
-            "only the sshd_config settings read first-wins"
-        );
+        for definition in BASELINE_CATALOG {
+            if !matches!(definition.reading, Reading::Files(_)) {
+                continue;
+            }
+            let first_wins = reader_program(definition).contains("BEGIN{v=\"\";f=0}");
+            assert_eq!(
+                first_wins,
+                definition.reload == ReloadGroup::Sshd,
+                "{} reads the wrong occurrence",
+                definition.id
+            );
+        }
     }
 
     /// A kernel parameter can be set from any of half a dozen places, and a
@@ -5343,9 +5528,15 @@ mod tests {
             .filter(|definition| matches!(definition.reading, Reading::RunningSysctl))
             .collect::<Vec<_>>();
         assert!(sysctl.len() >= 18);
+        // The reading is done once, in a function; each check names its own
+        // parameter and is answered by that function rather than by a file.
+        assert!(command.contains("lr_read=$(sysctl -n \"$lr_key\""));
         for definition in sysctl {
             assert!(
-                command.contains(&format!("sysctl -n '{}'", definition.key)),
+                command.contains(&format!(
+                    "lr_sysctl '{}' '{}'",
+                    definition.id, definition.key
+                )),
                 "{} is not read from the running kernel",
                 definition.id
             );

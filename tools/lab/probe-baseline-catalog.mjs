@@ -54,6 +54,11 @@ try {
   await sidecar.call("ssh.binding.disconnect", { bindingHandle: status.bindingHandle });
 } catch (error) {
   console.log(`FAILED: ${error.message}`);
+  // The sidecar logs why; a failure with only the public message is a failure
+  // you cannot act on.
+  const noisy = sidecar.stderr.join("").split(/\r?\n/u)
+    .filter((line) => /ERROR|WARN/u.test(line));
+  for (const line of noisy.slice(-4)) console.log(`  ${line.slice(0, 900)}`);
   process.exitCode = 1;
 } finally {
   sidecar.close();
