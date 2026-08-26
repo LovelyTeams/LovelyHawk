@@ -74,6 +74,7 @@ $expectedPreloadBindings = @(
     @{ Name = 'getBaselineCatalog'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:baseline:catalog:get' },
     @{ Name = 'scanBaseline'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:baseline:scan' },
     @{ Name = 'listBaselineHistory'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:baseline:history:list' },
+    @{ Name = 'readBaselineFile'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:baseline:file:read' },
     @{ Name = 'discoverMiddleware'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:middleware:discover' },
     @{ Name = 'loadMiddlewareConfiguration'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:middleware:configuration:load' },
     @{ Name = 'listMiddlewareHistory'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:middleware:history:list' },
@@ -162,8 +163,8 @@ $expectedPreloadBindings = @(
     @{ Name = 'notifyRendererReady'; Method = 'send'; Registration = 'on'; Channel = 'lovelyres:renderer-ready' }
 )
 
-if ($expectedPreloadBindings.Count -ne 116) {
-    throw "Electron main preload allowlist must contain exactly 116 methods; found $($expectedPreloadBindings.Count)."
+if ($expectedPreloadBindings.Count -ne 117) {
+    throw "Electron main preload allowlist must contain exactly 117 methods; found $($expectedPreloadBindings.Count)."
 }
 
 function Get-CspPolicyViolation {
@@ -526,6 +527,7 @@ $requiredFiles = @(
     (Join-Path $electronRoot 'src/renderer/firewall-read-helpers.ts'),
     (Join-Path $electronRoot 'src/renderer/firewall-read-state.ts'),
     (Join-Path $electronRoot 'src/renderer/BaselinePage.tsx'),
+    (Join-Path $electronRoot 'src/renderer/BaselineFilePane.tsx'),
     (Join-Path $electronRoot 'src/renderer/baseline-page.css'),
     (Join-Path $electronRoot 'src/renderer/baseline-read-helpers.ts'),
     (Join-Path $electronRoot 'src/renderer/baseline-read-state.ts'),
@@ -1514,8 +1516,8 @@ if (-not $baselineApiMatch.Success) {
     Add-GateViolation 'electron/src/shared/baseline-read-contract.ts is missing BaselineReadApi'
 } else {
     $baselineNames = @([regex]::Matches($baselineApiMatch.Groups['body'].Value, '(?m)^\s{2}(?<name>[A-Za-z_$][A-Za-z0-9_$]*)\s*\(') | ForEach-Object { $_.Groups['name'].Value })
-    if (($baselineNames -join "`n") -cne (@('getBaselineCatalog', 'scanBaseline', 'listBaselineHistory') -join "`n")) {
-        Add-GateViolation 'electron/src/shared/baseline-read-contract.ts must expose exactly getBaselineCatalog/scanBaseline/listBaselineHistory'
+    if (($baselineNames -join "`n") -cne (@('getBaselineCatalog', 'scanBaseline', 'listBaselineHistory', 'readBaselineFile') -join "`n")) {
+        Add-GateViolation 'electron/src/shared/baseline-read-contract.ts must expose exactly getBaselineCatalog/scanBaseline/listBaselineHistory/readBaselineFile'
     }
     if ($baselineApiMatch.Groups['body'].Value -notmatch 'getBaselineCatalog\(\):\s*Promise<unknown>;' -or
         $baselineApiMatch.Groups['body'].Value -notmatch 'scanBaseline\(bindingHandle:\s*string\):\s*Promise<unknown>;' -or
@@ -1527,7 +1529,8 @@ if (-not $baselineApiMatch.Success) {
 foreach ($marker in @(
     'getBaselineCatalog(): Promise<BaselineCatalog>;',
     'scanBaseline(bindingHandle: string): Promise<BaselineScan>;',
-    'listBaselineHistory(bindingHandle: string): Promise<BaselineHistory>;'
+    'listBaselineHistory(bindingHandle: string): Promise<BaselineHistory>;',
+    'readBaselineFile(bindingHandle: string, itemHandle: string): Promise<BaselineFile>;'
 )) {
     if (-not $contractText.Contains($marker, [System.StringComparison]::Ordinal)) {
         Add-GateViolation "electron/src/shared/contract.ts is missing exact Baseline API marker '$marker'"
@@ -1536,7 +1539,8 @@ foreach ($marker in @(
 foreach ($channel in @(
     'lovelyres:baseline:catalog:get',
     'lovelyres:baseline:scan',
-    'lovelyres:baseline:history:list'
+    'lovelyres:baseline:history:list',
+    'lovelyres:baseline:file:read'
 )) {
     if ([regex]::Matches($mainText, [regex]::Escape($channel)).Count -ne 1) {
         Add-GateViolation "electron/src/main/index.ts must register exactly one fixed Baseline IPC '$channel'"
@@ -1548,6 +1552,17 @@ foreach ($channel in @(
 if ($mainText -notmatch '(?s)ipcMain\.handle\("lovelyres:baseline:catalog:get".{0,240}?values\.length\s*!==\s*0' -or
     [regex]::Matches($mainText, 'values\.length\s*!==\s*1\s*\|\|\s*!isBaselineOpaqueHandle\(values\[0\]\)').Count -ne 2) {
     Add-GateViolation 'electron/src/main/index.ts must reject unknown Baseline IPC ingredients with exact arity zero/one validators'
+}
+# Opening the file behind a check names the check. A path is never a parameter.
+$baselineFileBoundary = $mainText.Substring(
+    $mainText.IndexOf('ipcMain.handle("lovelyres:baseline:file:read"', [System.StringComparison]::Ordinal),
+    $mainText.IndexOf('ipcMain.handle("lovelyres:middleware:discover"', [System.StringComparison]::Ordinal) -
+        $mainText.IndexOf('ipcMain.handle("lovelyres:baseline:file:read"', [System.StringComparison]::Ordinal)
+)
+if (-not $baselineFileBoundary.Contains('hasExactKeys(value, ["bindingHandle", "itemHandle"])', [System.StringComparison]::Ordinal) -or
+    [regex]::Matches($baselineFileBoundary, 'isBaselineOpaqueHandle\(value\.(?:binding|item)Handle\)').Count -ne 2 -or
+    $baselineFileBoundary -match '(?i)\b(?:path|filePath|remotePath|command|shell)\b') {
+    Add-GateViolation 'electron/src/main/index.ts must resolve the Baseline file from an item handle and never from a caller-supplied path'
 }
 foreach ($marker in @(
     'mod baseline_read_api;',
@@ -1572,6 +1587,10 @@ foreach ($marker in @(
     'MAX_READS_PER_BINDING: usize = 1',
     'pub(crate) fn close_binding(&self, binding_handle: &str)',
     'SnapshotData::History',
+    'pub(crate) async fn read_setting_file(',
+    'fn project_file_view(',
+    'MAX_FILE_TEXT_BYTES: usize = 256 * 1024',
+    'fn id_for(&self, item_handle: &str)',
     'if let Err(error) = self.validate_binding(&scope)'
 )) {
     if (-not $baselineReadApiText.Contains($marker, [System.StringComparison]::Ordinal)) {
@@ -1597,7 +1616,13 @@ foreach ($marker in @(
     'fn load_stored_baseline_history(&self)',
     'encoded_baseline_history_is_rejected_before_json_decode',
     'stored_history_limit_rejects_257_on_every_load_path_without_echo',
-    'exactly_256_stored_history_records_are_valid_on_every_load_path'
+    'exactly_256_stored_history_records_are_valid_on_every_load_path',
+    'pub async fn read_setting_file(',
+    'MAX_FILE_BYTES: usize = 256 * 1024',
+    'MAX_FILE_LINES: usize = 4_000',
+    'fn mentions_of(',
+    'a_commented_line_is_never_read_as_a_setting',
+    'the_marked_line_is_the_line_the_host_obeys'
 )) {
     if (-not $coreBaselineText.Contains($marker, [System.StringComparison]::Ordinal)) {
         Add-GateViolation "crates/lovelyres-core/src/baseline.rs is missing pre-allocation Baseline hardening marker '$marker'"
@@ -1607,7 +1632,7 @@ if ($appText -notmatch '(?s)activePage\.id\s*===\s*"baseline-quick-edit".{0,260}
     Add-GateViolation 'electron/src/renderer/App.tsx must mount BaselinePage with only the current opaque binding handle and fixed API'
 }
 if ($baselinePageText -match '(?i)\b(?:SshTargetSummary|BaselineConnection|connectionId|sessionId|targetGuard|generation|host|port|username|dataRoot|filePath|remotePath|recordId|operationId|digest|apiKey)\b' -or
-    $baselinePageText -match '(?i)\b(?:planBaseline|confirmBaseline|executeBaseline|restoreBaseline|reloadBaseline|exportBaseline|openBaselineTerminal|readBaselineFile|innerHTML|dangerouslySetInnerHTML)\b') {
+    $baselinePageText -match '(?i)\b(?:planBaseline|confirmBaseline|executeBaseline|restoreBaseline|reloadBaseline|exportBaseline|openBaselineTerminal|writeBaselineFile|innerHTML|dangerouslySetInnerHTML)\b') {
     Add-GateViolation 'electron/src/renderer/BaselinePage.tsx exceeds the opaque read-only plain-text Phase 1 surface'
 }
 foreach ($marker in @(
@@ -1615,11 +1640,27 @@ foreach ($marker in @(
     'const scope = bindingHandle === null ? null : baselineScope(bindingHandle);',
     'dispatch({ type: "deactivated", scope });',
     'scanBaseline(bindingHandle)',
-    'listBaselineHistory(bindingHandle)'
+    'listBaselineHistory(bindingHandle)',
+    'useBaselineFile(api, bindingHandle)'
 )) {
     if (-not $baselinePageText.Contains($marker, [System.StringComparison]::Ordinal)) {
         Add-GateViolation "electron/src/renderer/BaselinePage.tsx is missing lifecycle marker '$marker'"
     }
+}
+$baselineFilePanePath = Join-Path $electronRoot 'src/renderer/BaselineFilePane.tsx'
+$baselineFilePaneText = Get-Content -LiteralPath $baselineFilePanePath -Raw
+foreach ($marker in @(
+    'api.readBaselineFile(bindingHandle, itemHandle)',
+    'wanted.current !== itemHandle',
+    'isBaselineFile(value)'
+)) {
+    if (-not $baselineFilePaneText.Contains($marker, [System.StringComparison]::Ordinal)) {
+        Add-GateViolation "electron/src/renderer/BaselineFilePane.tsx is missing capability marker '$marker'"
+    }
+}
+# The pane shows a path and acts on a handle. It never sends one.
+if ($baselineFilePaneText -match 'readBaselineFile\([^)]*[''"`]/') {
+    Add-GateViolation 'electron/src/renderer/BaselineFilePane.tsx must open a file by naming the check, never a path'
 }
 if (-not $baselineStateText.Contains('| { type: "deactivated"; scope: string | null }', [System.StringComparison]::Ordinal) -or
     -not $baselineHelpersText.Contains('export function baselineScope(bindingHandle: string): string', [System.StringComparison]::Ordinal)) {

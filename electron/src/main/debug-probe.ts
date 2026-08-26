@@ -7,7 +7,7 @@ import { DEFAULT_THEME_ID, themeDefinition } from "../shared/theme-contract.js";
 
 const PROBE_TIMEOUT_MS = 15_000;
 const COMMAND_TIMEOUT_MS = 5_000;
-const MAIN_PRELOAD_API_COUNT = 116;
+const MAIN_PRELOAD_API_COUNT = 117;
 const UNAUTHORIZED_TERMINAL_URL = "lovelyres://app/?window=terminal";
 
 /** The default theme's chrome color as the renderer reports it, so a repalette
@@ -148,7 +148,7 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
     assert(
       Array.isArray(initial.apiMethods) &&
         initial.apiMethods.join(",") ===
-          "addNoteTag,bootstrap,cancelAiHistoryMutation,cancelCommandHistoryMutation,cancelConnectionDelete,cancelEmergencyPathAction,cancelIntegrityComparison,cancelNoteDelete,cancelSettingsMutation,cancelSshAttempt,clearApplicationLogBuffer,closeConfigDraft,collectCheckAuditStatus,collectSystemInfo,confirmAiHistoryMutation,confirmCommandHistoryMutation,confirmConnectionDelete,confirmEmergencyPathAction,confirmNoteDelete,confirmSettingsMutation,confirmSshHostKey,copyConfig,correlateLogSources,createConnection,createNote,diffForensicSnapshots,disconnectSshBinding,discoverLogSources,discoverMiddleware,executeEmergencyPathAction,exportAiHistory,exportApplicationLogs,exportConfigArtifact,exportConnections,exportDisposalReport,exportNotes,generateConfig,generateDisposalReport,getAiHistoryRecord,getApplicationLogPreview,getBaselineCatalog,getCheckAuditCatalog,getCommandHistory,getConfigCatalog,getConnection,getDisposalReportContent,getDockerCollection,getDockerLogs,getDockerSecurityAudit,getIntegrityPresets,getKubernetesAvailability,getKubernetesPodLogs,getKubernetesResourceDetail,getNote,getSnapshotDetail,getSshAttempt,getSystemInfoCatalog,getSystemInfoDetail,getSystemInfoSummary,importConnections,inspectDockerResource,inspectEmergencyPath,inspectFirewall,listAiHistory,listApplicationLogs,listBaselineHistory,listCommandHistory,listConnections,listFirewallChangeHistory,listIntegrityBaselines,listKubernetesResources,listMiddlewareHistory,listNotes,listPacketCaptureInterfaces,listSnapshots,loadEmergencyCommandCatalog,loadMiddlewareConfiguration,loadSettings,notifyRendererReady,onBeforeClose,openSshTerminal,planAiHistoryClear,planAiHistoryRemove,planCommandHistoryClear,planCommandHistoryRemove,planCommandReplay,planConnectionDelete,planEmergencyPathAction,planNoteDelete,planSettingsAiApiKeyClear,planSettingsAiProviderRemoval,pollIntegrityComparison,pollPacketCapture,readCheckAuditLog,readLogSource,refreshDockerContainers,removeNoteTag,replaceSettingsAiApiKey,respondSshMfa,reviseConfig,runEmergencyCommand,saveSettings,scanBaseline,searchLogIocs,setApplicationLogLevel,setNotePinned,setSecurityReferenceFavorites,setWindowTheme,startIntegrityComparison,startPacketCapture,startSshConnect,startSshProbe,stopPacketCapture,updateConnection,updateNote,writeClipboard",
+          "addNoteTag,bootstrap,cancelAiHistoryMutation,cancelCommandHistoryMutation,cancelConnectionDelete,cancelEmergencyPathAction,cancelIntegrityComparison,cancelNoteDelete,cancelSettingsMutation,cancelSshAttempt,clearApplicationLogBuffer,closeConfigDraft,collectCheckAuditStatus,collectSystemInfo,confirmAiHistoryMutation,confirmCommandHistoryMutation,confirmConnectionDelete,confirmEmergencyPathAction,confirmNoteDelete,confirmSettingsMutation,confirmSshHostKey,copyConfig,correlateLogSources,createConnection,createNote,diffForensicSnapshots,disconnectSshBinding,discoverLogSources,discoverMiddleware,executeEmergencyPathAction,exportAiHistory,exportApplicationLogs,exportConfigArtifact,exportConnections,exportDisposalReport,exportNotes,generateConfig,generateDisposalReport,getAiHistoryRecord,getApplicationLogPreview,getBaselineCatalog,getCheckAuditCatalog,getCommandHistory,getConfigCatalog,getConnection,getDisposalReportContent,getDockerCollection,getDockerLogs,getDockerSecurityAudit,getIntegrityPresets,getKubernetesAvailability,getKubernetesPodLogs,getKubernetesResourceDetail,getNote,getSnapshotDetail,getSshAttempt,getSystemInfoCatalog,getSystemInfoDetail,getSystemInfoSummary,importConnections,inspectDockerResource,inspectEmergencyPath,inspectFirewall,listAiHistory,listApplicationLogs,listBaselineHistory,listCommandHistory,listConnections,listFirewallChangeHistory,listIntegrityBaselines,listKubernetesResources,listMiddlewareHistory,listNotes,listPacketCaptureInterfaces,listSnapshots,loadEmergencyCommandCatalog,loadMiddlewareConfiguration,loadSettings,notifyRendererReady,onBeforeClose,openSshTerminal,planAiHistoryClear,planAiHistoryRemove,planCommandHistoryClear,planCommandHistoryRemove,planCommandReplay,planConnectionDelete,planEmergencyPathAction,planNoteDelete,planSettingsAiApiKeyClear,planSettingsAiProviderRemoval,pollIntegrityComparison,pollPacketCapture,readBaselineFile,readCheckAuditLog,readLogSource,refreshDockerContainers,removeNoteTag,replaceSettingsAiApiKey,respondSshMfa,reviseConfig,runEmergencyCommand,saveSettings,scanBaseline,searchLogIocs,setApplicationLogLevel,setNotePinned,setSecurityReferenceFavorites,setWindowTheme,startIntegrityComparison,startPacketCapture,startSshConnect,startSshProbe,stopPacketCapture,updateConnection,updateNote,writeClipboard",
       "preload exposed an unexpected API surface",
     );
     await waitFor(client, "document.fonts.status === 'loaded'");
@@ -776,7 +776,15 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
           restoreMethod: typeof window.lovelyres.restoreBaselineChange,
           reloadMethod: typeof window.lovelyres.reloadBaselineService,
           terminalMethod: typeof window.lovelyres.openBaselineTerminal,
-          fileMethod: typeof window.lovelyres.readBaselineFile,
+          readFileType: typeof window.lovelyres.readBaselineFile,
+          readFileArity: window.lovelyres.readBaselineFile.length,
+          readFile: await rejected(() =>
+            window.lovelyres.readBaselineFile(marker, marker)),
+          readFileWithPath: await rejected(() =>
+            window.lovelyres.readBaselineFile(marker, { itemHandle: marker, path: '/etc/shadow' })),
+          readFileWithExtraKeys: await rejected(() =>
+            window.lovelyres.readBaselineFile({ bindingHandle: marker, path: '/etc/shadow' }, marker)),
+          writeFileMethod: typeof window.lovelyres.writeBaselineFile,
           exportMethod: typeof window.lovelyres.exportBaseline,
           genericInvoke: typeof window.lovelyres.invoke,
           markerInDom: document.documentElement.textContent.includes(marker)
@@ -787,10 +795,12 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
     assert(baselineBoundary.catalogType === "function", "getBaselineCatalog is unavailable");
     assert(baselineBoundary.scanType === "function", "scanBaseline is unavailable");
     assert(baselineBoundary.historyType === "function", "listBaselineHistory is unavailable");
+    assert(baselineBoundary.readFileType === "function", "readBaselineFile is unavailable");
     assert(
       typeof baselineBoundary.catalogArity === "number" &&
         typeof baselineBoundary.scanArity === "number" &&
-        typeof baselineBoundary.historyArity === "number",
+        typeof baselineBoundary.historyArity === "number" &&
+        typeof baselineBoundary.readFileArity === "number",
       "Baseline contextBridge methods do not expose callable function metadata",
     );
     assert(baselineBoundary.catalogDisplayed === 38, "bounded Baseline catalog did not load");
@@ -798,14 +808,19 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
       baselineBoundary.catalogUnknownStripped === true,
       "catalog extra ingredients crossed the arity-zero preload boundary",
     );
-    for (const name of ["scan", "history", "scanWithUnknown", "historyWithUnknown"]) {
+    for (const name of [
+      "scan", "history", "scanWithUnknown", "historyWithUnknown",
+      // A forged item handle names no check, and a path smuggled in place
+      // of one names no file.
+      "readFile", "readFileWithPath", "readFileWithExtraKeys",
+    ]) {
       const result = baselineBoundary[name];
       assert(isRecord(result) && result.rejected === true, `Baseline ${name} did not fail closed`);
       assert(isRecord(result) && result.echoed === false, `Baseline ${name} echoed hostile input`);
     }
     for (const name of [
       "planMethod", "confirmMethod", "executeMethod", "restoreMethod", "reloadMethod",
-      "terminalMethod", "fileMethod", "exportMethod", "genericInvoke",
+      "terminalMethod", "writeFileMethod", "exportMethod", "genericInvoke",
     ]) {
       assert(baselineBoundary[name] === "undefined", `Baseline renderer exposed forbidden ${name}`);
     }

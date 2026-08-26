@@ -66,6 +66,7 @@ import type {
 } from "./firewall-read-contract.js";
 import type {
   BaselineCatalog,
+  BaselineFile,
   BaselineHistory,
   BaselineScan,
 } from "./baseline-read-contract.js";
@@ -469,6 +470,7 @@ export interface LovelyResApi {
   getBaselineCatalog(): Promise<BaselineCatalog>;
   scanBaseline(bindingHandle: string): Promise<BaselineScan>;
   listBaselineHistory(bindingHandle: string): Promise<BaselineHistory>;
+  readBaselineFile(bindingHandle: string, itemHandle: string): Promise<BaselineFile>;
   discoverMiddleware(bindingHandle: string): Promise<MiddlewareDiscovery>;
   loadMiddlewareConfiguration(
     bindingHandle: string,

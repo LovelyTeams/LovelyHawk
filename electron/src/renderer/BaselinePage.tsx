@@ -5,10 +5,18 @@ import {
   isBaselineHistory,
   isBaselineScan,
   type BaselineCatalog,
+  type BaselineCatalogItem,
+  type BaselineFile,
   type BaselineHistory,
   type BaselineReadApi,
   type BaselineScan,
+  type BaselineStatus,
 } from "../shared/baseline-read-contract";
+import {
+  BaselineFilePane,
+  useBaselineFile,
+  type BaselineFileStatus,
+} from "./BaselineFilePane";
 import {
   baselineCategoryLabel,
   baselineComplianceLabel,
@@ -128,6 +136,20 @@ export function BaselinePage({ bindingHandle, api, active = true }: BaselinePage
   }, [api, bindingHandle, enabled, historyVersion, scope, state.scope, state.tab]);
 
   const current = state.scope === scope;
+  // Which check the file pane is showing. View state, so it lives here rather
+  // than in the reducer that guards the scoped reads.
+  const [selectedItemHandle, setSelectedItemHandle] = useState<string | null>(null);
+  const configFile = useBaselineFile(api, bindingHandle);
+  const loadConfigFile = configFile.open;
+
+  useEffect(() => {
+    setSelectedItemHandle(null);
+  }, [scope]);
+
+  useEffect(() => {
+    void loadConfigFile(selectedItemHandle);
+  }, [loadConfigFile, selectedItemHandle]);
+
   if (!active) {
     return (
       <main className="baseline-page">
@@ -192,6 +214,12 @@ export function BaselinePage({ bindingHandle, api, active = true }: BaselinePage
                 onCategory={(value) => dispatch({ type: "category-changed", value })}
                 onCompliance={(value) => dispatch({ type: "compliance-changed", value })}
                 onRefresh={() => setScanVersion((value) => value + 1)}
+                selectedItemHandle={selectedItemHandle}
+                onSelect={setSelectedItemHandle}
+                file={configFile.file}
+                fileStatus={configFile.status}
+                fileError={configFile.error}
+                onReloadFile={() => void loadConfigFile(selectedItemHandle)}
               />
             ) : (
               <BaselineHistoryView
@@ -210,7 +238,8 @@ export function BaselinePage({ bindingHandle, api, active = true }: BaselinePage
 }
 
 export function BaselineChecksView({ catalog, status, scan, error, connected, search, category,
-  compliance, onSearch, onCategory, onCompliance, onRefresh }: {
+  compliance, onSearch, onCategory, onCompliance, onRefresh, selectedItemHandle = null,
+  onSelect, file = null, fileStatus = "idle", fileError = null, onReloadFile }: {
   catalog: BaselineCatalog;
   status: BaselineReadStatus;
   scan: BaselineScan | null;
@@ -223,8 +252,15 @@ export function BaselineChecksView({ catalog, status, scan, error, connected, se
   onCategory(value: BaselineCategoryFilter): void;
   onCompliance(value: BaselineComplianceFilter): void;
   onRefresh(): void;
+  selectedItemHandle?: string | null;
+  onSelect?: ((itemHandle: string | null) => void) | undefined;
+  file?: BaselineFile | null;
+  fileStatus?: BaselineFileStatus;
+  fileError?: string | null;
+  onReloadFile?: (() => void) | undefined;
 }) {
   const visible = filterBaselineItems(catalog.items, scan, search, category, compliance);
+  const selected = visible.find(({ item }) => item.itemHandle === selectedItemHandle) ?? null;
   return (
     <>
       <div className="baseline-view-header">
@@ -271,28 +307,27 @@ export function BaselineChecksView({ catalog, status, scan, error, connected, se
       ) : visible.length === 0 ? (
         <BaselineEmptyPanel title="没有匹配的基线项" detail="调整分类、合规状态或搜索文本。" compact />
       ) : (
-        <div className="baseline-card-grid">
-          {visible.map(({ item, status: itemStatus }) => (
-            <article className={`baseline-card risk-${item.risk}`} key={item.itemHandle}>
-              <header>
-                <span>{baselineCategoryLabel(item.category)}</span>
-                <span>{baselineRiskLabel(item.risk)}风险</span>
-                <strong className={itemStatus?.compliant ? "is-compliant" : itemStatus === null ? "is-unscanned" : "is-noncompliant"}>
-                  {baselineComplianceLabel(itemStatus)}
-                </strong>
-              </header>
-              <h3>{item.title}</h3>
-              <p>{item.description}</p>
-              <dl>
-                <div><dt>建议值</dt><dd><code>{item.recommendation}</code></dd></div>
-                <div><dt>值类型</dt><dd>{baselineValueKindLabel(item.valueKind)}</dd></div>
-                <div><dt>观察值</dt><dd><code>{itemStatus?.observed ?? "—"}</code></dd></div>
-              </dl>
-              {(itemStatus?.redacted || itemStatus?.textTruncated) && (
-                <small>观察值包含 credential-like 文本或已按字节边界处理。</small>
-              )}
-            </article>
-          ))}
+        <div className="baseline-workbench">
+          <div className="baseline-card-grid" role="list">
+            {visible.map(({ item, status: itemStatus }) => (
+              <BaselineCheckCard
+                key={item.itemHandle}
+                item={item}
+                status={itemStatus}
+                selected={item.itemHandle === selectedItemHandle}
+                onSelect={onSelect}
+              />
+            ))}
+          </div>
+          <BaselineFilePane
+            item={selected?.item ?? null}
+            status={selected?.status ?? null}
+            file={file}
+            fileStatus={fileStatus}
+            error={fileError}
+            connected={connected}
+            onReload={() => onReloadFile?.()}
+          />
         </div>
       )}
       {(catalog.truncated || scan?.truncated) && (
@@ -301,6 +336,45 @@ export function BaselineChecksView({ catalog, status, scan, error, connected, se
         </BaselineTruncatedNotice>
       )}
     </>
+  );
+}
+
+/**
+ * One check. Selecting it opens the file it reads in the pane beside the list,
+ * because a verdict without the line it came from is only an assertion.
+ */
+export function BaselineCheckCard({ item, status, selected = false, onSelect }: {
+  item: BaselineCatalogItem;
+  status: BaselineStatus | null;
+  selected?: boolean;
+  onSelect?: ((itemHandle: string | null) => void) | undefined;
+}) {
+  const verdict = status?.compliant === true
+    ? "is-compliant"
+    : status === null ? "is-unscanned" : "is-noncompliant";
+  return (
+    <article className={`baseline-card risk-${item.risk}${selected ? " is-selected" : ""}`} role="listitem">
+      <button
+        type="button"
+        aria-pressed={selected}
+        disabled={onSelect === undefined}
+        onClick={() => onSelect?.(selected ? null : item.itemHandle)}
+      >
+        <header>
+          <span>{baselineCategoryLabel(item.category)}</span>
+          <span>{baselineRiskLabel(item.risk)}风险</span>
+          <strong className={verdict}>{baselineComplianceLabel(status)}</strong>
+        </header>
+        <h3>{item.title}</h3>
+        <p>{item.description}</p>
+        <dl>
+          <div><dt>建议值</dt><dd><code>{item.recommendation}</code></dd></div>
+          <div><dt>值类型</dt><dd>{baselineValueKindLabel(item.valueKind)}</dd></div>
+          <div><dt>观察值</dt><dd><code>{status?.observed ?? "—"}</code></dd></div>
+        </dl>
+        {status?.textTruncated === true && <small>观察值已按字节边界截断。</small>}
+      </button>
+    </article>
   );
 }
 

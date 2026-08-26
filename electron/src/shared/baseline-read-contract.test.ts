@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   isBaselineCatalog,
+  isBaselineFile,
   isBaselineHistory,
   isBaselineOpaqueHandle,
   isBaselineScan,
@@ -79,7 +80,7 @@ const history = {
 };
 
 describe("baseline read strict contract", () => {
-  it("freezes the future public API at exactly three read-only methods", () => {
+  it("freezes the future public API at exactly four read-only methods", () => {
     const source = readFileSync(new URL("./baseline-read-contract.ts", import.meta.url), "utf8");
     const body = source.match(/export interface BaselineReadApi \{([\s\S]*?)\n\}/u)?.[1] ?? "";
     const methods = [...body.matchAll(/^\s{2}([A-Za-z][A-Za-z0-9]*)\(/gmu)]
@@ -88,9 +89,15 @@ describe("baseline read strict contract", () => {
       "getBaselineCatalog",
       "scanBaseline",
       "listBaselineHistory",
+      "readBaselineFile",
     ]);
-    for (const forbidden of ["plan", "confirm", "execute", "restore", "reload", "file", "terminal", "export", "ai"])
-      expect(body.toLowerCase()).not.toContain(forbidden);
+    // Reading the file behind a check is still reading. Nothing here changes
+    // one, and the caller names the check rather than the file.
+    expect(body).toContain("readBaselineFile(bindingHandle: string, itemHandle: string)");
+    for (const forbidden of [
+      "plan", "confirm", "execute", "restore", "reload", "terminal", "export", "ai",
+      "write", "path",
+    ]) expect(body.toLowerCase()).not.toContain(forbidden);
   });
 
   it("accepts only bounded safe catalog metadata and opaque unique handles", () => {
@@ -171,5 +178,93 @@ describe("baseline read strict contract", () => {
       entries: [{ ...history.entries[0], textTruncated: true }],
     })).toBe(false);
     expect(isBaselineCatalog({ ...catalog, items: [], displayed: 0 })).toBe(true);
+  });
+});
+
+describe("baseline configuration file", () => {
+  const file = {
+    itemHandle: "baseline-item-1",
+    path: "/etc/ssh/sshd_config",
+    key: "PermitRootLogin",
+    exists: true,
+    text: "#PermitRootLogin prohibit-password\nPermitRootLogin yes\nPort 22",
+    lineCount: 3,
+    mentions: [
+      { line: 0, commented: true, effective: false },
+      { line: 1, commented: false, effective: true },
+    ],
+    truncated: false,
+  };
+
+  it("accepts a file with its lines marked", () => {
+    expect(isBaselineFile(file)).toBe(true);
+    // Nothing in force is a real state: every line may be commented out.
+    expect(isBaselineFile({
+      ...file,
+      mentions: [{ line: 0, commented: true, effective: false }],
+    })).toBe(true);
+  });
+
+  it("shows the file as the target wrote it", () => {
+    const messy = {
+      ...file,
+      text: `${hostile}\n\tPermitRootLogin yes\nroot:$6$salt$hash:19000:0:99999:7:::`,
+      lineCount: 3,
+      mentions: [{ line: 1, commented: false, effective: true }],
+    };
+    expect(isBaselineFile(messy)).toBe(true);
+    // Tabs and blank lines survive, because a configuration file is evidence.
+    expect(isBaselineFile({ ...file, text: "a\n\n\tb", lineCount: 3, mentions: [] })).toBe(true);
+    // Control characters that break the rendering do not.
+    expect(isBaselineFile({ ...file, text: "PermitRootLogin\u0007 yes", lineCount: 1, mentions: [] }))
+      .toBe(false);
+  });
+
+  it("refuses a mark that cannot be drawn or cannot be true", () => {
+    // Past the end of the text.
+    expect(isBaselineFile({ ...file, mentions: [{ line: 9, commented: false, effective: true }] }))
+      .toBe(false);
+    // A commented line sets nothing, so it cannot be the line in force.
+    expect(isBaselineFile({
+      ...file,
+      mentions: [{ line: 0, commented: true, effective: true }],
+    })).toBe(false);
+    // Two lines in force is a contradiction.
+    expect(isBaselineFile({
+      ...file,
+      mentions: [
+        { line: 0, commented: false, effective: true },
+        { line: 1, commented: false, effective: true },
+      ],
+    })).toBe(false);
+    // Marks have to arrive in file order, so the window can draw them once.
+    expect(isBaselineFile({
+      ...file,
+      mentions: [
+        { line: 1, commented: false, effective: true },
+        { line: 0, commented: true, effective: false },
+      ],
+    })).toBe(false);
+  });
+
+  it("refuses a line count that does not match the text", () => {
+    expect(isBaselineFile({ ...file, lineCount: 2 })).toBe(false);
+    expect(isBaselineFile({ ...file, lineCount: 4 })).toBe(false);
+  });
+
+  it("keeps an absent file empty rather than letting it look blank", () => {
+    expect(isBaselineFile({
+      ...file, exists: false, text: "", lineCount: 0, mentions: [],
+    })).toBe(true);
+    // "Not there" with content would be a contradiction the window would draw.
+    expect(isBaselineFile({ ...file, exists: false })).toBe(false);
+  });
+
+  it("refuses anything that is not one of the catalogue's own files", () => {
+    expect(isBaselineFile({ ...file, path: "etc/ssh/sshd_config" })).toBe(false);
+    expect(isBaselineFile({ ...file, path: "" })).toBe(false);
+    expect(isBaselineFile({ ...file, key: "" })).toBe(false);
+    expect(isBaselineFile({ ...file, itemHandle: "../raw-id" })).toBe(false);
+    expect(isBaselineFile({ ...file, extra: true })).toBe(false);
   });
 });

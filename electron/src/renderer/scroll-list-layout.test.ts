@@ -21,6 +21,8 @@ const SCROLL_LISTS: Record<string, string> = {
   ".connection-list": ".connection-list-row",
   ".sftp-operation-dialog": ".sftp-operation-dialog > *",
   ".emergency-path-dialog": ".emergency-path-dialog > *",
+  ".baseline-card-grid": ".baseline-card-grid > *",
+  ".baseline-file-pane": ".baseline-file-pane > *",
   ".log-analysis-list": ".log-analysis-group",
 };
 

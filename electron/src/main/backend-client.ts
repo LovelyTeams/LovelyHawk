@@ -11,6 +11,7 @@ import {
   type AiHistoryRecord,
   type BootstrapResult,
   type BaselineCatalog,
+  type BaselineFile,
   type BaselineHistory,
   type BaselineScan,
   type CheckAuditCatalog,
@@ -131,6 +132,7 @@ import {
   type TerminalSearch,
   isBootstrapResult,
   isBaselineCatalog,
+  isBaselineFile,
   isBaselineHistory,
   isBaselineOpaqueHandle,
   isBaselineScan,
@@ -350,6 +352,7 @@ export const BASELINE_READ_RPC_METHODS = Object.freeze({
   catalog: "baseline.catalog.get",
   scan: "baseline.scan",
   listHistory: "baseline.history.list",
+  readFile: "baseline.file.read",
 } as const);
 
 export const MIDDLEWARE_READ_RPC_METHODS = Object.freeze({
@@ -1014,6 +1017,20 @@ export class BackendClient {
     const value = await this.#request(BASELINE_READ_RPC_METHODS.listHistory, { bindingHandle });
     if (!isBaselineHistory(value)) {
       throw new Error("The backend returned invalid baseline history.");
+    }
+    return value;
+  }
+
+  async readBaselineFile(bindingHandle: string, itemHandle: string): Promise<BaselineFile> {
+    if (![bindingHandle, itemHandle].every(isBaselineOpaqueHandle)) {
+      throw new Error("The baseline file request is invalid.");
+    }
+    const value = await this.#request(BASELINE_READ_RPC_METHODS.readFile, {
+      bindingHandle,
+      itemHandle,
+    });
+    if (!isBaselineFile(value) || value.itemHandle !== itemHandle) {
+      throw new Error("The backend returned an invalid baseline file.");
     }
     return value;
   }

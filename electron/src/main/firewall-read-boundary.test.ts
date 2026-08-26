@@ -15,11 +15,11 @@ function frozenApiBody(): string {
 }
 
 describe("central Firewall Electron boundary", () => {
-  it("keeps both Firewall methods in the central exact 116 preload", () => {
+  it("keeps both Firewall methods in the central exact 117 preload", () => {
     const body = frozenApiBody();
     const names = [...body.matchAll(/^  (?<name>[A-Za-z_$][A-Za-z0-9_$]*):/gmu)]
       .map((match) => match.groups?.name);
-    expect(names).toHaveLength(116);
+    expect(names).toHaveLength(117);
     expect(names.filter((name) => name === "inspectFirewall")).toEqual(["inspectFirewall"]);
     expect(names.filter((name) => name === "listFirewallChangeHistory"))
       .toEqual(["listFirewallChangeHistory"]);

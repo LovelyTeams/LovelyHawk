@@ -644,6 +644,17 @@ impl BackendState {
                     Err(failure) => Err(failure),
                 }
             }
+            RpcMethod::BaselineFileRead => {
+                match parse_params::<BaselineFileParams>(request.params) {
+                    Ok(params) => self
+                        .baseline_read
+                        .read_setting_file(&params.binding_handle, &params.item_handle)
+                        .await
+                        .map(to_value)
+                        .map_err(baseline_read_failure),
+                    Err(failure) => Err(failure),
+                }
+            }
             RpcMethod::MiddlewareDiscover => {
                 match parse_params::<MiddlewareBindingParams>(request.params) {
                     Ok(params) => self
@@ -1848,6 +1859,8 @@ enum RpcMethod {
     BaselineScan,
     #[serde(rename = "baseline.history.list")]
     BaselineHistoryList,
+    #[serde(rename = "baseline.file.read")]
+    BaselineFileRead,
     #[serde(rename = "middleware.discover")]
     MiddlewareDiscover,
     #[serde(rename = "middleware.configuration.load")]
@@ -2186,6 +2199,14 @@ struct FirewallBindingParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct BaselineBindingParams {
     binding_handle: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BaselineFileParams {
+    binding_handle: String,
+    /// Which catalogue item to open the file of. Never a path.
+    item_handle: String,
 }
 
 #[derive(Deserialize)]

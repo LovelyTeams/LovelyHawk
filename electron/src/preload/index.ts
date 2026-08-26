@@ -93,6 +93,8 @@ const api: LovelyResApi = Object.freeze({
     ipcRenderer.invoke("lovelyres:baseline:scan", bindingHandle),
   listBaselineHistory: (bindingHandle: string) =>
     ipcRenderer.invoke("lovelyres:baseline:history:list", bindingHandle),
+  readBaselineFile: (bindingHandle: string, itemHandle: string) =>
+    ipcRenderer.invoke("lovelyres:baseline:file:read", { bindingHandle, itemHandle }),
   discoverMiddleware: (bindingHandle: string) =>
     ipcRenderer.invoke("lovelyres:middleware:discover", bindingHandle),
   loadMiddlewareConfiguration: (

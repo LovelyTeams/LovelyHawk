@@ -23,6 +23,7 @@ const api: BaselineReadApi = {
   getBaselineCatalog: async () => { throw new Error(); },
   scanBaseline: async () => { throw new Error(); },
   listBaselineHistory: async () => { throw new Error(); },
+  readBaselineFile: async () => { throw new Error(); },
 };
 
 const catalog: BaselineCatalog = {
@@ -107,8 +108,13 @@ describe("central Baseline page", () => {
     expect(html).toContain("不符合");
     expect(html).toContain("&lt;/code&gt;&lt;script&gt;plain()&lt;/script&gt;");
     expect(html).not.toContain("<script>");
-    expect(html).toContain("观察值包含 credential-like 文本或已按字节边界处理");
+    // Nothing is hidden any more, so there is no "已遮蔽" notice to show. What
+    // is left is the honest one: a value that ran past the byte ceiling.
+    expect(html).not.toContain("credential-like");
+    expect(html).not.toContain("遮蔽");
     expect(html).toContain("手动扫描");
+    // Without a selection the pane says what it is for rather than sitting blank.
+    expect(html).toContain("右边会显示这项检查读的那个配置文件");
   });
 
   it("renders hostile history summaries as text with empty and truncated states", () => {
@@ -136,10 +142,16 @@ describe("central Baseline page", () => {
     expect(html).toContain("调整筛选");
   });
 
-  it("keeps phase one on the exact three APIs and has lifecycle cancellation with no action surfaces", () => {
+  it("keeps the page on the exact four read APIs with lifecycle cancellation and no action surfaces", () => {
     const source = readFileSync(new URL("./BaselinePage.tsx", import.meta.url), "utf8");
+    const pane = readFileSync(new URL("./BaselineFilePane.tsx", import.meta.url), "utf8");
     for (const required of ["getBaselineCatalog()", "scanBaseline(bindingHandle)", "listBaselineHistory(bindingHandle)"])
       expect(source).toContain(required);
+    // The file is opened by naming the check, never the file.
+    expect(pane).toContain("api.readBaselineFile(bindingHandle, itemHandle)");
+    expect(pane).not.toMatch(/readBaselineFile\([^)]*["'`]\//u);
+    // A reply for a check the operator has moved on from is dropped.
+    expect(pane).toContain("wanted.current !== itemHandle");
     expect(source.match(/let cancelled = false;/gu)?.length).toBe(3);
     expect(source.match(/cancelled = true;/gu)?.length).toBe(3);
     expect(source).toContain("bindingHandle: string | null");

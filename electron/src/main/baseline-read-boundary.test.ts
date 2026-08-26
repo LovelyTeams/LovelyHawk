@@ -15,12 +15,17 @@ function frozenApiBody(): string {
 }
 
 describe("central Baseline Electron boundary", () => {
-  it("keeps all three Baseline methods in the central exact 116 preload", () => {
+  it("keeps all four Baseline methods in the central exact 117 preload", () => {
     const body = frozenApiBody();
     const names = [...body.matchAll(/^  (?<name>[A-Za-z_$][A-Za-z0-9_$]*):/gmu)]
       .map((match) => match.groups?.name);
-    expect(names).toHaveLength(116);
-    for (const name of ["getBaselineCatalog", "scanBaseline", "listBaselineHistory"]) {
+    expect(names).toHaveLength(117);
+    for (const name of [
+      "getBaselineCatalog",
+      "scanBaseline",
+      "listBaselineHistory",
+      "readBaselineFile",
+    ]) {
       expect(names.filter((candidate) => candidate === name)).toEqual([name]);
     }
     expect(body).toMatch(
@@ -32,22 +37,33 @@ describe("central Baseline Electron boundary", () => {
     expect(body).toMatch(
       /listBaselineHistory: \(bindingHandle: string\) =>\s*ipcRenderer\.invoke\("lovelyres:baseline:history:list", bindingHandle\)/u,
     );
+    // Opening the file behind a check names the check, never the file. The
+    // path lives in the fixed catalogue inside the core.
+    expect(body).toMatch(
+      /readBaselineFile: \(bindingHandle: string, itemHandle: string\) =>\s*ipcRenderer\.invoke\("lovelyres:baseline:file:read", \{ bindingHandle, itemHandle \}\)/u,
+    );
   });
 
-  it("registers catalog arity zero and two exact handle-validated arity-one IPC routes", () => {
+  it("registers catalog arity zero and three exact handle-validated arity-one IPC routes", () => {
     for (const channel of [
       "lovelyres:baseline:catalog:get",
       "lovelyres:baseline:scan",
       "lovelyres:baseline:history:list",
+      "lovelyres:baseline:file:read",
     ]) expect((mainSource.match(new RegExp(channel, "gu")) ?? [])).toHaveLength(1);
     const boundary = mainSource.slice(
       mainSource.indexOf('ipcMain.handle("lovelyres:baseline:catalog:get"'),
       mainSource.indexOf('ipcMain.handle("lovelyres:middleware:discover"'),
     );
     expect((boundary.match(/values\.length !== 0/gu) ?? [])).toHaveLength(1);
-    expect((boundary.match(/values\.length !== 1/gu) ?? [])).toHaveLength(2);
+    expect((boundary.match(/values\.length !== 1/gu) ?? [])).toHaveLength(3);
     expect((boundary.match(/!isBaselineOpaqueHandle\(values\[0\]\)/gu) ?? []))
       .toHaveLength(2);
+    // The file route carries two handles and nothing else.
+    expect(boundary).toContain('hasExactKeys(value, ["bindingHandle", "itemHandle"])');
+    expect((boundary.match(/isBaselineOpaqueHandle\(value\.(?:binding|item)Handle\)/gu) ?? []))
+      .toHaveLength(2);
+    // Still read-only, and still no way to name a file from outside.
     expect(boundary).not.toMatch(/\b(?:path|command|terminal|export|plan|confirm|execute|mutat)/iu);
   });
 
@@ -61,9 +77,16 @@ describe("central Baseline Electron boundary", () => {
     expect(api).toContain(
       "listBaselineHistory(bindingHandle: string): Promise<BaselineHistory>;",
     );
+    expect(api).toContain(
+      "readBaselineFile(bindingHandle: string, itemHandle: string): Promise<BaselineFile>;",
+    );
+    // Reading is the only thing that was added. Nothing here changes a file,
+    // and nothing takes a path.
     for (const forbidden of [
       "planBaseline", "confirmBaseline", "executeBaseline", "restoreBaseline",
-      "reloadBaseline", "exportBaseline", "openBaselineTerminal", "readBaselineFile", "invoke(",
+      "reloadBaseline", "exportBaseline", "openBaselineTerminal", "writeBaselineFile",
+      "invoke(",
     ]) expect(api).not.toContain(forbidden);
+    expect(api).not.toMatch(/BaselineFile\s*\|\s*string|filePath|remotePath/u);
   });
 });

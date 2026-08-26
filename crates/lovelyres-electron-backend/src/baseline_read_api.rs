@@ -16,7 +16,7 @@ use lovelyres_core::{
     BackendServices, CoreError,
     baseline::{
         BaselineCategory, BaselineChangeRecord, BaselineChangeState, BaselineDefinition,
-        BaselineObservedValue, BaselineRisk, BaselineScan, BaselineValueKind,
+        BaselineFileView, BaselineObservedValue, BaselineRisk, BaselineScan, BaselineValueKind,
     },
     ssh::BoundSshSession,
     target::TargetGuard,
@@ -50,6 +50,12 @@ const MAX_GLOBAL_READS: usize = 4;
 const MAX_READS_PER_BINDING: usize = 1;
 const SNAPSHOT_TTL: Duration = Duration::from_secs(5 * 60);
 const REDACTED_TEXT: &str = "[SENSITIVE BASELINE TEXT REDACTED]";
+/// A configuration file the operator is meant to read on screen. The core cuts
+/// at the same ceiling; this is the boundary saying so again.
+const MAX_FILE_TEXT_BYTES: usize = 256 * 1024;
+const MAX_FILE_LINES: usize = 4_000;
+const MAX_FILE_MENTIONS: usize = 256;
+const MAX_FILE_RESPONSE_BYTES: usize = 384 * 1024;
 
 #[derive(Clone)]
 pub(crate) struct BaselineReadApi {
@@ -126,6 +132,32 @@ impl BaselineReadApi {
             return Err(error);
         }
         Ok(result)
+    }
+
+    /// Reads the configuration file one catalogue item is checked against.
+    ///
+    /// The caller names an item, not a file. The path comes from the fixed
+    /// catalogue inside the core, so a forged handle reaches nothing and a
+    /// real one can only ever open one of the six files the checks live in.
+    pub(crate) async fn read_setting_file(
+        &self,
+        binding_handle: &str,
+        item_handle: &str,
+    ) -> Result<BaselineFileDto, BaselineReadApiError> {
+        validate_handle(item_handle)?;
+        let item_id = self.catalog.id_for(item_handle)?;
+        let (session, scope) = self.capture_binding(binding_handle)?;
+        let _permit = self.acquire_read(&scope)?;
+        let view = self
+            .services
+            .baseline()
+            .read_setting_file(&session, item_id)
+            .await?;
+        self.validate_binding(&scope)?;
+        let dto = project_file_view(item_handle, &view)?;
+        ensure_serialized_bound(&dto, MAX_FILE_RESPONSE_BYTES)?;
+        self.validate_binding(&scope)?;
+        Ok(dto)
     }
 
     pub(crate) async fn list_history(
@@ -324,6 +356,30 @@ enum PublicBaselineValueKind {
     Integer { minimum: u32, maximum: u32 },
 }
 
+/// One of the six fixed configuration files, as it stands on the target.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BaselineFileDto {
+    item_handle: String,
+    /// The file this check reads. Fixed by the catalogue, so it is a label
+    /// rather than something the window can act on.
+    path: String,
+    key: String,
+    exists: bool,
+    text: String,
+    line_count: usize,
+    mentions: Vec<BaselineFileMentionDto>,
+    truncated: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BaselineFileMentionDto {
+    line: u32,
+    commented: bool,
+    effective: bool,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct BaselineScanDto {
@@ -376,6 +432,9 @@ struct BaselineHistoryEntryDto {
 struct CatalogProjection {
     dto: BaselineCatalogDto,
     handles_by_id: HashMap<String, String>,
+    /// The way back: a handle the window was given resolves to the catalogue
+    /// entry it stands for, and to nothing else.
+    ids_by_handle: HashMap<String, &'static str>,
     titles_by_id: HashMap<String, String>,
     stored_bytes: usize,
 }
@@ -498,12 +557,32 @@ impl CatalogProjection {
         if stored_bytes > MAX_CATALOG_RESPONSE_BYTES {
             return Err(BaselineReadApiError::OutputLimit);
         }
+        let ids_by_handle = definitions
+            .iter()
+            .filter_map(|definition| {
+                handles_by_id
+                    .get(definition.id)
+                    .map(|handle| (handle.clone(), definition.id))
+            })
+            .collect::<HashMap<_, _>>();
+        if ids_by_handle.len() != handles_by_id.len() {
+            return Err(BaselineReadApiError::InvalidData);
+        }
         Ok(Self {
             dto,
             handles_by_id,
+            ids_by_handle,
             titles_by_id,
             stored_bytes,
         })
+    }
+
+    /// The catalogue entry a handle stands for, or nothing.
+    fn id_for(&self, item_handle: &str) -> Result<&'static str, BaselineReadApiError> {
+        self.ids_by_handle
+            .get(item_handle)
+            .copied()
+            .ok_or(BaselineReadApiError::InvalidHandle)
     }
 }
 
@@ -829,6 +908,67 @@ fn project_scan(
         non_compliant_count: displayed.saturating_sub(compliant_count),
         redacted_field_count,
         truncated,
+    })
+}
+
+fn project_file_view(
+    item_handle: &str,
+    view: &BaselineFileView,
+) -> Result<BaselineFileDto, BaselineReadApiError> {
+    // The core already replaced control characters and cut at its own ceiling.
+    // Re-checking here is what makes the boundary a boundary rather than a
+    // pass-through that trusts whatever arrived.
+    if view.text.len() > MAX_FILE_TEXT_BYTES {
+        return Err(BaselineReadApiError::OutputLimit);
+    }
+    let lines = if view.text.is_empty() {
+        0
+    } else {
+        view.text.lines().count()
+    };
+    if lines > MAX_FILE_LINES {
+        return Err(BaselineReadApiError::OutputLimit);
+    }
+    if view
+        .text
+        .chars()
+        .any(|character| character != '\n' && character != '\t' && character.is_control())
+    {
+        return Err(BaselineReadApiError::InvalidData);
+    }
+    if view.mentions.len() > MAX_FILE_MENTIONS {
+        return Err(BaselineReadApiError::OutputLimit);
+    }
+    let mut effective_seen = false;
+    let mut mentions = Vec::with_capacity(view.mentions.len());
+    for mention in &view.mentions {
+        // A mark that points past the end of the text would draw a highlight
+        // on a line the operator cannot see.
+        if usize::try_from(mention.line).is_ok_and(|line| line >= lines) {
+            return Err(BaselineReadApiError::InvalidData);
+        }
+        if mention.effective {
+            // At most one line is in force; two would be a contradiction.
+            if effective_seen || mention.commented {
+                return Err(BaselineReadApiError::InvalidData);
+            }
+            effective_seen = true;
+        }
+        mentions.push(BaselineFileMentionDto {
+            line: mention.line,
+            commented: mention.commented,
+            effective: mention.effective,
+        });
+    }
+    Ok(BaselineFileDto {
+        item_handle: item_handle.to_owned(),
+        path: trusted_catalog_text(view.path, MAX_TITLE_BYTES)?,
+        key: trusted_catalog_text(view.key, MAX_RECOMMENDATION_BYTES)?,
+        exists: view.exists,
+        text: view.text.clone(),
+        line_count: lines,
+        mentions,
+        truncated: view.truncated,
     })
 }
 

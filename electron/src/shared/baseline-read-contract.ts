@@ -72,10 +72,37 @@ export interface BaselineHistory {
   truncated: boolean;
 }
 
+/**
+ * A line of a configuration file that names the setting being checked.
+ *
+ * `effective` marks the one line the program on the target actually obeys.
+ * A commented line never is, and when the same setting is written more than
+ * once only one of them counts — which one depends on the program.
+ */
+export interface BaselineFileMention {
+  line: number;
+  commented: boolean;
+  effective: boolean;
+}
+
+/** The configuration file behind one check, as it stands on the target. */
+export interface BaselineFile {
+  itemHandle: string;
+  /** The file this check reads. A label; the window cannot act on it. */
+  path: string;
+  key: string;
+  exists: boolean;
+  text: string;
+  lineCount: number;
+  mentions: BaselineFileMention[];
+  truncated: boolean;
+}
+
 export interface BaselineReadApi {
   getBaselineCatalog(): Promise<unknown>;
   scanBaseline(bindingHandle: string): Promise<unknown>;
   listBaselineHistory(bindingHandle: string): Promise<unknown>;
+  readBaselineFile(bindingHandle: string, itemHandle: string): Promise<unknown>;
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -257,4 +284,44 @@ export function isBaselineHistory(value: unknown): value is BaselineHistory {
     (!entries.some((entry) => entry.textTruncated) || value.truncated) &&
     withinTextBudget(entries.map((entry) => entry.summary), 128 * 1_024) &&
     withinSerializedBudget(value, 512 * 1_024);
+}
+
+function fileMention(value: unknown, lineCount: number): value is BaselineFileMention {
+  return record(value) && exact(value, ["line", "commented", "effective"]) &&
+    unsigned(value.line, 3_999) && value.line < lineCount &&
+    typeof value.commented === "boolean" && typeof value.effective === "boolean" &&
+    // A commented line sets nothing, so it can never be the one in force.
+    !(value.effective && value.commented);
+}
+
+/**
+ * A configuration file the operator reads on screen.
+ *
+ * The text crosses as the target wrote it. Only newlines and tabs are allowed
+ * among the control characters, because the rest break the rendering; nothing
+ * is filtered on how the content looks.
+ */
+export function isBaselineFile(value: unknown): value is BaselineFile {
+  if (!record(value) || !exact(value, [
+    "itemHandle", "path", "key", "exists", "text", "lineCount", "mentions", "truncated",
+  ]) || !isBaselineOpaqueHandle(value.itemHandle) ||
+    typeof value.path !== "string" || !value.path.startsWith("/") || value.path.length > 256 ||
+    typeof value.key !== "string" || value.key.length === 0 || value.key.length > 128 ||
+    typeof value.exists !== "boolean" || typeof value.text !== "string" ||
+    encoder.encode(value.text).byteLength > 256 * 1_024 ||
+    /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value.text) ||
+    /[\u0000-\u001f\u007f]/u.test(value.path) || /[\u0000-\u001f\u007f]/u.test(value.key) ||
+    !unsigned(value.lineCount, 4_000) || !Array.isArray(value.mentions) ||
+    value.mentions.length > 256 || typeof value.truncated !== "boolean") return false;
+  const lines = value.text.length === 0 ? 0 : value.text.split("\n").length;
+  if (lines !== value.lineCount) return false;
+  // A file that is not there has nothing to show and nothing to mark.
+  if (!value.exists && (value.text.length > 0 || value.mentions.length > 0)) return false;
+  const lineCount = value.lineCount;
+  const mentions = value.mentions as unknown[];
+  if (!mentions.every((mention) => fileMention(mention, lineCount))) return false;
+  const typed = mentions as BaselineFileMention[];
+  return typed.every((mention, index) => index === 0 || mention.line > typed[index - 1]!.line) &&
+    typed.filter((mention) => mention.effective).length <= 1 &&
+    withinSerializedBudget(value, 384 * 1_024);
 }

@@ -1029,6 +1029,20 @@ function registerIpc(): void {
     }
     return backend.listBaselineHistory(values[0]);
   });
+  ipcMain.handle("lovelyres:baseline:file:read", async (event, ...values: unknown[]) => {
+    validateSender(event);
+    const value = values[0];
+    if (
+      values.length !== 1 ||
+      !isRecord(value) ||
+      !hasExactKeys(value, ["bindingHandle", "itemHandle"]) ||
+      !isBaselineOpaqueHandle(value.bindingHandle) ||
+      !isBaselineOpaqueHandle(value.itemHandle)
+    ) {
+      throw new Error("Invalid baseline file request.");
+    }
+    return backend.readBaselineFile(value.bindingHandle, value.itemHandle);
+  });
   ipcMain.handle("lovelyres:middleware:discover", async (event, ...values: unknown[]) => {
     validateSender(event);
     if (values.length !== 1 || !isMiddlewareOpaqueHandle(values[0])) {

@@ -29,11 +29,11 @@ function expectLiteralErrorsOnly(source: string, expectedCount: number): void {
 }
 
 describe("central Docker Electron read boundary", () => {
-  it("keeps the exact five read methods in the frozen exact 116 preload", () => {
+  it("keeps the exact five read methods in the frozen exact 117 preload", () => {
     const body = frozenApiBody();
     const names = [...body.matchAll(/^  (?<name>[A-Za-z_$][A-Za-z0-9_$]*):/gmu)]
       .map((match) => match.groups?.name);
-    expect(names).toHaveLength(116);
+    expect(names).toHaveLength(117);
     for (const name of [
       "refreshDockerContainers",
       "getDockerCollection",

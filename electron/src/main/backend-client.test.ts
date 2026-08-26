@@ -194,19 +194,26 @@ describe("Firewall read backend client boundary", () => {
 });
 
 describe("Baseline read backend client boundary", () => {
-  it("pins exactly three RPC methods and validates every input and response DTO", () => {
+  it("pins exactly four RPC methods and validates every input and response DTO", () => {
     expect(BASELINE_READ_RPC_METHODS).toEqual({
       catalog: "baseline.catalog.get",
       scan: "baseline.scan",
       listHistory: "baseline.history.list",
+      readFile: "baseline.file.read",
     });
-    expect(Object.keys(BASELINE_READ_RPC_METHODS)).toHaveLength(3);
+    expect(Object.keys(BASELINE_READ_RPC_METHODS)).toHaveLength(4);
     expect(BackendClient.prototype.getBaselineCatalog.toString()).toContain("isBaselineCatalog");
     expect(BackendClient.prototype.scanBaseline.toString()).toContain("isBaselineScan");
     expect(BackendClient.prototype.scanBaseline.toString()).toContain("isBaselineOpaqueHandle");
     expect(BackendClient.prototype.listBaselineHistory.toString()).toContain("isBaselineHistory");
     expect(BackendClient.prototype.listBaselineHistory.toString())
       .toContain("isBaselineOpaqueHandle");
+    expect(BackendClient.prototype.readBaselineFile.toString()).toContain("isBaselineFile");
+    // Both handles are checked, and the reply has to be about the one asked for.
+    expect(BackendClient.prototype.readBaselineFile.toString())
+      .toContain("isBaselineOpaqueHandle");
+    expect(BackendClient.prototype.readBaselineFile.toString())
+      .toContain("value.itemHandle !== itemHandle");
   });
 });
 

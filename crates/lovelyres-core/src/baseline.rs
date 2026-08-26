@@ -781,6 +781,37 @@ pub struct BaselineScan {
     pub captured_at: DateTime<Utc>,
 }
 
+/// One of the six fixed configuration files, as it stands on the host.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BaselineFileView {
+    /// The file the setting is read from. Fixed by the catalogue.
+    pub path: &'static str,
+    /// The directive this view was opened for.
+    pub key: &'static str,
+    pub exists: bool,
+    /// The file as it is on the host, control characters aside.
+    pub text: String,
+    /// Every line that mentions the directive, in file order.
+    pub mentions: Vec<BaselineFileMention>,
+    /// True when the file was longer than the ceiling and was cut short.
+    pub truncated: bool,
+}
+
+/// A line that mentions the directive this view was opened for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BaselineFileMention {
+    /// Zero-based index into the text that was returned.
+    pub line: u32,
+    /// Whether this line is commented out, and so sets nothing.
+    pub commented: bool,
+    /// Whether this is the line the program on the host actually obeys.
+    ///
+    /// At most one line is effective. A commented line never is, and when the
+    /// directive appears more than once the answer depends on which end the
+    /// reader starts from — see [`Precedence`].
+    pub effective: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BaselineChangeRequest {
     pub item_id: String,
@@ -999,6 +1030,30 @@ impl BaselineService {
             statuses,
             captured_at: Utc::now(),
         })
+    }
+
+    /// Reads the file one setting lives in, and says which lines mention it.
+    ///
+    /// The caller names a setting, never a file: the path comes from the fixed
+    /// catalogue, so this can only ever read one of six known configuration
+    /// files. Reading is what makes a check answerable — a status of
+    /// "不合规" is an assertion, and the operator has to be able to see the
+    /// line it was made from.
+    pub async fn read_setting_file(
+        &self,
+        session: &BoundSshSession,
+        item_id: &str,
+    ) -> CoreResult<BaselineFileView> {
+        self.target.validate(session.target())?;
+        let definition = definition(item_id)?;
+        let output = successful_output(
+            "read baseline configuration file",
+            self.ssh
+                .execute_bound(session, read_file_command(definition), COMMAND_TIMEOUT)
+                .await?,
+        )?;
+        self.target.validate(session.target())?;
+        parse_file_view(definition, &output)
     }
 
     pub async fn plan_changes(
@@ -1651,6 +1706,138 @@ fn reader_program(precedence: Precedence) -> &'static str {
              END{print v}"
         }
     }
+}
+
+/// Longest configuration file this will carry back.
+const MAX_FILE_BYTES: usize = 256 * 1024;
+/// Most lines it will carry back, so a pathological file cannot fill a pane.
+const MAX_FILE_LINES: usize = 4_000;
+const FILE_MARKER: &str = "LR_BASELINE_FILE_V1";
+
+fn read_file_command(definition: &BaselineDefinition) -> String {
+    // `head -c` before `head -n` so a single enormous line cannot get through
+    // either. The marker proves the command ran rather than the shell dying
+    // half way and leaving a partial file that reads as a short one.
+    format!(
+        "set -u; lr_file={file}; \
+         if [ -L \"$lr_file\" ] || {{ [ -e \"$lr_file\" ] && [ ! -f \"$lr_file\" ]; }}; then \
+           printf '%s\\n' {marker}_UNSUPPORTED; \
+         elif [ -f \"$lr_file\" ]; then \
+           printf '%s\\n' {marker}_BEGIN; \
+           head -c {bytes} \"$lr_file\" | head -n {lines}; \
+           printf '\\n%s\\n' {marker}_END; \
+         else \
+           printf '%s\\n' {marker}_ABSENT; \
+         fi",
+        file = shq(definition.file),
+        marker = FILE_MARKER,
+        bytes = MAX_FILE_BYTES,
+        lines = MAX_FILE_LINES,
+    )
+}
+
+fn parse_file_view(definition: &BaselineDefinition, output: &str) -> CoreResult<BaselineFileView> {
+    let absent = format!("{FILE_MARKER}_ABSENT");
+    let unsupported = format!("{FILE_MARKER}_UNSUPPORTED");
+    let begin = format!("{FILE_MARKER}_BEGIN");
+    let end = format!("{FILE_MARKER}_END");
+
+    if output.lines().any(|line| line.trim() == absent)
+        || output.lines().any(|line| line.trim() == unsupported)
+    {
+        return Ok(BaselineFileView {
+            path: definition.file,
+            key: definition.key,
+            exists: false,
+            text: String::new(),
+            mentions: Vec::new(),
+            truncated: false,
+        });
+    }
+
+    let (_, rest) = output
+        .split_once(&begin)
+        .ok_or_else(|| CoreError::validation("baseline file", "missing typed file marker"))?;
+    let (body, _) = rest
+        .rsplit_once(&end)
+        .ok_or_else(|| CoreError::validation("baseline file", "missing typed file terminator"))?;
+    // The command prints a newline before the terminator, and the marker sat
+    // on its own line after the content.
+    let body = body.strip_prefix('\n').unwrap_or(body);
+    let body = body.strip_suffix('\n').unwrap_or(body);
+
+    let mut lines = Vec::new();
+    let mut truncated = false;
+    for line in body.lines() {
+        if lines.len() >= MAX_FILE_LINES {
+            truncated = true;
+            break;
+        }
+        // Only control characters are replaced. A configuration file is
+        // evidence; what it says reaches the operator as written.
+        lines.push(
+            line.chars()
+                .map(|character| {
+                    if character == '\t' || !character.is_control() {
+                        character
+                    } else {
+                        char::REPLACEMENT_CHARACTER
+                    }
+                })
+                .collect::<String>(),
+        );
+    }
+
+    let mentions = mentions_of(definition, &lines)?;
+    let text = lines.join("\n");
+    truncated |= text.len() >= MAX_FILE_BYTES;
+    Ok(BaselineFileView {
+        path: definition.file,
+        key: definition.key,
+        exists: true,
+        text,
+        mentions,
+        truncated,
+    })
+}
+
+/// Finds every line that names the directive, and marks the one that counts.
+fn mentions_of(
+    definition: &BaselineDefinition,
+    lines: &[String],
+) -> CoreResult<Vec<BaselineFileMention>> {
+    let mut mentions = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        let trimmed = line.trim_start();
+        let commented = trimmed.starts_with('#');
+        let bare = trimmed.trim_start_matches('#').trim_start();
+        let Some(token) = bare.split([' ', '\t', '=']).next() else {
+            continue;
+        };
+        if !token.eq_ignore_ascii_case(definition.key) {
+            continue;
+        }
+        let Ok(line) = u32::try_from(index) else {
+            break;
+        };
+        mentions.push(BaselineFileMention {
+            line,
+            commented,
+            effective: false,
+        });
+    }
+    // Exactly the rule the scan reads by, so the marked line and the reported
+    // value can never disagree.
+    let effective = match definition.precedence() {
+        Precedence::First => mentions.iter().position(|mention| !mention.commented),
+        Precedence::Last => mentions.iter().rposition(|mention| !mention.commented),
+    };
+    if let Some(index) = effective
+        && let Some(mention) = mentions.get_mut(index)
+    {
+        mention.effective = true;
+    }
+    Ok(mentions)
 }
 
 fn parse_scan(output: &str) -> CoreResult<Vec<BaselineStatus>> {
@@ -2967,6 +3154,162 @@ mod tests {
         assert_eq!(command.matches("/^[[:space:]]*#/{next}").count(), 38);
     }
 
+    fn sshd_definition() -> &'static BaselineDefinition {
+        definition("ssh-permit-root-login").unwrap()
+    }
+
+    fn sysctl_definition() -> &'static BaselineDefinition {
+        BASELINE_CATALOG
+            .iter()
+            .find(|item| item.file() == "/etc/sysctl.d/99-lovelyres-baseline.conf")
+            .unwrap()
+    }
+
+    fn view(definition: &BaselineDefinition, body: &str) -> BaselineFileView {
+        let output = format!("{FILE_MARKER}_BEGIN\n{body}\n{FILE_MARKER}_END\n");
+        parse_file_view(definition, &output).unwrap()
+    }
+
+    #[test]
+    fn the_marked_line_is_the_line_the_host_obeys() {
+        // sshd keeps the first value it is given, so the second active line is
+        // present but not in force.
+        let sshd = view(
+            sshd_definition(),
+            "#PermitRootLogin prohibit-password\nPermitRootLogin yes\nPermitRootLogin no",
+        );
+        assert_eq!(
+            sshd.mentions,
+            vec![
+                BaselineFileMention {
+                    line: 0,
+                    commented: true,
+                    effective: false
+                },
+                BaselineFileMention {
+                    line: 1,
+                    commented: false,
+                    effective: true
+                },
+                BaselineFileMention {
+                    line: 2,
+                    commented: false,
+                    effective: false
+                },
+            ],
+        );
+
+        // sysctl applies the later line.
+        let sysctl = view(
+            sysctl_definition(),
+            &format!("{key} = 1\n{key} = 0", key = sysctl_definition().key()),
+        );
+        assert_eq!(
+            sysctl.mentions,
+            vec![
+                BaselineFileMention {
+                    line: 0,
+                    commented: false,
+                    effective: false
+                },
+                BaselineFileMention {
+                    line: 1,
+                    commented: false,
+                    effective: true
+                },
+            ],
+        );
+    }
+
+    #[test]
+    fn a_file_that_only_comments_the_setting_has_nothing_in_force() {
+        let view = view(
+            sshd_definition(),
+            "#PermitRootLogin no\n# PermitRootLogin yes",
+        );
+        assert_eq!(view.mentions.len(), 2);
+        assert!(view.mentions.iter().all(|mention| mention.commented));
+        assert!(view.mentions.iter().all(|mention| !mention.effective));
+    }
+
+    #[test]
+    fn a_setting_is_matched_by_name_not_by_prefix() {
+        // `PermitRootLoginX` and `NotPermitRootLogin` are different settings.
+        let view = view(
+            sshd_definition(),
+            "PermitRootLoginX yes\nNotPermitRootLogin yes\npermitrootlogin no\nPermitRootLogin=yes",
+        );
+        assert_eq!(
+            view.mentions
+                .iter()
+                .map(|mention| mention.line)
+                .collect::<Vec<_>>(),
+            vec![2, 3],
+        );
+        // The reader is case-insensitive, so the lower-case line is the first
+        // one in force.
+        assert!(view.mentions[0].effective);
+    }
+
+    #[test]
+    fn the_file_reaches_the_caller_as_written() {
+        let view = view(
+            sshd_definition(),
+            "Port 22\n\n  # spaced comment\nPermitRootLogin yes",
+        );
+        assert_eq!(
+            view.text,
+            "Port 22\n\n  # spaced comment\nPermitRootLogin yes"
+        );
+        assert_eq!(view.path, "/etc/ssh/sshd_config");
+        assert_eq!(view.key, "PermitRootLogin");
+        assert!(view.exists);
+        assert!(!view.truncated);
+    }
+
+    #[test]
+    fn only_control_characters_are_replaced() {
+        let view = view(sshd_definition(), "PermitRootLogin yes\u{7}\tkeep\ttabs");
+        assert!(view.text.contains('\u{fffd}'));
+        assert!(view.text.contains("\tkeep\ttabs"));
+    }
+
+    #[test]
+    fn a_file_that_is_not_there_says_so_rather_than_looking_empty() {
+        for marker in ["ABSENT", "UNSUPPORTED"] {
+            let output = format!("{FILE_MARKER}_{marker}\n");
+            let view = parse_file_view(sshd_definition(), &output).unwrap();
+            assert!(!view.exists, "{marker}");
+            assert!(view.text.is_empty());
+            assert!(view.mentions.is_empty());
+        }
+    }
+
+    #[test]
+    fn a_reply_without_the_marker_is_refused() {
+        assert!(parse_file_view(sshd_definition(), "PermitRootLogin yes\n").is_err());
+        let unterminated = format!("{FILE_MARKER}_BEGIN\nPermitRootLogin yes\n");
+        assert!(parse_file_view(sshd_definition(), &unterminated).is_err());
+    }
+
+    #[test]
+    fn the_read_command_names_only_a_catalogue_file() {
+        for definition in BASELINE_CATALOG {
+            let command = read_file_command(definition);
+            assert!(command.contains(&format!("lr_file='{}'", definition.file())));
+            assert!(command.contains(&format!("head -c {MAX_FILE_BYTES}")));
+            assert!(command.contains(&format!("head -n {MAX_FILE_LINES}")));
+            // Read-only: nothing here writes, moves or removes.
+            for forbidden in ["rm ", "mv ", "tee ", "> \"$lr_file\"", "chmod", "chown"] {
+                assert!(
+                    !command.contains(forbidden),
+                    "{} {forbidden}",
+                    definition.id
+                );
+            }
+        }
+    }
+
     #[test]
     fn the_scan_asks_about_every_setting_exactly_once() {
         let command = scan_command();
@@ -2974,7 +3317,9 @@ mod tests {
         assert_eq!(command.matches("lr_file=").count(), 38);
         for definition in BASELINE_CATALOG {
             assert_eq!(
-                command.matches(&format!("printf 'ITEM=%s\\t%s\\n' '{}'", definition.id)).count(),
+                command
+                    .matches(&format!("printf 'ITEM=%s\\t%s\\n' '{}'", definition.id))
+                    .count(),
                 1,
                 "{} is not asked about exactly once",
                 definition.id,

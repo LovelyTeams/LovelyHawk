@@ -19,11 +19,11 @@ function frozenApiBody(): string {
 }
 
 describe("central Middleware Electron boundary", () => {
-  it("keeps exactly three read methods in the frozen exact 116 preload", () => {
+  it("keeps exactly three read methods in the frozen exact 117 preload", () => {
     const body = frozenApiBody();
     const names = [...body.matchAll(/^  (?<name>[A-Za-z_$][A-Za-z0-9_$]*):/gmu)]
       .map((match) => match.groups?.name);
-    expect(names).toHaveLength(116);
+    expect(names).toHaveLength(117);
     expect(names.filter((name) => name === "discoverMiddleware")).toEqual(["discoverMiddleware"]);
     expect(names.filter((name) => name === "loadMiddlewareConfiguration"))
       .toEqual(["loadMiddlewareConfiguration"]);
