@@ -49,6 +49,8 @@ export type ConfigGeneratorApi = Pick<
 
 interface ConfigGeneratorPageProps {
   api?: ConfigGeneratorApi;
+  /** Set when the configuration workbench already carries the page title. */
+  embedded?: boolean;
 }
 
 export interface ConfigGeneratorPageHandle {
@@ -575,7 +577,7 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 export const ConfigGeneratorPage = forwardRef<ConfigGeneratorPageHandle, ConfigGeneratorPageProps>(
-function ConfigGeneratorPage({ api }, ref) {
+function ConfigGeneratorPage({ api, embedded = false }, ref) {
   const configApi = resolveApi(api);
   const [catalog, setCatalog] = useState<ConfigCatalog | null>(null);
   const [editor, dispatch] = useReducer(configEditorReducer, undefined, createConfigEditorState);
@@ -795,12 +797,19 @@ function ConfigGeneratorPage({ api }, ref) {
   useImperativeHandle(ref, () => ({ beforeDeactivate: releaseDraft }), [busy, configApi, draft]);
 
   return (
-    <section className="page config-generator-page" aria-labelledby="config-generator-title">
+    <section
+      className={embedded ? "page config-generator-page is-embedded" : "page config-generator-page"}
+      aria-label="配置生成"
+    >
+      {/* Inside the configuration workbench the page already carries the title
+          and says what this half does. Two headings stacked read as two pages. */}
       <header className="page-heading config-generator-heading">
-        <div>
-          <h1 id="config-generator-title">配置生成器</h1>
-          <p>生成纯文本配置草稿供人工审阅；不联网、不部署到目标。</p>
-        </div>
+        {embedded ? <div /> : (
+          <div>
+            <h1>配置生成器</h1>
+            <p>生成纯文本配置草稿供人工审阅；不联网、不部署到目标。</p>
+          </div>
+        )}
         <div className="config-catalog-count" aria-label="配置目录规模">
           <strong>{catalog?.products.length ?? 0}</strong><span>产品</span>
           <strong>{totalFeatures}</strong><span>特性</span>

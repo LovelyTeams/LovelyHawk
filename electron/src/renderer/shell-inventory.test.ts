@@ -22,6 +22,16 @@ const NOT_WIRED: Record<string, string> = {};
 /** Page components the SSH window hosts instead of the main shell. */
 const IN_TERMINAL_WINDOW = ["SftpBrowserPage"];
 
+/**
+ * Page components another page hosts instead of the shell. Checking a
+ * configuration and writing one are two views of one job, so they share a
+ * page; each half is still a page component of its own.
+ */
+const HOSTED_BY: Record<string, string> = {
+  BaselinePage: "ConfigurationPage",
+  ConfigGeneratorPage: "ConfigurationPage",
+};
+
 describe("application shell inventory", () => {
   it("mounts every page component, or records why it cannot", () => {
     const app = source("App.tsx");
@@ -32,7 +42,11 @@ describe("application shell inventory", () => {
 
     const terminalWindow = source("TerminalWindow.tsx");
     for (const component of components) {
-      const mounted = app.includes(`<${component}`) || terminalWindow.includes(`<${component}`);
+      const host = HOSTED_BY[component];
+      const hostSource = host === undefined ? "" : source(`${host}.tsx`);
+      const mounted = app.includes(`<${component}`) ||
+        terminalWindow.includes(`<${component}`) ||
+        hostSource.includes(`<${component}`);
       const excused = component in NOT_WIRED;
       expect(mounted, `${component} must be mounted or listed as not wired`).toBe(!excused);
     }

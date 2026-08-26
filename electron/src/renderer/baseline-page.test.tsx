@@ -173,13 +173,22 @@ describe("central Baseline page", () => {
     expect(source).not.toMatch(/\b(?:sessionId|targetGeneration|guard|shell|remotePath|recordId|operationId|digest|backup)\s*:/u);
   });
 
-  it("is mounted by App with only the current 请先建立 SSH 连接 and frozen API", () => {
-    const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
-    expect(source).toMatch(
-      /activePage\.id === "baseline-quick-edit"[\s\S]*?<BaselinePage[\s\S]*?bindingHandle=\{activeTarget\?\.bindingHandle \?\? null\}[\s\S]*?api=\{window\.lovelyres\}/u,
+  it("is mounted by the configuration page with only the current binding and frozen API", () => {
+    const app = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+    const host = readFileSync(new URL("./ConfigurationPage.tsx", import.meta.url), "utf8");
+    // The shell hands the configuration page the binding and the frozen API,
+    // and the configuration page hands the same two on to the checking half.
+    expect(app).toMatch(
+      /activePage\.id === "config-generator"[\s\S]*?<ConfigurationPage[\s\S]*?bindingHandle=\{activeTarget\?\.bindingHandle \?\? null\}[\s\S]*?api=\{window\.lovelyres\}/u,
     );
-    const mount = source.match(/<BaselinePage[\s\S]*?\/>/u)?.[0] ?? "";
-    expect(mount).not.toMatch(/\b(?:target|connection|summary|session|guard)=/u);
+    expect(host).toContain("<BaselinePage bindingHandle={bindingHandle} api={api} embedded />");
+    for (const mount of [
+      app.match(/<ConfigurationPage[\s\S]*?\/>/u)?.[0] ?? "",
+      host.match(/<BaselinePage[\s\S]*?\/>/u)?.[0] ?? "",
+    ]) expect(mount).not.toMatch(/\b(?:target|connection|summary|session|guard)=/u);
+    // Generating needs no target, and checking still lists what it would check
+    // when there is none, so neither half is gated behind a connection.
+    expect(host).not.toContain("bindingHandle === null");
   });
 
   it("uses global theme tokens with no color literals", () => {

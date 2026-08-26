@@ -136,13 +136,24 @@
 .baseline-workbench {
   display: grid;
   grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  /* One row, explicitly capped. A max-height alone leaves the row sized to its
+     content, so the columns grow to the full height of the card list and their
+     own `overflow: auto` never engages — which drew the file pane's centred
+     empty state four thousand pixels below anything on screen. */
+  grid-template-rows: minmax(0, 1fr);
   gap: 14px;
   margin-top: 14px;
-  min-height: 0;
-  /* Both columns scroll on their own, so a long file does not push the list
-     out of reach and a long list does not push the file down. */
-  max-height: min(70vh, 760px);
+  /* Definite, not just a ceiling, so the row has something to resolve against.
+     Both columns then scroll on their own: a long file does not push the list
+     out of reach, and a long list does not push the file down. */
+  height: min(68vh, 720px);
 }
+
+/* A grid item will not shrink below its content unless told to, so without
+   this the row grows to the full height of the card list, `overflow: auto`
+   never engages, and the file pane's centred empty state ends up drawn below
+   anything the operator can see. */
+.baseline-workbench > * { min-height: 0; }
 
 /* A scrolling flex column shrinks its children by default, which squeezes the
    cards until their titles overlap the next row. */

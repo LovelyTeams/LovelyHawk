@@ -801,7 +801,7 @@ export function isBootstrapResult(value: unknown): value is BootstrapResult {
     typeof value.appVersion === "string" &&
     value.protocolVersion === BACKEND_PROTOCOL &&
     Array.isArray(value.pages) &&
-    value.pages.length === 19 &&
+    value.pages.length === 18 &&
     value.pages.every(isPageDescriptor) &&
     new Set(value.pages.map((page) => page.id)).size === value.pages.length &&
     isStringArray(value.securityReferenceFavoriteIds, 512)

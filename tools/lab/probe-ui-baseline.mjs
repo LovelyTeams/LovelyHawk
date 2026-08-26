@@ -1,0 +1,282 @@
+// Opens the baseline page against a real host, selects a failing check, and
+// captures what the operator would be looking at.
+//
+//   node tools/lab/probe-ui-baseline.mjs            # ubuntu
+import { execFileSync, spawn } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { Sidecar, connect } from "./rpc-harness.mjs";
+import { labTarget } from "./lab-target.mjs";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const repository = path.resolve(here, "..", "..");
+const electronRoot = path.join(repository, "electron");
+const backend = path.join(repository, "target", "debug", "lovelyres-backend.exe");
+const which = process.env.LAB ?? "ubuntu";
+const container = `lab-${which}`;
+const port = 9334;
+
+let failures = 0;
+function check(name, actual, expected = true) {
+  const ok = actual === expected;
+  if (!ok) failures += 1;
+  console.log(`  ${ok ? "PASS" : "FAIL"} ${name}${ok ? "" : `\n       expected ${JSON.stringify(expected)}\n       actual   ${JSON.stringify(actual)}`}`);
+}
+
+function onHost(command) {
+  return execFileSync(
+    "wsl.exe",
+    ["-d", "Ubuntu", "-u", "root", "-e", "bash", "-lc",
+      `docker exec ${container} sh -c ${JSON.stringify(command)}`],
+    { encoding: "utf8" },
+  ).split("\0").join("").trim();
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function waitFor(session, expression, label, attempts = 90) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (await session.evaluate(expression) === true) return;
+    await sleep(500);
+  }
+  throw new Error(`timed out waiting for ${label}`);
+}
+
+async function openSession() {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    try {
+      const targets = await fetch(`http://127.0.0.1:${port}/json/list`).then((r) => r.json());
+      const page = targets.find((target) =>
+        target.type === "page" && String(target.url).startsWith("lovelyres://app/") &&
+        !String(target.url).includes("window=terminal"));
+      if (page !== undefined) return await attach(page.webSocketDebuggerUrl);
+    } catch {
+      // Not listening yet.
+    }
+    await sleep(500);
+  }
+  throw new Error("the window never exposed a debugging target");
+}
+
+function attach(url) {
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(url);
+    const pending = new Map();
+    let nextId = 1;
+    socket.addEventListener("message", (event) => {
+      const message = JSON.parse(String(event.data));
+      const waiting = pending.get(message.id);
+      if (waiting === undefined) return;
+      pending.delete(message.id);
+      if (message.error !== undefined) waiting.reject(new Error(JSON.stringify(message.error)));
+      else waiting.resolve(message.result);
+    });
+    socket.addEventListener("error", () => reject(new Error("could not attach to the window")));
+    socket.addEventListener("open", () => {
+      const send = (method, params) => new Promise((res, rej) => {
+        const id = nextId++;
+        pending.set(id, { resolve: res, reject: rej });
+        socket.send(JSON.stringify({ id, method, params }));
+        setTimeout(() => {
+          if (pending.delete(id)) rej(new Error(`${method} timed out`));
+        }, 30_000);
+      });
+      resolve({
+        send,
+        close: () => socket.close(),
+        async evaluate(expression) {
+          const result = await send("Runtime.evaluate", {
+            expression, awaitPromise: true, returnByValue: true,
+          });
+          if (result.exceptionDetails !== undefined) {
+            throw new Error(result.exceptionDetails.exception?.description ?? "evaluate threw");
+          }
+          return result.result.value;
+        },
+      });
+    });
+  });
+}
+
+const evidence = path.join(repository, "target", "lab-ui");
+fs.mkdirSync(evidence, { recursive: true });
+
+async function shot(session, name) {
+  const { data } = await session.send("Page.captureScreenshot", { format: "png" });
+  const file = path.join(evidence, `${name}.png`);
+  fs.writeFileSync(file, Buffer.from(data, "base64"));
+  console.log(`      saved ${file}`);
+}
+
+const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "lovelyres-base-"));
+let electron;
+let session;
+try {
+  onHost("cp /etc/ssh/sshd_config /tmp/sshd_config.bak");
+  const seeded = Buffer.from(
+    "Port 22\nPermitRootLogin yes\n#PermitRootLogin prohibit-password\nPasswordAuthentication yes\nPermitRootLogin no\n",
+    "utf8",
+  ).toString("base64");
+  onHost(`printf '%s' '${seeded}' | base64 -d > /etc/ssh/sshd_config`);
+
+  console.log(`preparing ${dataRoot} ...`);
+  const sidecar = new Sidecar(backend, dataRoot);
+  try {
+    const status = await connect(sidecar, labTarget(which));
+    if (status.stage !== "connected") throw new Error(JSON.stringify(status));
+  } finally {
+    sidecar.close();
+  }
+
+  console.log("launching the window ...");
+  const executable = execFileSync(
+    process.execPath, ["-e", "process.stdout.write(require('electron'))"],
+    { cwd: electronRoot, encoding: "utf8" },
+  ).trim();
+  electron = spawn(executable, [".", `--remote-debugging-port=${port}`], {
+    cwd: electronRoot,
+    env: { ...process.env, LOVELYRES_ARCHIVE_ROOT: dataRoot, LOVELYRES_DEBUG: "1" },
+    stdio: "ignore", shell: false, windowsHide: true,
+  });
+
+  session = await openSession();
+  await session.send("Runtime.enable", {});
+  await session.send("Page.enable", {});
+  await waitFor(session, "document.querySelector('.connection-card') !== null", "the connection list");
+  await session.evaluate(`(() => {
+    const card = document.querySelector('.connection-card');
+    card?.querySelector('button')?.click() ?? card?.click();
+    return true;
+  })()`);
+  await waitFor(session, "document.querySelector('.nav-item') !== null", "the connected shell", 120);
+
+  await session.evaluate(`(() => {
+    [...document.querySelectorAll('.nav-item')]
+      .find(candidate => candidate.textContent?.includes('配置'))?.click();
+    return true;
+  })()`);
+  await waitFor(session, "document.querySelector('.baseline-card') !== null", "the checks", 180);
+  await waitFor(
+    session,
+    "document.querySelectorAll('.baseline-card header strong.is-noncompliant').length > 0",
+    "a scanned result",
+    240,
+  );
+
+  const before = await session.evaluate(`(() => {
+    const pane = document.querySelector('.baseline-file-pane');
+    const empty = pane?.querySelector('.baseline-file-empty');
+    const box = empty?.getBoundingClientRect();
+    return {
+      pane: pane !== null,
+      text: pane?.textContent ?? "",
+      emptyVisible: box !== undefined && box.height > 0 &&
+        box.top >= 0 && box.bottom <= window.innerHeight
+    };
+  })()`);
+  check("未选中时右侧说明它是干什么的", before.text.includes("右边会显示这项检查读的那个配置文件"));
+  // Present in the DOM is not the same as on screen: the pane once grew past
+  // the viewport and drew its centred message where nobody could see it.
+  check("而且那段字真的在可视区里", before.emptyVisible, true);
+  if (!before.emptyVisible) {
+    console.log("      geometry:", JSON.stringify(await session.evaluate(`(() => {
+      const box = (selector) => {
+        const node = document.querySelector(selector);
+        if (node === null) return null;
+        const r = node.getBoundingClientRect();
+        return { top: Math.round(r.top), h: Math.round(r.height), scrollH: node.scrollHeight };
+      };
+      return {
+        viewport: window.innerHeight,
+        workbench: box('.baseline-workbench'),
+        cards: box('.baseline-card-grid'),
+        pane: box('.baseline-file-pane'),
+        empty: box('.baseline-file-empty'),
+        content: box('.baseline-content'),
+        page: box('.configuration-page')
+      };
+    })()`)));
+  }
+
+  const shell = await session.evaluate(`(() => ({
+    title: document.querySelector('.configuration-page h1')?.textContent ?? null,
+    modes: [...document.querySelectorAll('.configuration-modes button strong')].map(n => n.textContent),
+    active: document.querySelector('.configuration-modes .is-active strong')?.textContent ?? null,
+    baselineOwnHeader: document.querySelector('.baseline-header') !== null
+  }))()`);
+  check("合并后的页面标题", shell.title, "配置");
+  check("两种模式都在", shell.modes.join(","), "检查这台主机,生成新配置");
+  check("默认停在检查", shell.active, "检查这台主机");
+  check("嵌进来的基线页不再自带标题", shell.baselineOwnHeader, false);
+  await shot(session, "configuration-inspect");
+
+  await session.evaluate(`(() => {
+    const card = [...document.querySelectorAll('.baseline-card')]
+      .find(candidate => candidate.textContent?.includes('禁止 root 直接登录'));
+    card?.querySelector('button')?.click();
+    return true;
+  })()`);
+  await waitFor(
+    session,
+    "document.querySelector('.baseline-file-text') !== null",
+    "the file",
+    120,
+  );
+
+  const pane = await session.evaluate(`(() => {
+    const lines = [...document.querySelectorAll('.baseline-file-text pre span')];
+    return {
+      path: document.querySelector('.baseline-file-path')?.textContent ?? null,
+      verdict: document.querySelector('.baseline-file-verdict')?.textContent ?? null,
+      effective: lines.filter(line => line.classList.contains('is-effective')).map(line => line.textContent.trim()),
+      commented: lines.filter(line => line.classList.contains('is-commented')).map(line => line.textContent.trim()),
+      inert: lines.filter(line => line.classList.contains('is-inert')).map(line => line.textContent.trim()),
+      observed: document.querySelector('.baseline-file-facts')?.textContent ?? ""
+    };
+  })()`);
+  console.log(`\n${pane.path}\n  ${pane.verdict}`);
+  console.log(`  生效: ${JSON.stringify(pane.effective)}`);
+  console.log(`  注释: ${JSON.stringify(pane.commented)}`);
+  console.log(`  被压过: ${JSON.stringify(pane.inert)}`);
+  check("右侧打开的是 sshd_config", pane.path, "/etc/ssh/sshd_config");
+  check("生效行标的是放行 root 的那条", pane.effective.join(""), "PermitRootLogin yes");
+  check("注释行单独标出来", pane.commented.join(""), "#PermitRootLogin prohibit-password");
+  check("被压过的同名设置也标出来", pane.inert.join(""), "PermitRootLogin no");
+  check("说明写清了第几行生效", pane.verdict.includes("第 2 行"));
+  check("卡片上的观察值跟高亮一致", pane.observed.includes("yes"));
+  await shot(session, "baseline-file-pane");
+
+  // The other half of the same page.
+  await session.evaluate(`(() => {
+    [...document.querySelectorAll('.configuration-modes button')]
+      .find(candidate => candidate.querySelector('strong')?.textContent === '生成新配置')?.click();
+    return true;
+  })()`);
+  await waitFor(session, "document.querySelectorAll('.config-product-strip button').length > 0", "the generator", 180);
+  const generator = await session.evaluate(`(() => ({
+    products: document.querySelectorAll('.config-product-strip button').length,
+    preview: document.querySelector('.config-preview') !== null,
+    ownTitle: [...document.querySelectorAll('.configuration-page h1')].map(n => n.textContent).join(","),
+    active: document.querySelector('.configuration-modes .is-active strong')?.textContent ?? null
+  }))()`);
+  check("切到生成模式", generator.active, "生成新配置");
+  check("生成器还在同一个页面里", generator.products > 0, true);
+  check("右侧仍然是配置文件的位置", generator.preview, true);
+  check("整页只有一个标题", generator.ownTitle, "配置");
+  await shot(session, "configuration-generate");
+
+  console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : `${failures} CHECK(S) FAILED`}`);
+  process.exitCode = failures === 0 ? 0 : 1;
+} catch (error) {
+  console.log(`\nFAILED: ${error.message}`);
+  process.exitCode = 1;
+} finally {
+  session?.close();
+  electron?.kill();
+  onHost("[ -f /tmp/sshd_config.bak ] && cp /tmp/sshd_config.bak /etc/ssh/sshd_config; rm -f /tmp/sshd_config.bak");
+  await sleep(600);
+  fs.rmSync(dataRoot, { recursive: true, force: true });
+}

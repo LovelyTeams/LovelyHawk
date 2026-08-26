@@ -1,0 +1,77 @@
+/* The shell shared by checking a configuration and writing one. */
+
+.configuration-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  padding: 18px 20px;
+}
+
+.configuration-page > * { flex: none; }
+.configuration-page > .baseline-page,
+.configuration-page > .config-generator-page { flex: 1 1 auto; min-height: 0; }
+
+.configuration-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.configuration-header h1 {
+  margin: 0;
+  color: var(--text);
+  font-size: 19px;
+}
+
+.configuration-header p {
+  margin: 5px 0 0;
+  max-width: 62ch;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+
+.configuration-modes {
+  display: flex;
+  flex: none;
+  gap: 6px;
+  padding: 4px;
+  background: var(--surface-inset);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.configuration-modes button {
+  display: grid;
+  gap: 2px;
+  padding: 7px 13px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--muted);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.configuration-modes button strong { color: var(--text); font-size: 13px; font-weight: 620; }
+.configuration-modes button em { color: var(--muted); font-size: 11.5px; font-style: normal; }
+
+.configuration-modes button:hover:not(.is-active) { background: var(--surface-hover); }
+
+.configuration-modes button.is-active {
+  border-color: var(--accent);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.configuration-modes button.is-active strong { color: var(--accent-text); }
+.configuration-modes button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Inside the workbench the page carries no title of its own. */
+.baseline-page.is-embedded { padding: 0; }
+.baseline-page.is-embedded .baseline-content { border-radius: 12px; }
+.config-generator-page.is-embedded { padding: 0; }
+.config-generator-page.is-embedded .config-generator-heading { justify-content: flex-end; }

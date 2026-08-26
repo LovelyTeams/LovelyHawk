@@ -528,6 +528,8 @@ $requiredFiles = @(
     (Join-Path $electronRoot 'src/renderer/firewall-read-state.ts'),
     (Join-Path $electronRoot 'src/renderer/BaselinePage.tsx'),
     (Join-Path $electronRoot 'src/renderer/BaselineFilePane.tsx'),
+    (Join-Path $electronRoot 'src/renderer/ConfigurationPage.tsx'),
+    (Join-Path $electronRoot 'src/renderer/configuration-page.css'),
     (Join-Path $electronRoot 'src/renderer/baseline-page.css'),
     (Join-Path $electronRoot 'src/renderer/baseline-read-helpers.ts'),
     (Join-Path $electronRoot 'src/renderer/baseline-read-state.ts'),
@@ -1628,8 +1630,18 @@ foreach ($marker in @(
         Add-GateViolation "crates/lovelyres-core/src/baseline.rs is missing pre-allocation Baseline hardening marker '$marker'"
     }
 }
-if ($appText -notmatch '(?s)activePage\.id\s*===\s*"baseline-quick-edit".{0,260}<BaselinePage\s+bindingHandle=\{activeTarget\?\.bindingHandle\s*\?\?\s*null\}\s+api=\{window\.lovelyres\}') {
-    Add-GateViolation 'electron/src/renderer/App.tsx must mount BaselinePage with only the current opaque binding handle and fixed API'
+# Checking a configuration and writing one share one page, so the shell mounts
+# that page and it hands the checking half the same binding and frozen API.
+if ($appText -notmatch '(?s)activePage\.id\s*===\s*"config-generator".{0,320}<ConfigurationPage[\s\S]{0,200}bindingHandle=\{activeTarget\?\.bindingHandle\s*\?\?\s*null\}[\s\S]{0,120}api=\{window\.lovelyres\}') {
+    Add-GateViolation 'electron/src/renderer/App.tsx must mount ConfigurationPage with only the current opaque binding handle and fixed API'
+}
+$configurationPagePath = Join-Path $electronRoot 'src/renderer/ConfigurationPage.tsx'
+$configurationPageText = Get-Content -LiteralPath $configurationPagePath -Raw
+if (-not $configurationPageText.Contains('<BaselinePage bindingHandle={bindingHandle} api={api} embedded />', [System.StringComparison]::Ordinal)) {
+    Add-GateViolation 'electron/src/renderer/ConfigurationPage.tsx must pass only the opaque binding handle and fixed API to the checking half'
+}
+if ($configurationPageText -match '(?i)\b(?:SshTargetSummary|connectionId|sessionId|targetGuard|generation|host|port|username|dataRoot|filePath|remotePath|apiKey)\b') {
+    Add-GateViolation 'electron/src/renderer/ConfigurationPage.tsx exceeds the opaque page surface'
 }
 if ($baselinePageText -match '(?i)\b(?:SshTargetSummary|BaselineConnection|connectionId|sessionId|targetGuard|generation|host|port|username|dataRoot|filePath|remotePath|recordId|operationId|digest|apiKey)\b' -or
     $baselinePageText -match '(?i)\b(?:planBaseline|confirmBaseline|executeBaseline|restoreBaseline|reloadBaseline|exportBaseline|openBaselineTerminal|writeBaselineFile|innerHTML|dangerouslySetInnerHTML)\b') {

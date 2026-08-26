@@ -4062,17 +4062,6 @@ fn page_descriptors() -> Vec<PageDescriptor> {
             migration_state: Pending,
         },
         PageDescriptor {
-            id: "baseline-quick-edit",
-            group: Response,
-            title: "基线修复",
-            icon: "⌘",
-            capability: ConnectedTarget,
-            summary: "计划基线修复、验证并保留恢复命令。",
-            primary_action: "选择基线",
-            sections: &["基线模板", "变更计划", "验证"],
-            migration_state: Pending,
-        },
-        PageDescriptor {
             id: "database",
             group: Operations,
             title: "数据库",
@@ -4130,12 +4119,15 @@ fn page_descriptors() -> Vec<PageDescriptor> {
         PageDescriptor {
             id: "config-generator",
             group: Operations,
-            title: "配置生成",
+            title: "配置",
             icon: "▧",
+            // Generating works with nothing connected, which is what
+            // preparation before an event looks like. The checking half says
+            // so itself when there is no target.
             capability: LocalWorkspace,
-            summary: "从受控模板快速生成可审阅的服务配置。",
-            primary_action: "生成配置",
-            sections: &["配置类型", "参数", "预览与导出"],
+            summary: "检查这台主机的配置哪里不合规，或从受控模板生成一份新的。",
+            primary_action: "检查配置",
+            sections: &["检查主机", "生成配置", "配置文件"],
             migration_state: Pending,
         },
     ]
@@ -4425,7 +4417,7 @@ mod tests {
         assert!(response.ok);
         let result = response.result.unwrap();
         assert_eq!(result["protocolVersion"], PROTOCOL_VERSION);
-        assert_eq!(result["pages"].as_array().unwrap().len(), 19);
+        assert_eq!(result["pages"].as_array().unwrap().len(), 18);
         assert!(result.get("dataRoot").is_none());
         assert_eq!(
             result["pages"]

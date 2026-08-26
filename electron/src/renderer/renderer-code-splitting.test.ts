@@ -6,11 +6,18 @@ const app = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 
 /** Every page the registry can show. Each one is its own chunk. */
 const PAGES = [
-  "SecurityReference", "Notes", "ConfigGeneratorPage", "SystemInfoPage", "AiHistoryPage",
-  "SnapshotPage", "FirewallPage", "BaselinePage", "MiddlewarePage", "CheckAuditPage",
+  "SecurityReference", "Notes", "ConfigurationPage", "SystemInfoPage", "AiHistoryPage",
+  "SnapshotPage", "FirewallPage", "MiddlewarePage", "CheckAuditPage",
   "IntegrityPage", "LogAnalysisPage", "PacketCapturePage",
   "KubernetesPage", "DockerPage", "EmergencyCommandsPage",
 ];
+
+/**
+ * Pages hosted by another page rather than by the shell. They ride in their
+ * host's chunk, which is still loaded on demand, so the shell must not import
+ * them at all.
+ */
+const HOSTED = { ConfigurationPage: ["BaselinePage", "ConfigGeneratorPage"] };
 
 describe("renderer code splitting", () => {
   /**
@@ -48,7 +55,7 @@ describe("renderer code splitting", () => {
   it("keeps the imperative handles as type-only imports", () => {
     expect(app).toContain('import type { NotesHandle } from "./Notes";');
     expect(app).toContain(
-      'import type { ConfigGeneratorPageHandle } from "./ConfigGeneratorPage";',
+      'import type { ConfigurationPageHandle } from "./ConfigurationPage";',
     );
   });
 

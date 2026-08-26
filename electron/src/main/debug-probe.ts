@@ -133,7 +133,7 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
     );
     assert(initial.href === "lovelyres://app/", "renderer origin is not the packaged custom scheme");
     assert(initial.title === "LovelyRes", "renderer title is missing");
-    assert(initial.navItems === 19, "page registry did not render exactly 19 navigation items");
+    assert(initial.navItems === 18, "page registry did not render exactly 18 navigation items");
     // Build bookkeeping never belongs in the operator's sidebar.
     assert(initial.readyPages === 0, "the sidebar still renders migration markers");
     assert(initial.welcomeView === 1, "disconnected app did not open on the welcome view");
@@ -830,7 +830,7 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
       client,
       `(() => {
         const button = [...document.querySelectorAll('.nav-item')]
-          .find(candidate => candidate.textContent?.includes('基线修复'));
+          .find(candidate => candidate.textContent?.includes('配置'));
         button?.click();
         return button instanceof HTMLButtonElement;
       })()`,
@@ -840,7 +840,8 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
       client,
       `(() => {
         const page = document.querySelector('.baseline-page');
-        const prompt = page?.querySelector('.baseline-target');
+        const shell = document.querySelector('.configuration-page');
+        const prompt = page?.querySelector('.baseline-connection-note');
         const parseRgb = (value) => {
           const match = value.match(/^rgba?\\(\\s*([0-9.]+)[, ]+\\s*([0-9.]+)[, ]+\\s*([0-9.]+)/i);
           return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
@@ -870,8 +871,10 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
           .find(button => button.textContent?.includes('手动扫描'));
         const resources = performance.getEntriesByType('resource').map(entry => entry.name);
         return {
-          title: page?.querySelector('h1')?.textContent ?? '',
+          title: shell?.querySelector('h1')?.textContent ?? '',
           prompt: prompt?.textContent ?? '',
+          modes: [...(shell?.querySelectorAll('.configuration-modes button strong') ?? [])]
+            .map(node => node.textContent).join(','),
           background,
           color,
           promptColor,
@@ -892,11 +895,15 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
         };
       })()`,
     );
-    assert(baselineDisconnected.title === "Linux 安全基线", "Baseline page title is missing");
+    assert(baselineDisconnected.title === "配置", "configuration page title is missing");
+    assert(
+      baselineDisconnected.modes === "检查这台主机,生成新配置",
+      "configuration page did not offer both halves of the job",
+    );
     assert(
       typeof baselineDisconnected.prompt === "string" &&
-        baselineDisconnected.prompt.includes("尚未连接 SSH 目标"),
-      "Baseline page did not render its honest disconnected state",
+        baselineDisconnected.prompt.includes("连接 SSH 目标后才能扫描"),
+      "the checking half did not render its honest disconnected state",
     );
     assert(baselineDisconnected.catalogCards === 38, "Baseline local catalog is incomplete");
     assert(baselineDisconnected.compliantRows === 0, "Baseline page invented remote scan results");
@@ -961,7 +968,7 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
       client,
       `(() => {
         const button = [...document.querySelectorAll('.nav-item')]
-          .find(candidate => candidate.textContent?.includes('基线修复'));
+          .find(candidate => candidate.textContent?.includes('配置'));
         button?.click();
         return button instanceof HTMLButtonElement;
       })()`,
@@ -973,16 +980,21 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
         remounted: document.querySelectorAll('.baseline-page').length === 1,
         catalogCards: document.querySelectorAll('.baseline-card').length,
         noRemoteRows: document.querySelectorAll('.baseline-card .is-compliant, .baseline-card .is-noncompliant, .baseline-history-list article').length === 0,
-        prompt: document.querySelector('.baseline-target')?.textContent ?? ''
+        prompt: document.querySelector('.baseline-connection-note')?.textContent ?? '',
+        mode: document.querySelector('.configuration-modes .is-active strong')?.textContent ?? ''
       }))()`,
     );
     assert(baselineLifecycle.remounted === true, "Baseline page did not remount cleanly");
     assert(baselineLifecycle.catalogCards === 38, "Baseline catalog drifted after remount");
     assert(baselineLifecycle.noRemoteRows === true, "Baseline page retained remote state");
     assert(
+      baselineLifecycle.mode === "检查这台主机",
+      "the configuration page did not come back on the checking half",
+    );
+    assert(
       typeof baselineLifecycle.prompt === "string" &&
-        baselineLifecycle.prompt.includes("尚未连接 SSH 目标"),
-      "Baseline page lost its disconnected state after remount",
+        baselineLifecycle.prompt.includes("连接 SSH 目标后才能扫描"),
+      "the checking half lost its disconnected state after remount",
     );
     await evaluate(
       client,
@@ -4671,10 +4683,22 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
       client,
       `(() => {
         const button = [...document.querySelectorAll('.nav-item')]
-          .find(candidate => candidate.querySelector('strong')?.textContent === '配置生成');
+          .find(candidate => candidate.querySelector('strong')?.textContent === '配置');
         if (!button) return false;
         button.click();
         return true;
+      })()`,
+    );
+    // Generating is the second half of the same page, so it is reached by the
+    // mode switch rather than by its own navigation entry.
+    await waitFor(client, "document.querySelector('.configuration-modes') !== null");
+    await evaluate(
+      client,
+      `(() => {
+        const button = [...document.querySelectorAll('.configuration-modes button')]
+          .find(candidate => candidate.querySelector('strong')?.textContent === '生成新配置');
+        button?.click();
+        return button instanceof HTMLButtonElement;
       })()`,
     );
     await waitFor(

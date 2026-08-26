@@ -16,7 +16,7 @@ import type {
   PageGroup,
 } from "../shared/contract";
 import type { SshTargetSummary } from "../shared/ssh-contract";
-import type { ConfigGeneratorPageHandle } from "./ConfigGeneratorPage";
+import type { ConfigurationPageHandle } from "./ConfigurationPage";
 import { ConnectionManager } from "./ConnectionManager";
 import {
   CommandHistoryPanel,
@@ -50,12 +50,11 @@ import { NotificationStack } from "./NotificationStack";
  */
 const SecurityReference = lazy(async () => ({ default: (await import("./SecurityReference")).SecurityReference }));
 const Notes = lazy(async () => ({ default: (await import("./Notes")).Notes }));
-const ConfigGeneratorPage = lazy(async () => ({ default: (await import("./ConfigGeneratorPage")).ConfigGeneratorPage }));
+const ConfigurationPage = lazy(async () => ({ default: (await import("./ConfigurationPage")).ConfigurationPage }));
 const SystemInfoPage = lazy(async () => ({ default: (await import("./SystemInfoPage")).SystemInfoPage }));
 const AiHistoryPage = lazy(async () => ({ default: (await import("./AiHistoryPage")).AiHistoryPage }));
 const SnapshotPage = lazy(async () => ({ default: (await import("./SnapshotPage")).SnapshotPage }));
 const FirewallPage = lazy(async () => ({ default: (await import("./FirewallPage")).FirewallPage }));
-const BaselinePage = lazy(async () => ({ default: (await import("./BaselinePage")).BaselinePage }));
 const MiddlewarePage = lazy(async () => ({ default: (await import("./MiddlewarePage")).MiddlewarePage }));
 const CheckAuditPage = lazy(async () => ({ default: (await import("./CheckAuditPage")).CheckAuditPage }));
 const IntegrityPage = lazy(async () => ({ default: (await import("./IntegrityPage")).IntegrityPage }));
@@ -131,7 +130,7 @@ export function App() {
   // Declared with the state it derives from: the theme effect below depends on it.
   const overlayOpen = connectionManagerRequest !== undefined || settingsOpen || commandHistoryOpen ||
     disposalReportOpen || applicationLogOpen;
-  const configGeneratorRef = useRef<ConfigGeneratorPageHandle>(null);
+  const configurationRef = useRef<ConfigurationPageHandle>(null);
   const notesRef = useRef<NotesHandle>(null);
   const settingsPanelRef = useRef<SettingsPanelHandle>(null);
   const commandHistoryPanelRef = useRef<CommandHistoryPanelHandle>(null);
@@ -188,7 +187,7 @@ export function App() {
       return notesRef.current?.beforeDeactivate() ?? true;
     }
     if (activePageId === "config-generator") {
-      return configGeneratorRef.current?.beforeDeactivate() ?? true;
+      return configurationRef.current?.beforeDeactivate() ?? true;
     }
     return true;
   }), [activePageId, applicationLogOpen, commandHistoryOpen, disposalReportOpen, settingsOpen]);
@@ -278,7 +277,7 @@ export function App() {
         if (!canDeactivate) return;
       }
       if (activePageId === "config-generator") {
-        const canDeactivate = await configGeneratorRef.current?.beforeDeactivate() ?? true;
+        const canDeactivate = await configurationRef.current?.beforeDeactivate() ?? true;
         if (!canDeactivate) return;
       }
       setActivePageId(pageId);
@@ -470,7 +469,11 @@ export function App() {
           ) : activePage.id === "notes" ? (
             <Notes ref={notesRef} />
           ) : activePage.id === "config-generator" ? (
-            <ConfigGeneratorPage ref={configGeneratorRef} />
+            <ConfigurationPage
+              ref={configurationRef}
+              bindingHandle={activeTarget?.bindingHandle ?? null}
+              api={window.lovelyres}
+            />
           ) : activePage.id === "system-info" ? (
             <SystemInfoPage
               connection={activeTarget}
@@ -492,11 +495,6 @@ export function App() {
               bindingHandle={activeTarget?.bindingHandle ?? null}
               api={window.lovelyres}
               writeClipboard={window.lovelyres.writeClipboard}
-            />
-          ) : activePage.id === "baseline-quick-edit" ? (
-            <BaselinePage
-              bindingHandle={activeTarget?.bindingHandle ?? null}
-              api={window.lovelyres}
             />
           ) : activePage.id === "middleware" ? (
             <MiddlewarePage

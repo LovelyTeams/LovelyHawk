@@ -41,6 +41,12 @@ export interface BaselinePageProps {
   bindingHandle: string | null;
   api: BaselineReadApi;
   active?: boolean;
+  /**
+   * Set when the page sits inside the configuration workbench, which already
+   * carries the title and says what the view does. Two headers stacked on top
+   * of each other read as two pages.
+   */
+  embedded?: boolean;
 }
 
 const tabs: readonly BaselineTab[] = ["checks", "history"];
@@ -51,7 +57,7 @@ const complianceFilters: readonly BaselineComplianceFilter[] = [
   "all", "compliant", "non-compliant", "unscanned",
 ];
 
-export function BaselinePage({ bindingHandle, api, active = true }: BaselinePageProps) {
+export function BaselinePage({ bindingHandle, api, active = true, embedded = false }: BaselinePageProps) {
   const [state, dispatch] = useReducer(baselineReadReducer, undefined, createBaselineReadState);
   const [catalogVersion, setCatalogVersion] = useState(0);
   const [scanVersion, setScanVersion] = useState(0);
@@ -161,26 +167,28 @@ export function BaselinePage({ bindingHandle, api, active = true }: BaselinePage
     );
   }
   return (
-    <main className="baseline-page">
-      <header className="baseline-header">
-        <div>
-          <p className="baseline-kicker">只读</p>
-          <h1>Linux 安全基线</h1>
-          <p className="baseline-target">
-            {bindingHandle === null
-              ? "尚未连接 SSH 目标"
-              : "已连接目标"}
-          </p>
-        </div>
-        <button type="button" disabled={state.catalogStatus === "loading"}
-          onClick={() => setCatalogVersion((value) => value + 1)}>
-          {state.catalogStatus === "loading" ? "目录刷新中…" : "刷新目录"}
-        </button>
-      </header>
+    <main className={embedded ? "baseline-page is-embedded" : "baseline-page"}>
+      {!embedded && (
+        <>
+          <header className="baseline-header">
+            <div>
+              <p className="baseline-kicker">只读</p>
+              <h1>Linux 安全基线</h1>
+              <p className="baseline-target">
+                {bindingHandle === null ? "尚未连接 SSH 目标" : "已连接目标"}
+              </p>
+            </div>
+            <button type="button" disabled={state.catalogStatus === "loading"}
+              onClick={() => setCatalogVersion((value) => value + 1)}>
+              {state.catalogStatus === "loading" ? "目录刷新中…" : "刷新目录"}
+            </button>
+          </header>
 
-      <p className="baseline-readonly-banner">
-        本页只读取固定目录、当前合规状态与当前目标的安全历史摘要；不提供计划、确认、执行、恢复或重载入口。
-      </p>
+          <p className="baseline-readonly-banner">
+            本页只读取固定目录、当前合规状态与当前目标的安全历史摘要；不提供计划、确认、执行、恢复或重载入口。
+          </p>
+        </>
+      )}
 
       {(state.catalogStatus === "idle" || state.catalogStatus === "loading") && state.catalog === null ? (
         <BaselineStatusPanel label="正在读取随包分发的基线目录…" />
