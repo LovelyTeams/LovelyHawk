@@ -547,11 +547,19 @@ impl EmergencyRegistry {
         }
         let catalog = self
             .catalogs
-            .get(snapshot_handle)
+            .get_mut(snapshot_handle)
             .ok_or(EmergencyCommandApiError::CatalogStale)?;
-        if &catalog.scope != scope || catalog.expires_at <= Instant::now() {
+        let now = Instant::now();
+        if &catalog.scope != scope || catalog.expires_at <= now {
             return Err(EmergencyCommandApiError::CatalogStale);
         }
+        // The window slides while the catalogue is in use. A sweep of a slow
+        // host outlasts a fixed five minutes and every command after that
+        // point failed, which in the window is a category run stopping
+        // half-way through. An idle catalogue still expires on time, and the
+        // target-change check below is what actually guards the binding.
+        catalog.expires_at = now + CATALOG_TTL;
+        let catalog = &*catalog;
         let command = catalog
             .commands
             .iter()
@@ -1003,6 +1011,27 @@ mod tests {
 
     /// The shipped catalog grew well past the original slice; every bound it
     /// crosses has to hold for the real entries, not just for fixtures.
+    /// A sweep of a slow host outlasts a fixed five minutes, and every command
+    /// after that point failed — in the window, a category run stopping
+    /// half-way through with nothing said about why.
+    #[test]
+    fn the_catalogue_window_slides_while_it_is_in_use() {
+        let source = include_str!("emergency_command_api.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap();
+        assert!(production.contains("catalog.expires_at = now + CATALOG_TTL;"));
+        // Renewal happens after the staleness check, never instead of it.
+        let check = production
+            .find("if &catalog.scope != scope || catalog.expires_at <= now {")
+            .unwrap();
+        let renew = production
+            .find("catalog.expires_at = now + CATALOG_TTL;")
+            .unwrap();
+        assert!(check < renew);
+        // The binding is still validated on every run; the window is not what
+        // protects against the target changing underneath.
+        assert!(production.contains("self.validate_binding(&scope)"));
+    }
+
     /// A host under investigation is often a host under load. Losing the whole
     /// catalogue because the one-line os-release probe was slow leaves the
     /// operator with nothing exactly when they need something.
