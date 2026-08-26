@@ -161,7 +161,7 @@ try {
   await waitFor(session, "document.querySelector('.baseline-card') !== null", "the checks", 180);
   await waitFor(
     session,
-    "document.querySelectorAll('.baseline-card header strong.is-noncompliant').length > 0",
+    "document.querySelectorAll('.baseline-card-verdict.is-noncompliant').length > 0",
     "a scanned result",
     240,
   );
@@ -216,7 +216,7 @@ try {
   await session.evaluate(`(() => {
     const card = [...document.querySelectorAll('.baseline-card')]
       .find(candidate => candidate.textContent?.includes('禁止 root 直接登录'));
-    card?.querySelector('button')?.click();
+    card?.click();
     return true;
   })()`);
   await waitFor(
@@ -248,6 +248,53 @@ try {
   check("说明写清了第几行生效", pane.verdict.includes("第 2 行"));
   check("卡片上的观察值跟高亮一致", pane.observed.includes("yes"));
   await shot(session, "baseline-file-pane");
+
+  // Density: how many checks fit without scrolling, and whether the bubble
+  // that holds what the row had no room for opens on hover.
+  const density = await session.evaluate(`(() => {
+    const list = document.querySelector('.baseline-card-grid');
+    const box = list.getBoundingClientRect();
+    const cards = [...document.querySelectorAll('.baseline-card')];
+    const inside = cards.filter(card => {
+      const rect = card.getBoundingClientRect();
+      return rect.top >= box.top && rect.bottom <= box.bottom;
+    });
+    return {
+      groups: document.querySelectorAll('.baseline-check-group').length,
+      cards: cards.length,
+      visible: inside.length,
+      cardHeight: Math.round(cards[0]?.getBoundingClientRect().height ?? 0),
+      bubbleHidden: getComputedStyle(document.querySelector('.baseline-card-bubble')).opacity
+    };
+  })()`);
+  console.log(`\n列表 ${density.cards} 项，分 ${density.groups} 组，不滚动看得到 ${density.visible} 项，单项高 ${density.cardHeight}px`);
+  check("按分类分组", density.groups >= 5, true);
+  // Guards against sliding back to the giant cards this replaced, where three
+  // checks filled the column.
+  check("一屏至少看得到 10 项", density.visible >= 10, true);
+  check("单项高度压到 50px 以内", density.cardHeight <= 50, true);
+  check("气泡默认不显示", density.bubbleHidden, "0");
+
+  const at = await session.evaluate(`(() => {
+    const rect = document.querySelector('.baseline-card').getBoundingClientRect();
+    return {
+      type: 'mouseMoved',
+      x: Math.round(rect.left + 40),
+      y: Math.round(rect.top + rect.height / 2)
+    };
+  })()`);
+  await session.send("Input.dispatchMouseEvent", at);
+  await sleep(400);
+  const hovered = await session.evaluate(`(() => {
+    const bubble = document.querySelector('.baseline-card-slot:hover .baseline-card-bubble');
+    return {
+      opacity: bubble === null ? null : getComputedStyle(bubble).opacity,
+      text: bubble?.textContent ?? ''
+    };
+  })()`);
+  check("悬停时气泡出来了", hovered.opacity, "1");
+  check("气泡里带着说明和取值", hovered.text.includes("建议值") && hovered.text.includes("取值"), true);
+  await shot(session, "baseline-card-bubble");
 
   // The other half of the same page.
   await session.evaluate(`(() => {

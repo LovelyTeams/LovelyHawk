@@ -78,24 +78,177 @@
 .baseline-summary strong { color: var(--text); font-size: 18px; }
 .baseline-summary span { color: var(--muted); font-size: 12.5px; }
 
-.baseline-card-grid { display: flex; flex-direction: column; gap: 10px; min-width: 0; overflow: auto; }
-.baseline-card { min-width: 0; padding: 14px; background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--border-strong); border-radius: 10px; }
-.baseline-card.risk-critical { border-left-color: var(--danger); }
-.baseline-card.risk-high { border-left-color: var(--warning); }
-.baseline-card.risk-medium { border-left-color: var(--accent); }
-.baseline-card header { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
-.baseline-card header strong { margin-left: auto; padding: 3px 6px; border-radius: 999px; font-size: 12px; }
-.baseline-card header strong.is-compliant { color: var(--success-text); background: var(--success-soft); }
-.baseline-card header strong.is-noncompliant { color: var(--danger-text); background: var(--danger-soft); }
-.baseline-card header strong.is-unscanned { color: var(--text-secondary); background: var(--surface-inset); }
-.baseline-card h3 { margin: 10px 0 5px; color: var(--text); font-size: 13px; }
-.baseline-card > p { min-height: 34px; margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.55; }
-.baseline-card dl { display: grid; gap: 5px; margin: 11px 0 0; }
-.baseline-card dl div { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 8px; }
-.baseline-card dt { color: var(--muted); font-size: 12px; }
-.baseline-card dd { min-width: 0; margin: 0; color: var(--text); font-size: 12.5px; overflow-wrap: anywhere; }
-.baseline-card code { color: var(--console-text); background: var(--console-bg); border-radius: 4px; padding: 2px 4px; font-family: "Cascadia Mono", monospace; white-space: pre-wrap; }
-.baseline-card small { display: block; margin-top: 9px; color: var(--warning-text); font-size: 12px; }
+.baseline-card-grid {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+  background: var(--surface-inset);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+/* Category branch ---------------------------------------------------------
+   Thirty-eight checks in one flat list is a scroll, not a picture. Grouped,
+   the failure count per category is the first thing that reads. */
+
+.baseline-check-group { flex: none; }
+
+.baseline-check-group header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 8px 5px;
+}
+
+.baseline-check-group header strong {
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.baseline-group-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.baseline-group-failing { color: var(--danger-text); font-style: normal; }
+
+/* One check ------------------------------------------------------------- */
+
+.baseline-card-slot { position: relative; }
+
+.baseline-card {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.baseline-card:disabled { cursor: default; }
+.baseline-card:hover:not(:disabled) { background: var(--surface); }
+
+.baseline-card.is-selected {
+  border-color: var(--accent);
+  background: var(--info-soft);
+}
+
+.baseline-card.is-selected .baseline-card-body strong { color: var(--info-text); }
+
+/* A dot rather than a word: the risk is a rank, and a rank reads faster as
+   a colour than as another label competing with the verdict. */
+.baseline-card-risk {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+
+.baseline-card.risk-critical .baseline-card-risk { background: var(--danger); }
+.baseline-card.risk-high .baseline-card-risk { background: var(--warning); }
+.baseline-card.risk-medium .baseline-card-risk { background: var(--accent); }
+
+.baseline-card-body {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 1px;
+}
+
+.baseline-card-body strong {
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+.baseline-card-values {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "Cascadia Mono", monospace;
+  font-size: 11.5px;
+}
+
+.baseline-card-verdict {
+  flex: none;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.baseline-card-verdict.is-compliant { color: var(--success-text); background: var(--success-soft); }
+.baseline-card-verdict.is-noncompliant { color: var(--danger-text); background: var(--danger-soft); }
+.baseline-card-verdict.is-unscanned { color: var(--text-secondary); background: var(--surface); }
+
+/* What the row had no room for --------------------------------------------
+   The wording of a check and the values it accepts only matter once the
+   operator has stopped on one, so they wait here rather than taking a third
+   of the list. */
+
+.baseline-card-bubble {
+  position: absolute;
+  top: 100%;
+  left: 8px;
+  z-index: 30;
+  display: grid;
+  width: max-content;
+  max-width: 340px;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 11px 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+.baseline-card-slot:hover .baseline-card-bubble,
+.baseline-card-slot:focus-within .baseline-card-bubble { opacity: 1; }
+
+/* Near the bottom of the list the bubble opens upward instead of off-screen. */
+.baseline-check-group:last-child .baseline-card-slot:nth-last-child(-n + 3) .baseline-card-bubble {
+  top: auto;
+  bottom: 100%;
+  margin: 0 0 4px;
+}
+
+.baseline-card-bubble strong { color: var(--text); font-size: 12.5px; }
+.baseline-card-bubble-risk { color: var(--muted); font-size: 11.5px; }
+.baseline-card-bubble p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.baseline-card-bubble dl { display: grid; gap: 4px; margin: 2px 0 0; }
+.baseline-card-bubble dl div { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 9px; }
+.baseline-card-bubble dt { color: var(--muted); font-size: 11.5px; }
+.baseline-card-bubble dd { min-width: 0; margin: 0; color: var(--text); font-size: 12px; overflow-wrap: anywhere; }
+.baseline-card-bubble code {
+  color: var(--console-text);
+  background: var(--console-bg);
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-family: "Cascadia Mono", monospace;
+}
+.baseline-card-bubble em { color: var(--warning-text); font-size: 11.5px; font-style: normal; }
 
 .baseline-history-list { display: grid; gap: 9px; margin-top: 14px; }
 .baseline-history-list article { padding: 13px 14px; background: var(--surface-inset); border: 1px solid var(--border); border-radius: 9px; }
@@ -115,21 +268,6 @@
 .baseline-empty.is-compact, .baseline-error.is-compact { padding: 24px 16px; }
 .baseline-warning { margin: 12px 0 0; padding: 9px 11px; color: var(--warning-text); background: var(--warning-soft); border: 1px solid var(--warning-border); border-radius: 8px; font-size: 12.5px; }
 .baseline-page button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-
-@media (max-width: 1000px) {
-  .baseline-workbench { grid-template-columns: 1fr; }
-  .baseline-file-pane { max-height: 420px; }
-  .baseline-filters { grid-template-columns: 1fr 1fr; }
-  .baseline-filters label:first-child { grid-column: 1 / -1; }
-}
-
-@media (max-width: 680px) {
-  .baseline-page { padding: 12px; }
-  .baseline-header, .baseline-view-header { align-items: flex-start; flex-direction: column; }
-  .baseline-summary { grid-template-columns: 1fr 1fr; }
-  .baseline-filters { grid-template-columns: 1fr; }
-  .baseline-filters label:first-child { grid-column: auto; }
-}
 
 /* Checks on the left, the file they read on the right --------------------- */
 
@@ -306,4 +444,26 @@
 .baseline-file-text pre span.is-inert {
   margin: 0 -14px;
   padding: 0 14px;
+}
+
+@media (max-width: 1000px) {
+  /* Too narrow for two columns, so the file goes under the list and the whole
+     thing grows with the page rather than scrolling in two boxes. */
+  .baseline-workbench {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) auto;
+    height: auto;
+  }
+  .baseline-card-grid { max-height: 380px; }
+  .baseline-file-pane { max-height: 420px; }
+  .baseline-filters { grid-template-columns: 1fr 1fr; }
+  .baseline-filters label:first-child { grid-column: 1 / -1; }
+}
+
+@media (max-width: 680px) {
+  .baseline-page { padding: 12px; }
+  .baseline-header, .baseline-view-header { align-items: flex-start; flex-direction: column; }
+  .baseline-summary { grid-template-columns: 1fr 1fr; }
+  .baseline-filters { grid-template-columns: 1fr; }
+  .baseline-filters label:first-child { grid-column: auto; }
 }

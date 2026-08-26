@@ -18,6 +18,52 @@ export interface BaselineVisibleItem {
   status: BaselineStatus | null;
 }
 
+/** One category's worth of checks, with how many of them failed. */
+export interface BaselineCheckGroup {
+  category: BaselineCategory;
+  items: BaselineVisibleItem[];
+  failing: number;
+}
+
+/** The order the categories are read in, worst first. */
+const CATEGORY_ORDER: readonly BaselineCategory[] = [
+  "ssh", "authentication", "password", "kernel", "network", "logging", "file-permissions",
+];
+
+/**
+ * Groups what is on screen by category.
+ *
+ * Thirty-eight checks in one flat list is a scroll, not a picture. Grouped,
+ * the count of failures per category is the first thing an operator reads.
+ */
+export function groupBaselineChecks(visible: readonly BaselineVisibleItem[]): BaselineCheckGroup[] {
+  const groups = new Map<BaselineCategory, BaselineVisibleItem[]>();
+  for (const entry of visible) {
+    const bucket = groups.get(entry.item.category);
+    if (bucket === undefined) groups.set(entry.item.category, [entry]);
+    else bucket.push(entry);
+  }
+  return CATEGORY_ORDER.flatMap((category) => {
+    const items = groups.get(category);
+    if (items === undefined || items.length === 0) return [];
+    return [{
+      category,
+      items,
+      failing: items.filter((entry) => entry.status !== null && !entry.status.compliant).length,
+    }];
+  });
+}
+
+/** The one line a compact card can spare for what the target actually has. */
+export function baselineValueSummary(
+  item: BaselineCatalogItem,
+  status: BaselineStatus | null,
+): string {
+  if (status === null) return `建议 ${item.recommendation}`;
+  if (status.compliant) return `${item.recommendation}，符合`;
+  return `建议 ${item.recommendation}，实际 ${status.observed}`;
+}
+
 export function baselineScope(bindingHandle: string): string {
   return bindingHandle;
 }

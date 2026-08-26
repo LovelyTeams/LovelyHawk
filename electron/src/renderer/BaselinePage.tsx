@@ -23,6 +23,8 @@ import {
   baselineHistoryStateLabel,
   baselineRiskLabel,
   baselineScope,
+  baselineValueSummary,
+  groupBaselineChecks,
   baselineTabLabel,
   baselineValueKindLabel,
   filterBaselineItems,
@@ -316,15 +318,32 @@ export function BaselineChecksView({ catalog, status, scan, error, connected, se
         <BaselineEmptyPanel title="没有匹配的基线项" detail="调整分类、合规状态或搜索文本。" compact />
       ) : (
         <div className="baseline-workbench">
-          <div className="baseline-card-grid" role="list">
-            {visible.map(({ item, status: itemStatus }) => (
-              <BaselineCheckCard
-                key={item.itemHandle}
-                item={item}
-                status={itemStatus}
-                selected={item.itemHandle === selectedItemHandle}
-                onSelect={onSelect}
-              />
+          <div className="baseline-card-grid">
+            {groupBaselineChecks(visible).map((group) => (
+              <section className="baseline-check-group" key={group.category}>
+                <header>
+                  <strong>{baselineCategoryLabel(group.category)}</strong>
+                  <span className="baseline-group-count">
+                    {group.failing === 0
+                      ? `${group.items.length} 项`
+                      : `${group.items.length} 项，`}
+                    {group.failing > 0 && (
+                      <em className="baseline-group-failing">{group.failing} 项不符合</em>
+                    )}
+                  </span>
+                </header>
+                <div role="list">
+                  {group.items.map(({ item, status: itemStatus }) => (
+                    <BaselineCheckCard
+                      key={item.itemHandle}
+                      item={item}
+                      status={itemStatus}
+                      selected={item.itemHandle === selectedItemHandle}
+                      onSelect={onSelect}
+                    />
+                  ))}
+                </div>
+              </section>
             ))}
           </div>
           <BaselineFilePane
@@ -351,6 +370,14 @@ export function BaselineChecksView({ catalog, status, scan, error, connected, se
  * One check. Selecting it opens the file it reads in the pane beside the list,
  * because a verdict without the line it came from is only an assertion.
  */
+/**
+ * One check, in the space one check is worth.
+ *
+ * A verdict, a title and what the target has against what it should have —
+ * that is what an operator scans a list of thirty-eight for. The wording of
+ * the check and the values it accepts only matter once they have stopped on
+ * one, so those wait in the bubble that opens on hover.
+ */
 export function BaselineCheckCard({ item, status, selected = false, onSelect }: {
   item: BaselineCatalogItem;
   status: BaselineStatus | null;
@@ -361,28 +388,33 @@ export function BaselineCheckCard({ item, status, selected = false, onSelect }: 
     ? "is-compliant"
     : status === null ? "is-unscanned" : "is-noncompliant";
   return (
-    <article className={`baseline-card risk-${item.risk}${selected ? " is-selected" : ""}`} role="listitem">
+    <div className="baseline-card-slot" role="listitem">
       <button
         type="button"
+        className={`baseline-card risk-${item.risk}${selected ? " is-selected" : ""}`}
         aria-pressed={selected}
         disabled={onSelect === undefined}
         onClick={() => onSelect?.(selected ? null : item.itemHandle)}
       >
-        <header>
-          <span>{baselineCategoryLabel(item.category)}</span>
-          <span>{baselineRiskLabel(item.risk)}风险</span>
-          <strong className={verdict}>{baselineComplianceLabel(status)}</strong>
-        </header>
-        <h3>{item.title}</h3>
+        <span className="baseline-card-risk" aria-hidden="true" />
+        <span className="baseline-card-body">
+          <strong>{item.title}</strong>
+          <span className="baseline-card-values">{baselineValueSummary(item, status)}</span>
+        </span>
+        <span className={`baseline-card-verdict ${verdict}`}>{baselineComplianceLabel(status)}</span>
+      </button>
+      <span className="baseline-card-bubble" role="tooltip">
+        <strong>{item.title}</strong>
+        <span className="baseline-card-bubble-risk">{baselineRiskLabel(item.risk)}风险</span>
         <p>{item.description}</p>
         <dl>
           <div><dt>建议值</dt><dd><code>{item.recommendation}</code></dd></div>
-          <div><dt>值类型</dt><dd>{baselineValueKindLabel(item.valueKind)}</dd></div>
-          <div><dt>观察值</dt><dd><code>{status?.observed ?? "—"}</code></dd></div>
+          <div><dt>取值</dt><dd>{baselineValueKindLabel(item.valueKind)}</dd></div>
+          <div><dt>目标机上的值</dt><dd><code>{status?.observed ?? "尚未扫描"}</code></dd></div>
         </dl>
-        {status?.textTruncated === true && <small>观察值已按字节边界截断。</small>}
-      </button>
-    </article>
+        {status?.textTruncated === true && <em>观察值已按字节边界截断。</em>}
+      </span>
+    </div>
   );
 }
 

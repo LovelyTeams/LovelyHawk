@@ -195,7 +195,10 @@ describe("central Baseline page", () => {
     const css = readFileSync(new URL("./baseline-page.css", import.meta.url), "utf8");
     expect((css.match(/var\(--[a-z0-9-]+\)/gu) ?? []).length).toBeGreaterThan(30);
     expect(css).not.toMatch(/#[0-9a-f]{3,8}|rgba?\(|hsla?\(/iu);
-    expect(css).toMatch(/\.baseline-card code \{[^}]*color: var\(--console-text\);[^}]*background: var\(--console-bg\);/u);
+    expect(css).toMatch(/\.baseline-card-bubble code \{[^}]*color: var\(--console-text\);[^}]*background: var\(--console-bg\);/u);
+    // The bubble only exists on hover, so it must not be reachable by a stray
+    // pointer event while it is invisible.
+    expect(css).toMatch(/\.baseline-card-bubble \{[^}]*opacity: 0;[^}]*pointer-events: none;/u);
   });
 });
 
