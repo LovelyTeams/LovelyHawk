@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { EventEmitter } from "node:events";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -24,6 +26,46 @@ import {
   stopChildProcess,
   type StoppableChildProcess,
 } from "./backend-client";
+
+describe("sidecar request deadlines", () => {
+  const source = readFileSync(new URL("./backend-client.ts", import.meta.url), "utf8");
+
+  /**
+   * A client bound below the sidecar's own turns a slow target into "the
+   * request timed out", which says nothing an operator can act on, and drops
+   * the specific answer the sidecar was about to give. It happened on a lab
+   * host where a system-info tab needed more than the fifteen seconds every
+   * request used to get.
+   */
+  it("waits longer than the deadline the sidecar applies", () => {
+    const value = (name: string): number => {
+      const match = new RegExp(`const ${name} = ([0-9_]+);`, "u").exec(source);
+      return Number((match?.[1] ?? "0").replace(/_/gu, ""));
+    };
+    const sidecar = (file: string, name: string): number => {
+      const text = readFileSync(
+        new URL(`../../../crates/lovelyres-electron-backend/src/${file}`, import.meta.url),
+        "utf8",
+      );
+      const match = new RegExp(`const ${name}: Duration = Duration::from_secs\((\d+)\)`, "u")
+        .exec(text);
+      return Number(match?.[1] ?? 0) * 1_000;
+    };
+
+    const run = value("EMERGENCY_COMMAND_RUN_TIMEOUT_MS");
+    expect(run).toBeGreaterThan(sidecar("emergency_command_api.rs", "EXECUTION_DEADLINE"));
+    const operation = value("SFTP_OPERATION_TIMEOUT_MS");
+    expect(operation).toBeGreaterThan(sidecar("sftp_browser_api.rs", "EXECUTE_DEADLINE"));
+    const transfer = value("SFTP_TRANSFER_TIMEOUT_MS");
+    expect(transfer).toBeGreaterThan(sidecar("sftp_browser_api.rs", "TRANSFER_DEADLINE"));
+
+    // Anything that runs a command on a target waits past the forty-five
+    // seconds the core allows a single one.
+    expect(value("REMOTE_REQUEST_TIMEOUT_MS")).toBeGreaterThan(45_000);
+    expect(source).toContain('"system-info",');
+    expect(source).toContain("timeoutMs = defaultTimeoutFor(method)");
+  });
+});
 
 describe("terminal backend client boundary", () => {
   it("pins all seven internal RPC methods while validating every raw DTO", () => {

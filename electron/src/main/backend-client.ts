@@ -292,9 +292,25 @@ import {
 // the core's one-million-character note limit.
 const MAX_REQUEST_BYTES = 8 * 1024 * 1024;
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+/**
+ * How long to wait for one sidecar answer.
+ *
+ * This is not how a dead sidecar is noticed: the child's exit and error events
+ * fail every pending request at once. It only fires while the sidecar is alive
+ * and still working, so it has to sit above whatever bound the sidecar itself
+ * applies — otherwise the operator is told the request timed out instead of
+ * the specific reason the sidecar was a moment away from giving, and the answer
+ * that does arrive is dropped on the floor.
+ *
+ * The default suits work that never leaves this machine. Anything that runs a
+ * command on a target waits longer, because the core gives those commands up
+ * to forty-five seconds each and a loaded host uses all of it.
+ */
 const REQUEST_TIMEOUT_MS = 15_000;
-const EMERGENCY_COMMAND_CATALOG_TIMEOUT_MS = 20_000;
-const EMERGENCY_COMMAND_RUN_TIMEOUT_MS = 45_000;
+const REMOTE_REQUEST_TIMEOUT_MS = 60_000;
+const EMERGENCY_COMMAND_CATALOG_TIMEOUT_MS = 45_000;
+/** Above emergency_command_api's own EXECUTION_DEADLINE of seventy-five seconds. */
+const EMERGENCY_COMMAND_RUN_TIMEOUT_MS = 90_000;
 const SFTP_BROWSER_TIMEOUT_MS = 30_000;
 const SFTP_TRANSFER_TIMEOUT_MS = 190_000;
 const SFTP_OPERATION_TIMEOUT_MS = 100_000;
@@ -502,6 +518,26 @@ interface RpcResponse {
     code: string;
     message: string;
   };
+}
+
+/**
+ * Namespaces whose methods run a command on the target. Anything else is local
+ * work — reading a note, saving a setting — and answers in milliseconds.
+ */
+const REMOTE_NAMESPACES: ReadonlySet<string> = new Set([
+  "baseline", "check-audit", "docker", "emergency-command", "firewall",
+  "integrity", "kubernetes", "log-analysis", "middleware", "packet-capture",
+  "sftp-browser", "snapshot", "system-info",
+]);
+
+/**
+ * A method that reaches the target gets the longer bound unless its caller
+ * passes one of its own. The SSH namespace is deliberately absent: connecting
+ * is a poll loop of short calls, and the attempt carries its own deadline.
+ */
+function defaultTimeoutFor(method: string): number {
+  const namespace = method.split(".")[0] ?? "";
+  return REMOTE_NAMESPACES.has(namespace) ? REMOTE_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
 }
 
 export class BackendClient {
@@ -2245,7 +2281,7 @@ export class BackendClient {
   #request(
     method: string,
     params: object,
-    timeoutMs = REQUEST_TIMEOUT_MS,
+    timeoutMs = defaultTimeoutFor(method),
   ): Promise<unknown> {
     const child = this.#process;
     if (child === null || child.stdin.destroyed) {
