@@ -15,8 +15,9 @@ use std::{
 use lovelyres_core::{
     BackendServices, CoreError,
     baseline::{
-        BaselineCategory, BaselineChangeRecord, BaselineChangeState, BaselineDefinition,
-        BaselineFileView, BaselineObservedValue, BaselineRisk, BaselineScan, BaselineValueKind,
+        BaselineCategory, BaselineChangeRecord, BaselineChangeState, BaselineComponent,
+        BaselineDefinition, BaselineFileView, BaselineObservedValue, BaselineRisk, BaselineScan,
+        BaselineValueKind, PRESENCE_MARKER,
     },
     ssh::BoundSshSession,
     target::TargetGuard,
@@ -27,8 +28,12 @@ use uuid::Uuid;
 use crate::ssh_api::SshApi;
 
 const MAX_HANDLE_BYTES: usize = 128;
-const MAX_CATALOG_ITEMS: usize = 64;
-const MAX_STATUS_ITEMS: usize = 64;
+/// The catalogue covers the operating system, SSH, four databases and two web
+/// servers, so the ceiling is set above what the catalogue can grow to rather
+/// than at what it happened to be. It is still a fixed bound: the list is
+/// compiled in, and a scan that returned more rows than this would be refused.
+const MAX_CATALOG_ITEMS: usize = 160;
+const MAX_STATUS_ITEMS: usize = 160;
 const MAX_HISTORY_ENTRIES: usize = 256;
 const MAX_OPTIONS: usize = 16;
 const MAX_TITLE_BYTES: usize = 256;
@@ -50,6 +55,9 @@ const MAX_GLOBAL_READS: usize = 4;
 const MAX_READS_PER_BINDING: usize = 1;
 const SNAPSHOT_TTL: Duration = Duration::from_secs(5 * 60);
 const REDACTED_TEXT: &str = "[SENSITIVE BASELINE TEXT REDACTED]";
+/// What a check that only reports whether a directive is set says instead of
+/// the value, which for those checks is a credential.
+const PRESENCE_LABEL: &str = "已设置";
 /// A configuration file the operator is meant to read on screen. The core cuts
 /// at the same ceiling; this is the boundary saying so again.
 const MAX_FILE_TEXT_BYTES: usize = 256 * 1024;
@@ -348,11 +356,15 @@ pub(crate) struct BaselineCatalogDto {
 struct BaselineCatalogItemDto {
     item_handle: String,
     category: &'static str,
+    /// Which piece of software this check is about. Fixed at compile time.
+    component: &'static str,
     risk: &'static str,
     value_kind: PublicBaselineValueKind,
     title: String,
     description: String,
     recommendation: String,
+    /// Whether this tool would write the change, or only report it.
+    writable: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -475,8 +487,14 @@ impl CatalogProjection {
             handles.insert(item_handle.clone());
             let title = trusted_catalog_text(definition.title, MAX_TITLE_BYTES)?;
             let description = trusted_catalog_text(definition.description, MAX_DESCRIPTION_BYTES)?;
-            let recommendation =
-                trusted_catalog_text(definition.recommendation, MAX_RECOMMENDATION_BYTES)?;
+            // A presence check has no value to recommend, only the fact of
+            // being set. The core says that with a marker so nothing has to
+            // parse Chinese; the window is where it becomes words.
+            let recommendation = if definition.value_kind == BaselineValueKind::Presence {
+                PRESENCE_LABEL.to_owned()
+            } else {
+                trusted_catalog_text(definition.recommendation, MAX_RECOMMENDATION_BYTES)?
+            };
             let value_kind = match definition.value_kind {
                 BaselineValueKind::Choice(options) => {
                     if options.is_empty() || options.len() > MAX_OPTIONS {
@@ -510,6 +528,16 @@ impl CatalogProjection {
                     }
                     PublicBaselineValueKind::Integer { minimum, maximum }
                 }
+                // A truth value is a choice of two, whatever the file spells
+                // it; the window offers the two it would ask for.
+                BaselineValueKind::Boolean => PublicBaselineValueKind::Choice {
+                    options: vec!["on".to_owned(), "off".to_owned()],
+                },
+                // Nothing to choose: the check reports only whether the
+                // directive is set, because its value is a credential.
+                BaselineValueKind::Presence => PublicBaselineValueKind::Choice {
+                    options: vec![PRESENCE_LABEL.to_owned()],
+                },
             };
             text_bytes = text_bytes
                 .saturating_add(title.len())
@@ -531,11 +559,13 @@ impl CatalogProjection {
             items.push(BaselineCatalogItemDto {
                 item_handle,
                 category: category_key(definition.category),
+                component: component_key(definition.component),
                 risk: risk_key(definition.risk),
                 value_kind,
                 title,
                 description,
                 recommendation,
+                writable: definition.is_writable(),
             });
         }
         let dto = BaselineCatalogDto {
@@ -885,6 +915,16 @@ fn project_scan(
                 false,
                 false,
             ),
+            // The software this check is about is not on this target. Saying
+            // "not set" here would put it among the findings; it is not one.
+            BaselineObservedValue::NotInstalled => {
+                ("not-installed", "未安装".to_owned(), false, false)
+            }
+            // A presence check reports a marker rather than the value it
+            // found, because the value is the credential the check is about.
+            BaselineObservedValue::Value(value) if value == PRESENCE_MARKER => {
+                ("value", PRESENCE_LABEL.to_owned(), false, false)
+            }
             BaselineObservedValue::Value(value) => {
                 let (value, redacted, truncated) =
                     budget.take_public(&value, MAX_OBSERVED_BYTES, REDACTED_TEXT);
@@ -1135,6 +1175,22 @@ const fn category_key(category: BaselineCategory) -> &'static str {
         BaselineCategory::Authentication => "authentication",
         BaselineCategory::Logging => "logging",
         BaselineCategory::FilePermissions => "file-permissions",
+        BaselineCategory::AccessControl => "access-control",
+        BaselineCategory::Transport => "transport",
+        BaselineCategory::ServiceHardening => "service-hardening",
+    }
+}
+
+const fn component_key(component: BaselineComponent) -> &'static str {
+    match component {
+        BaselineComponent::System => "system",
+        BaselineComponent::Ssh => "ssh",
+        BaselineComponent::MySql => "mysql",
+        BaselineComponent::PostgreSql => "postgresql",
+        BaselineComponent::Redis => "redis",
+        BaselineComponent::MongoDb => "mongodb",
+        BaselineComponent::Nginx => "nginx",
+        BaselineComponent::Apache => "apache",
     }
 }
 

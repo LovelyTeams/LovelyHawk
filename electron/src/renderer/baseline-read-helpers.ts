@@ -1,6 +1,7 @@
 import type {
   BaselineCatalogItem,
   BaselineCategory,
+  BaselineComponent,
   BaselineHistoryState,
   BaselineRisk,
   BaselineScan,
@@ -18,38 +19,50 @@ export interface BaselineVisibleItem {
   status: BaselineStatus | null;
 }
 
-/** One category's worth of checks, with how many of them failed. */
+/** One product's worth of checks, with how many of them failed. */
 export interface BaselineCheckGroup {
-  category: BaselineCategory;
+  component: BaselineComponent;
   items: BaselineVisibleItem[];
   failing: number;
+  /** True when this software is not on the target at all. */
+  absent: boolean;
 }
 
-/** The order the categories are read in, worst first. */
-const CATEGORY_ORDER: readonly BaselineCategory[] = [
-  "ssh", "authentication", "password", "kernel", "network", "logging", "file-permissions",
+/** The order the products are read in: the machine itself, then what it runs. */
+const COMPONENT_ORDER: readonly BaselineComponent[] = [
+  "system", "ssh", "mysql", "postgresql", "redis", "mongodb", "nginx", "apache",
 ];
 
+/** A check on software the target does not run is neither passed nor failed. */
+export function baselineApplies(status: BaselineStatus | null): boolean {
+  return status === null || status.observedKind !== "not-installed";
+}
+
 /**
- * Groups what is on screen by category.
+ * Groups what is on screen by the software each check is about.
  *
- * Thirty-eight checks in one flat list is a scroll, not a picture. Grouped,
- * the count of failures per category is the first thing an operator reads.
+ * Seventy-five checks in one flat list is a scroll, not a picture, and the
+ * grouping that helps is the one that matches the question: an operator sent
+ * to harden the database wants the database's checks together. Which kind of
+ * hardening each is stays available as a filter.
  */
 export function groupBaselineChecks(visible: readonly BaselineVisibleItem[]): BaselineCheckGroup[] {
-  const groups = new Map<BaselineCategory, BaselineVisibleItem[]>();
+  const groups = new Map<BaselineComponent, BaselineVisibleItem[]>();
   for (const entry of visible) {
-    const bucket = groups.get(entry.item.category);
-    if (bucket === undefined) groups.set(entry.item.category, [entry]);
+    const bucket = groups.get(entry.item.component);
+    if (bucket === undefined) groups.set(entry.item.component, [entry]);
     else bucket.push(entry);
   }
-  return CATEGORY_ORDER.flatMap((category) => {
-    const items = groups.get(category);
+  return COMPONENT_ORDER.flatMap((component) => {
+    const items = groups.get(component);
     if (items === undefined || items.length === 0) return [];
+    const scanned = items.filter((entry) => entry.status !== null);
     return [{
-      category,
+      component,
       items,
-      failing: items.filter((entry) => entry.status !== null && !entry.status.compliant).length,
+      failing: items.filter((entry) =>
+        entry.status !== null && !entry.status.compliant && baselineApplies(entry.status)).length,
+      absent: scanned.length > 0 && scanned.every((entry) => !baselineApplies(entry.status)),
     }];
   });
 }
@@ -59,9 +72,13 @@ export function baselineValueSummary(
   item: BaselineCatalogItem,
   status: BaselineStatus | null,
 ): string {
-  if (status === null) return `建议 ${item.recommendation}`;
-  if (status.compliant) return `${item.recommendation}，符合`;
-  return `建议 ${item.recommendation}，实际 ${status.observed}`;
+  const wanted = item.valueKind.kind === "choice" && item.valueKind.options.length === 1
+    ? item.valueKind.options[0] ?? item.recommendation
+    : item.recommendation;
+  if (status === null) return `建议 ${wanted}`;
+  if (!baselineApplies(status)) return "这台机器上没有这个软件";
+  if (status.compliant) return `${wanted}，符合`;
+  return `建议 ${wanted}，实际 ${status.observed}`;
 }
 
 export function baselineScope(bindingHandle: string): string {
@@ -117,6 +134,22 @@ export function baselineCategoryLabel(category: BaselineCategory): string {
     case "authentication": return "认证防护";
     case "logging": return "审计日志";
     case "file-permissions": return "文件权限";
+    case "access-control": return "访问控制";
+    case "transport": return "传输加密";
+    case "service-hardening": return "服务加固";
+  }
+}
+
+export function baselineComponentLabel(component: BaselineComponent): string {
+  switch (component) {
+    case "system": return "操作系统";
+    case "ssh": return "SSH 服务";
+    case "mysql": return "MySQL / MariaDB";
+    case "postgresql": return "PostgreSQL";
+    case "redis": return "Redis";
+    case "mongodb": return "MongoDB";
+    case "nginx": return "Nginx";
+    case "apache": return "Apache";
   }
 }
 
@@ -141,5 +174,6 @@ export function baselineHistoryStateLabel(state: BaselineHistoryState): string {
 
 export function baselineComplianceLabel(status: BaselineStatus | null): string {
   if (status === null) return "尚未扫描";
+  if (!baselineApplies(status)) return "不适用";
   return status.compliant ? "符合" : "不符合";
 }

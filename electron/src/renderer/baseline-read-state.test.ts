@@ -11,11 +11,13 @@ const catalog: BaselineCatalog = {
   items: [{
     itemHandle: "item-a",
     category: "ssh",
+    component: "ssh",
     risk: "critical",
     valueKind: { kind: "choice", options: ["yes", "no"] },
     title: "关闭密码认证",
     description: "只读目录项",
     recommendation: "no",
+    writable: true,
   }],
   displayed: 1,
   truncated: false,

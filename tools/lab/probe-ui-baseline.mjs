@@ -202,12 +202,12 @@ try {
   }
 
   const shell = await session.evaluate(`(() => ({
-    title: document.querySelector('.configuration-page h1')?.textContent ?? null,
+    title: document.querySelector('.window-titlebar small')?.textContent ?? null,
     modes: [...document.querySelectorAll('.configuration-modes button strong')].map(n => n.textContent),
     active: document.querySelector('.configuration-modes .is-active strong')?.textContent ?? null,
     baselineOwnHeader: document.querySelector('.baseline-header') !== null
   }))()`);
-  check("合并后的页面标题", shell.title, "配置");
+  check("标题只在标题栏上", shell.title, "配置");
   check("两种模式都在", shell.modes.join(","), "检查这台主机,生成新配置");
   check("默认停在检查", shell.active, "检查这台主机");
   check("嵌进来的基线页不再自带标题", shell.baselineOwnHeader, false);
@@ -312,7 +312,8 @@ try {
   check("切到生成模式", generator.active, "生成新配置");
   check("生成器还在同一个页面里", generator.products > 0, true);
   check("右侧仍然是配置文件的位置", generator.preview, true);
-  check("整页只有一个标题", generator.ownTitle, "配置");
+  // The page carries no title of its own now; the title bar has it.
+  check("整页没有重复的大标题", generator.ownTitle, "");
   await shot(session, "configuration-generate");
 
   console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : `${failures} CHECK(S) FAILED`}`);

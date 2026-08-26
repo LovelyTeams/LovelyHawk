@@ -76,7 +76,9 @@
 .baseline-filters input, .baseline-filters select { min-height: 36px; padding: 7px 9px; color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 7px; font-size: 13px; outline: 0; }
 .baseline-filters input:focus, .baseline-filters select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus-ring) 16%, transparent); }
 
-.baseline-summary { display: grid; grid-template-columns: repeat(4, minmax(100px, 1fr)); gap: 8px; margin-bottom: 14px; }
+/* One row however many counters there are, rather than four per row with the
+   fifth stranded underneath. */
+.baseline-summary { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(100px, 1fr); gap: 8px; margin-bottom: 14px; }
 .baseline-summary article { display: flex; align-items: baseline; gap: 7px; padding: 10px 12px; background: var(--surface-inset); border: 1px solid var(--border); border-radius: 8px; }
 .baseline-summary strong { color: var(--text); font-size: 18px; }
 .baseline-summary span { color: var(--muted); font-size: 12.5px; }
@@ -100,6 +102,9 @@
    the failure count per category is the first thing that reads. */
 
 .baseline-check-group { flex: none; }
+/* Software the target does not run: still listed, so the operator can see the
+   check exists, but dimmed so it does not read as a row that needs work. */
+.baseline-check-group.is-absent { opacity: .55; }
 
 .baseline-check-group header {
   display: flex;

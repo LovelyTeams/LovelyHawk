@@ -21,7 +21,9 @@ import {
   type BaselineFileStatus,
 } from "./BaselineFilePane";
 import {
+  baselineApplies,
   baselineCategoryLabel,
+  baselineComponentLabel,
   baselineComplianceLabel,
   baselineHistoryStateLabel,
   baselineRiskLabel,
@@ -287,6 +289,8 @@ export function BaselineChecksView({ catalog, status, scan, error, connected, se
 }) {
   const visible = filterBaselineItems(catalog.items, scan, search, category, compliance);
   const selected = visible.find(({ item }) => item.itemHandle === selectedItemHandle) ?? null;
+  const notApplicableCount = scan?.statuses.filter((row) => !baselineApplies(row)).length ?? 0;
+  const failingCount = (scan?.nonCompliantCount ?? 0) - notApplicableCount;
   return (
     <>
       <div className="baseline-view-header">
@@ -322,7 +326,10 @@ export function BaselineChecksView({ catalog, status, scan, error, connected, se
       <div className="baseline-summary" aria-label="基线汇总">
         <article><strong>{catalog.displayed}</strong><span>目录项</span></article>
         <article><strong>{scan?.compliantCount ?? 0}</strong><span>符合</span></article>
-        <article><strong>{scan?.nonCompliantCount ?? 0}</strong><span>不符合</span></article>
+        <article><strong>{failingCount}</strong><span>不符合</span></article>
+        {/* Checks for software this machine does not run are neither passed nor
+            failed. Counting them as failures buried the real ones. */}
+        <article><strong>{notApplicableCount}</strong><span>不适用</span></article>
         <article><strong>{scan === null ? catalog.displayed : Math.max(0, catalog.displayed - scan.displayed)}</strong>
           <span>尚未扫描</span></article>
       </div>
@@ -336,14 +343,19 @@ export function BaselineChecksView({ catalog, status, scan, error, connected, se
         <div className="baseline-workbench">
           <div className="baseline-card-grid">
             {groupBaselineChecks(visible).map((group) => (
-              <section className="baseline-check-group" key={group.category}>
+              <section
+                className={group.absent ? "baseline-check-group is-absent" : "baseline-check-group"}
+                key={group.component}
+              >
                 <header>
-                  <strong>{baselineCategoryLabel(group.category)}</strong>
+                  <strong>{baselineComponentLabel(group.component)}</strong>
                   <span className="baseline-group-count">
-                    {group.failing === 0
-                      ? `${group.items.length} 项`
-                      : `${group.items.length} 项，`}
-                    {group.failing > 0 && (
+                    {group.absent
+                      ? `${group.items.length} 项 · 这台机器上没装`
+                      : group.failing === 0
+                        ? `${group.items.length} 项`
+                        : `${group.items.length} 项，`}
+                    {!group.absent && group.failing > 0 && (
                       <em className="baseline-group-failing">{group.failing} 项不符合</em>
                     )}
                   </span>

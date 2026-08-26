@@ -15,19 +15,23 @@ const hostile = "</div><script>plain()</script>";
 const items: BaselineCatalogItem[] = [{
   itemHandle: "item-ssh",
   category: "ssh",
+  component: "ssh",
   risk: "critical",
   valueKind: { kind: "choice", options: ["yes", "no"] },
   title: "关闭密码认证",
   description: hostile,
   recommendation: "no",
+  writable: true,
 }, {
   itemHandle: "item-kernel",
   category: "kernel",
+  component: "system",
   risk: "high",
   valueKind: { kind: "integer", minimum: 0, maximum: 2 },
   title: "启用 ASLR",
   description: "内核地址随机化",
   recommendation: "2",
+  writable: true,
 }];
 
 const scan: BaselineScan = {

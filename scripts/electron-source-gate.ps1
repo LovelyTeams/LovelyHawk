@@ -1583,7 +1583,7 @@ foreach ($marker in @(
 foreach ($marker in @(
     'BoundSshSession',
     'TargetGuard',
-    'MAX_CATALOG_ITEMS: usize = 64',
+    'MAX_CATALOG_ITEMS: usize = 160',
     'MAX_HISTORY_ENTRIES: usize = 256',
     'MAX_REGISTRY_BYTES: usize = 4 * 1024 * 1024',
     'MAX_READS_PER_BINDING: usize = 1',

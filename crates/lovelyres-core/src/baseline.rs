@@ -54,10 +54,16 @@ pub enum BaselineCategory {
     Authentication,
     Logging,
     FilePermissions,
+    /// Who may reach the service at all: listen addresses, host rules.
+    AccessControl,
+    /// Whether what crosses the wire is encrypted.
+    Transport,
+    /// Turning off what the service does not need to be doing.
+    ServiceHardening,
 }
 
 impl BaselineCategory {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 10] = [
         Self::Ssh,
         Self::Authentication,
         Self::Password,
@@ -65,6 +71,9 @@ impl BaselineCategory {
         Self::Network,
         Self::Logging,
         Self::FilePermissions,
+        Self::AccessControl,
+        Self::Transport,
+        Self::ServiceHardening,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -76,7 +85,61 @@ impl BaselineCategory {
             Self::Authentication => "认证防护",
             Self::Logging => "审计日志",
             Self::FilePermissions => "文件权限",
+            Self::AccessControl => "访问控制",
+            Self::Transport => "传输加密",
+            Self::ServiceHardening => "服务加固",
         }
+    }
+}
+
+/// What a check is about, as opposed to what kind of hardening it is.
+///
+/// Two axes, because with eighty checks one is not enough: an operator asked
+/// to harden the database wants the database's checks, and an operator asked
+/// about logging wants logging across everything. Grouping by the software and
+/// filtering by the kind answers both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BaselineComponent {
+    System,
+    Ssh,
+    MySql,
+    PostgreSql,
+    Redis,
+    MongoDb,
+    Nginx,
+    Apache,
+}
+
+impl BaselineComponent {
+    pub const ALL: [Self; 8] = [
+        Self::System,
+        Self::Ssh,
+        Self::MySql,
+        Self::PostgreSql,
+        Self::Redis,
+        Self::MongoDb,
+        Self::Nginx,
+        Self::Apache,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::System => "操作系统",
+            Self::Ssh => "SSH 服务",
+            Self::MySql => "MySQL / MariaDB",
+            Self::PostgreSql => "PostgreSQL",
+            Self::Redis => "Redis",
+            Self::MongoDb => "MongoDB",
+            Self::Nginx => "Nginx",
+            Self::Apache => "Apache HTTP Server",
+        }
+    }
+
+    /// Whether a target without this software should be told it is missing
+    /// checks. The operating system is always present; a database is not.
+    pub const fn is_optional(self) -> bool {
+        !matches!(self, Self::System | Self::Ssh)
     }
 }
 
@@ -103,13 +166,67 @@ impl BaselineRisk {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BaselineValueKind {
     Choice(&'static [&'static str]),
-    Integer { minimum: u32, maximum: u32 },
+    Integer {
+        minimum: u32,
+        maximum: u32,
+    },
+    /// Only whether the directive is set, never what it is set to.
+    ///
+    /// `requirepass` is the check that matters most on a Redis reachable from
+    /// the network, and its value is the password. Carrying that back so it
+    /// could be printed in a compliance table would make the check worse than
+    /// not having it.
+    Presence,
+    /// A truth value, spelled however the software in question spells it.
+    ///
+    /// The same idea is written `0`, `off`, `false`, `no` and `disabled`
+    /// across the files this reads, and comparing the spelling instead of the
+    /// meaning reported a correctly hardened setting as a finding.
+    Boolean,
+}
+
+impl BaselineValueKind {
+    /// The canonical spelling of a truth value, or `None` if it is not one.
+    fn as_boolean(value: &str) -> Option<&'static str> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "1" | "on" | "yes" | "true" | "enabled" | "enable" => Some("on"),
+            "0" | "off" | "no" | "false" | "disabled" | "disable" => Some("off"),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FileFormat {
+    /// `Directive value` — sshd, redis, httpd, login.defs.
     Whitespace,
+    /// `key = value` — sysctl, postgresql.conf, auditd.
     Equals,
+    /// `key = value` under a `[section]` header — the my.cnf family.
+    Ini(&'static str),
+    /// `directive value;` — nginx.
+    Semicolon,
+    /// `parent:` then an indented `key: value` — mongod.conf.
+    ///
+    /// The key is written as the whole path, `security.authorization`, and the
+    /// reader walks the indentation to find it.
+    Yaml,
+}
+
+/// Where a check's observed value comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reading {
+    /// The first of these paths that exists on the target. Distributions put
+    /// the same file in different places, and a check that only knows one of
+    /// them reports "not set" on all the others.
+    Files(&'static [&'static str]),
+    /// Ask the kernel what it is currently using.
+    ///
+    /// Reading the value out of a file says what someone wrote down; a kernel
+    /// parameter can be set from `/etc/sysctl.conf`, from any file under
+    /// `/etc/sysctl.d`, by a unit, or by hand, and only the running value says
+    /// what the machine is doing right now.
+    RunningSysctl,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -134,12 +251,22 @@ enum Precedence {
 pub struct BaselineDefinition {
     pub id: &'static str,
     pub category: BaselineCategory,
+    pub component: BaselineComponent,
     pub title: &'static str,
     pub description: &'static str,
     pub recommendation: &'static str,
     pub risk: BaselineRisk,
     pub value_kind: BaselineValueKind,
+    /// The file a change would be written to, and the file the operator is
+    /// shown. Reading may find the value somewhere else — see [`Reading`].
     file: &'static str,
+    reading: Reading,
+    /// What the software uses when the directive is not written down.
+    ///
+    /// A setting left at a safe default is not a finding. Reporting every
+    /// unwritten directive as non-compliant fills the table with rows that
+    /// need no action, and a table like that stops being read.
+    implicit: Option<&'static str>,
     key: &'static str,
     format: FileFormat,
     reload: ReloadGroup,
@@ -152,6 +279,28 @@ impl BaselineDefinition {
     /// show; it is not a path a caller can choose.
     pub const fn file(&self) -> &'static str {
         self.file
+    }
+
+    /// Whether this tool will write the change as well as report it.
+    ///
+    /// It writes to one fixed path. That is safe for the operating system's
+    /// own files, which are in the same place everywhere this runs, and unsafe
+    /// for everything else: a database keeps its configuration somewhere
+    /// different on every distribution, and writing the directive to the path
+    /// this tool happens to know would leave a correct-looking file that the
+    /// database never reads. Those checks report, and say where to go.
+    pub const fn is_writable(&self) -> bool {
+        matches!(self.format, FileFormat::Whitespace | FileFormat::Equals)
+            && !matches!(self.value_kind, BaselineValueKind::Presence)
+            && !self.component.is_optional()
+    }
+
+    /// Every path the scan will look in, in order, for this setting.
+    const fn candidates(&self) -> &'static [&'static str] {
+        match self.reading {
+            Reading::Files(paths) => paths,
+            Reading::RunningSysctl => &[],
+        }
     }
 
     /// The directive this setting is written as.
@@ -168,6 +317,69 @@ impl BaselineDefinition {
     }
 }
 
+// Where each product keeps the file, on the distributions this tool meets.
+// The scan reads the first of these that exists; a check that knows only one
+// distribution's path reports "not set" on every other one.
+// sshd keeps the first value it sees and its `Include` line sits at the top of
+// the packaged file, so anything dropped into sshd_config.d wins — and so is
+// read first here.
+const SSHD_FILES: &[&str] = &["/etc/ssh/sshd_config.d/*.conf", "/etc/ssh/sshd_config"];
+const LOGIN_DEFS_FILES: &[&str] = &["/etc/login.defs"];
+const FAILLOCK_FILES: &[&str] = &["/etc/security/faillock.conf"];
+const PWQUALITY_FILES: &[&str] = &["/etc/security/pwquality.conf"];
+const AUDITD_FILES: &[&str] = &["/etc/audit/auditd.conf", "/etc/auditd.conf"];
+// In the order the server reads them: the main file, then each include
+// directory. The last value read is the one that takes effect.
+const MYSQL_FILES: &[&str] = &[
+    "/etc/my.cnf",
+    "/etc/mysql/my.cnf",
+    "/etc/my.cnf.d/*.cnf",
+    "/etc/mysql/conf.d/*.cnf",
+    "/etc/mysql/mysql.conf.d/*.cnf",
+    "/etc/mysql/mariadb.conf.d/*.cnf",
+];
+const POSTGRESQL_FILES: &[&str] = &[
+    "/etc/postgresql/*/main/postgresql.conf",
+    "/var/lib/pgsql/data/postgresql.conf",
+    "/var/lib/pgsql/*/data/postgresql.conf",
+    "/var/lib/postgresql/data/postgresql.conf",
+    "/etc/postgresql/postgresql.conf",
+];
+const REDIS_FILES: &[&str] = &[
+    "/etc/redis/redis.conf",
+    "/etc/redis.conf",
+    "/etc/redis/6379.conf",
+];
+const MONGODB_FILES: &[&str] = &["/etc/mongod.conf", "/etc/mongodb.conf"];
+// nginx includes conf.d and the enabled sites, and a directive set there
+// overrides the one in the main file for that server.
+const NGINX_FILES: &[&str] = &[
+    "/etc/nginx/nginx.conf",
+    "/usr/local/nginx/conf/nginx.conf",
+    "/etc/nginx/conf.d/*.conf",
+    "/etc/nginx/sites-enabled/*",
+];
+const APACHE_FILES: &[&str] = &[
+    "/etc/httpd/conf/httpd.conf",
+    "/etc/apache2/apache2.conf",
+    "/usr/local/apache2/conf/httpd.conf",
+];
+
+/// What a presence check reports instead of the value it found.
+pub const PRESENCE_MARKER: &str = "configured";
+
+const SSH_LOG_LEVEL: &[&str] = &["quiet", "fatal", "error", "info", "verbose", "debug"];
+const ENCRYPT_METHOD: &[&str] = &["sha512", "sha256", "yescrypt", "md5", "des"];
+const MYSQL_BIND: &[&str] = &["127.0.0.1", "::1", "localhost", "0.0.0.0", "*", "::"];
+const PG_LISTEN: &[&str] = &["localhost", "127.0.0.1", "*", "0.0.0.0"];
+const PG_PASSWORD_ENCRYPTION: &[&str] = &["scram-sha-256", "md5", "scram_sha_256"];
+const PG_LOG_STATEMENT: &[&str] = &["none", "ddl", "mod", "all"];
+const MONGO_AUTHORIZATION: &[&str] = &["enabled", "disabled"];
+const MONGO_BIND: &[&str] = &["127.0.0.1", "::1", "localhost", "0.0.0.0"];
+const MONGO_TLS_MODE: &[&str] = &["requiretls", "prefertls", "allowtls", "disabled"];
+const APACHE_SERVER_TOKENS: &[&str] =
+    &["prod", "productonly", "major", "minor", "min", "os", "full"];
+
 const YES_NO: &[&str] = &["yes", "no"];
 const ROOT_LOGIN: &[&str] = &["yes", "no", "prohibit-password"];
 const AUDIT_LOG_ACTION: &[&str] = &["ignore", "syslog", "suspend", "rotate", "keep_logs"];
@@ -183,6 +395,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
         recommendation: "no",
         risk: BaselineRisk::Critical,
         value_kind: BaselineValueKind::Choice(ROOT_LOGIN),
+        component: BaselineComponent::Ssh,
+        reading: Reading::Files(SSHD_FILES),
+        implicit: None,
         file: "/etc/ssh/sshd_config",
         key: "PermitRootLogin",
         format: FileFormat::Whitespace,
@@ -196,6 +411,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
         recommendation: "no",
         risk: BaselineRisk::Critical,
         value_kind: BaselineValueKind::Choice(YES_NO),
+        component: BaselineComponent::Ssh,
+        reading: Reading::Files(SSHD_FILES),
+        implicit: None,
         file: "/etc/ssh/sshd_config",
         key: "PasswordAuthentication",
         format: FileFormat::Whitespace,
@@ -209,6 +427,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
         recommendation: "yes",
         risk: BaselineRisk::High,
         value_kind: BaselineValueKind::Choice(YES_NO),
+        component: BaselineComponent::Ssh,
+        reading: Reading::Files(SSHD_FILES),
+        implicit: None,
         file: "/etc/ssh/sshd_config",
         key: "PubkeyAuthentication",
         format: FileFormat::Whitespace,
@@ -225,6 +446,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
             minimum: 1,
             maximum: 10,
         },
+        component: BaselineComponent::Ssh,
+        reading: Reading::Files(SSHD_FILES),
+        implicit: None,
         file: "/etc/ssh/sshd_config",
         key: "MaxAuthTries",
         format: FileFormat::Whitespace,
@@ -241,6 +465,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
             minimum: 10,
             maximum: 300,
         },
+        component: BaselineComponent::Ssh,
+        reading: Reading::Files(SSHD_FILES),
+        implicit: None,
         file: "/etc/ssh/sshd_config",
         key: "LoginGraceTime",
         format: FileFormat::Whitespace,
@@ -254,6 +481,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
         recommendation: "no",
         risk: BaselineRisk::Critical,
         value_kind: BaselineValueKind::Choice(YES_NO),
+        component: BaselineComponent::Ssh,
+        reading: Reading::Files(SSHD_FILES),
+        implicit: None,
         file: "/etc/ssh/sshd_config",
         key: "PermitEmptyPasswords",
         format: FileFormat::Whitespace,
@@ -267,6 +497,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
         recommendation: "no",
         risk: BaselineRisk::High,
         value_kind: BaselineValueKind::Choice(YES_NO),
+        component: BaselineComponent::Ssh,
+        reading: Reading::Files(SSHD_FILES),
+        implicit: None,
         file: "/etc/ssh/sshd_config",
         key: "HostbasedAuthentication",
         format: FileFormat::Whitespace,
@@ -280,6 +513,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
         recommendation: "yes",
         risk: BaselineRisk::High,
         value_kind: BaselineValueKind::Choice(YES_NO),
+        component: BaselineComponent::Ssh,
+        reading: Reading::Files(SSHD_FILES),
+        implicit: None,
         file: "/etc/ssh/sshd_config",
         key: "IgnoreRhosts",
         format: FileFormat::Whitespace,
@@ -293,6 +529,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
         recommendation: "no",
         risk: BaselineRisk::Medium,
         value_kind: BaselineValueKind::Choice(YES_NO),
+        component: BaselineComponent::Ssh,
+        reading: Reading::Files(SSHD_FILES),
+        implicit: None,
         file: "/etc/ssh/sshd_config",
         key: "X11Forwarding",
         format: FileFormat::Whitespace,
@@ -306,6 +545,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
         recommendation: "no",
         risk: BaselineRisk::Medium,
         value_kind: BaselineValueKind::Choice(YES_NO),
+        component: BaselineComponent::Ssh,
+        reading: Reading::Files(SSHD_FILES),
+        implicit: None,
         file: "/etc/ssh/sshd_config",
         key: "AllowTcpForwarding",
         format: FileFormat::Whitespace,
@@ -322,6 +564,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
             minimum: 0,
             maximum: 60,
         },
+        component: BaselineComponent::System,
+        reading: Reading::Files(LOGIN_DEFS_FILES),
+        implicit: None,
         file: "/etc/login.defs",
         key: "FAIL_DELAY",
         format: FileFormat::Whitespace,
@@ -338,6 +583,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
             minimum: 1,
             maximum: 20,
         },
+        component: BaselineComponent::System,
+        reading: Reading::Files(FAILLOCK_FILES),
+        implicit: None,
         file: "/etc/security/faillock.conf",
         key: "deny",
         format: FileFormat::Equals,
@@ -354,6 +602,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
             minimum: 60,
             maximum: 86_400,
         },
+        component: BaselineComponent::System,
+        reading: Reading::Files(FAILLOCK_FILES),
+        implicit: None,
         file: "/etc/security/faillock.conf",
         key: "fail_interval",
         format: FileFormat::Equals,
@@ -370,6 +621,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
             minimum: 0,
             maximum: 86_400,
         },
+        component: BaselineComponent::System,
+        reading: Reading::Files(FAILLOCK_FILES),
+        implicit: None,
         file: "/etc/security/faillock.conf",
         key: "unlock_time",
         format: FileFormat::Equals,
@@ -386,6 +640,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
             minimum: 6,
             maximum: 128,
         },
+        component: BaselineComponent::System,
+        reading: Reading::Files(PWQUALITY_FILES),
+        implicit: None,
         file: "/etc/security/pwquality.conf",
         key: "minlen",
         format: FileFormat::Equals,
@@ -402,6 +659,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
             minimum: 1,
             maximum: 99_999,
         },
+        component: BaselineComponent::System,
+        reading: Reading::Files(LOGIN_DEFS_FILES),
+        implicit: None,
         file: "/etc/login.defs",
         key: "PASS_MAX_DAYS",
         format: FileFormat::Whitespace,
@@ -418,6 +678,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
             minimum: 0,
             maximum: 365,
         },
+        component: BaselineComponent::System,
+        reading: Reading::Files(LOGIN_DEFS_FILES),
+        implicit: None,
         file: "/etc/login.defs",
         key: "PASS_MIN_DAYS",
         format: FileFormat::Whitespace,
@@ -434,6 +697,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
             minimum: 0,
             maximum: 30,
         },
+        component: BaselineComponent::System,
+        reading: Reading::Files(LOGIN_DEFS_FILES),
+        implicit: None,
         file: "/etc/login.defs",
         key: "PASS_WARN_AGE",
         format: FileFormat::Whitespace,
@@ -447,6 +713,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
         recommendation: "027",
         risk: BaselineRisk::High,
         value_kind: BaselineValueKind::Choice(DEFAULT_UMASK),
+        component: BaselineComponent::System,
+        reading: Reading::Files(LOGIN_DEFS_FILES),
+        implicit: None,
         file: "/etc/login.defs",
         key: "UMASK",
         format: FileFormat::Whitespace,
@@ -460,6 +729,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
         recommendation: "yes",
         risk: BaselineRisk::High,
         value_kind: BaselineValueKind::Choice(YES_NO),
+        component: BaselineComponent::Ssh,
+        reading: Reading::Files(SSHD_FILES),
+        implicit: None,
         file: "/etc/ssh/sshd_config",
         key: "StrictModes",
         format: FileFormat::Whitespace,
@@ -476,6 +748,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
             minimum: 0,
             maximum: 2,
         },
+        component: BaselineComponent::System,
+        reading: Reading::RunningSysctl,
+        implicit: None,
         file: "/etc/sysctl.d/99-lovelyres-baseline.conf",
         key: "kernel.randomize_va_space",
         format: FileFormat::Equals,
@@ -492,6 +767,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
             minimum: 0,
             maximum: 2,
         },
+        component: BaselineComponent::System,
+        reading: Reading::RunningSysctl,
+        implicit: None,
         file: "/etc/sysctl.d/99-lovelyres-baseline.conf",
         key: "kernel.kptr_restrict",
         format: FileFormat::Equals,
@@ -508,6 +786,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
             minimum: 0,
             maximum: 1,
         },
+        component: BaselineComponent::System,
+        reading: Reading::RunningSysctl,
+        implicit: None,
         file: "/etc/sysctl.d/99-lovelyres-baseline.conf",
         key: "kernel.dmesg_restrict",
         format: FileFormat::Equals,
@@ -524,6 +805,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
             minimum: 0,
             maximum: 2,
         },
+        component: BaselineComponent::System,
+        reading: Reading::RunningSysctl,
+        implicit: None,
         file: "/etc/sysctl.d/99-lovelyres-baseline.conf",
         key: "fs.suid_dumpable",
         format: FileFormat::Equals,
@@ -540,6 +824,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
             minimum: 0,
             maximum: 1,
         },
+        component: BaselineComponent::System,
+        reading: Reading::RunningSysctl,
+        implicit: None,
         file: "/etc/sysctl.d/99-lovelyres-baseline.conf",
         key: "kernel.core_uses_pid",
         format: FileFormat::Equals,
@@ -556,6 +843,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
             minimum: 0,
             maximum: 1,
         },
+        component: BaselineComponent::System,
+        reading: Reading::RunningSysctl,
+        implicit: None,
         file: "/etc/sysctl.d/99-lovelyres-baseline.conf",
         key: "fs.protected_hardlinks",
         format: FileFormat::Equals,
@@ -572,6 +862,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
             minimum: 0,
             maximum: 1,
         },
+        component: BaselineComponent::System,
+        reading: Reading::RunningSysctl,
+        implicit: None,
         file: "/etc/sysctl.d/99-lovelyres-baseline.conf",
         key: "fs.protected_symlinks",
         format: FileFormat::Equals,
@@ -588,6 +881,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
             minimum: 0,
             maximum: 1,
         },
+        component: BaselineComponent::System,
+        reading: Reading::RunningSysctl,
+        implicit: None,
         file: "/etc/sysctl.d/99-lovelyres-baseline.conf",
         key: "net.ipv4.conf.all.accept_redirects",
         format: FileFormat::Equals,
@@ -604,6 +900,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
             minimum: 0,
             maximum: 1,
         },
+        component: BaselineComponent::System,
+        reading: Reading::RunningSysctl,
+        implicit: None,
         file: "/etc/sysctl.d/99-lovelyres-baseline.conf",
         key: "net.ipv4.conf.all.accept_source_route",
         format: FileFormat::Equals,
@@ -620,6 +919,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
             minimum: 0,
             maximum: 1,
         },
+        component: BaselineComponent::System,
+        reading: Reading::RunningSysctl,
+        implicit: None,
         file: "/etc/sysctl.d/99-lovelyres-baseline.conf",
         key: "net.ipv4.conf.default.accept_redirects",
         format: FileFormat::Equals,
@@ -636,6 +938,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
             minimum: 0,
             maximum: 1,
         },
+        component: BaselineComponent::System,
+        reading: Reading::RunningSysctl,
+        implicit: None,
         file: "/etc/sysctl.d/99-lovelyres-baseline.conf",
         key: "net.ipv4.conf.all.secure_redirects",
         format: FileFormat::Equals,
@@ -652,6 +957,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
             minimum: 0,
             maximum: 1,
         },
+        component: BaselineComponent::System,
+        reading: Reading::RunningSysctl,
+        implicit: None,
         file: "/etc/sysctl.d/99-lovelyres-baseline.conf",
         key: "net.ipv4.conf.default.accept_source_route",
         format: FileFormat::Equals,
@@ -668,6 +976,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
             minimum: 0,
             maximum: 1,
         },
+        component: BaselineComponent::System,
+        reading: Reading::RunningSysctl,
+        implicit: None,
         file: "/etc/sysctl.d/99-lovelyres-baseline.conf",
         key: "net.ipv4.conf.all.log_martians",
         format: FileFormat::Equals,
@@ -684,6 +995,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
             minimum: 0,
             maximum: 1,
         },
+        component: BaselineComponent::System,
+        reading: Reading::RunningSysctl,
+        implicit: None,
         file: "/etc/sysctl.d/99-lovelyres-baseline.conf",
         key: "net.ipv4.tcp_syncookies",
         format: FileFormat::Equals,
@@ -700,6 +1014,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
             minimum: 1,
             maximum: 65_535,
         },
+        component: BaselineComponent::System,
+        reading: Reading::Files(AUDITD_FILES),
+        implicit: None,
         file: "/etc/audit/auditd.conf",
         key: "max_log_file",
         format: FileFormat::Equals,
@@ -716,6 +1033,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
             minimum: 1,
             maximum: 99,
         },
+        component: BaselineComponent::System,
+        reading: Reading::Files(AUDITD_FILES),
+        implicit: None,
         file: "/etc/audit/auditd.conf",
         key: "num_logs",
         format: FileFormat::Equals,
@@ -729,6 +1049,9 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
         recommendation: "rotate",
         risk: BaselineRisk::High,
         value_kind: BaselineValueKind::Choice(AUDIT_LOG_ACTION),
+        component: BaselineComponent::System,
+        reading: Reading::Files(AUDITD_FILES),
+        implicit: None,
         file: "/etc/audit/auditd.conf",
         key: "max_log_file_action",
         format: FileFormat::Equals,
@@ -742,9 +1065,630 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
         recommendation: "syslog",
         risk: BaselineRisk::High,
         value_kind: BaselineValueKind::Choice(AUDIT_SPACE_ACTION),
+        component: BaselineComponent::System,
+        reading: Reading::Files(AUDITD_FILES),
+        implicit: None,
         file: "/etc/audit/auditd.conf",
         key: "space_left_action",
         format: FileFormat::Equals,
+        reload: ReloadGroup::None,
+    },
+    // ---- SSH, the rest of what a session should be held to -----------------
+    BaselineDefinition {
+        id: "ssh-log-level",
+        category: BaselineCategory::Logging,
+        component: BaselineComponent::Ssh,
+        title: "记录登录密钥指纹",
+        description: "VERBOSE 会记录登录所用公钥的指纹，事后才能分辨是谁的密钥登进来的。",
+        recommendation: "verbose",
+        risk: BaselineRisk::Medium,
+        value_kind: BaselineValueKind::Choice(SSH_LOG_LEVEL),
+        reading: Reading::Files(SSHD_FILES),
+        implicit: Some("info"),
+        file: "/etc/ssh/sshd_config",
+        key: "LogLevel",
+        format: FileFormat::Whitespace,
+        reload: ReloadGroup::Sshd,
+    },
+    BaselineDefinition {
+        id: "ssh-client-alive-interval",
+        category: BaselineCategory::Ssh,
+        component: BaselineComponent::Ssh,
+        title: "闲置会话自动断开",
+        description: "无人操作的会话会一直留着；设定探测间隔后，掉线或被遗忘的终端会自行关闭。",
+        recommendation: "300",
+        risk: BaselineRisk::Medium,
+        value_kind: BaselineValueKind::Integer {
+            minimum: 60,
+            maximum: 900,
+        },
+        reading: Reading::Files(SSHD_FILES),
+        implicit: None,
+        file: "/etc/ssh/sshd_config",
+        key: "ClientAliveInterval",
+        format: FileFormat::Whitespace,
+        reload: ReloadGroup::Sshd,
+    },
+    BaselineDefinition {
+        id: "ssh-client-alive-count",
+        category: BaselineCategory::Ssh,
+        component: BaselineComponent::Ssh,
+        title: "探测无响应即断开",
+        description: "配合探测间隔使用：连续几次无响应就结束会话。设为 0 表示第一次就断。",
+        recommendation: "0",
+        risk: BaselineRisk::Low,
+        value_kind: BaselineValueKind::Integer {
+            minimum: 0,
+            maximum: 3,
+        },
+        reading: Reading::Files(SSHD_FILES),
+        implicit: None,
+        file: "/etc/ssh/sshd_config",
+        key: "ClientAliveCountMax",
+        format: FileFormat::Whitespace,
+        reload: ReloadGroup::Sshd,
+    },
+    BaselineDefinition {
+        id: "ssh-use-pam",
+        category: BaselineCategory::Authentication,
+        component: BaselineComponent::Ssh,
+        title: "登录走 PAM",
+        description: "关掉 PAM，锁定策略、失败计数和会话限制就全部不生效了。",
+        recommendation: "yes",
+        risk: BaselineRisk::High,
+        value_kind: BaselineValueKind::Choice(YES_NO),
+        reading: Reading::Files(SSHD_FILES),
+        implicit: Some("yes"),
+        file: "/etc/ssh/sshd_config",
+        key: "UsePAM",
+        format: FileFormat::Whitespace,
+        reload: ReloadGroup::Sshd,
+    },
+    BaselineDefinition {
+        id: "password-encrypt-method",
+        category: BaselineCategory::Password,
+        component: BaselineComponent::System,
+        title: "口令哈希算法",
+        description: "新建口令用哪种算法存放。MD5 与 DES 早已可以离线爆破。",
+        recommendation: "sha512",
+        risk: BaselineRisk::High,
+        value_kind: BaselineValueKind::Choice(ENCRYPT_METHOD),
+        reading: Reading::Files(LOGIN_DEFS_FILES),
+        implicit: None,
+        file: "/etc/login.defs",
+        key: "ENCRYPT_METHOD",
+        format: FileFormat::Whitespace,
+        reload: ReloadGroup::None,
+    },
+    // ---- More of what the kernel is actually doing -------------------------
+    BaselineDefinition {
+        id: "kernel-ptrace-scope",
+        category: BaselineCategory::Kernel,
+        component: BaselineComponent::System,
+        title: "限制进程互相调试",
+        description: "阻止一个普通进程附着到另一个进程上读它的内存，这是抓取内存中凭据的常用手法。",
+        recommendation: "1",
+        risk: BaselineRisk::High,
+        value_kind: BaselineValueKind::Integer {
+            minimum: 0,
+            maximum: 3,
+        },
+        reading: Reading::RunningSysctl,
+        implicit: None,
+        file: "/etc/sysctl.d/99-lovelyres-baseline.conf",
+        key: "kernel.yama.ptrace_scope",
+        format: FileFormat::Equals,
+        reload: ReloadGroup::Sysctl,
+    },
+    BaselineDefinition {
+        id: "network-send-redirects",
+        category: BaselineCategory::Network,
+        component: BaselineComponent::System,
+        title: "不发送 ICMP 重定向",
+        description: "只有路由器需要告诉别人改走哪条路；一台服务器发这种包只会泄露网络结构。",
+        recommendation: "0",
+        risk: BaselineRisk::Medium,
+        value_kind: BaselineValueKind::Integer {
+            minimum: 0,
+            maximum: 1,
+        },
+        reading: Reading::RunningSysctl,
+        implicit: None,
+        file: "/etc/sysctl.d/99-lovelyres-baseline.conf",
+        key: "net.ipv4.conf.all.send_redirects",
+        format: FileFormat::Equals,
+        reload: ReloadGroup::Sysctl,
+    },
+    BaselineDefinition {
+        id: "network-ignore-broadcast-ping",
+        category: BaselineCategory::Network,
+        component: BaselineComponent::System,
+        title: "忽略广播 ping",
+        description: "回应广播 ICMP 会让这台机器成为放大攻击的帮凶，也会暴露自己存在。",
+        recommendation: "1",
+        risk: BaselineRisk::Medium,
+        value_kind: BaselineValueKind::Integer {
+            minimum: 0,
+            maximum: 1,
+        },
+        reading: Reading::RunningSysctl,
+        implicit: None,
+        file: "/etc/sysctl.d/99-lovelyres-baseline.conf",
+        key: "net.ipv4.icmp_echo_ignore_broadcasts",
+        format: FileFormat::Equals,
+        reload: ReloadGroup::Sysctl,
+    },
+    BaselineDefinition {
+        id: "network-reverse-path-filter",
+        category: BaselineCategory::Network,
+        component: BaselineComponent::System,
+        title: "反向路径校验",
+        description: "丢弃源地址不可能从该网卡进来的包，挡掉最简单的一类地址伪造。",
+        recommendation: "1",
+        risk: BaselineRisk::Medium,
+        value_kind: BaselineValueKind::Integer {
+            minimum: 0,
+            maximum: 2,
+        },
+        reading: Reading::RunningSysctl,
+        implicit: None,
+        file: "/etc/sysctl.d/99-lovelyres-baseline.conf",
+        key: "net.ipv4.conf.all.rp_filter",
+        format: FileFormat::Equals,
+        reload: ReloadGroup::Sysctl,
+    },
+    // ---- MySQL and MariaDB -------------------------------------------------
+    BaselineDefinition {
+        id: "mysql-bind-address",
+        category: BaselineCategory::AccessControl,
+        component: BaselineComponent::MySql,
+        title: "只监听本机",
+        description: "数据库直接暴露在网络上，等于把认证当成唯一一道门。应用在本机时应只监听回环。",
+        recommendation: "127.0.0.1",
+        risk: BaselineRisk::Critical,
+        value_kind: BaselineValueKind::Choice(MYSQL_BIND),
+        reading: Reading::Files(MYSQL_FILES),
+        implicit: None,
+        file: "/etc/mysql/mariadb.conf.d/50-server.cnf",
+        key: "bind-address",
+        format: FileFormat::Ini("mysqld"),
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "mysql-local-infile",
+        category: BaselineCategory::ServiceHardening,
+        component: BaselineComponent::MySql,
+        title: "关闭 LOAD DATA LOCAL",
+        description: "开着它，一次 SQL 注入就能读走服务器上的任意文件。",
+        recommendation: "off",
+        risk: BaselineRisk::Critical,
+        value_kind: BaselineValueKind::Boolean,
+        reading: Reading::Files(MYSQL_FILES),
+        implicit: Some("off"),
+        file: "/etc/mysql/mariadb.conf.d/50-server.cnf",
+        key: "local_infile",
+        format: FileFormat::Ini("mysqld"),
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "mysql-skip-symbolic-links",
+        category: BaselineCategory::ServiceHardening,
+        component: BaselineComponent::MySql,
+        title: "禁止表文件走符号链接",
+        description: "允许符号链接时，一张表可以指到数据目录之外的任意路径。",
+        recommendation: "on",
+        risk: BaselineRisk::High,
+        value_kind: BaselineValueKind::Boolean,
+        reading: Reading::Files(MYSQL_FILES),
+        implicit: None,
+        file: "/etc/mysql/mariadb.conf.d/50-server.cnf",
+        key: "skip-symbolic-links",
+        format: FileFormat::Ini("mysqld"),
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "mysql-secure-file-priv",
+        category: BaselineCategory::ServiceHardening,
+        component: BaselineComponent::MySql,
+        title: "限制导入导出目录",
+        description: "限定 SELECT INTO OUTFILE 与 LOAD DATA 只能落在一个目录里。留空等于整个文件系统。",
+        recommendation: PRESENCE_MARKER,
+        risk: BaselineRisk::High,
+        value_kind: BaselineValueKind::Presence,
+        reading: Reading::Files(MYSQL_FILES),
+        implicit: None,
+        file: "/etc/mysql/mariadb.conf.d/50-server.cnf",
+        key: "secure_file_priv",
+        format: FileFormat::Ini("mysqld"),
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "mysql-log-error",
+        category: BaselineCategory::Logging,
+        component: BaselineComponent::MySql,
+        title: "错误日志写到文件",
+        description: "没有错误日志，重启、崩溃和认证失败都不会留下任何可查的痕迹。",
+        recommendation: PRESENCE_MARKER,
+        risk: BaselineRisk::High,
+        value_kind: BaselineValueKind::Presence,
+        reading: Reading::Files(MYSQL_FILES),
+        implicit: None,
+        file: "/etc/mysql/mariadb.conf.d/50-server.cnf",
+        key: "log_error",
+        format: FileFormat::Ini("mysqld"),
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "mysql-skip-name-resolve",
+        category: BaselineCategory::AccessControl,
+        component: BaselineComponent::MySql,
+        title: "授权只按 IP 判定",
+        description: "关掉反解后，授权表里的主机名不会被 DNS 影响，也就无法用 DNS 欺骗绕过。",
+        recommendation: "on",
+        risk: BaselineRisk::Medium,
+        value_kind: BaselineValueKind::Boolean,
+        reading: Reading::Files(MYSQL_FILES),
+        implicit: Some("off"),
+        file: "/etc/mysql/mariadb.conf.d/50-server.cnf",
+        key: "skip-name-resolve",
+        format: FileFormat::Ini("mysqld"),
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "mysql-general-log",
+        category: BaselineCategory::Logging,
+        component: BaselineComponent::MySql,
+        title: "关闭全量语句日志",
+        description: "全量日志会把每条语句连同其中的口令一起写进文件，日常不应开着。",
+        recommendation: "off",
+        risk: BaselineRisk::Medium,
+        value_kind: BaselineValueKind::Boolean,
+        reading: Reading::Files(MYSQL_FILES),
+        implicit: Some("off"),
+        file: "/etc/mysql/mariadb.conf.d/50-server.cnf",
+        key: "general_log",
+        format: FileFormat::Ini("mysqld"),
+        reload: ReloadGroup::None,
+    },
+    // ---- PostgreSQL --------------------------------------------------------
+    BaselineDefinition {
+        id: "postgresql-listen-addresses",
+        category: BaselineCategory::AccessControl,
+        component: BaselineComponent::PostgreSql,
+        title: "只监听本机",
+        description: "监听 * 表示任何能到达这台机器的人都能尝试认证。",
+        recommendation: "localhost",
+        risk: BaselineRisk::Critical,
+        value_kind: BaselineValueKind::Choice(PG_LISTEN),
+        reading: Reading::Files(POSTGRESQL_FILES),
+        implicit: Some("localhost"),
+        file: "/etc/postgresql/postgresql.conf",
+        key: "listen_addresses",
+        format: FileFormat::Equals,
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "postgresql-password-encryption",
+        category: BaselineCategory::Password,
+        component: BaselineComponent::PostgreSql,
+        title: "口令用 SCRAM 存放",
+        description: "md5 方式的口令散列可以直接拿来重放登录，SCRAM 不行。",
+        recommendation: "scram-sha-256",
+        risk: BaselineRisk::High,
+        value_kind: BaselineValueKind::Choice(PG_PASSWORD_ENCRYPTION),
+        reading: Reading::Files(POSTGRESQL_FILES),
+        implicit: Some("scram-sha-256"),
+        file: "/etc/postgresql/postgresql.conf",
+        key: "password_encryption",
+        format: FileFormat::Equals,
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "postgresql-log-connections",
+        category: BaselineCategory::Logging,
+        component: BaselineComponent::PostgreSql,
+        title: "记录连接建立",
+        description: "不记录连接，就无从知道是谁在什么时候连过这个库。",
+        recommendation: "on",
+        risk: BaselineRisk::High,
+        value_kind: BaselineValueKind::Boolean,
+        reading: Reading::Files(POSTGRESQL_FILES),
+        implicit: Some("off"),
+        file: "/etc/postgresql/postgresql.conf",
+        key: "log_connections",
+        format: FileFormat::Equals,
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "postgresql-log-disconnections",
+        category: BaselineCategory::Logging,
+        component: BaselineComponent::PostgreSql,
+        title: "记录连接断开",
+        description: "与连接记录成对使用，才能还原出每个会话持续了多久。",
+        recommendation: "on",
+        risk: BaselineRisk::Medium,
+        value_kind: BaselineValueKind::Boolean,
+        reading: Reading::Files(POSTGRESQL_FILES),
+        implicit: Some("off"),
+        file: "/etc/postgresql/postgresql.conf",
+        key: "log_disconnections",
+        format: FileFormat::Equals,
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "postgresql-log-statement",
+        category: BaselineCategory::Logging,
+        component: BaselineComponent::PostgreSql,
+        title: "记录结构变更语句",
+        description: "至少记下建表、改表、授权这类语句，事后才看得出库结构被谁动过。",
+        recommendation: "ddl",
+        risk: BaselineRisk::Medium,
+        value_kind: BaselineValueKind::Choice(PG_LOG_STATEMENT),
+        reading: Reading::Files(POSTGRESQL_FILES),
+        implicit: Some("none"),
+        file: "/etc/postgresql/postgresql.conf",
+        key: "log_statement",
+        format: FileFormat::Equals,
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "postgresql-logging-collector",
+        category: BaselineCategory::Logging,
+        component: BaselineComponent::PostgreSql,
+        title: "日志落盘",
+        description: "不开收集器时日志只写标准错误，容器里通常就等于没有留存。",
+        recommendation: "on",
+        risk: BaselineRisk::Medium,
+        value_kind: BaselineValueKind::Boolean,
+        reading: Reading::Files(POSTGRESQL_FILES),
+        implicit: Some("off"),
+        file: "/etc/postgresql/postgresql.conf",
+        key: "logging_collector",
+        format: FileFormat::Equals,
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "postgresql-ssl",
+        category: BaselineCategory::Transport,
+        component: BaselineComponent::PostgreSql,
+        title: "启用传输加密",
+        description: "不开 SSL 时，口令与查询结果在网络上是明文。",
+        recommendation: "on",
+        risk: BaselineRisk::High,
+        value_kind: BaselineValueKind::Boolean,
+        reading: Reading::Files(POSTGRESQL_FILES),
+        implicit: Some("off"),
+        file: "/etc/postgresql/postgresql.conf",
+        key: "ssl",
+        format: FileFormat::Equals,
+        reload: ReloadGroup::None,
+    },
+    // ---- Redis -------------------------------------------------------------
+    BaselineDefinition {
+        id: "redis-protected-mode",
+        category: BaselineCategory::AccessControl,
+        component: BaselineComponent::Redis,
+        title: "保持保护模式",
+        description: "保护模式是没设口令时的最后一道拦阻；关掉它的无口令 Redis 是被利用最多的一种配置。",
+        recommendation: "on",
+        risk: BaselineRisk::Critical,
+        value_kind: BaselineValueKind::Boolean,
+        reading: Reading::Files(REDIS_FILES),
+        implicit: Some("on"),
+        file: "/etc/redis/redis.conf",
+        key: "protected-mode",
+        format: FileFormat::Whitespace,
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "redis-requirepass",
+        category: BaselineCategory::Authentication,
+        component: BaselineComponent::Redis,
+        title: "设置访问口令",
+        description: "只检查有没有设置，不读取也不显示它的值。",
+        recommendation: PRESENCE_MARKER,
+        risk: BaselineRisk::Critical,
+        value_kind: BaselineValueKind::Presence,
+        reading: Reading::Files(REDIS_FILES),
+        implicit: None,
+        file: "/etc/redis/redis.conf",
+        key: "requirepass",
+        format: FileFormat::Whitespace,
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "redis-bind",
+        category: BaselineCategory::AccessControl,
+        component: BaselineComponent::Redis,
+        title: "限定监听地址",
+        description: "没有 bind 行时 Redis 监听所有网卡。只检查是否显式限定过。",
+        recommendation: PRESENCE_MARKER,
+        risk: BaselineRisk::Critical,
+        value_kind: BaselineValueKind::Presence,
+        reading: Reading::Files(REDIS_FILES),
+        implicit: None,
+        file: "/etc/redis/redis.conf",
+        key: "bind",
+        format: FileFormat::Whitespace,
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "redis-logfile",
+        category: BaselineCategory::Logging,
+        component: BaselineComponent::Redis,
+        title: "日志写到文件",
+        description: "logfile 为空时日志只写标准输出，重启后什么都不剩。",
+        recommendation: PRESENCE_MARKER,
+        risk: BaselineRisk::Medium,
+        value_kind: BaselineValueKind::Presence,
+        reading: Reading::Files(REDIS_FILES),
+        implicit: None,
+        file: "/etc/redis/redis.conf",
+        key: "logfile",
+        format: FileFormat::Whitespace,
+        reload: ReloadGroup::None,
+    },
+    // ---- MongoDB -----------------------------------------------------------
+    BaselineDefinition {
+        id: "mongodb-authorization",
+        category: BaselineCategory::Authentication,
+        component: BaselineComponent::MongoDb,
+        title: "开启鉴权",
+        description: "默认不开鉴权，任何能连上的人都是管理员。",
+        recommendation: "enabled",
+        risk: BaselineRisk::Critical,
+        value_kind: BaselineValueKind::Choice(MONGO_AUTHORIZATION),
+        reading: Reading::Files(MONGODB_FILES),
+        implicit: Some("disabled"),
+        file: "/etc/mongod.conf",
+        key: "security.authorization",
+        format: FileFormat::Yaml,
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "mongodb-bind-ip",
+        category: BaselineCategory::AccessControl,
+        component: BaselineComponent::MongoDb,
+        title: "只监听本机",
+        description: "绑定 0.0.0.0 会把整个库暴露到网络上。",
+        recommendation: "127.0.0.1",
+        risk: BaselineRisk::Critical,
+        value_kind: BaselineValueKind::Choice(MONGO_BIND),
+        reading: Reading::Files(MONGODB_FILES),
+        implicit: Some("127.0.0.1"),
+        file: "/etc/mongod.conf",
+        key: "net.bindIp",
+        format: FileFormat::Yaml,
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "mongodb-javascript",
+        category: BaselineCategory::ServiceHardening,
+        component: BaselineComponent::MongoDb,
+        title: "关闭服务端 JavaScript",
+        description: "服务端 JavaScript 让一次注入可以直接在库里执行代码。",
+        recommendation: "off",
+        risk: BaselineRisk::High,
+        value_kind: BaselineValueKind::Boolean,
+        reading: Reading::Files(MONGODB_FILES),
+        implicit: Some("on"),
+        file: "/etc/mongod.conf",
+        key: "security.javascriptEnabled",
+        format: FileFormat::Yaml,
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "mongodb-tls-mode",
+        category: BaselineCategory::Transport,
+        component: BaselineComponent::MongoDb,
+        title: "强制传输加密",
+        description: "不强制 TLS 时，认证与数据都以明文经过网络。",
+        recommendation: "requiretls",
+        risk: BaselineRisk::High,
+        value_kind: BaselineValueKind::Choice(MONGO_TLS_MODE),
+        reading: Reading::Files(MONGODB_FILES),
+        implicit: Some("disabled"),
+        file: "/etc/mongod.conf",
+        key: "net.tls.mode",
+        format: FileFormat::Yaml,
+        reload: ReloadGroup::None,
+    },
+    // ---- Nginx -------------------------------------------------------------
+    BaselineDefinition {
+        id: "nginx-server-tokens",
+        category: BaselineCategory::ServiceHardening,
+        component: BaselineComponent::Nginx,
+        title: "隐藏版本号",
+        description: "响应头和错误页里的版本号，等于直接告诉对方该用哪个漏洞。",
+        recommendation: "off",
+        risk: BaselineRisk::Medium,
+        value_kind: BaselineValueKind::Boolean,
+        reading: Reading::Files(NGINX_FILES),
+        implicit: Some("on"),
+        file: "/etc/nginx/nginx.conf",
+        key: "server_tokens",
+        format: FileFormat::Semicolon,
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "nginx-autoindex",
+        category: BaselineCategory::ServiceHardening,
+        component: BaselineComponent::Nginx,
+        title: "关闭目录浏览",
+        description: "开着目录索引，没有首页的目录会把里面所有文件列出来。",
+        recommendation: "off",
+        risk: BaselineRisk::High,
+        value_kind: BaselineValueKind::Boolean,
+        reading: Reading::Files(NGINX_FILES),
+        implicit: Some("off"),
+        file: "/etc/nginx/nginx.conf",
+        key: "autoindex",
+        format: FileFormat::Semicolon,
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "nginx-ssl-protocols",
+        category: BaselineCategory::Transport,
+        component: BaselineComponent::Nginx,
+        title: "显式指定 TLS 版本",
+        description: "只检查是否显式写过；没写就跟随编译默认，可能仍然接受已被淘汰的版本。",
+        recommendation: PRESENCE_MARKER,
+        risk: BaselineRisk::Medium,
+        value_kind: BaselineValueKind::Presence,
+        reading: Reading::Files(NGINX_FILES),
+        implicit: None,
+        file: "/etc/nginx/nginx.conf",
+        key: "ssl_protocols",
+        format: FileFormat::Semicolon,
+        reload: ReloadGroup::None,
+    },
+    // ---- Apache HTTP Server ------------------------------------------------
+    BaselineDefinition {
+        id: "apache-server-tokens",
+        category: BaselineCategory::ServiceHardening,
+        component: BaselineComponent::Apache,
+        title: "隐藏版本与模块",
+        description: "默认会连同版本号和已装模块一起报出去。Prod 只报产品名。",
+        recommendation: "prod",
+        risk: BaselineRisk::Medium,
+        value_kind: BaselineValueKind::Choice(APACHE_SERVER_TOKENS),
+        reading: Reading::Files(APACHE_FILES),
+        implicit: Some("full"),
+        file: "/etc/httpd/conf/httpd.conf",
+        key: "ServerTokens",
+        format: FileFormat::Whitespace,
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "apache-server-signature",
+        category: BaselineCategory::ServiceHardening,
+        component: BaselineComponent::Apache,
+        title: "错误页不带签名",
+        description: "错误页脚注里的版本与主机名会一并泄露。",
+        recommendation: "off",
+        risk: BaselineRisk::Low,
+        value_kind: BaselineValueKind::Boolean,
+        reading: Reading::Files(APACHE_FILES),
+        implicit: Some("off"),
+        file: "/etc/httpd/conf/httpd.conf",
+        key: "ServerSignature",
+        format: FileFormat::Whitespace,
+        reload: ReloadGroup::None,
+    },
+    BaselineDefinition {
+        id: "apache-trace-enable",
+        category: BaselineCategory::ServiceHardening,
+        component: BaselineComponent::Apache,
+        title: "关闭 TRACE 方法",
+        description: "TRACE 会把请求原样回显，可被用来读取本不该被脚本读到的头部。",
+        recommendation: "off",
+        risk: BaselineRisk::Medium,
+        value_kind: BaselineValueKind::Boolean,
+        reading: Reading::Files(APACHE_FILES),
+        implicit: Some("on"),
+        file: "/etc/httpd/conf/httpd.conf",
+        key: "TraceEnable",
+        format: FileFormat::Whitespace,
         reload: ReloadGroup::None,
     },
 ];
@@ -754,6 +1698,13 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
 pub enum BaselineObservedValue {
     Missing,
     Unsupported,
+    /// The software this check is about is not on this target: none of the
+    /// paths it could keep its configuration in exists.
+    ///
+    /// This is not the same as "not set", and reporting it as such was the
+    /// difference between a table of findings and a table where forty rows of
+    /// absent software buried the four that mattered.
+    NotInstalled,
     Value(String),
 }
 
@@ -762,8 +1713,15 @@ impl BaselineObservedValue {
         match self {
             Self::Missing => "未设置",
             Self::Unsupported => "不支持（符号链接或特殊文件）",
+            Self::NotInstalled => "未安装",
             Self::Value(value) => value,
         }
+    }
+
+    /// Whether this check applies to the target at all. A check on software
+    /// the target does not run is neither passed nor failed.
+    pub fn applies(&self) -> bool {
+        !matches!(self, Self::NotInstalled)
     }
 }
 
@@ -1610,9 +2568,53 @@ pub fn definition(item_id: &str) -> CoreResult<&'static BaselineDefinition> {
         })
 }
 
+/// Whether what the target is doing matches what the check asks for.
+fn compliance_of(definition: &BaselineDefinition, observed: &BaselineObservedValue) -> bool {
+    let effective = match observed {
+        // A presence check has no value to compare: the marker is the whole
+        // answer, and it only appears when the directive is set.
+        BaselineObservedValue::Value(value)
+            if definition.value_kind == BaselineValueKind::Presence =>
+        {
+            return value == PRESENCE_MARKER;
+        }
+        BaselineObservedValue::Value(value) => value.as_str(),
+        // Nothing written down means the software uses its own default, and if
+        // that default is what the check asks for then there is nothing wrong.
+        BaselineObservedValue::Missing => match definition.implicit {
+            Some(default) => default,
+            None => return false,
+        },
+        // Software that is not installed cannot be out of compliance; callers
+        // read `observed.applies()` before counting this either way.
+        BaselineObservedValue::Unsupported | BaselineObservedValue::NotInstalled => return false,
+    };
+    normalize_requested_value(definition, effective)
+        .is_ok_and(|value| value == definition.recommendation)
+}
+
+/// Refuses a change to a check this tool only knows how to read.
+fn read_only_check(definition: &BaselineDefinition) -> CoreError {
+    CoreError::validation(
+        "baseline change",
+        format!(
+            "{} 是只读检查：请按建议手动修改 {}",
+            definition.id, definition.file
+        ),
+    )
+}
+
 fn normalize_requested_value(definition: &BaselineDefinition, value: &str) -> CoreResult<String> {
     let value = value.trim();
     match definition.value_kind {
+        // There is no value to write: the check reports only that a directive
+        // is set, because its value is a credential.
+        BaselineValueKind::Presence => Err(read_only_check(definition)),
+        BaselineValueKind::Boolean => BaselineValueKind::as_boolean(value)
+            .map(str::to_owned)
+            .ok_or_else(|| {
+                CoreError::validation("baseline value", format!("{} 只接受开关值", definition.id))
+            }),
         BaselineValueKind::Choice(choices) => {
             let normalized = value.to_ascii_lowercase();
             if choices.contains(&normalized.as_str()) {
@@ -1639,13 +2641,24 @@ fn normalize_requested_value(definition: &BaselineDefinition, value: &str) -> Co
     }
 }
 
+/// The characters an observed value may contain, on the target and again here.
+///
+/// It used to be letters, digits, underscore and hyphen, which was enough for
+/// `yes`/`no` and a number and destroyed everything else: an address came back
+/// as `127001`, a `*` came back empty and so read as "not set", and a log path
+/// lost its slashes. Widened to what a configuration value is actually made
+/// of, and no further — nothing here can start a command, close a quote or
+/// carry a newline.
+const OBSERVED_VALUE_CHARS: &str = "A-Za-z0-9_.:*/,+-";
+
 fn validate_observed(value: &BaselineObservedValue) -> CoreResult<()> {
     if let BaselineObservedValue::Value(value) = value
         && (value.is_empty()
             || value.len() > 64
-            || !value
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-')))
+            || !value.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric()
+                    || matches!(byte, b'_' | b'-' | b'.' | b':' | b'*' | b'/' | b',' | b'+')
+            }))
     {
         return Err(CoreError::validation(
             "baseline observed value",
@@ -1658,21 +2671,71 @@ fn validate_observed(value: &BaselineObservedValue) -> CoreResult<()> {
 fn scan_command() -> String {
     let mut command = format!("set -u; printf '%s\\n' {SCAN_MARKER}; ");
     for definition in BASELINE_CATALOG {
-        command.push_str(&format!(
-            "lr_file={file}; lr_key={key}; lr_value=__missing__; \
-             if [ -L \"$lr_file\" ] || {{ [ -e \"$lr_file\" ] && [ ! -f \"$lr_file\" ]; }}; then \
-               lr_value=__unsupported__; \
-             elif [ -f \"$lr_file\" ]; then \
-               lr_value=$(awk -v k=\"$lr_key\" '{program}' \"$lr_file\" | tail -n 1); \
-               lr_value=$(printf '%s' \"$lr_value\" | tr -cd 'A-Za-z0-9_-'); [ -n \"$lr_value\" ] || lr_value=__missing__; \
-             fi; printf 'ITEM=%s\\t%s\\n' {id} \"$lr_value\"; ",
-            file = shq(definition.file),
-            key = shq(definition.key),
-            id = shq(definition.id),
-            program = reader_program(definition.precedence()),
-        ));
+        command.push_str(&item_command(definition));
     }
     command
+}
+
+/// The shell that reads one setting and prints one row.
+///
+/// Three answers have to be told apart and used to be two. "Not set" on a
+/// machine that runs the software is a finding; the same word on a machine
+/// that has never had that software installed is noise, and forty rows of it
+/// is enough noise to hide the findings. A configuration file that is nowhere
+/// to be found reports absent, and the check is not counted against the target.
+fn item_command(definition: &BaselineDefinition) -> String {
+    let id = shq(definition.id);
+    match definition.reading {
+        Reading::RunningSysctl => format!(
+            "lr_value=__missing__; \
+             if command -v sysctl >/dev/null 2>&1; then \
+               lr_read=$(sysctl -n {key} 2>/dev/null || true); \
+             else lr_read=$(cat /proc/sys/$(printf '%s' {key} | tr . /) 2>/dev/null || true); fi; \
+             lr_read=$(printf '%s' \"$lr_read\" | tr -s '[:space:]' ' '); \
+             lr_value=$(printf '%s' \"$lr_read\" | tr -cd '{allowed}'); \
+             [ -n \"$lr_value\" ] || lr_value=__missing__; \
+             printf 'ITEM=%s\\t%s\\n' {id} \"$lr_value\"; ",
+            key = shq(definition.key),
+            allowed = OBSERVED_VALUE_CHARS,
+        ),
+        // Every file that exists, read in the order the program reads them,
+        // and the precedence rule applied across the whole set.
+        //
+        // Reading only the first one found reported what the packaged default
+        // says. MySQL's `!includedir` means a later file overrides an earlier
+        // one, and on a lab host with `bind-address = 127.0.0.1` in the
+        // packaged file and an override elsewhere, the check said the database
+        // was bound to the loopback while the server was in fact listening on
+        // every interface. sshd is the same shape read the other way round:
+        // its `Include` sits at the top and it keeps the first value it sees,
+        // so the dropped-in files win and are listed first here.
+        Reading::Files(_) => {
+            // The candidates are compile-time constants restricted to path
+            // characters, so they go in unquoted and a `*` in one of them is a
+            // glob the shell resolves. See the catalogue test that pins it.
+            let candidates = definition.candidates().join(" ");
+            format!(
+                "lr_files=; lr_odd=0; for lr_candidate in {candidates}; do \
+                   if [ -L \"$lr_candidate\" ] || {{ [ -e \"$lr_candidate\" ] && [ ! -f \"$lr_candidate\" ]; }}; then \
+                     lr_odd=1; \
+                   elif [ -f \"$lr_candidate\" ]; then \
+                     lr_files=\"$lr_files $lr_candidate\"; \
+                   fi; \
+                 done; \
+                 lr_key={key}; \
+                 if [ -n \"$lr_files\" ]; then \
+                   lr_value=$(awk -v k=\"$lr_key\" '{program}' $lr_files | tail -n 1); \
+                   lr_value=$(printf '%s' \"$lr_value\" | tr -cd '{allowed}'); \
+                   [ -n \"$lr_value\" ] || lr_value=__missing__; \
+                 elif [ \"$lr_odd\" = 1 ]; then lr_value=__unsupported__; \
+                 else lr_value=__absent__; fi; \
+                 printf 'ITEM=%s\\t%s\\n' {id} \"$lr_value\"; ",
+                key = shq(definition.key),
+                program = reader_program(definition),
+                allowed = OBSERVED_VALUE_CHARS,
+            )
+        }
+    }
 }
 
 /// Reads the value a program on the host would actually obey for one key.
@@ -1681,7 +2744,93 @@ fn scan_command() -> String {
 /// `PermitRootLogin yes` followed by the distribution's own
 /// `#PermitRootLogin no` report as compliant on a host that was letting root
 /// straight in, which is the exact opposite of what the check exists for.
-fn reader_program(precedence: Precedence) -> &'static str {
+fn reader_program(definition: &BaselineDefinition) -> String {
+    let body = match definition.format {
+        FileFormat::Whitespace | FileFormat::Equals => flat_reader(definition.precedence(), ""),
+        // Nginx writes `directive value;`, and the semicolon is punctuation
+        // rather than part of the value.
+        FileFormat::Semicolon => flat_reader(
+            definition.precedence(),
+            "sub(/[[:space:]]*;[[:space:]]*$/,\"\",v); ",
+        ),
+        FileFormat::Ini(section) => ini_reader(section),
+        FileFormat::Yaml => YAML_READER.to_owned(),
+    };
+    match definition.value_kind {
+        // The value is the secret the check is about. Whether it is set is the
+        // answer; what it is set to must not leave the target.
+        // Matched on the print rather than on the whole END, because a format
+        // that trims the value has already rewritten the END around it. That
+        // replacement matched nothing for nginx, and a directive's value went
+        // out through the one kind of check whose whole purpose is not to
+        // carry values off the target.
+        BaselineValueKind::Presence => {
+            let replaced = body.replace("print v}", "print (v==\"\" ? \"\" : \"configured\")}");
+            debug_assert_ne!(replaced, body, "the presence reader did not take");
+            replaced
+        }
+        BaselineValueKind::Choice(_)
+        | BaselineValueKind::Integer { .. }
+        | BaselineValueKind::Boolean => body,
+    }
+}
+
+/// A setting under a `[section]` header, which is how the my.cnf family works.
+/// The same key means different things under `[mysqld]` and `[client]`, so
+/// lines outside the section are not this setting at all.
+fn ini_reader(section: &str) -> String {
+    format!(
+        "BEGIN{{v=\"\";inS=0}} \
+         /^[[:space:]]*[#;]/{{next}} \
+         /^[[:space:]]*$/{{next}} \
+         /^[[:space:]]*\\[/{{s=$0; \
+           gsub(/^[[:space:]]*\\[|\\][[:space:]]*.*$/,\"\",s); \
+           gsub(/^[[:space:]]+|[[:space:]]+$/,\"\",s); \
+           inS=(tolower(s)==tolower(\"{section}\")); next}} \
+         inS{{p=$0; sub(/^[[:space:]]+/,\"\",p); t=p; sub(/[[:space:]=].*$/,\"\",t); \
+          tk=tolower(t); gsub(/-/,\"_\",tk); kk=tolower(k); gsub(/-/,\"_\",kk); \
+          if(tk==kk){{hasEq=(p ~ /^[^[:space:]=]+[[:space:]]*=/); \
+          sub(/^[^[:space:]=]+[[:space:]]*=?[[:space:]]*/,\"\",p); \
+          gsub(/^[[:space:]]+|[[:space:]]+$/,\"\",p); \
+          v=(hasEq ? p : (p==\"\" ? \"on\" : p))}}}} \
+         END{{print v}}"
+    )
+}
+
+/// A dotted path through indented YAML, which is how mongod.conf is written.
+///
+/// The key is given whole — `security.authorization` — and the reader rebuilds
+/// each line's path from the indentation it sits at.
+const YAML_READER: &str = "BEGIN{v=\"\";top=0} \
+     /^[[:space:]]*#/{next} \
+     /^[[:space:]]*$/{next} \
+     {line=$0; sub(/#.*$/,\"\",line); \
+      if(line ~ /^[[:space:]]*$/) next; \
+      ind=match(line,/[^ ]/)-1; \
+      name=line; sub(/^[[:space:]]*/,\"\",name); \
+      p=index(name,\":\"); if(p==0) next; \
+      val=substr(name,p+1); name=substr(name,1,p-1); \
+      gsub(/^[[:space:]]+|[[:space:]]+$/,\"\",val); \
+      gsub(/^[[:space:]]+|[[:space:]]+$/,\"\",name); \
+      while(top>0 && ind_of[top]>=ind) top--; \
+      top++; ind_of[top]=ind; name_of[top]=name; \
+      path=name_of[1]; for(i=2;i<=top;i++) path=path \".\" name_of[i]; \
+      if(tolower(path)==tolower(k) && val!=\"\") v=val} \
+     END{print v}";
+
+/// The two flat shapes differ only in which occurrence wins. Any trailing trim
+/// is folded into the END, where the value is already whichever one won, so
+/// the body stays exactly the program that was settled against real hosts.
+fn flat_reader(precedence: Precedence, trim: &str) -> String {
+    let program = flat_reader_body(precedence);
+    if trim.is_empty() {
+        program.to_owned()
+    } else {
+        program.replace("END{print v}", &format!("END{{{trim}print v}}"))
+    }
+}
+
+fn flat_reader_body(precedence: Precedence) -> &'static str {
     match precedence {
         // `sshd -T` on a real host confirms sshd_config(5): "for each keyword,
         // the first obtained value will be used".
@@ -1856,6 +3005,7 @@ fn parse_scan(output: &str) -> CoreResult<Vec<BaselineStatus>> {
         let observed = match value {
             "__missing__" => BaselineObservedValue::Missing,
             "__unsupported__" => BaselineObservedValue::Unsupported,
+            "__absent__" => BaselineObservedValue::NotInstalled,
             value => BaselineObservedValue::Value(value.to_owned()),
         };
         validate_observed(&observed)?;
@@ -1875,11 +3025,7 @@ fn parse_scan(output: &str) -> CoreResult<Vec<BaselineStatus>> {
             let observed = values
                 .remove(definition.id)
                 .ok_or_else(|| CoreError::validation("baseline scan", "missing item row"))?;
-            let compliant = match &observed {
-                BaselineObservedValue::Value(value) => normalize_requested_value(definition, value)
-                    .is_ok_and(|value| value == definition.recommendation),
-                BaselineObservedValue::Missing | BaselineObservedValue::Unsupported => false,
-            };
+            let compliant = compliance_of(definition, &observed);
             Ok(BaselineStatus {
                 item_id: definition.id.to_owned(),
                 observed,
@@ -2189,9 +3335,19 @@ fn edit_body(
             "non-canonical value reached command builder",
         ));
     }
+    if !definition.is_writable() {
+        return Err(read_only_check(definition));
+    }
     let separator = match definition.format {
         FileFormat::Whitespace => "space",
         FileFormat::Equals => "equals",
+        // Rewriting a sectioned or nested file with a flat line editor would
+        // put the directive in the wrong section, or at the wrong depth, which
+        // is worse than not writing it. `is_writable` has already refused
+        // these; the arm is here so a new format cannot slip through.
+        FileFormat::Ini(_) | FileFormat::Semicolon | FileFormat::Yaml => {
+            return Err(read_only_check(definition));
+        }
     };
     let temporary = format!("{remote_root}/edit-{index}.tmp");
     Ok(format!(
@@ -2595,10 +3751,6 @@ mod tests {
                         byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-')
                     })
             );
-            assert_eq!(
-                normalize_requested_value(definition, definition.recommendation).unwrap(),
-                definition.recommendation
-            );
             match definition.value_kind {
                 BaselineValueKind::Choice(choices) => {
                     let mut unique = BTreeSet::new();
@@ -2610,27 +3762,75 @@ mod tests {
                             *choice
                         );
                     }
+                    assert_eq!(
+                        normalize_requested_value(definition, definition.recommendation).unwrap(),
+                        definition.recommendation
+                    );
                 }
                 BaselineValueKind::Integer { minimum, maximum } => {
                     assert!(minimum <= maximum);
+                    assert_eq!(
+                        normalize_requested_value(definition, definition.recommendation).unwrap(),
+                        definition.recommendation
+                    );
+                }
+                BaselineValueKind::Boolean => {
+                    assert!(matches!(definition.recommendation, "on" | "off"));
+                }
+                // A presence check has no value: what it reports is the marker,
+                // and the marker is what it is compared against.
+                BaselineValueKind::Presence => {
+                    assert_eq!(definition.recommendation, PRESENCE_MARKER);
+                    assert!(normalize_requested_value(definition, "anything").is_err());
                 }
             }
-            match definition.format {
-                FileFormat::Whitespace => assert!(matches!(
-                    definition.file,
-                    "/etc/ssh/sshd_config" | "/etc/login.defs"
-                )),
-                FileFormat::Equals => assert!(matches!(
-                    definition.file,
-                    "/etc/sysctl.d/99-lovelyres-baseline.conf"
-                        | "/etc/security/faillock.conf"
-                        | "/etc/security/pwquality.conf"
-                        | "/etc/audit/auditd.conf"
-                )),
+            // A default has to be a value this check could actually read off a
+            // target, or "nothing written down" would be judged against a
+            // value the software never uses.
+            if let Some(implicit) = definition.implicit {
+                assert!(
+                    normalize_requested_value(definition, implicit).is_ok(),
+                    "{} has a default it could never observe: {implicit}",
+                    definition.id
+                );
+                assert_eq!(
+                    compliance_of(definition, &BaselineObservedValue::Missing),
+                    compliance_of(
+                        definition,
+                        &BaselineObservedValue::Value(implicit.to_owned())
+                    ),
+                    "{} judges an unwritten directive differently from its own default",
+                    definition.id
+                );
+            }
+            // Only the flat formats can be written back; the rest are read-only
+            // and must refuse a change rather than corrupt a sectioned file.
+            if !definition.is_writable() {
+                assert!(
+                    edit_body(
+                        &PlannedBaselineChange {
+                            item_id: definition.id.to_owned(),
+                            before: BaselineObservedValue::Missing,
+                            after: definition.recommendation.to_owned(),
+                        },
+                        "/tmp",
+                        0,
+                    )
+                    .is_err(),
+                    "{} must refuse to be written",
+                    definition.id
+                );
             }
         }
-        assert_eq!(BASELINE_CATALOG.len(), 38);
-        assert!(BASELINE_CATALOG.len() <= MAX_CHANGES);
+        assert_eq!(BASELINE_CATALOG.len(), 75);
+        // One plan carries every check this tool will write; the rest are read.
+        assert!(
+            BASELINE_CATALOG
+                .iter()
+                .filter(|definition| definition.is_writable())
+                .count()
+                <= MAX_CHANGES
+        );
         for category in BaselineCategory::ALL {
             assert!(
                 BASELINE_CATALOG
@@ -2714,7 +3914,14 @@ mod tests {
             .map(|definition| (definition.id, "__missing__"))
             .collect::<Vec<_>>();
         harness.set_execute_output(scan_fixture(&overrides, &[]));
-        let requests = BASELINE_CATALOG
+        // The checks this tool can write back. The rest are read: a sectioned
+        // or nested file cannot be edited a line at a time without damage, and
+        // a presence check has no value to write.
+        let writable = BASELINE_CATALOG
+            .iter()
+            .filter(|definition| definition.is_writable())
+            .collect::<Vec<_>>();
+        let requests = writable
             .iter()
             .map(|definition| BaselineChangeRequest::recommended(definition.id).unwrap())
             .collect::<Vec<_>>();
@@ -2724,7 +3931,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(plan.changes.len(), BASELINE_CATALOG.len());
+        assert_eq!(plan.changes.len(), writable.len());
         assert_eq!(plan.files.len(), 6);
     }
 
@@ -3150,8 +4357,17 @@ mod tests {
         let command = scan_command();
         assert!(command.contains("/^[[:space:]]*#/{next}"));
         assert!(!command.contains("sub(/^[[:space:]]*#[[:space:]]*/"));
-        // Both readers have to skip them, not just one.
-        assert_eq!(command.matches("/^[[:space:]]*#/{next}").count(), 38);
+        // Every reader has to skip them, not just one. A kernel parameter is
+        // read from the running kernel and has no file to have comments in.
+        let from_files = BASELINE_CATALOG
+            .iter()
+            .filter(|definition| matches!(definition.reading, Reading::Files(_)))
+            .count();
+        assert_eq!(
+            command.matches("/^[[:space:]]*#/{next}").count()
+                + command.matches("/^[[:space:]]*[#;]/{next}").count(),
+            from_files
+        );
     }
 
     fn sshd_definition() -> &'static BaselineDefinition {
@@ -3313,8 +4529,6 @@ mod tests {
     #[test]
     fn the_scan_asks_about_every_setting_exactly_once() {
         let command = scan_command();
-        assert_eq!(BASELINE_CATALOG.len(), 38);
-        assert_eq!(command.matches("lr_file=").count(), 38);
         for definition in BASELINE_CATALOG {
             assert_eq!(
                 command
@@ -3327,9 +4541,81 @@ mod tests {
         }
         // First-wins needs a found flag; last-wins must not have one, or it
         // would silently become first-wins too.
+        let sshd = BASELINE_CATALOG
+            .iter()
+            .filter(|definition| definition.reload == ReloadGroup::Sshd)
+            .count();
         let first = command.matches("BEGIN{v=\"\";f=0}").count();
-        let last = command.matches("BEGIN{v=\"\"} ").count();
-        assert_eq!(first, 11, "only the sshd_config settings read first-wins");
-        assert_eq!(first + last, 38);
+        assert_eq!(first, sshd, "only the sshd_config settings read first-wins");
+    }
+
+    /// A kernel parameter can be set from any of half a dozen places, and a
+    /// unit or an operator can set it from none of them. Reading the file this
+    /// tool would write said what someone had written down; it said nothing
+    /// about what the kernel was doing, and on a host where the file did not
+    /// exist it said every one of these settings was missing.
+    #[test]
+    fn kernel_parameters_are_read_from_the_running_kernel() {
+        let command = scan_command();
+        let sysctl = BASELINE_CATALOG
+            .iter()
+            .filter(|definition| matches!(definition.reading, Reading::RunningSysctl))
+            .collect::<Vec<_>>();
+        assert!(sysctl.len() >= 18);
+        for definition in sysctl {
+            assert!(
+                command.contains(&format!("sysctl -n '{}'", definition.key)),
+                "{} is not read from the running kernel",
+                definition.id
+            );
+        }
+        // And when there is no sysctl binary, straight from /proc.
+        assert!(command.contains("cat /proc/sys/$(printf '%s'"));
+    }
+
+    /// A presence check must never print what it found.
+    ///
+    /// One of them did: the nginx TLS check trims a trailing semicolon, and
+    /// the rewrite that turns the value into a marker was looking for the
+    /// exact END the trim had already replaced. It matched nothing, silently,
+    /// and the directive's value came back instead of the word.
+    #[test]
+    fn a_presence_check_prints_a_marker_and_never_a_value() {
+        let presence = BASELINE_CATALOG
+            .iter()
+            .filter(|definition| definition.value_kind == BaselineValueKind::Presence)
+            .collect::<Vec<_>>();
+        assert!(presence.len() >= 6);
+        for definition in presence {
+            let program = reader_program(definition);
+            assert!(
+                program.contains("print (v==\"\" ? \"\" : \"configured\")"),
+                "{} would print the value it read",
+                definition.id
+            );
+            assert!(
+                !program.contains("; print v}") && !program.contains("END{print v}"),
+                "{} still has a path that prints the value",
+                definition.id
+            );
+        }
+    }
+
+    /// Every candidate path is a compile-time constant that goes into the
+    /// scan unquoted, so a `*` in it is a glob the target's shell resolves.
+    /// Nothing else about them may be shell-significant.
+    #[test]
+    fn candidate_paths_are_inert_enough_to_go_unquoted() {
+        for definition in BASELINE_CATALOG {
+            for path in definition.candidates() {
+                assert!(path.starts_with('/'), "{path} is not absolute");
+                assert!(
+                    path.bytes().all(|byte| byte.is_ascii_alphanumeric()
+                        || matches!(byte, b'/' | b'.' | b'_' | b'-' | b'*')),
+                    "{path} carries a shell-significant character"
+                );
+                assert!(!path.contains("..") && !path.contains("//"));
+            }
+        }
     }
 }

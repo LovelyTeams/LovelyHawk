@@ -5,10 +5,24 @@ export type BaselineCategory =
   | "network"
   | "authentication"
   | "logging"
-  | "file-permissions";
+  | "file-permissions"
+  | "access-control"
+  | "transport"
+  | "service-hardening";
+
+/** Which piece of software a check is about, as opposed to what kind it is. */
+export type BaselineComponent =
+  | "system"
+  | "ssh"
+  | "mysql"
+  | "postgresql"
+  | "redis"
+  | "mongodb"
+  | "nginx"
+  | "apache";
 
 export type BaselineRisk = "critical" | "high" | "medium" | "low";
-export type BaselineObservedKind = "missing" | "unsupported" | "value";
+export type BaselineObservedKind = "missing" | "unsupported" | "value" | "not-installed";
 export type BaselineHistoryState = "applied" | "restored";
 
 export type BaselineValueKind =
@@ -18,11 +32,14 @@ export type BaselineValueKind =
 export interface BaselineCatalogItem {
   itemHandle: string;
   category: BaselineCategory;
+  component: BaselineComponent;
   risk: BaselineRisk;
   valueKind: BaselineValueKind;
   title: string;
   description: string;
   recommendation: string;
+  /** Whether this tool would write the change, or only report it. */
+  writable: boolean;
 }
 
 export interface BaselineCatalog {
@@ -110,11 +127,26 @@ const encoder = new TextEncoder();
 const redactedText = "[SENSITIVE BASELINE TEXT REDACTED]";
 const missingText = "未设置";
 const unsupportedText = "不支持（符号链接或特殊文件）";
+const notInstalledText = "未安装";
+/**
+ * The ceiling on how many checks one response may carry.
+ *
+ * Set above what the compiled-in catalogue can grow to rather than at whatever
+ * it happens to be today, so adding a check does not require editing a number
+ * on both sides of the boundary — but still a fixed bound, checked here.
+ */
+const MAX_CHECKS = 160;
 const categories = new Set<BaselineCategory>([
   "ssh", "password", "kernel", "network", "authentication", "logging", "file-permissions",
+  "access-control", "transport", "service-hardening",
+]);
+const components = new Set<BaselineComponent>([
+  "system", "ssh", "mysql", "postgresql", "redis", "mongodb", "nginx", "apache",
 ]);
 const risks = new Set<BaselineRisk>(["critical", "high", "medium", "low"]);
-const observedKinds = new Set<BaselineObservedKind>(["missing", "unsupported", "value"]);
+const observedKinds = new Set<BaselineObservedKind>([
+  "missing", "unsupported", "value", "not-installed",
+]);
 const historyStates = new Set<BaselineHistoryState>(["applied", "restored"]);
 
 function record(value: unknown): value is JsonRecord {
@@ -197,10 +229,13 @@ function valueKind(value: unknown, recommendation: string): value is BaselineVal
 
 function catalogItem(value: unknown): value is BaselineCatalogItem {
   if (!record(value) || !exact(value, [
-    "itemHandle", "category", "risk", "valueKind", "title", "description", "recommendation",
+    "itemHandle", "category", "component", "risk", "valueKind", "title", "description",
+    "recommendation", "writable",
   ]) || !isBaselineOpaqueHandle(value.itemHandle) || typeof value.category !== "string" ||
-    !categories.has(value.category as BaselineCategory) || typeof value.risk !== "string" ||
-    !risks.has(value.risk as BaselineRisk) || !publicText(value.title, 256, false) ||
+    !categories.has(value.category as BaselineCategory) || typeof value.component !== "string" ||
+    !components.has(value.component as BaselineComponent) || typeof value.risk !== "string" ||
+    !risks.has(value.risk as BaselineRisk) || typeof value.writable !== "boolean" ||
+    !publicText(value.title, 256, false) ||
     !publicText(value.description, 2 * 1_024, false) ||
     !publicText(value.recommendation, 128, false)) return false;
   return valueKind(value.valueKind, value.recommendation);
@@ -208,8 +243,8 @@ function catalogItem(value: unknown): value is BaselineCatalogItem {
 
 export function isBaselineCatalog(value: unknown): value is BaselineCatalog {
   if (!record(value) || !exact(value, ["items", "displayed", "truncated"]) ||
-    !Array.isArray(value.items) || value.items.length > 64 || !value.items.every(catalogItem) ||
-    !unsigned(value.displayed, 64) || value.displayed !== value.items.length ||
+    !Array.isArray(value.items) || value.items.length > MAX_CHECKS || !value.items.every(catalogItem) ||
+    !unsigned(value.displayed, MAX_CHECKS) || value.displayed !== value.items.length ||
     typeof value.truncated !== "boolean") return false;
   const items = value.items as BaselineCatalogItem[];
   return new Set(items.map((item) => item.itemHandle)).size === items.length &&
@@ -232,6 +267,10 @@ function status(value: unknown): value is BaselineStatus {
   if (/[\u0000-\u001f\u007f]/u.test(value.observed)) return false;
   if (value.observedKind === "missing") return value.observed === missingText;
   if (value.observedKind === "unsupported") return value.observed === unsupportedText;
+  // Software that is not on the target is not out of compliance with anything.
+  if (value.observedKind === "not-installed") {
+    return value.observed === notInstalledText && !value.compliant;
+  }
   return true;
 }
 
@@ -241,7 +280,7 @@ export function isBaselineScan(value: unknown): value is BaselineScan {
     "nonCompliantCount", "redactedFieldCount", "truncated",
   ]) || !isBaselineOpaqueHandle(value.scanHandle) || !timestamp(value.capturedAt) ||
     !safeInteger(value.expiresInSeconds, 1, 300) || !Array.isArray(value.statuses) ||
-    value.statuses.length > 64 || !value.statuses.every(status) || !unsigned(value.displayed, 64) ||
+    value.statuses.length > MAX_CHECKS || !value.statuses.every(status) || !unsigned(value.displayed, MAX_CHECKS) ||
     value.displayed !== value.statuses.length || !unsigned(value.compliantCount, value.displayed) ||
     !unsigned(value.nonCompliantCount, value.displayed) ||
     value.compliantCount + value.nonCompliantCount !== value.displayed ||
