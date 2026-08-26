@@ -14,7 +14,7 @@ ubuntu|ubuntu:22.04|2222|apt-get update -qq && apt-get install -y -qq --no-insta
 debian|debian:12|2224|apt-get update -qq && apt-get install -y -qq --no-install-recommends openssh-server sudo cron netcat-openbsd curl iproute2 procps net-tools libcap2-bin python3
 rocky|rockylinux/rockylinux:9|2225|dnf install -y -q openssh-server sudo crontabs nmap-ncat iproute procps-ng net-tools libcap python3 && ssh-keygen -A
 alma|almalinux:9|2226|dnf install -y -q openssh-server sudo crontabs nmap-ncat iproute procps-ng net-tools libcap python3 && ssh-keygen -A
-openeuler|openeuler/openeuler:22.03-lts|2227|dnf install -y -q openssh-server sudo cronie nmap-ncat iproute procps-ng net-tools libcap python3 && ssh-keygen -A
+openeuler|openeuler/openeuler:22.03-lts|2227|dnf install -y -q openssh-server sudo cronie nmap-ncat iproute procps-ng net-tools libcap python3 findutils && ssh-keygen -A
 anolis|openanolis/anolisos:8.8|2228|dnf install -y -q openssh-server sudo crontabs nmap-ncat iproute procps-ng net-tools libcap python3 && ssh-keygen -A
 deepin|linuxdeepin/deepin:beige|2229|apt-get update -qq && apt-get install -y -qq --no-install-recommends openssh-server sudo cron netcat-openbsd curl iproute2 procps net-tools libcap2-bin python3
 suse|opensuse/leap:15.5|2230|zypper -q --non-interactive install openssh-server sudo cron netcat curl iproute2 procps net-tools libcap-progs python3 && ssh-keygen -A

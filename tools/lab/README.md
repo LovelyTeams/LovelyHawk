@@ -56,6 +56,20 @@ $//" /opt/lab-matrix/*.sh && bash /opt/lab-matrix/build.sh'
 攻击者 IP 统一 `198.51.100.7`，方便当 IOC 用。回连都加了 1 秒连接超时并脱离会话，
 否则不可达的 C2 会把每次登录拖到 20 秒。
 
+## 检出率（2026-08-26）
+
+`probe-groundtruth.mjs` 逐条断言 30 项植入物：
+
+| 靶机 | 结果 | 说明 |
+| --- | --- | --- |
+| ubuntu / debian / deepin | 30/30 | |
+| rocky / alma / anolis / openeuler | 30/30 | 修复前 RPM 系连命令目录都出不来 |
+| suse | 28/30 | 两项靶机没种上：SUSE 的 `daemon` 行与特权组名不同 |
+| alpine | 28/30 | 两项在 Alpine 上不存在：`/usr/bin/find` 是 busybox 符号链接（加 SUID 无效）、系统无 PAM |
+
+余下的差额都是**靶机在该发行版上没种上**，不是漏检。改降噪规则后如果某台掉到 30 以下，
+先用 `probe-one.mjs` 看那条命令的原始输出，确认是规则问题还是植入没成功。
+
 ## 探针
 
 ```bash
