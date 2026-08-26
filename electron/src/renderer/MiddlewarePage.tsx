@@ -1,7 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 
-import { targetFailureMessage } from "./target-lost";
-
+import { isTargetLost, TARGET_LOST_MESSAGE, targetFailureMessage } from "./target-lost";
 import {
   isMiddlewareConfiguration,
   isMiddlewareDiscovery,
@@ -38,6 +37,24 @@ export interface MiddlewarePageProps {
   api: MiddlewareReadApi;
 }
 
+/**
+ * Why discovery could not answer.
+ *
+ * Finding middleware means enumerating service units, so a target without
+ * systemd — a container, a minimal install — cannot be asked at all. Saying
+ * "none found" there would read as "nothing is running", which on a machine
+ * with four services would be a lie, so it says what happened and where to
+ * look instead.
+ */
+export function middlewareFailureMessage(reason: unknown): string {
+  const message = reason instanceof Error ? reason.message : String(reason ?? "");
+  if (message.includes("middleware-unsupported-target")) {
+    return "这台主机没有 systemd，中间件是按服务单元找的，所以这里问不出来。改到命令工作台里按进程和监听端口查。";
+  }
+  if (isTargetLost(reason)) return TARGET_LOST_MESSAGE;
+  return "无法发现当前目标的中间件实例：连接可能已断开或变化，也可能权限不足。";
+}
+
 const tabs: readonly MiddlewareTab[] = ["instances", "history"];
 const products: readonly MiddlewareProductFilter[] = ["all", "nginx", "apache-httpd", "redis", "tomcat"];
 const statuses: readonly MiddlewareStatusFilter[] = [
@@ -70,7 +87,9 @@ export function MiddlewarePage({ bindingHandle, api }: MiddlewarePageProps) {
         type: "discovery-failed",
         scope,
         request,
-        error: "无法发现当前目标的中间件实例：连接可能已断开或变化，也可能权限不足。",
+        // A target with no systemd cannot answer this at all, which is worth
+        // saying outright — and worth pointing somewhere that can.
+        error: middlewareFailureMessage(reason),
       });
     });
     return () => {

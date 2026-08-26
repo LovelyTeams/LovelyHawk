@@ -14,6 +14,13 @@ export const SERVICE_PORTS = {
   "baseline-deb": 2241, "baseline-el": 2242,
 };
 
+/**
+ * One Ubuntu server with several services on it, the way a competition box
+ * actually looks. Start here: it is one container to keep alive instead of
+ * twenty-one, and every page has something to find on it.
+ */
+export const ARENA_PORT = 2250;
+
 export function labTarget(which = process.env.LAB ?? "ubuntu") {
   const output = execFileSync(
     "wsl.exe",
@@ -21,9 +28,9 @@ export function labTarget(which = process.env.LAB ?? "ubuntu") {
     { encoding: "utf8" },
   );
   const address = output.split("\0").join("").trim().split(/\s+/u)[0];
-  const port = LAB_PORTS[which] ?? SERVICE_PORTS[which];
+  const port = which === "arena" ? ARENA_PORT : LAB_PORTS[which] ?? SERVICE_PORTS[which];
   if (port === undefined) {
-    const known = [...Object.keys(LAB_PORTS), ...Object.keys(SERVICE_PORTS)].join(", ");
+    const known = ["arena", ...Object.keys(LAB_PORTS), ...Object.keys(SERVICE_PORTS)].join(", ");
     throw new Error(`unknown lab: ${which} (have ${known})`);
   }
   return { host: address, port, username: "root", password: "LabRoot#2026" };

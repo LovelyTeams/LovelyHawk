@@ -1003,11 +1003,20 @@ impl MiddlewareService {
             .ssh
             .execute_bound(
                 session,
-                middleware_unit_inventory_command().to_owned(),
+                middleware_unit_inventory_command(),
                 Duration::from_secs(20),
             )
             .await?;
         self.target.validate(session.target())?;
+        if output
+            .output
+            .lines()
+            .any(|line| line.trim() == NO_SYSTEMD_MARKER)
+        {
+            return Err(CoreError::Unsupported {
+                feature: "middleware discovery without systemd",
+            });
+        }
         ensure_command_succeeded("middleware unit inventory", &output)?;
         if output.output.len() > MAX_DISCOVERY_OUTPUT_BYTES {
             return Err(CoreError::validation(
@@ -2306,8 +2315,19 @@ fn catalog_for(product: MiddlewareProduct) -> &'static MiddlewareCatalogEntry {
         .expect("every closed middleware product has one catalog entry")
 }
 
-fn middleware_unit_inventory_command() -> &'static str {
-    "LC_ALL=C systemctl list-unit-files --type=service --no-legend --no-pager 2>/dev/null"
+/// Printed instead of a unit list when the host has no systemd at all.
+///
+/// Without this the missing `systemctl` came back as exit 127 with stderr
+/// discarded, which reads as "the middleware investigation failed" on a host
+/// where it never could have run. Reporting no instances would be worse still:
+/// the services are there, they are just not systemd units.
+const NO_SYSTEMD_MARKER: &str = "LR_MIDDLEWARE_NO_SYSTEMD";
+
+fn middleware_unit_inventory_command() -> String {
+    format!(
+        "command -v systemctl >/dev/null 2>&1 || {{ printf '%s\\n' {NO_SYSTEMD_MARKER}; exit 0; }}; \
+         LC_ALL=C systemctl list-unit-files --type=service --no-legend --no-pager 2>/dev/null"
+    )
 }
 
 fn product_probe_command(product: MiddlewareProduct, binary_path: &RemotePath) -> String {

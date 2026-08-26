@@ -258,6 +258,12 @@ pub(crate) enum MiddlewareReadApiError {
     OutputLimit,
     ConcurrencyLimit,
     RegistryUnavailable,
+    /// The host has no systemd, so there are no service units to enumerate.
+    ///
+    /// Not a failure and not an empty result: the services are running, they
+    /// are simply not discoverable this way, and saying "none found" would be
+    /// the same false negative the baseline scan used to make.
+    Unsupported,
 }
 
 impl fmt::Debug for MiddlewareReadApiError {
@@ -272,6 +278,7 @@ impl fmt::Debug for MiddlewareReadApiError {
             Self::OutputLimit => "OutputLimit",
             Self::ConcurrencyLimit => "ConcurrencyLimit",
             Self::RegistryUnavailable => "RegistryUnavailable",
+            Self::Unsupported => "Unsupported",
         })
     }
 }
@@ -288,6 +295,7 @@ impl fmt::Display for MiddlewareReadApiError {
             Self::OutputLimit => "the middleware result exceeded its public limit",
             Self::ConcurrencyLimit => "the middleware read concurrency limit was reached",
             Self::RegistryUnavailable => "the middleware registry is unavailable",
+            Self::Unsupported => "this host has no systemd to enumerate service units",
         })
     }
 }
@@ -304,6 +312,11 @@ impl From<CoreError> for MiddlewareReadApiError {
         // their own breakage.
         if matches!(error, CoreError::SshDisconnected { .. }) {
             return Self::BindingUnavailable;
+        }
+        // Enumerating service units on a host with no systemd is not a
+        // failure to report; it is a thing this host cannot answer.
+        if matches!(error, CoreError::Unsupported { .. }) {
+            return Self::Unsupported;
         }
         Self::Core
     }

@@ -3192,6 +3192,15 @@ fn middleware_read_failure(error: MiddlewareReadApiError) -> RpcFailure {
             public_message: "LovelyRes could not complete the middleware investigation.",
             source: None,
         },
+        // A host with no systemd cannot answer this, which is neither a
+        // failure nor an empty result. Saying which it is stops an operator
+        // reading "none found" as "nothing is running here".
+        MiddlewareReadApiError::Unsupported => RpcFailure {
+            operation: "enumerate middleware service units",
+            code: "middleware-unsupported-target",
+            public_message: "This host has no systemd, so middleware cannot be found by service unit.",
+            source: None,
+        },
         MiddlewareReadApiError::BindingUnavailable => RpcFailure {
             operation: "validate middleware SSH binding",
             code: "middleware-binding-unavailable",
