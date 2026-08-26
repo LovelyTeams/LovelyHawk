@@ -8,6 +8,31 @@
 虚机自己的地址（`lab-target.mjs` 自动取）。容器 PID 1 是 `sleep infinity` 加 sshd
 看门狗，否则 sshd 一退出整台靶机就没了。
 
+## 一键起环境
+
+```bash
+pnpm lab:up
+```
+
+一条命令：检查 WSL 里的 docker、同步靶机定义、把九台都拉起来，再把它们连同口令写进
+LovelyRes 的连接库。打开应用就能在连接管理里直接点，不用输任何东西。
+
+WSL 重启后虚机会换地址，再跑一次 `pnpm lab:up` 就把九条连接的地址都刷新了（原地更新，
+不会产生重复条目）。
+
+| 命令 | 作用 |
+| --- | --- |
+| `pnpm lab:up` | 起容器 + 写连接库 |
+| `pnpm lab:up -- -Rebuild` | 改过 `tools/lab/matrix/` 里的脚本后重建镜像 |
+| `pnpm lab:up -- -SkipImport` | 只起容器，不动连接库 |
+| `pnpm lab:import` | 只刷新连接库（换地址后最常用） |
+| `pnpm lab:remove` | 把九条实验靶机连接从库里删掉 |
+| `pnpm lab:down` | 停掉容器，连接条目保留 |
+
+连接名统一是「实验靶机 xxx」、分组「实验靶机」、标签 `lab`，和真实目标一眼可分。
+写入的是应用自己的连接库（开发模式下在 `D:\LovelyRes\data`）；要写到别处就设
+`LOVELYRES_ARCHIVE_ROOT`。**应用运行时不要跑导入**，两个 sidecar 同时写同一个库会打架。
+
 ## 九台靶机（tools/lab/matrix/）
 
 `build.sh` 按发行版逐台构建并启动，植入物用同一份 `compromise.sh`，所以任何检出差异
