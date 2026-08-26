@@ -1,4 +1,5 @@
 import { useEffect, useReducer, useRef, useState } from "react";
+import type { ReactNode } from "react";
 
 import { targetFailureMessage } from "./target-lost";
 
@@ -51,6 +52,12 @@ export interface BaselinePageProps {
    * of each other read as two pages.
    */
   embedded?: boolean;
+  /**
+   * The switch between the two halves of the configuration page. It is
+   * rendered into the view tabs rather than above them, because a row that
+   * exists already costs nothing.
+   */
+  modeSwitch?: ReactNode;
 }
 
 const tabs: readonly BaselineTab[] = ["checks", "history"];
@@ -61,7 +68,13 @@ const complianceFilters: readonly BaselineComplianceFilter[] = [
   "all", "compliant", "non-compliant", "unscanned",
 ];
 
-export function BaselinePage({ bindingHandle, api, active = true, embedded = false }: BaselinePageProps) {
+export function BaselinePage({
+  bindingHandle,
+  api,
+  active = true,
+  embedded = false,
+  modeSwitch,
+}: BaselinePageProps) {
   const [state, dispatch] = useReducer(baselineReadReducer, undefined, createBaselineReadState);
   const [catalogVersion, setCatalogVersion] = useState(0);
   const [scanVersion, setScanVersion] = useState(0);
@@ -210,6 +223,7 @@ export function BaselinePage({ bindingHandle, api, active = true, embedded = fal
                 {baselineTabLabel(tab)}
               </button>
             ))}
+            {modeSwitch}
           </nav>
           <section className="baseline-content">
             {state.tab === "checks" ? (

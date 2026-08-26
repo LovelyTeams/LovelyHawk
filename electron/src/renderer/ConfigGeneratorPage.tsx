@@ -51,6 +51,8 @@ interface ConfigGeneratorPageProps {
   api?: ConfigGeneratorApi;
   /** Set when the configuration workbench already carries the page title. */
   embedded?: boolean;
+  /** The switch between checking a host and generating a configuration. */
+  modeSwitch?: ReactNode;
 }
 
 export interface ConfigGeneratorPageHandle {
@@ -577,7 +579,7 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 export const ConfigGeneratorPage = forwardRef<ConfigGeneratorPageHandle, ConfigGeneratorPageProps>(
-function ConfigGeneratorPage({ api, embedded = false }, ref) {
+function ConfigGeneratorPage({ api, embedded = false, modeSwitch }, ref) {
   const configApi = resolveApi(api);
   const [catalog, setCatalog] = useState<ConfigCatalog | null>(null);
   const [editor, dispatch] = useReducer(configEditorReducer, undefined, createConfigEditorState);
@@ -804,7 +806,7 @@ function ConfigGeneratorPage({ api, embedded = false }, ref) {
       {/* Inside the configuration workbench the page already carries the title
           and says what this half does. Two headings stacked read as two pages. */}
       <header className="page-heading config-generator-heading">
-        {embedded ? <div /> : (
+        {embedded ? modeSwitch : (
           <div>
             <h1>配置生成器</h1>
             <p>生成纯文本配置草稿供人工审阅；不联网、不部署到目标。</p>
@@ -874,21 +876,28 @@ function ConfigGeneratorPage({ api, embedded = false }, ref) {
       {catalog === null || selectedProduct === null ? (
         <div className="config-loading" role="status">正在读取随包分发的配置目录…</div>
       ) : (
-        <>
-          <nav className="config-product-strip" aria-label="配置产品">
-            {catalog.products.map((product) => (
-              <button
-                className={editor.selectedProduct === product.key ? "active" : ""}
-                type="button"
-                key={product.key}
-                aria-pressed={editor.selectedProduct === product.key}
-                onClick={() => dispatch({ type: "select-product", product: product.key })}
-                data-testid={`config-product-${product.key}`}
-              >
-                <span>{product.family}</span>
-                <strong>{product.title}</strong>
-                <small>{product.features.length} 个特性</small>
-              </button>
+        <div className="config-generator-workbench">
+          {/* The products down the side rather than across the top: nine of
+              them in a row left each one too narrow to read, and the row cost
+              a band of height that the editor below it needed. */}
+          <nav className="config-product-list" aria-label="配置产品">
+            {groupProductsByFamily(catalog.products).map((group) => (
+              <Fragment key={group.family}>
+                <p className="config-product-family">{group.family}</p>
+                {group.products.map((product) => (
+                  <button
+                    className={editor.selectedProduct === product.key ? "active" : ""}
+                    type="button"
+                    key={product.key}
+                    aria-pressed={editor.selectedProduct === product.key}
+                    onClick={() => dispatch({ type: "select-product", product: product.key })}
+                    data-testid={`config-product-${product.key}`}
+                  >
+                    <strong>{product.title}</strong>
+                    <small>{product.features.length} 个特性</small>
+                  </button>
+                ))}
+              </Fragment>
             ))}
           </nav>
 
@@ -1175,8 +1184,21 @@ function ConfigGeneratorPage({ api, embedded = false }, ref) {
               )}
             </aside>
           </div>
-        </>
+        </div>
       )}
     </section>
   );
 });
+
+/** The nine products, kept in catalogue order, under the family they belong to. */
+function groupProductsByFamily(
+  products: ConfigCatalog["products"],
+): { family: string; products: ConfigCatalog["products"] }[] {
+  const groups: { family: string; products: ConfigCatalog["products"] }[] = [];
+  for (const product of products) {
+    const last = groups.at(-1);
+    if (last !== undefined && last.family === product.family) last.products.push(product);
+    else groups.push({ family: product.family, products: [product] });
+  }
+  return groups;
+}

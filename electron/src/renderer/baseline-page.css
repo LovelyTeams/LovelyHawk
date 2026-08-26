@@ -43,7 +43,10 @@
   line-height: 1.55;
 }
 
-.baseline-tabs { display: flex; gap: 6px; margin: 12px 0 0; }
+.baseline-tabs { display: flex; align-items: center; gap: 6px; margin: 12px 0 0; }
+/* The half-switch sits at the far end of the row the view tabs already need. */
+.baseline-tabs .configuration-modes { margin-left: auto; }
+.baseline-page.is-embedded .baseline-tabs { margin-top: 0; }
 .baseline-tabs button {
   min-width: 112px;
   padding: 10px 15px;

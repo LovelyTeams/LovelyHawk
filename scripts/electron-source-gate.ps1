@@ -1637,7 +1637,7 @@ if ($appText -notmatch '(?s)activePage\.id\s*===\s*"config-generator".{0,320}<Co
 }
 $configurationPagePath = Join-Path $electronRoot 'src/renderer/ConfigurationPage.tsx'
 $configurationPageText = Get-Content -LiteralPath $configurationPagePath -Raw
-if (-not $configurationPageText.Contains('<BaselinePage bindingHandle={bindingHandle} api={api} embedded />', [System.StringComparison]::Ordinal)) {
+if (-not $configurationPageText.Contains('<BaselinePage bindingHandle={bindingHandle} api={api} embedded modeSwitch={modeSwitch} />', [System.StringComparison]::Ordinal)) {
     Add-GateViolation 'electron/src/renderer/ConfigurationPage.tsx must pass only the opaque binding handle and fixed API to the checking half'
 }
 if ($configurationPageText -match '(?i)\b(?:SshTargetSummary|connectionId|sessionId|targetGuard|generation|host|port|username|dataRoot|filePath|remotePath|apiKey)\b') {

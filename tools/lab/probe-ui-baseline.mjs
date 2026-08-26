@@ -302,9 +302,9 @@ try {
       .find(candidate => candidate.querySelector('strong')?.textContent === '生成新配置')?.click();
     return true;
   })()`);
-  await waitFor(session, "document.querySelectorAll('.config-product-strip button').length > 0", "the generator", 180);
+  await waitFor(session, "document.querySelectorAll('.config-product-list button').length > 0", "the generator", 180);
   const generator = await session.evaluate(`(() => ({
-    products: document.querySelectorAll('.config-product-strip button').length,
+    products: document.querySelectorAll('.config-product-list button').length,
     preview: document.querySelector('.config-preview') !== null,
     ownTitle: [...document.querySelectorAll('.configuration-page h1')].map(n => n.textContent).join(","),
     active: document.querySelector('.configuration-modes .is-active strong')?.textContent ?? null

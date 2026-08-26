@@ -871,7 +871,10 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
           .find(button => button.textContent?.includes('手动扫描'));
         const resources = performance.getEntriesByType('resource').map(entry => entry.name);
         return {
-          title: shell?.querySelector('h1')?.textContent ?? '',
+          // The page's name is the title bar's job; repeating it inside the
+          // page cost a header band the operator scrolled past every time.
+          title: document.querySelector('.window-titlebar small')?.textContent ?? '',
+          pageHeadings: shell?.querySelectorAll('h1').length ?? -1,
           prompt: prompt?.textContent ?? '',
           modes: [...(shell?.querySelectorAll('.configuration-modes button strong') ?? [])]
             .map(node => node.textContent).join(','),
@@ -896,6 +899,10 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
       })()`,
     );
     assert(baselineDisconnected.title === "配置", "configuration page title is missing");
+    assert(
+      baselineDisconnected.pageHeadings === 0,
+      "the configuration page repeated its own name below the title bar",
+    );
     assert(
       baselineDisconnected.modes === "检查这台主机,生成新配置",
       "configuration page did not offer both halves of the job",
@@ -4767,7 +4774,7 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
     const atomicSearchSelection = await evaluate<Record<string, unknown>>(
       client,
       `(() => ({
-        activeProduct: document.querySelector('.config-product-strip button[aria-pressed="true"]')?.getAttribute('data-testid'),
+        activeProduct: document.querySelector('.config-product-list button[aria-pressed="true"]')?.getAttribute('data-testid'),
         selectedSubjects: [...document.querySelectorAll('.config-feature-list label.selected')]
           .map(node => node.getAttribute('data-config-subject')),
         v14Checked: document.querySelector('[data-testid="config-version-postgresql-14"]')?.checked

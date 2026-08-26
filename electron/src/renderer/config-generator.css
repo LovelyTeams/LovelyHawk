@@ -10,8 +10,10 @@
   border: 0;
 }
 
-.config-generator-page { max-width: 1440px; }
+.config-generator-page { display: flex; min-height: 0; max-width: 1440px; flex-direction: column; }
+.config-generator-page > * { flex: none; }
 .config-generator-heading { margin-bottom: 17px; }
+.config-generator-page.is-embedded .config-generator-heading { align-items: center; margin-bottom: 0; }
 .config-catalog-count {
   display: grid;
   grid-template-columns: auto auto;
@@ -96,16 +98,38 @@
 .config-read-only-detail span { margin-top: 2px; color: var(--warning-text); font-size: 12px; font-weight: 600; }
 
 .config-loading { margin-top: 14px; padding: 70px; color: var(--faint); text-align: center; background: var(--surface); border: 1px dashed var(--border); border-radius: 14px; font-size: 12px; }
-.config-product-strip { display: grid; grid-template-columns: repeat(9, minmax(86px, 1fr)); gap: 6px; margin: 13px 0; }
-.config-product-strip button { display: flex; min-width: 0; min-height: 67px; flex-direction: column; align-items: flex-start; justify-content: center; padding: 8px 9px; text-align: left; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; }
-.config-product-strip button:hover { border-color: var(--accent-soft-border); }
-.config-product-strip button.active { color: var(--on-accent); background: linear-gradient(135deg, var(--accent-strong), var(--accent)); border-color: var(--accent); box-shadow: var(--shadow-sm); }
-.config-product-strip span { overflow: hidden; width: 100%; color: var(--faint); font-size: 12px; letter-spacing: .06em; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
-.config-product-strip strong { overflow: hidden; width: 100%; margin: 3px 0; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.config-product-strip small { color: var(--faint); font-size: 12px; }
-.config-product-strip button.active span, .config-product-strip button.active small { color: color-mix(in srgb, var(--on-accent) 78%, var(--accent)); }
+/* Products on the left, the whole editing and copying half on the right. */
+.config-generator-workbench {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: minmax(190px, 224px) minmax(0, 1fr);
+  gap: 13px;
+  margin-top: 13px;
+}
 
-.config-workbench { display: grid; grid-template-columns: minmax(0, 3fr) minmax(330px, 2fr); align-items: start; gap: 13px; }
+.config-product-list {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px;
+  overflow: auto;
+  scrollbar-width: thin;
+  background: var(--surface-inset);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.config-product-family { flex: none; margin: 9px 0 3px; padding: 0 5px; color: var(--faint); font-size: 11.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+.config-product-family:first-child { margin-top: 0; }
+.config-product-list button { display: flex; min-width: 0; flex: none; flex-direction: column; align-items: flex-start; gap: 2px; padding: 7px 9px; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 8px; }
+.config-product-list button:hover:not(.active) { background: var(--surface-hover); border-color: var(--border); }
+.config-product-list button.active { color: var(--on-accent); background: linear-gradient(135deg, var(--accent-strong), var(--accent)); border-color: var(--accent); box-shadow: var(--shadow-sm); }
+.config-product-list strong { overflow: hidden; max-width: 100%; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.config-product-list small { color: var(--faint); font-size: 11.5px; }
+.config-product-list button.active small { color: color-mix(in srgb, var(--on-accent) 78%, var(--accent)); }
+
+.config-workbench { display: grid; min-width: 0; grid-template-columns: minmax(0, 3fr) minmax(300px, 2fr); align-items: start; gap: 13px; }
 .config-editor, .config-preview { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-sm); }
 .config-editor { overflow: hidden; }
 .config-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 25px; padding: 17px 19px; background: linear-gradient(105deg, var(--accent-soft), var(--surface-alt)); border-bottom: 1px solid var(--border); }
@@ -224,7 +248,6 @@
 @media (max-width: 1260px) {
   .config-read-only-status { grid-template-columns: 1fr 1fr; }
   .config-read-only-detail { grid-column: 1 / -1; padding: 9px 0 0; border-top: 1px solid var(--warning-border); border-left: 0; }
-  .config-product-strip { grid-template-columns: repeat(5, minmax(100px, 1fr)); }
   .config-workbench { grid-template-columns: minmax(0, 1fr); }
   .config-preview { position: static; }
 }

@@ -24,12 +24,12 @@ const MODES: { mode: ConfigurationMode; label: string; hint: string }[] = [
   {
     mode: "inspect",
     label: "检查这台主机",
-    hint: "看它现在的配置哪里不合规",
+    hint: "读取这台主机上的配置文件，对照基线看哪里不合规。只读，不改动。",
   },
   {
     mode: "generate",
     label: "生成新配置",
-    hint: "按受控模板写一份可以照抄的",
+    hint: "从受控模板生成一份配置，检查无误后再照着改主机。",
   },
 ];
 
@@ -42,6 +42,12 @@ const MODES: { mode: ConfigurationMode; label: string; hint: string }[] = [
  * Only the checking half needs a target. Generating works with nothing
  * connected, which is what preparation before an event looks like, so the page
  * itself stays reachable offline.
+ *
+ * The switch between the two rides in whichever row the half below already
+ * has. It used to sit in a header of its own, with the page's name repeated
+ * from the title bar and a paragraph explaining each half — a hundred pixels
+ * across the top of the window, every time, to say something the operator
+ * learned once.
  */
 export const ConfigurationPage = forwardRef<ConfigurationPageHandle, ConfigurationPageProps>(
 function ConfigurationPage({ bindingHandle, api }, ref) {
@@ -62,40 +68,32 @@ function ConfigurationPage({ bindingHandle, api }, ref) {
     setMode(next);
   }
 
+  const modeSwitch = (
+    <div className="configuration-modes" role="group" aria-label="配置视图">
+      {MODES.map((entry) => (
+        <button
+          key={entry.mode}
+          type="button"
+          className={mode === entry.mode ? "is-active" : ""}
+          aria-pressed={mode === entry.mode}
+          title={entry.hint}
+          onClick={() => void switchTo(entry.mode)}
+        >
+          <strong>{entry.label}</strong>
+        </button>
+      ))}
+    </div>
+  );
+
   return (
     <div className="configuration-page">
-      <header className="configuration-header">
-        <div>
-          <h1>配置</h1>
-          <p>
-            {mode === "inspect"
-              ? "读取这台主机上的配置文件，对照基线看哪里不合规。只读，不改动。"
-              : "从受控模板生成一份配置，检查无误后再照着改主机。"}
-          </p>
-        </div>
-        <nav className="configuration-modes" aria-label="配置视图">
-          {MODES.map((entry) => (
-            <button
-              key={entry.mode}
-              type="button"
-              className={mode === entry.mode ? "is-active" : ""}
-              aria-current={mode === entry.mode ? "page" : undefined}
-              onClick={() => void switchTo(entry.mode)}
-            >
-              <strong>{entry.label}</strong>
-              <em>{entry.hint}</em>
-            </button>
-          ))}
-        </nav>
-      </header>
-
       {/* Disconnected, the checking half still lists what it would check and
           says it cannot scan. Reading the catalogue before an event is worth
           more than a screen that refuses to open. */}
       {mode === "inspect" ? (
-        <BaselinePage bindingHandle={bindingHandle} api={api} embedded />
+        <BaselinePage bindingHandle={bindingHandle} api={api} embedded modeSwitch={modeSwitch} />
       ) : (
-        <ConfigGeneratorPage ref={generatorRef} embedded />
+        <ConfigGeneratorPage ref={generatorRef} embedded modeSwitch={modeSwitch} />
       )}
     </div>
   );

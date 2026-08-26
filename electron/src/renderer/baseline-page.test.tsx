@@ -181,7 +181,9 @@ describe("central Baseline page", () => {
     expect(app).toMatch(
       /activePage\.id === "config-generator"[\s\S]*?<ConfigurationPage[\s\S]*?bindingHandle=\{activeTarget\?\.bindingHandle \?\? null\}[\s\S]*?api=\{window\.lovelyres\}/u,
     );
-    expect(host).toContain("<BaselinePage bindingHandle={bindingHandle} api={api} embedded />");
+    expect(host).toContain(
+      "<BaselinePage bindingHandle={bindingHandle} api={api} embedded modeSwitch={modeSwitch} />",
+    );
     for (const mount of [
       app.match(/<ConfigurationPage[\s\S]*?\/>/u)?.[0] ?? "",
       host.match(/<BaselinePage[\s\S]*?\/>/u)?.[0] ?? "",
