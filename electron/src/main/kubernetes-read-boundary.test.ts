@@ -23,11 +23,11 @@ function expectLiteralErrorsOnly(source: string, expectedCount: number): void {
 }
 
 describe("central Kubernetes Electron read boundary", () => {
-  it("keeps the exact four read methods in the frozen exact 117 preload", () => {
+  it("keeps the exact four read methods in the frozen exact 124 preload", () => {
     const body = frozenApiBody();
     const names = [...body.matchAll(/^  (?<name>[A-Za-z_$][A-Za-z0-9_$]*):/gmu)]
       .map((match) => match.groups?.name);
-    expect(names).toHaveLength(117);
+    expect(names).toHaveLength(124);
     for (const name of [
       "getKubernetesAvailability",
       "listKubernetesResources",
@@ -53,9 +53,11 @@ describe("central Kubernetes Electron read boundary", () => {
       "lovelyres:kubernetes:pod:logs:get",
     ]) expect((mainSource.match(new RegExp(channel, "gu")) ?? [])).toHaveLength(1);
 
+    // Ends where reading ends. The action routes live immediately after and
+    // have their own boundary test.
     const boundary = mainSource.slice(
       mainSource.indexOf('ipcMain.handle("lovelyres:kubernetes:availability:get"'),
-      mainSource.indexOf('ipcMain.handle("lovelyres:docker:containers:refresh"'),
+      mainSource.indexOf('ipcMain.handle("lovelyres:kubernetes:workload:action:plan"'),
     );
     expect((boundary.match(/validateSender\(event\)/gu) ?? [])).toHaveLength(4);
     expect((boundary.match(/values\.length !== 1/gu) ?? [])).toHaveLength(4);
@@ -86,7 +88,7 @@ describe("central Kubernetes Electron read boundary", () => {
 
     const boundary = backendClientSource.slice(
       backendClientSource.indexOf("async getKubernetesAvailability"),
-      backendClientSource.indexOf("async refreshDockerContainers"),
+      backendClientSource.indexOf("async planKubernetesWorkloadAction"),
     );
     expect((boundary.match(/isKubernetesAvailability/gu) ?? [])).toHaveLength(1);
     expect((boundary.match(/isKubernetesSnapshot/gu) ?? [])).toHaveLength(1);

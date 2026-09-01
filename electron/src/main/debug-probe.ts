@@ -7,7 +7,7 @@ import { DEFAULT_THEME_ID, themeDefinition } from "../shared/theme-contract.js";
 
 const PROBE_TIMEOUT_MS = 15_000;
 const COMMAND_TIMEOUT_MS = 5_000;
-const MAIN_PRELOAD_API_COUNT = 117;
+const MAIN_PRELOAD_API_COUNT = 124;
 const UNAUTHORIZED_TERMINAL_URL = "lovelyres://app/?window=terminal";
 
 /** The default theme's chrome color as the renderer reports it, so a repalette
@@ -100,7 +100,10 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
         title: document.title,
         navItems: document.querySelectorAll('.nav-item').length,
         readyPages: document.querySelectorAll('.nav-item i').length,
-        backendConnected: document.body.textContent.includes('后端已连接'),
+        // The shell renders a startup placeholder until bootstrap comes back,
+        // so the status bar existing IS the handshake. Asking for an element
+        // rather than a phrase keeps a copy edit from quietly disabling this.
+        backendConnected: document.querySelector('.window-statusbar') !== null,
         welcomeView: document.querySelectorAll('[data-testid="welcome-view"]').length,
         welcomeText: document.querySelector('[data-testid="welcome-view"]')?.textContent ?? '',
         systemInfoPrompt: document.querySelector('.system-info-connect-prompt')?.textContent ?? '',
@@ -133,7 +136,7 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
     );
     assert(initial.href === "lovelyres://app/", "renderer origin is not the packaged custom scheme");
     assert(initial.title === "LovelyRes", "renderer title is missing");
-    assert(initial.navItems === 18, "page registry did not render exactly 18 navigation items");
+    assert(initial.navItems === 14, "page registry did not render exactly 14 navigation items");
     // Build bookkeeping never belongs in the operator's sidebar.
     assert(initial.readyPages === 0, "the sidebar still renders migration markers");
     assert(initial.welcomeView === 1, "disconnected app did not open on the welcome view");
@@ -148,7 +151,7 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
     assert(
       Array.isArray(initial.apiMethods) &&
         initial.apiMethods.join(",") ===
-          "addNoteTag,bootstrap,cancelAiHistoryMutation,cancelCommandHistoryMutation,cancelConnectionDelete,cancelEmergencyPathAction,cancelIntegrityComparison,cancelNoteDelete,cancelSettingsMutation,cancelSshAttempt,clearApplicationLogBuffer,closeConfigDraft,collectCheckAuditStatus,collectSystemInfo,confirmAiHistoryMutation,confirmCommandHistoryMutation,confirmConnectionDelete,confirmEmergencyPathAction,confirmNoteDelete,confirmSettingsMutation,confirmSshHostKey,copyConfig,correlateLogSources,createConnection,createNote,diffForensicSnapshots,disconnectSshBinding,discoverLogSources,discoverMiddleware,executeEmergencyPathAction,exportAiHistory,exportApplicationLogs,exportConfigArtifact,exportConnections,exportDisposalReport,exportNotes,generateConfig,generateDisposalReport,getAiHistoryRecord,getApplicationLogPreview,getBaselineCatalog,getCheckAuditCatalog,getCommandHistory,getConfigCatalog,getConnection,getDisposalReportContent,getDockerCollection,getDockerLogs,getDockerSecurityAudit,getIntegrityPresets,getKubernetesAvailability,getKubernetesPodLogs,getKubernetesResourceDetail,getNote,getSnapshotDetail,getSshAttempt,getSystemInfoCatalog,getSystemInfoDetail,getSystemInfoSummary,importConnections,inspectDockerResource,inspectEmergencyPath,inspectFirewall,listAiHistory,listApplicationLogs,listBaselineHistory,listCommandHistory,listConnections,listFirewallChangeHistory,listIntegrityBaselines,listKubernetesResources,listMiddlewareHistory,listNotes,listPacketCaptureInterfaces,listSnapshots,loadEmergencyCommandCatalog,loadMiddlewareConfiguration,loadSettings,notifyRendererReady,onBeforeClose,openSshTerminal,planAiHistoryClear,planAiHistoryRemove,planCommandHistoryClear,planCommandHistoryRemove,planCommandReplay,planConnectionDelete,planEmergencyPathAction,planNoteDelete,planSettingsAiApiKeyClear,planSettingsAiProviderRemoval,pollIntegrityComparison,pollPacketCapture,readBaselineFile,readCheckAuditLog,readLogSource,refreshDockerContainers,removeNoteTag,replaceSettingsAiApiKey,respondSshMfa,reviseConfig,runEmergencyCommand,saveSettings,scanBaseline,searchLogIocs,setApplicationLogLevel,setNotePinned,setSecurityReferenceFavorites,setWindowTheme,startIntegrityComparison,startPacketCapture,startSshConnect,startSshProbe,stopPacketCapture,updateConnection,updateNote,writeClipboard",
+          "addNoteTag,bootstrap,cancelAiHistoryMutation,cancelCommandHistoryMutation,cancelConnectionDelete,cancelDockerContainerAction,cancelEmergencyPathAction,cancelIntegrityComparison,cancelKubernetesWorkloadAction,cancelNoteDelete,cancelSettingsMutation,cancelSshAttempt,cancelSystemInfoRowAction,clearApplicationLogBuffer,closeConfigDraft,collectCheckAuditStatus,collectSystemInfo,confirmAiHistoryMutation,confirmCommandHistoryMutation,confirmConnectionDelete,confirmDockerContainerAction,confirmEmergencyPathAction,confirmKubernetesWorkloadAction,confirmNoteDelete,confirmSettingsMutation,confirmSshHostKey,confirmSystemInfoRowAction,copyConfig,correlateLogSources,createConnection,createNote,disconnectSshBinding,discoverLogSources,executeDockerContainerAction,executeEmergencyPathAction,executeKubernetesWorkloadAction,executeSystemInfoRowAction,exportAiHistory,exportApplicationLogs,exportConfigArtifact,exportConnections,exportDisposalReport,exportNotes,generateConfig,generateDisposalReport,getAiHistoryRecord,getApplicationLogPreview,getBaselineCatalog,getCheckAuditCatalog,getCommandHistory,getConfigCatalog,getConnection,getDisposalReportContent,getDockerCollection,getDockerLogs,getDockerSecurityAudit,getIntegrityPresets,getKubernetesAvailability,getKubernetesPodLogs,getKubernetesResourceDetail,getNote,getSshAttempt,getSystemInfoCatalog,getSystemInfoDetail,getSystemInfoSummary,importConnections,inspectDockerResource,inspectEmergencyPath,inspectSystemInfoRow,listAiHistory,listApplicationLogs,listBaselineHistory,listCommandHistory,listConnections,listIntegrityBaselines,listKubernetesResources,listNotes,listPacketCaptureInterfaces,listSystemInfoRowActions,loadEmergencyCommandCatalog,loadSettings,notifyRendererReady,onBeforeClose,openDockerContainerTerminal,openSshTerminal,planAiHistoryClear,planAiHistoryRemove,planCommandHistoryClear,planCommandHistoryRemove,planCommandReplay,planConnectionDelete,planDockerContainerAction,planEmergencyPathAction,planKubernetesWorkloadAction,planNoteDelete,planSettingsAiApiKeyClear,planSettingsAiProviderRemoval,planSystemInfoRowAction,pollIntegrityComparison,pollPacketCapture,readBaselineFile,readCheckAuditLog,readLogSource,refreshDockerContainers,removeNoteTag,replaceSettingsAiApiKey,respondSshMfa,reviseConfig,runEmergencyCommand,saveSettings,scanBaseline,searchLogIocs,setApplicationLogLevel,setNotePinned,setSecurityReferenceFavorites,setWindowTheme,startIntegrityComparison,startPacketCapture,startSshConnect,startSshProbe,stopPacketCapture,updateConnection,updateNote,writeClipboard",
       "preload exposed an unexpected API surface",
     );
     await waitFor(client, "document.fonts.status === 'loaded'");
@@ -281,454 +284,6 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
       path.join(outputDirectory, "system-info-disconnected.png"),
       systemInfoScreenshotBytes,
     );
-
-    const snapshotBoundary = await evaluate<Record<string, unknown>>(
-      client,
-      `(async () => {
-        const marker = 'forged-snapshot-capability-must-not-echo';
-        const rejected = async (operation) => {
-          try {
-            await operation();
-            return { rejected: false, echoed: false };
-          } catch (error) {
-            return { rejected: true, echoed: String(error).includes(marker) };
-          }
-        };
-        const list = await rejected(() => window.lovelyres.listSnapshots(marker));
-        const detail = await rejected(() => window.lovelyres.getSnapshotDetail(
-          marker, 'opaque-snapshot-detail'
-        ));
-        const diff = await rejected(() => window.lovelyres.diffForensicSnapshots(marker, {
-          olderSnapshotHandle: 'opaque-snapshot-older',
-          newerSnapshotHandle: 'opaque-snapshot-newer'
-        }));
-        const hostileInput = await rejected(() => window.lovelyres.diffForensicSnapshots(marker, {
-          olderSnapshotHandle: 'opaque-snapshot-older',
-          newerSnapshotHandle: 'opaque-snapshot-newer',
-          snapshotId: marker,
-          path: marker
-        }));
-        return {
-          publicApiCount: Object.keys(window.lovelyres).length,
-          listType: typeof window.lovelyres.listSnapshots,
-          detailType: typeof window.lovelyres.getSnapshotDetail,
-          diffType: typeof window.lovelyres.diffForensicSnapshots,
-          list,
-          detail,
-          diff,
-          hostileInput,
-          createMethod: typeof window.lovelyres.createSnapshot,
-          captureMethod: typeof window.lovelyres.captureSnapshot,
-          exportMethod: typeof window.lovelyres.exportSnapshot,
-          deleteMethod: typeof window.lovelyres.deleteSnapshot,
-          restoreMethod: typeof window.lovelyres.restoreSnapshot,
-          pathMethod: typeof window.lovelyres.readSnapshotPath,
-          commandMethod: typeof window.lovelyres.executeSnapshotCommand,
-          genericInvoke: typeof window.lovelyres.invoke,
-          markerInDom: document.documentElement.textContent.includes(marker)
-        };
-      })()`,
-    );
-    assert(snapshotBoundary.publicApiCount === MAIN_PRELOAD_API_COUNT, "Snapshot boundary is outside the exact preload surface");
-    assert(snapshotBoundary.listType === "function", "listSnapshots is unavailable");
-    assert(snapshotBoundary.detailType === "function", "getSnapshotDetail is unavailable");
-    assert(snapshotBoundary.diffType === "function", "diffForensicSnapshots is unavailable");
-    for (const name of ["list", "detail", "diff", "hostileInput"]) {
-      const result = snapshotBoundary[name];
-      assert(isRecord(result) && result.rejected === true, `Snapshot ${name} request did not fail closed`);
-      assert(isRecord(result) && result.echoed === false, `Snapshot ${name} request echoed hostile input`);
-    }
-    for (const name of [
-      "createMethod", "captureMethod", "exportMethod", "deleteMethod", "restoreMethod",
-      "pathMethod", "commandMethod", "genericInvoke",
-    ]) {
-      assert(snapshotBoundary[name] === "undefined", `Snapshot renderer exposed forbidden ${name}`);
-    }
-    assert(snapshotBoundary.markerInDom === false, "Snapshot hostile marker entered the DOM");
-
-    await evaluate(
-      client,
-      `(() => {
-        const button = [...document.querySelectorAll('.nav-item')]
-          .find(candidate => candidate.textContent?.includes('取证快照'));
-        button?.click();
-        return button instanceof HTMLButtonElement;
-      })()`,
-    );
-    await waitFor(client, "document.querySelector('.snapshot-disconnected') !== null");
-    const snapshotDisconnected = await evaluate<Record<string, unknown>>(
-      client,
-      `(() => {
-        const page = document.querySelector('.snapshot-disconnected');
-        const prompt = page?.querySelector('p');
-        const parseRgb = (value) => {
-          const match = value.match(/^rgba?\\(\\s*([0-9.]+)[, ]+\\s*([0-9.]+)[, ]+\\s*([0-9.]+)/i);
-          return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
-        };
-        const luminance = (rgb) => {
-          if (rgb === null) return null;
-          const channels = rgb.map(channel => {
-            const value = channel / 255;
-            return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
-          });
-          return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
-        };
-        const contrast = (foreground, background) => {
-          const foregroundLuminance = luminance(parseRgb(foreground));
-          const backgroundLuminance = luminance(parseRgb(background));
-          if (foregroundLuminance === null || backgroundLuminance === null) return null;
-          return (Math.max(foregroundLuminance, backgroundLuminance) + 0.05) /
-            (Math.min(foregroundLuminance, backgroundLuminance) + 0.05);
-        };
-        const pageStyle = page === null ? null : getComputedStyle(page);
-        const promptStyle = prompt === null || prompt === undefined ? null : getComputedStyle(prompt);
-        const background = pageStyle?.backgroundColor ?? '';
-        const color = pageStyle?.color ?? '';
-        const promptColor = promptStyle?.color ?? '';
-        const text = page?.textContent ?? '';
-        return {
-          title: page?.querySelector('h1')?.textContent ?? '',
-          prompt: prompt?.textContent ?? '',
-          background,
-          color,
-          promptColor,
-          pageContrast: contrast(color, background),
-          promptContrast: contrast(promptColor, background),
-          listRows: page?.querySelectorAll('.snapshot-list-item').length ?? -1,
-          tables: page?.querySelectorAll('table').length ?? -1,
-          preformatted: page?.querySelectorAll('pre').length ?? -1,
-          scripts: page?.querySelectorAll('script').length ?? -1,
-          images: page?.querySelectorAll('img').length ?? -1,
-          inputs: page?.querySelectorAll('input,textarea,select').length ?? -1,
-          inlineHandlers: page?.querySelectorAll('[onclick],[onerror],[onload]').length ?? -1,
-          markerVisible: document.documentElement.textContent.includes('forged-snapshot-capability-must-not-echo'),
-          internalIdentityVisible: /bindingHandle|connectionId|sessionId|TargetGuard|snapshotId|dataRoot|filePath/iu.test(text),
-          sidebarInert: document.querySelector('.sidebar')?.inert,
-          workspaceInert: document.querySelector('.workspace')?.inert
-        };
-      })()`,
-    );
-    assert(snapshotDisconnected.title === "快照调查", "disconnected Snapshot page title is missing");
-    assert(
-      typeof snapshotDisconnected.prompt === "string" &&
-        snapshotDisconnected.prompt.includes("连接 SSH 目标后"),
-      "disconnected Snapshot page did not render its honest connection prompt",
-    );
-    assert(
-      typeof snapshotDisconnected.background === "string" &&
-        snapshotDisconnected.background !== "transparent" &&
-        snapshotDisconnected.background !== "rgba(0, 0, 0, 0)",
-      "Snapshot page background is transparent",
-    );
-    assert(
-      typeof snapshotDisconnected.pageContrast === "number" && snapshotDisconnected.pageContrast >= 4.5,
-      "Snapshot page foreground/background contrast is below 4.5:1",
-    );
-    assert(
-      typeof snapshotDisconnected.promptContrast === "number" && snapshotDisconnected.promptContrast >= 4.5,
-      "Snapshot disconnected prompt contrast is below 4.5:1",
-    );
-    for (const name of ["listRows", "tables", "preformatted", "scripts", "images", "inputs", "inlineHandlers"]) {
-      assert(snapshotDisconnected[name] === 0, `disconnected Snapshot page rendered unexpected ${name}`);
-    }
-    assert(snapshotDisconnected.markerVisible === false, "forged Snapshot capability reached the page");
-    assert(snapshotDisconnected.internalIdentityVisible === false, "Snapshot page exposed internal identity material");
-    assert(snapshotDisconnected.sidebarInert === false, "Snapshot page unexpectedly made navigation inert");
-    assert(snapshotDisconnected.workspaceInert === false, "Snapshot page unexpectedly made its workspace inert");
-
-    await waitFor(client, "document.fonts.status === 'loaded'");
-    window.showInactive();
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    const snapshotScreenshot = await withTimeout(
-      window.webContents.capturePage(),
-      "Electron disconnected Snapshot capturePage",
-    ).finally(() => window.hide());
-    const snapshotScreenshotBytes = snapshotScreenshot.toPNG();
-    assert(snapshotScreenshotBytes.length > 100, "Snapshot screenshot capture failed");
-    fs.writeFileSync(path.join(outputDirectory, "snapshot-disconnected.png"), snapshotScreenshotBytes);
-
-    await evaluate(
-      client,
-      `(() => {
-        const button = [...document.querySelectorAll('.nav-item')]
-          .find(candidate => candidate.textContent?.includes('主机全景'));
-        button?.click();
-        return button instanceof HTMLButtonElement;
-      })()`,
-    );
-    await waitFor(
-      client,
-      "document.querySelector('.snapshot-page') === null && document.querySelector('.system-info-connect-prompt') !== null",
-    );
-    await evaluate(
-      client,
-      `(() => {
-        const button = [...document.querySelectorAll('.nav-item')]
-          .find(candidate => candidate.textContent?.includes('取证快照'));
-        button?.click();
-        return button instanceof HTMLButtonElement;
-      })()`,
-    );
-    await waitFor(client, "document.querySelector('.snapshot-disconnected') !== null");
-    const snapshotLifecycle = await evaluate<Record<string, unknown>>(
-      client,
-      `(() => ({
-        remounted: document.querySelectorAll('.snapshot-disconnected').length === 1,
-        noRemoteRows: document.querySelectorAll('.snapshot-list-item, .snapshot-forensic-text').length === 0,
-        prompt: document.querySelector('.snapshot-disconnected p')?.textContent ?? ''
-      }))()`,
-    );
-    assert(snapshotLifecycle.remounted === true, "Snapshot page did not remount cleanly");
-    assert(snapshotLifecycle.noRemoteRows === true, "Snapshot page retained remote rows across navigation");
-    assert(
-      typeof snapshotLifecycle.prompt === "string" && snapshotLifecycle.prompt.includes("连接 SSH 目标后"),
-      "Snapshot page lost its disconnected state after remount",
-    );
-    await evaluate(
-      client,
-      `(() => {
-        const button = [...document.querySelectorAll('.nav-item')]
-          .find(candidate => candidate.textContent?.includes('主机全景'));
-        button?.click();
-        return button instanceof HTMLButtonElement;
-      })()`,
-    );
-    await waitFor(client, "document.querySelector('.system-info-connect-prompt') !== null");
-
-    const firewallBoundary = await evaluate<Record<string, unknown>>(
-      client,
-      `(async () => {
-        const marker = 'forged-firewall-capability-must-not-echo';
-        const rejected = async (operation) => {
-          try {
-            await operation();
-            return { rejected: false, echoed: false };
-          } catch (error) {
-            return { rejected: true, echoed: String(error).includes(marker) };
-          }
-        };
-        const inspect = await rejected(() => window.lovelyres.inspectFirewall(marker));
-        const history = await rejected(() => window.lovelyres.listFirewallChangeHistory(marker));
-        const inspectWithUnknown = await rejected(() =>
-          window.lovelyres.inspectFirewall(marker, { path: marker, command: marker })
-        );
-        const historyWithUnknown = await rejected(() =>
-          window.lovelyres.listFirewallChangeHistory(marker, { target: marker })
-        );
-        return {
-          publicApiCount: Object.keys(window.lovelyres).length,
-          inspectType: typeof window.lovelyres.inspectFirewall,
-          historyType: typeof window.lovelyres.listFirewallChangeHistory,
-          inspectArity: window.lovelyres.inspectFirewall.length,
-          historyArity: window.lovelyres.listFirewallChangeHistory.length,
-          inspect,
-          history,
-          inspectWithUnknown,
-          historyWithUnknown,
-          planMethod: typeof window.lovelyres.planFirewallMutation,
-          confirmMethod: typeof window.lovelyres.confirmFirewallMutation,
-          executeMethod: typeof window.lovelyres.executeFirewallMutation,
-          restoreMethod: typeof window.lovelyres.restoreFirewallChange,
-          reconcileMethod: typeof window.lovelyres.reconcileFirewall,
-          terminalMethod: typeof window.lovelyres.openFirewallTerminal,
-          fileMethod: typeof window.lovelyres.readFirewallFile,
-          exportMethod: typeof window.lovelyres.exportFirewallRules,
-          genericInvoke: typeof window.lovelyres.invoke,
-          markerInDom: document.documentElement.textContent.includes(marker)
-        };
-      })()`,
-    );
-    assert(firewallBoundary.publicApiCount === MAIN_PRELOAD_API_COUNT, "Firewall boundary is outside the exact preload surface");
-    assert(firewallBoundary.inspectType === "function", "inspectFirewall is unavailable");
-    assert(
-      firewallBoundary.historyType === "function",
-      "listFirewallChangeHistory is unavailable",
-    );
-    assert(
-      typeof firewallBoundary.inspectArity === "number" &&
-        typeof firewallBoundary.historyArity === "number",
-      "Firewall contextBridge methods do not expose callable function metadata",
-    );
-    for (const name of ["inspect", "history", "inspectWithUnknown", "historyWithUnknown"]) {
-      const result = firewallBoundary[name];
-      assert(isRecord(result) && result.rejected === true, `Firewall ${name} did not fail closed`);
-      assert(isRecord(result) && result.echoed === false, `Firewall ${name} echoed hostile input`);
-    }
-    for (const name of [
-      "planMethod", "confirmMethod", "executeMethod", "restoreMethod", "reconcileMethod",
-      "terminalMethod", "fileMethod", "exportMethod", "genericInvoke",
-    ]) {
-      assert(firewallBoundary[name] === "undefined", `Firewall renderer exposed forbidden ${name}`);
-    }
-    assert(firewallBoundary.markerInDom === false, "Firewall hostile marker entered the DOM");
-
-    await evaluate(
-      client,
-      `(() => {
-        const button = [...document.querySelectorAll('.nav-item')]
-          .find(candidate => candidate.textContent?.includes('边界隔离'));
-        button?.click();
-        return button instanceof HTMLButtonElement;
-      })()`,
-    );
-    await waitFor(client, "document.querySelector('.firewall-connect-state') !== null");
-    const firewallDisconnected = await evaluate<Record<string, unknown>>(
-      client,
-      `(() => {
-        const page = document.querySelector('.firewall-page');
-        const prompt = page?.querySelector('.firewall-connect-state p');
-        const parseRgb = (value) => {
-          const match = value.match(/^rgba?\\(\\s*([0-9.]+)[, ]+\\s*([0-9.]+)[, ]+\\s*([0-9.]+)/i);
-          return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
-        };
-        const luminance = (rgb) => {
-          if (rgb === null) return null;
-          const channels = rgb.map(channel => {
-            const value = channel / 255;
-            return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
-          });
-          return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
-        };
-        const contrast = (foreground, background) => {
-          const foregroundLuminance = luminance(parseRgb(foreground));
-          const backgroundLuminance = luminance(parseRgb(background));
-          if (foregroundLuminance === null || backgroundLuminance === null) return null;
-          return (Math.max(foregroundLuminance, backgroundLuminance) + 0.05) /
-            (Math.min(foregroundLuminance, backgroundLuminance) + 0.05);
-        };
-        const pageStyle = page === null ? null : getComputedStyle(page);
-        const promptStyle = prompt === null || prompt === undefined ? null : getComputedStyle(prompt);
-        const background = pageStyle?.backgroundColor ?? '';
-        const color = pageStyle?.color ?? '';
-        const promptColor = promptStyle?.color ?? '';
-        const text = page?.textContent ?? '';
-        const resources = performance.getEntriesByType('resource').map(entry => entry.name);
-        return {
-          title: page?.querySelector('h1')?.textContent ?? '',
-          prompt: prompt?.textContent ?? '',
-          background,
-          color,
-          promptColor,
-          pageContrast: contrast(color, background),
-          promptContrast: contrast(promptColor, background),
-          rulePanels: page?.querySelectorAll('.firewall-rule-panel').length ?? -1,
-          historyPanels: page?.querySelectorAll('.firewall-history-workbench').length ?? -1,
-          tables: page?.querySelectorAll('table').length ?? -1,
-          preformatted: page?.querySelectorAll('pre').length ?? -1,
-          scripts: page?.querySelectorAll('script').length ?? -1,
-          images: page?.querySelectorAll('img').length ?? -1,
-          inputs: page?.querySelectorAll('input,textarea,select').length ?? -1,
-          inlineHandlers: page?.querySelectorAll('[onclick],[onerror],[onload]').length ?? -1,
-          markerVisible: document.documentElement.textContent.includes('forged-firewall-capability-must-not-echo'),
-          internalIdentityVisible: /bindingHandle|connectionId|sessionId|TargetGuard|dataRoot|filePath|username/iu.test(text),
-          localResources: resources.every(url => url.startsWith('lovelyres://app/')),
-          sidebarInert: document.querySelector('.sidebar')?.inert,
-          workspaceInert: document.querySelector('.workspace')?.inert
-        };
-      })()`,
-    );
-    assert(
-      firewallDisconnected.title === "连接目标后调查防火墙",
-      "disconnected Firewall page title is missing",
-    );
-    assert(
-      typeof firewallDisconnected.prompt === "string" &&
-        firewallDisconnected.prompt.includes("不会修改防火墙"),
-      "disconnected Firewall page did not render its honest opaque-binding prompt",
-    );
-    assert(
-      typeof firewallDisconnected.background === "string" &&
-        firewallDisconnected.background !== "transparent" &&
-        firewallDisconnected.background !== "rgba(0, 0, 0, 0)",
-      "Firewall page background is transparent",
-    );
-    assert(
-      typeof firewallDisconnected.pageContrast === "number" &&
-        firewallDisconnected.pageContrast >= 4.5,
-      "Firewall page foreground/background contrast is below 4.5:1",
-    );
-    assert(
-      typeof firewallDisconnected.promptContrast === "number" &&
-        firewallDisconnected.promptContrast >= 4.5,
-      "Firewall disconnected prompt contrast is below 4.5:1",
-    );
-    for (const name of [
-      "rulePanels", "historyPanels", "tables", "preformatted", "scripts", "images", "inputs",
-      "inlineHandlers",
-    ]) {
-      assert(firewallDisconnected[name] === 0, `disconnected Firewall page rendered ${name}`);
-    }
-    assert(firewallDisconnected.markerVisible === false, "forged Firewall capability reached the page");
-    assert(
-      firewallDisconnected.internalIdentityVisible === false,
-      "Firewall page exposed internal identity material",
-    );
-    assert(firewallDisconnected.localResources === true, "Firewall page loaded a non-local resource");
-    assert(firewallDisconnected.sidebarInert === false, "Firewall page made navigation inert");
-    assert(firewallDisconnected.workspaceInert === false, "Firewall page made its workspace inert");
-
-    await waitFor(client, "document.fonts.status === 'loaded'");
-    window.showInactive();
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    const firewallScreenshot = await withTimeout(
-      window.webContents.capturePage(),
-      "Electron disconnected Firewall capturePage",
-    ).finally(() => window.hide());
-    const firewallScreenshotBytes = firewallScreenshot.toPNG();
-    assert(firewallScreenshotBytes.length > 100, "Firewall screenshot capture failed");
-    fs.writeFileSync(
-      path.join(outputDirectory, "firewall-disconnected.png"),
-      firewallScreenshotBytes,
-    );
-
-    await evaluate(
-      client,
-      `(() => {
-        const button = [...document.querySelectorAll('.nav-item')]
-          .find(candidate => candidate.textContent?.includes('主机全景'));
-        button?.click();
-        return button instanceof HTMLButtonElement;
-      })()`,
-    );
-    await waitFor(
-      client,
-      "document.querySelector('.firewall-page') === null && document.querySelector('.system-info-connect-prompt') !== null",
-    );
-    await evaluate(
-      client,
-      `(() => {
-        const button = [...document.querySelectorAll('.nav-item')]
-          .find(candidate => candidate.textContent?.includes('边界隔离'));
-        button?.click();
-        return button instanceof HTMLButtonElement;
-      })()`,
-    );
-    await waitFor(client, "document.querySelector('.firewall-connect-state') !== null");
-    const firewallLifecycle = await evaluate<Record<string, unknown>>(
-      client,
-      `(() => ({
-        remounted: document.querySelectorAll('.firewall-connect-state').length === 1,
-        noRemoteRows: document.querySelectorAll('.firewall-rule-panel, .firewall-history-workbench').length === 0,
-        prompt: document.querySelector('.firewall-connect-state p')?.textContent ?? ''
-      }))()`,
-    );
-    assert(firewallLifecycle.remounted === true, "Firewall page did not remount cleanly");
-    assert(firewallLifecycle.noRemoteRows === true, "Firewall page retained remote state");
-    assert(
-      typeof firewallLifecycle.prompt === "string" &&
-        firewallLifecycle.prompt.includes("不会修改防火墙"),
-      "Firewall page lost its disconnected state after remount",
-    );
-    await evaluate(
-      client,
-      `(() => {
-        const button = [...document.querySelectorAll('.nav-item')]
-          .find(candidate => candidate.textContent?.includes('主机全景'));
-        button?.click();
-        return button instanceof HTMLButtonElement;
-      })()`,
-    );
-    await waitFor(client, "document.querySelector('.system-info-connect-prompt') !== null");
 
     const baselineBoundary = await evaluate<Record<string, unknown>>(
       client,
@@ -1002,203 +557,6 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
       typeof baselineLifecycle.prompt === "string" &&
         baselineLifecycle.prompt.includes("连接 SSH 目标后才能扫描"),
       "the checking half lost its disconnected state after remount",
-    );
-    await evaluate(
-      client,
-      `(() => {
-        const button = [...document.querySelectorAll('.nav-item')]
-          .find(candidate => candidate.textContent?.includes('主机全景'));
-        button?.click();
-        return button instanceof HTMLButtonElement;
-      })()`,
-    );
-    await waitFor(client, "document.querySelector('.system-info-connect-prompt') !== null");
-
-    const middlewareBoundary = await evaluate<Record<string, unknown>>(
-      client,
-      `(async () => {
-        const marker = 'forged-middleware-capability-must-not-echo';
-        const rejected = async (operation) => {
-          try {
-            await operation();
-            return { rejected: false, echoed: false };
-          } catch (error) {
-            return { rejected: true, echoed: String(error).includes(marker) };
-          }
-        };
-        return {
-          publicApiCount: Object.keys(window.lovelyres).length,
-          discoverType: typeof window.lovelyres.discoverMiddleware,
-          configurationType: typeof window.lovelyres.loadMiddlewareConfiguration,
-          historyType: typeof window.lovelyres.listMiddlewareHistory,
-          discoverArity: window.lovelyres.discoverMiddleware.length,
-          configurationArity: window.lovelyres.loadMiddlewareConfiguration.length,
-          historyArity: window.lovelyres.listMiddlewareHistory.length,
-          discover: await rejected(() => window.lovelyres.discoverMiddleware(marker)),
-          configuration: await rejected(() =>
-            window.lovelyres.loadMiddlewareConfiguration(marker, marker, marker)),
-          history: await rejected(() => window.lovelyres.listMiddlewareHistory(marker)),
-          discoverWithUnknown: await rejected(() => window.lovelyres.discoverMiddleware({
-            bindingHandle: marker,
-            command: marker,
-            targetIdentity: marker
-          })),
-          planMethod: typeof window.lovelyres.planMiddlewareChange,
-          confirmMethod: typeof window.lovelyres.confirmMiddlewareChange,
-          executeMethod: typeof window.lovelyres.executeMiddlewareChange,
-          restoreMethod: typeof window.lovelyres.restoreMiddlewareChange,
-          terminalMethod: typeof window.lovelyres.openMiddlewareTerminal,
-          fileMethod: typeof window.lovelyres.readMiddlewareFile,
-          exportMethod: typeof window.lovelyres.exportMiddleware,
-          genericInvoke: typeof window.lovelyres.invoke,
-          markerInDom: document.documentElement.textContent.includes(marker)
-        };
-      })()`,
-    );
-    assert(middlewareBoundary.publicApiCount === MAIN_PRELOAD_API_COUNT, "Middleware boundary is outside the exact preload surface");
-    assert(middlewareBoundary.discoverType === "function", "discoverMiddleware is unavailable");
-    assert(
-      middlewareBoundary.configurationType === "function",
-      "loadMiddlewareConfiguration is unavailable",
-    );
-    assert(middlewareBoundary.historyType === "function", "listMiddlewareHistory is unavailable");
-    assert(
-      typeof middlewareBoundary.discoverArity === "number" &&
-        typeof middlewareBoundary.configurationArity === "number" &&
-        typeof middlewareBoundary.historyArity === "number",
-      "Middleware contextBridge methods do not expose callable function metadata",
-    );
-    for (const name of ["discover", "configuration", "history", "discoverWithUnknown"]) {
-      const result = middlewareBoundary[name];
-      assert(isRecord(result) && result.rejected === true, `Middleware ${name} did not fail closed`);
-      assert(isRecord(result) && result.echoed === false, `Middleware ${name} echoed hostile input`);
-    }
-    for (const name of [
-      "planMethod", "confirmMethod", "executeMethod", "restoreMethod", "terminalMethod",
-      "fileMethod", "exportMethod", "genericInvoke",
-    ]) {
-      assert(middlewareBoundary[name] === "undefined", `Middleware renderer exposed forbidden ${name}`);
-    }
-    assert(middlewareBoundary.markerInDom === false, "Middleware hostile marker entered the DOM");
-
-    await evaluate(
-      client,
-      `(() => {
-        const button = [...document.querySelectorAll('.nav-item')]
-          .find(candidate => candidate.textContent?.includes('中间件'));
-        button?.click();
-        return button instanceof HTMLButtonElement;
-      })()`,
-    );
-    await waitFor(client, "document.querySelector('.middleware-page') !== null");
-    const middlewareDisconnected = await evaluate<Record<string, unknown>>(
-      client,
-      `(() => {
-        const page = document.querySelector('.middleware-page');
-        const target = page?.querySelector('.middleware-target');
-        const pageStyle = page === null ? null : getComputedStyle(page);
-        const resources = performance.getEntriesByType('resource').map(entry => entry.name);
-        const text = page?.textContent ?? '';
-        const refresh = page?.querySelector('.middleware-view-header button');
-        return {
-          title: page?.querySelector('h1')?.textContent ?? '',
-          target: target?.textContent ?? '',
-          disconnectedNote: page?.querySelector('.middleware-connection-note')?.textContent ?? '',
-          instanceRows: page?.querySelectorAll('.middleware-instance-grid > button').length ?? -1,
-          historyRows: page?.querySelectorAll('.middleware-history-list > article').length ?? -1,
-          refreshDisabled: refresh instanceof HTMLButtonElement && refresh.disabled,
-          background: pageStyle?.backgroundColor ?? '',
-          color: pageStyle?.color ?? '',
-          scripts: page?.querySelectorAll('script').length ?? -1,
-          images: page?.querySelectorAll('img').length ?? -1,
-          inlineHandlers: page?.querySelectorAll('[onclick],[onerror],[onload]').length ?? -1,
-          markerVisible: document.documentElement.textContent.includes('forged-middleware-capability-must-not-echo'),
-          internalIdentityVisible: /connectionId|sessionId|TargetGuard|generation|dataRoot|filePath|remotePath|username@/iu.test(text),
-          localResources: resources.every(url => url.startsWith('lovelyres://app/'))
-        };
-      })()`,
-    );
-    assert(middlewareDisconnected.title === "中间件配置调查", "Middleware page title is missing");
-    assert(
-      typeof middlewareDisconnected.target === "string" &&
-        middlewareDisconnected.target.includes("尚未连接 SSH 目标"),
-      "Middleware page did not render its honest disconnected target",
-    );
-    assert(
-      typeof middlewareDisconnected.disconnectedNote === "string" &&
-        middlewareDisconnected.disconnectedNote.includes("当前页面没有目标数据"),
-      "Middleware page did not explain its disconnected empty state",
-    );
-    assert(middlewareDisconnected.instanceRows === 0, "Middleware page invented remote instances");
-    assert(middlewareDisconnected.historyRows === 0, "Middleware page invented remote history");
-    assert(middlewareDisconnected.refreshDisabled === true, "Middleware discovery is enabled disconnected");
-    assert(
-      typeof middlewareDisconnected.background === "string" &&
-        middlewareDisconnected.background !== "transparent" &&
-        middlewareDisconnected.background !== "rgba(0, 0, 0, 0)",
-      "Middleware page background is transparent",
-    );
-    for (const name of ["scripts", "images", "inlineHandlers"]) {
-      assert(middlewareDisconnected[name] === 0, `Middleware page rendered unexpected ${name}`);
-    }
-    assert(middlewareDisconnected.markerVisible === false, "forged Middleware input reached the page");
-    assert(
-      middlewareDisconnected.internalIdentityVisible === false,
-      "Middleware page exposed internal identity material",
-    );
-    assert(middlewareDisconnected.localResources === true, "Middleware page loaded a non-local resource");
-
-    await waitFor(client, "document.fonts.status === 'loaded'");
-    window.showInactive();
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    const middlewareScreenshot = await withTimeout(
-      window.webContents.capturePage(),
-      "Electron disconnected Middleware capturePage",
-    ).finally(() => window.hide());
-    const middlewareScreenshotBytes = middlewareScreenshot.toPNG();
-    assert(middlewareScreenshotBytes.length > 100, "Middleware screenshot capture failed");
-    fs.writeFileSync(
-      path.join(outputDirectory, "middleware-disconnected.png"),
-      middlewareScreenshotBytes,
-    );
-
-    await evaluate(
-      client,
-      `(() => {
-        const button = [...document.querySelectorAll('.nav-item')]
-          .find(candidate => candidate.textContent?.includes('主机全景'));
-        button?.click();
-        return button instanceof HTMLButtonElement;
-      })()`,
-    );
-    await waitFor(
-      client,
-      "document.querySelector('.middleware-page') === null && document.querySelector('.system-info-connect-prompt') !== null",
-    );
-    await evaluate(
-      client,
-      `(() => {
-        const button = [...document.querySelectorAll('.nav-item')]
-          .find(candidate => candidate.textContent?.includes('中间件'));
-        button?.click();
-        return button instanceof HTMLButtonElement;
-      })()`,
-    );
-    await waitFor(client, "document.querySelector('.middleware-page') !== null");
-    const middlewareLifecycle = await evaluate<Record<string, unknown>>(
-      client,
-      `(() => ({
-        remounted: document.querySelectorAll('.middleware-page').length === 1,
-        noRemoteRows: document.querySelectorAll('.middleware-instance-grid > button, .middleware-history-list > article').length === 0,
-        prompt: document.querySelector('.middleware-target')?.textContent ?? ''
-      }))()`,
-    );
-    assert(middlewareLifecycle.remounted === true, "Middleware page did not remount cleanly");
-    assert(middlewareLifecycle.noRemoteRows === true, "Middleware page retained remote state");
-    assert(
-      typeof middlewareLifecycle.prompt === "string" &&
-        middlewareLifecycle.prompt.includes("尚未连接 SSH 目标"),
-      "Middleware page lost its disconnected state after remount",
     );
     await evaluate(
       client,
@@ -2133,6 +1491,30 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
               marker,
               { rowHandle: marker, remotePath: marker }
             )),
+          planType: typeof window.lovelyres.planKubernetesWorkloadAction,
+          confirmType: typeof window.lovelyres.confirmKubernetesWorkloadAction,
+          executeType: typeof window.lovelyres.executeKubernetesWorkloadAction,
+          cancelType: typeof window.lovelyres.cancelKubernetesWorkloadAction,
+          // Forged handles, an action shape outside the closed set, and a
+          // replica count past the ceiling. None may reach a cluster, and none
+          // may come back in the error.
+          planForged: await rejected(() =>
+            window.lovelyres.planKubernetesWorkloadAction(
+              marker, marker, marker, marker, { kind: 'cordon' }
+            )),
+          planOutsideTheSet: await rejected(() =>
+            window.lovelyres.planKubernetesWorkloadAction(
+              marker, marker, marker, marker, { kind: 'delete', target: marker }
+            )),
+          planPastTheCeiling: await rejected(() =>
+            window.lovelyres.planKubernetesWorkloadAction(
+              marker, marker, marker, marker,
+              { kind: 'scale-deployment', replicas: 1000000 }
+            )),
+          confirmForged: await rejected(() =>
+            window.lovelyres.confirmKubernetesWorkloadAction(marker, marker)),
+          executeForged: await rejected(() =>
+            window.lovelyres.executeKubernetesWorkloadAction(marker, marker)),
           scaleMethod: typeof window.lovelyres.scaleKubernetesDeployment,
           restartMethod: typeof window.lovelyres.restartKubernetesResource,
           deleteMethod: typeof window.lovelyres.deleteKubernetesResource,
@@ -2148,7 +1530,10 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
       })()`,
     );
     assert(kubernetesBoundary.publicApiCount === MAIN_PRELOAD_API_COUNT, "Kubernetes boundary is outside the exact preload surface");
-    for (const name of ["availabilityType", "listType", "detailType", "logsType"]) {
+    for (const name of [
+      "availabilityType", "listType", "detailType", "logsType",
+      "planType", "confirmType", "executeType", "cancelType",
+    ]) {
       assert(kubernetesBoundary[name] === "function", `Kubernetes API is unavailable: ${name}`);
     }
     for (const name of ["availabilityArity", "listArity", "detailArity", "logsArity"]) {
@@ -2166,6 +1551,11 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
       "listWithUnknown",
       "detailWithUnknown",
       "logsWithUnknown",
+      "planForged",
+      "planOutsideTheSet",
+      "planPastTheCeiling",
+      "confirmForged",
+      "executeForged",
     ]) {
       const result = kubernetesBoundary[name];
       assert(isRecord(result) && result.rejected === true, `Kubernetes ${name} did not fail closed`);
@@ -2255,7 +1645,7 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
     );
     assert(
       typeof kubernetesDisconnected.prompt === "string" &&
-        kubernetesDisconnected.prompt.includes("不会修改集群"),
+        kubernetesDisconnected.prompt.includes("要先确认再执行"),
       "Kubernetes page did not render its honest disconnected prompt",
     );
     assert(
@@ -2330,7 +1720,7 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
     assert(kubernetesLifecycle.noRemoteRows === true, "Kubernetes page retained remote state");
     assert(
       typeof kubernetesLifecycle.prompt === "string" &&
-        kubernetesLifecycle.prompt.includes("不会修改集群"),
+        kubernetesLifecycle.prompt.includes("要先确认再执行"),
       "Kubernetes page lost its disconnected state after remount",
     );
     const kubernetesConsole = { errorCount: consoleErrors.length };
@@ -2411,6 +1801,27 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
               marker,
               { tail: 200, command: marker }
             )),
+          planType: typeof window.lovelyres.planDockerContainerAction,
+          confirmType: typeof window.lovelyres.confirmDockerContainerAction,
+          executeType: typeof window.lovelyres.executeDockerContainerAction,
+          cancelType: typeof window.lovelyres.cancelDockerContainerAction,
+          // Forged handles and an action outside the closed set. None of these
+          // may reach a runtime, and none may come back in the error.
+          planForged: await rejected(() =>
+            window.lovelyres.planDockerContainerAction(marker, marker, marker, marker, 'stop')),
+          planOutsideTheSet: await rejected(() =>
+            window.lovelyres.planDockerContainerAction(
+              marker, marker, marker, marker, 'exec ' + marker
+            )),
+          confirmForged: await rejected(() =>
+            window.lovelyres.confirmDockerContainerAction(marker, marker)),
+          executeForged: await rejected(() =>
+            window.lovelyres.executeDockerContainerAction(marker, marker)),
+          planWithUnknown: await rejected(() =>
+            window.lovelyres.planDockerContainerAction(
+              marker, marker, marker, marker,
+              { action: 'stop', command: marker, containerId: marker }
+            )),
           startMethod: typeof window.lovelyres.startDockerContainer,
           stopMethod: typeof window.lovelyres.stopDockerContainer,
           restartMethod: typeof window.lovelyres.restartDockerContainer,
@@ -2432,6 +1843,10 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
       "inspectType",
       "auditType",
       "logsType",
+      "planType",
+      "confirmType",
+      "executeType",
+      "cancelType",
     ]) {
       assert(dockerBoundary[name] === "function", "Docker API is unavailable: " + name);
     }
@@ -2458,6 +1873,11 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
       "inspectWithUnknown",
       "auditWithUnknown",
       "logsWithUnknown",
+      "planForged",
+      "planOutsideTheSet",
+      "confirmForged",
+      "executeForged",
+      "planWithUnknown",
     ]) {
       const result = dockerBoundary[name];
       assert(isRecord(result) && result.rejected === true, "Docker " + name + " did not fail closed");
@@ -2551,7 +1971,7 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
     );
     assert(
       typeof dockerDisconnected.prompt === "string" &&
-        dockerDisconnected.prompt.includes("不会修改容器"),
+        dockerDisconnected.prompt.includes("要先确认再执行"),
       "Docker page did not render its honest disconnected prompt",
     );
     assert(
@@ -2634,7 +2054,7 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
     assert(dockerLifecycle.noRemoteRows === true, "Docker page retained remote state");
     assert(
       typeof dockerLifecycle.prompt === "string" &&
-        dockerLifecycle.prompt.includes("不会修改容器"),
+        dockerLifecycle.prompt.includes("要先确认再执行"),
       "Docker page lost its disconnected state after remount",
     );
     const dockerConsole = { errorCount: consoleErrors.length };
@@ -5336,18 +4756,9 @@ async function runDebugProbe(window: BrowserWindow, outputDirectory: string): Pr
         initial,
         terminalDisconnected,
         unauthorizedTerminal,
-        snapshotBoundary,
-        snapshotDisconnected,
-        snapshotLifecycle,
-        firewallBoundary,
-        firewallDisconnected,
-        firewallLifecycle,
         baselineBoundary,
         baselineDisconnected,
         baselineLifecycle,
-        middlewareBoundary,
-        middlewareDisconnected,
-        middlewareLifecycle,
         checkAuditBoundary,
         checkAuditDisconnected,
         checkAuditLifecycle,
@@ -5563,10 +4974,10 @@ async function probeUnauthorizedTerminalRenderer(
       Array.isArray(initial.apiMethods) &&
         initial.apiMethods.join(",") ===
           "cancelSftpOperation,close,confirmSftpOperation,copySelection,downloadSftpEntry," +
-            "executeSftpOperation,input,listLocalDirectory,listSftpDirectory,open," +
-            "openLocalBrowser,openSftpBrowser,planSftpOperation,poll,readSftpText,resize," +
-            "search,stageSftpUpload",
-      "terminal preload is not the exact eighteen-method surface",
+            "executeSftpOperation,fileEditorTarget,input,listLocalDirectory,listSftpDirectory," +
+            "open,openFileEditor,openLocalBrowser,openSftpBrowser,planSftpOperation,poll," +
+            "readSftpText,resize,search,stageSftpUpload",
+      "terminal preload is not the exact twenty-method surface",
     );
     assert(
       JSON.stringify(initial.apiArities) ===
@@ -5577,10 +4988,12 @@ async function probeUnauthorizedTerminalRenderer(
           copySelection: 0,
           downloadSftpEntry: 0,
           executeSftpOperation: 0,
+          fileEditorTarget: 0,
           input: 0,
           listLocalDirectory: 0,
           listSftpDirectory: 0,
           open: 0,
+          openFileEditor: 0,
           openLocalBrowser: 0,
           openSftpBrowser: 0,
           planSftpOperation: 0,

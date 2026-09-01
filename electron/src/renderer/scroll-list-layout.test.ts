@@ -21,11 +21,29 @@ const SCROLL_LISTS: Record<string, string> = {
   ".connection-list": ".connection-list-row",
   ".sftp-operation-dialog": ".sftp-operation-dialog > *",
   ".emergency-path-dialog": ".emergency-path-dialog > *",
+  ".kubernetes-action-dialog": ".kubernetes-action-dialog > *",
+  ".docker-action-dialog": ".docker-action-dialog > *",
   ".baseline-card-grid": ".baseline-card-grid > *",
   ".baseline-file-pane": ".baseline-file-pane > *",
   ".log-analysis-list": ".log-analysis-group",
   ".system-info-file-scroll": ".system-info-file",
   ".config-product-list": ".config-product-list button",
+  // Both context menus scroll now, because a menu taller than the window used
+  // to be clipped by it instead — and the item that fell off the bottom was
+  // 删除. A scrolling flex column squeezes its children, so the items pin
+  // their own height. See menu-placement.ts.
+  ".sftp-context-menu": ".sftp-context-menu button",
+  ".emergency-path-menu": ".emergency-path-menu button",
+  // The row menu on the system-information tables: forty items for a process,
+  // so it scrolls on a short window, and each item pins its own height.
+  ".system-info-row-menu": ".system-info-row-menu button",
+  // The row action dialog body, which scrolls when an inspection output or a
+  // plan summary runs long.
+  ".system-info-action-body": ".system-info-action-body > *",
+  // The save confirmation, which scrolls if a plan summary runs long.
+  ".file-editor-dialog": ".file-editor-dialog > *",
+  // The Kubernetes details, which scroll when a describe output runs long.
+  ".kubernetes-detail-backdrop > .kubernetes-detail": ".kubernetes-detail-backdrop > .kubernetes-detail > *",
 };
 
 function rule(css: string, selector: string): string {

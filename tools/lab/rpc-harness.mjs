@@ -8,6 +8,20 @@ import path from "node:path";
 
 const PROTOCOL = "lovelyres-backend/v1";
 
+/**
+ * Which sidecar binary a probe should drive.
+ *
+ * The debug build is the default, but Windows holds an .exe open while it
+ * runs: with the app started from `pnpm electron:dev`, `cargo build` cannot
+ * replace `target/debug/lovelyres-backend.exe` and quietly leaves the old one
+ * in place — so a probe would then test code that is not the code just
+ * written. Set LOVELYRES_BACKEND_BIN to the release build to get out of the
+ * way of a running window instead of closing it.
+ */
+export function backendBinary() {
+  return process.env.LOVELYRES_BACKEND_BIN ?? "D:/LovelyRes/target/debug/lovelyres-backend.exe";
+}
+
 export class Sidecar {
   #child;
   #buffer = "";

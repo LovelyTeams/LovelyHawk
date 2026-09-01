@@ -38,7 +38,7 @@ describe("application shell inventory", () => {
     const components = readdirSync(rendererDir())
       .filter((name) => name.endsWith("Page.tsx"))
       .map((name) => name.slice(0, -".tsx".length));
-    expect(components.length).toBeGreaterThan(14);
+    expect(components.length).toBeGreaterThan(11);
 
     const terminalWindow = source("TerminalWindow.tsx");
     for (const component of components) {
@@ -78,7 +78,21 @@ describe("application shell inventory", () => {
 
     const main = readFileSync(path.join(rendererDir(), "..", "main", "index.ts"), "utf8");
     const boundary = main.slice(main.indexOf('ipcMain.handle("lovelyres:terminal:sftp:open"'));
-    expect((boundary.match(/terminalContextFor\(event\)/gu) ?? [])).toHaveLength(3);
+    // Every handler in this tail resolves its window before doing anything —
+    // the three browser routes plus the two that open a file in a window of
+    // its own. The number is here to notice a new handler, and a new handler
+    // that resolves its window is the correct kind of new handler.
+    const handlers = [...boundary.matchAll(/ipcMain\.handle\("(?<channel>[^"]+)"/gu)]
+      .map((match) => match.groups?.channel);
+    expect(handlers).toEqual([
+      "lovelyres:terminal:sftp:open",
+      "lovelyres:terminal:sftp:directory:list",
+      "lovelyres:terminal:file-editor:open",
+      "lovelyres:terminal:file-editor:target",
+      "lovelyres:terminal:sftp:text:read",
+    ]);
+    expect((boundary.match(/terminalContextFor\(event\)/gu) ?? []))
+      .toHaveLength(handlers.length);
     expect(boundary).toContain("context.bindingHandle");
   });
 

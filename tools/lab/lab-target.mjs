@@ -15,6 +15,24 @@ export const SERVICE_PORTS = {
 };
 
 /**
+ * The container-orchestration hosts, started by `pnpm lab:orchestration`.
+ *
+ * Kept apart from `SERVICE_PORTS` rather than appended to it: those are all
+ * "one product with a deliberately bad configuration", and the connection
+ * import labels the whole family that way. A Podman host filed as
+ * "配置不合规 podman" would be wrong twice over — nothing is misconfigured on
+ * it, and what it is for is not its configuration.
+ */
+export const ORCHESTRATION_PORTS = {
+  // One host with its own Docker daemon; one with kubectl against the lab's
+  // k3s cluster. Podman is here because most RHEL-family and domestic-distro
+  // hosts have it and no docker at all, and the tool has to find that itself.
+  docker: 2244, kubernetes: 2245, podman: 2246,
+  // Both runtimes on one machine — the shape a real competition box has.
+  "container-arena": 2247,
+};
+
+/**
  * One Ubuntu server with several services on it, the way a competition box
  * actually looks. Start here: it is one container to keep alive instead of
  * twenty-one, and every page has something to find on it.
@@ -28,9 +46,16 @@ export function labTarget(which = process.env.LAB ?? "ubuntu") {
     { encoding: "utf8" },
   );
   const address = output.split("\0").join("").trim().split(/\s+/u)[0];
-  const port = which === "arena" ? ARENA_PORT : LAB_PORTS[which] ?? SERVICE_PORTS[which];
+  const port = which === "arena"
+    ? ARENA_PORT
+    : LAB_PORTS[which] ?? SERVICE_PORTS[which] ?? ORCHESTRATION_PORTS[which];
   if (port === undefined) {
-    const known = ["arena", ...Object.keys(LAB_PORTS), ...Object.keys(SERVICE_PORTS)].join(", ");
+    const known = [
+      "arena",
+      ...Object.keys(LAB_PORTS),
+      ...Object.keys(SERVICE_PORTS),
+      ...Object.keys(ORCHESTRATION_PORTS),
+    ].join(", ");
     throw new Error(`unknown lab: ${which} (have ${known})`);
   }
   return { host: address, port, username: "root", password: "LabRoot#2026" };

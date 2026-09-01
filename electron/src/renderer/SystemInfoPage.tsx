@@ -6,10 +6,12 @@ import {
   isSystemInfoSummary,
   isSystemInfoTable,
   type SystemInfoApi,
+  type SystemInfoRow,
   type SystemInfoTable,
   type SystemInfoTabKey,
 } from "../shared/system-info-contract";
 import {
+  buildSystemInfoRowCopy,
   buildSystemInfoSummaryCopy,
   buildSystemInfoTableCopy,
   formatSystemInfoValue,
@@ -18,6 +20,9 @@ import {
   nextModalFocusIndex,
   SUMMARY_FIELDS,
 } from "./system-info-helpers";
+import { useSystemInfoRowActions } from "./system-info-row-actions";
+import { SystemInfoRowActionDialog } from "./SystemInfoRowActionDialog";
+import { SystemInfoRowMenu, type SystemInfoRowLocalAction } from "./SystemInfoRowMenu";
 import {
   createSystemInfoState,
   systemInfoReducer,
@@ -50,6 +55,10 @@ export function SystemInfoPage({ connection, api, writeClipboard }: SystemInfoPa
   const selectedTab = stateIsCurrent ? state.selectedTab : null;
   const table = stateIsCurrent ? state.table : null;
   const detailState = stateIsCurrent ? state.detail : null;
+  // The right-click menu and the dialog it opens. Every request they make
+  // names a row of the table currently showing and nothing else.
+  const rowActions = useSystemInfoRowActions(api, bindingHandle, table?.snapshotHandle ?? null);
+  const overlayOpen = detailState !== null || rowActions.state !== null;
   useModalScrim(detailState !== null);
   const groups = useMemo(() => groupSystemInfoCatalog(catalog), [catalog]);
   // Most tabs have no detail behind any of their rows; the column is only worth
@@ -255,6 +264,36 @@ export function SystemInfoPage({ connection, api, writeClipboard }: SystemInfoPa
     }
   }
 
+  async function copyText(text: string, done: string) {
+    try {
+      await (writeClipboard ?? ((value) => window.lovelyres.writeClipboard(value)))(text);
+      setNotice(done);
+    } catch {
+      setNotice("复制失败或内容超过本地预算。");
+    }
+  }
+
+  /** The menu items the window answers by itself, without asking the target. */
+  function handleLocalRowAction(action: SystemInfoRowLocalAction) {
+    const menu = rowActions.menu;
+    rowActions.dismissMenu();
+    if (menu === null) return;
+    switch (action) {
+      case "copy-cell":
+        if (menu.cell !== null) void copyText(menu.cell, "已复制这一格。");
+        return;
+      case "copy-row":
+        try {
+          void copyText(buildSystemInfoRowCopy(menu.row), "已复制这一行。");
+        } catch {
+          setNotice("复制失败或内容超过本地预算。");
+        }
+        return;
+      case "detail":
+        openDetail(menu.row.id);
+    }
+  }
+
   if (connection === null) {
     return (
       <section className="page system-info-page">
@@ -273,8 +312,8 @@ export function SystemInfoPage({ connection, api, writeClipboard }: SystemInfoPa
       <div
         ref={backgroundRef}
         className="system-info-background"
-        aria-hidden={detailState !== null ? true : undefined}
-        inert={detailState !== null ? true : undefined}
+        aria-hidden={overlayOpen ? true : undefined}
+        inert={overlayOpen ? true : undefined}
       >
 
         {notice !== null ? <div className="system-info-notice" role="status">{notice}</div> : null}
@@ -370,7 +409,11 @@ export function SystemInfoPage({ connection, api, writeClipboard }: SystemInfoPa
                 ) : null}
                 {state.tableStatus === "ready" && table !== null && table.rows.length > 0
                   && table.tab === "shell-configs" ? (
-                  <ShellConfigText table={table} />
+                  <ShellConfigText
+                    table={table}
+                    selectedRowId={rowActions.menu?.row.id ?? null}
+                    onRowContextMenu={rowActions.openMenu}
+                  />
                 ) : null}
                 {state.tableStatus === "ready" && table !== null && table.rows.length > 0
                   && table.tab !== "shell-configs" ? (
@@ -379,8 +422,19 @@ export function SystemInfoPage({ connection, api, writeClipboard }: SystemInfoPa
                       <thead><tr>{table.columns.map((column) => <th key={column}>{column}</th>)}<th>级别</th>{anyDetail ? <th>详情</th> : null}</tr></thead>
                       <tbody>
                         {table.rows.map((row) => (
-                          <tr key={row.id}>
-                            {row.cells.map((cell, index) => <td key={`${row.id}:${index}`}>{cell}</td>)}
+                          <tr
+                            key={row.id}
+                            className={rowActions.menu?.row.id === row.id ? "is-selected" : undefined}
+                            onContextMenu={(event) => rowActions.openMenu(event, row, null)}
+                          >
+                            {row.cells.map((cell, index) => (
+                              <td
+                                key={`${row.id}:${index}`}
+                                onContextMenu={(event) => rowActions.openMenu(event, row, cell)}
+                              >
+                                {cell}
+                              </td>
+                            ))}
                             <td><span className={`system-info-risk ${row.risk}`}>{riskLabel(row.risk)}</span></td>
                             {anyDetail ? (
                               <td>
@@ -403,6 +457,28 @@ export function SystemInfoPage({ connection, api, writeClipboard }: SystemInfoPa
           </>
         ) : null}
       </div>
+
+      {rowActions.menu !== null ? (
+        <SystemInfoRowMenu
+          position={rowActions.menu.position}
+          row={rowActions.menu.row}
+          cell={rowActions.menu.cell}
+          actions={rowActions.menu.actions}
+          error={rowActions.menu.error}
+          onLocal={handleLocalRowAction}
+          onAction={(action) => void rowActions.choose(action)}
+          onDismiss={rowActions.dismissMenu}
+        />
+      ) : null}
+
+      {rowActions.state !== null ? (
+        <SystemInfoRowActionDialog
+          state={rowActions.state}
+          onConfirm={() => void rowActions.confirm()}
+          onCopyOutput={(text) => void copyText(text, "已复制输出。")}
+          onClose={rowActions.close}
+        />
+      ) : null}
 
       {detailState !== null ? (
         <div className="system-info-detail-backdrop">
@@ -441,8 +517,21 @@ export function SystemInfoPage({ connection, api, writeClipboard }: SystemInfoPa
  * whole reason to open this tab — but they are marked in place, where the lines
  * around them give them their meaning.
  */
-function ShellConfigText({ table }: { table: SystemInfoTable }) {
+function ShellConfigText({
+  table,
+  selectedRowId,
+  onRowContextMenu,
+}: {
+  table: SystemInfoTable;
+  selectedRowId: string | null;
+  onRowContextMenu: (
+    event: { clientX: number; clientY: number; preventDefault: () => void },
+    row: SystemInfoRow,
+    cell: string | null,
+  ) => void;
+}) {
   const files = useMemo(() => groupShellConfigRows(table), [table]);
+  const rowsById = useMemo(() => new Map(table.rows.map((row) => [row.id, row])), [table]);
   return (
     <div className="system-info-file-scroll">
       {files.map((file) => (
@@ -455,7 +544,14 @@ function ShellConfigText({ table }: { table: SystemInfoTable }) {
           </header>
           <pre>
             {file.lines.map((line) => (
-              <div className={`system-info-file-line ${line.risk}`} key={`${file.path}:${line.number}`}>
+              <div
+                className={`system-info-file-line ${line.risk}${selectedRowId === line.rowId ? " is-selected" : ""}`}
+                key={`${file.path}:${line.number}`}
+                onContextMenu={(event) => {
+                  const row = rowsById.get(line.rowId);
+                  if (row !== undefined) onRowContextMenu(event, row, line.text);
+                }}
+              >
                 <span className="system-info-file-number">{line.number}</span>
                 <span className="system-info-file-text">{line.text}</span>
               </div>

@@ -1257,99 +1257,6 @@
    }
   },
   {
-   "id": "firewall",
-   "owner": [
-    "electron-renderer",
-    "rust-backend",
-    "lovelyres-core"
-   ],
-   "source": [
-    "crates/lovelyres-gpui/src/firewall.rs",
-    "crates/lovelyres-core/src/firewall.rs"
-   ],
-   "replacement": {
-    "state": "mixed",
-    "targets": [
-     "electron/src/renderer/FirewallPage.tsx",
-     "electron/src/shared/firewall-read-contract.ts",
-     "crates/lovelyres-electron-backend/src/firewall_read_api.rs",
-     "electron/src/main/backend-client.ts + exact main IPC/preload bridge",
-     "App registry branch receives only the opaque bindingHandle plus the fixed read and existing main-owned clipboard APIs",
-     "Two centrally wired read-only methods: inspectFirewall and listFirewallChangeHistory",
-     "Pending phase-two plan/confirm/dead-man/verify/restore and real Linux firewall validation"
-    ]
-   },
-   "status": "Pending",
-   "acceptance": [
-    "Rule review, isolation plan, exact confirmation, journal, independent verification, restore receipt, concurrent-change rejection, and real-target validation are preserved."
-   ],
-   "tests": {
-    "required": [
-     "Core firewall safety tests",
-     "Backend exact read RPC and eager disconnect-cleanup tests",
-     "Renderer exact contract, opaque lifecycle, late-result and clipboard-bound tests",
-     "Electron CDP disconnected-page and boundary smoke",
-     "Backend plan/confirm tests",
-     "Renderer dangerous-flow tests",
-     "Real Linux VM isolation and recovery validation"
-    ],
-    "evidence": [
-     "electron-backend-check-audit-firewall-read-2026-08-24",
-     "electron-renderer-check-audit-firewall-read-2026-08-24",
-     "lovelyres-core-firewall-portable-bounds-2026-08-25",
-     "electron-backend-firewall-central-read-2026-08-25",
-     "electron-check-firewall-central-2026-08-25",
-     "electron-source-gate-firewall-central-2026-08-25",
-     "electron-cdp-firewall-central-2026-08-25"
-    ]
-   }
-  },
-  {
-   "id": "snapshot",
-   "owner": [
-    "electron-renderer",
-    "rust-backend",
-    "lovelyres-core"
-   ],
-   "source": [
-    "crates/lovelyres-gpui/src/snapshot.rs",
-    "crates/lovelyres-core/src/snapshot.rs"
-   ],
-   "replacement": {
-    "state": "mixed",
-    "targets": [
-     "electron/src/renderer/SnapshotPage.tsx",
-     "electron/src/shared/snapshot-read-contract.ts",
-     "crates/lovelyres-electron-backend/src/snapshot_read_api.rs",
-     "electron/src/main/backend-client.ts + exact main IPC/preload bridge",
-     "App registry branch receives only the opaque bindingHandle",
-     "Three centrally wired read-only methods: listSnapshots, getSnapshotDetail, diffForensicSnapshots",
-     "Public collector projection fully redacts Processes, LoginHistory, CronJobs, AuthorizedKeys, Sudoers, RecentModifiedFiles and EnvVariables; only NetworkConnections, ListeningPorts, StartupServices, RunningUsers and LoadedModules remain bounded normalized plain text"
-    ]
-   },
-   "status": "Pending",
-   "acceptance": [
-    "Create/list/diff/export, archive bounds, validated paths, cancellation, target guards, hostile text, and persistence match the GPUI page."
-   ],
-   "tests": {
-    "required": [
-     "Core snapshot tests",
-     "Backend contract tests",
-     "Renderer interaction tests",
-     "Electron CDP page smoke"
-    ],
-    "evidence": [
-     "electron-backend-snapshot-read-standalone-2026-08-24",
-     "electron-renderer-snapshot-read-standalone-2026-08-24",
-     "lovelyres-core-snapshot-preprojection-2026-08-25",
-     "electron-check-snapshot-central-2026-08-25",
-     "electron-backend-snapshot-central-2026-08-25",
-     "electron-source-gate-snapshot-central-2026-08-25",
-     "electron-cdp-snapshot-central-2026-08-25"
-    ]
-   }
-  },
-  {
    "id": "baseline-quick-edit",
    "owner": [
     "electron-renderer",
@@ -1432,48 +1339,6 @@
    }
   },
   {
-   "id": "middleware",
-   "owner": [
-    "electron-renderer",
-    "rust-backend",
-    "lovelyres-core"
-   ],
-   "source": [
-    "crates/lovelyres-gpui/src/middleware.rs",
-    "crates/lovelyres-core/src/middleware.rs",
-    "crates/lovelyres-core/src/middleware_document.rs"
-   ],
-   "replacement": {
-    "state": "mixed",
-    "targets": [
-     "electron/src/renderer/MiddlewarePage.tsx",
-     "electron/src/shared/middleware-read-contract.ts",
-     "crates/lovelyres-electron-backend/src/middleware_read_api.rs",
-     "electron/src/main/backend-client.ts plus exact main IPC/preload bridge",
-     "App registry branch receives only the opaque bindingHandle",
-     "Three centrally wired read-only methods: discoverMiddleware, loadMiddlewareConfiguration, and listMiddlewareHistory",
-     "Pending phase-two plan/confirm/execute/verify/restore/export and real Linux/OpenSSH/systemd/SFTP validation"
-    ]
-   },
-   "status": "Pending",
-   "acceptance": [
-    "Discovery/health, complete configuration viewing, typed edits, immutable plans, exact confirmation, verification, restore, document bounds/redaction, and target guards are equivalent."
-   ],
-   "tests": {
-    "required": [
-     "Core middleware/document tests",
-     "Backend exact read RPC and eager disconnect-cleanup tests",
-     "Renderer exact contract, opaque lifecycle and late-result tests",
-     "Electron CDP disconnected-page and boundary smoke",
-     "Backend plan/confirm/verify/restore tests",
-     "Applicable real middleware validation"
-    ],
-    "evidence": [
-     "electron-cdp-middleware-check-audit-central-2026-08-25"
-    ]
-   }
-  },
-  {
    "id": "java-hot-update",
    "owner": [
     "electron-renderer",
@@ -1501,38 +1366,6 @@
      "Backend plan/confirm tests",
      "Renderer interaction tests",
      "Applicable real JVM validation"
-    ],
-    "evidence": []
-   }
-  },
-  {
-   "id": "batch-servers",
-   "owner": [
-    "electron-renderer",
-    "rust-backend",
-    "lovelyres-core"
-   ],
-   "source": [
-    "crates/lovelyres-gpui/src/batch_servers.rs",
-    "crates/lovelyres-core/src/batch.rs"
-   ],
-   "replacement": {
-    "state": "planned",
-    "targets": [
-     "Electron BatchServersPage",
-     "Typed bounded batch backend methods"
-    ]
-   },
-   "status": "Pending",
-   "acceptance": [
-    "Target selection, task templates, bounded concurrency/event queues, per-target guards, cancellation, late-result rejection, partial results, confirmations, and audit are equivalent."
-   ],
-   "tests": {
-    "required": [
-     "Core batch tests",
-     "Backend concurrency/backpressure tests",
-     "Renderer interaction tests",
-     "Multi-target integration validation"
     ],
     "evidence": []
    }

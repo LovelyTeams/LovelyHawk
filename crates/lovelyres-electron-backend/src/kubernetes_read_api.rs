@@ -272,6 +272,39 @@ impl KubernetesReadApi {
             .resolve_row(scope, snapshot_handle, row_handle, now)
     }
 
+    /// Turns a row handle back into the Deployment or Node it was minted for.
+    ///
+    /// The mutation side needs exactly this and nothing else: it never sees a
+    /// namespace, a name or a UID, so it cannot act on a resource the snapshot
+    /// did not offer. Scope and expiry are checked here, so a handle from a
+    /// previous target, a previous session, or a snapshot that has since aged
+    /// out resolves to nothing.
+    ///
+    /// The row is returned whole because the core's planner re-reads the live
+    /// resource and refuses when the UID or resourceVersion moved — it needs
+    /// the reading this row was made from to compare against.
+    pub(crate) fn resolve_workload_for_mutation(
+        &self,
+        binding_handle: &str,
+        snapshot_handle: &str,
+        row_handle: &str,
+    ) -> Result<(BoundSshSession, KubernetesWorkloadRow), KubernetesReadApiError> {
+        validate_handle(snapshot_handle)?;
+        validate_handle(row_handle)?;
+        let (session, scope) = self.capture_binding(binding_handle)?;
+        let row = self.resolve_row(&scope, snapshot_handle, row_handle, Instant::now())?;
+        match row {
+            CoreRow::Deployment(deployment) => Ok((
+                session,
+                KubernetesWorkloadRow::Deployment(Box::new(deployment)),
+            )),
+            CoreRow::Node(node) => Ok((session, KubernetesWorkloadRow::Node(Box::new(node)))),
+            // A namespace or a pod has no mutation in the core at all, so this
+            // is "that handle names the wrong kind of thing", not a refusal.
+            CoreRow::Namespace(_) | CoreRow::Pod(_) => Err(KubernetesReadApiError::RowUnavailable),
+        }
+    }
+
     fn acquire_read(&self, scope: &BindingScope) -> Result<ReadPermit, KubernetesReadApiError> {
         ReadPermit::acquire(Arc::clone(&self.concurrency), scope.concurrency_key())
     }
@@ -658,6 +691,16 @@ enum CoreRow {
     Pod(KubernetesPod),
     Deployment(KubernetesDeployment),
     Node(KubernetesNode),
+}
+
+/// The two row kinds the core knows how to change.
+///
+/// Boxed because a Node row carries its capacities and roles and is much the
+/// larger of the two; an unboxed enum would make every caller pay for it.
+#[derive(Clone)]
+pub(crate) enum KubernetesWorkloadRow {
+    Deployment(Box<KubernetesDeployment>),
+    Node(Box<KubernetesNode>),
 }
 
 impl CoreRow {

@@ -83,6 +83,8 @@ export function SftpBrowserPage({
   const [pendingPreview, setPendingPreview] = useState<PendingPreview | null>(null);
   const [transferNotice, setTransferNotice] = useState<string | null>(null);
   const transferInFlight = useRef(false);
+  // Opening a window is remote work too: a double click would ask twice.
+  const fileWindowInFlight = useRef(false);
   const [menu, setMenu] = useState<
     { position: { x: number; y: number }; entry: SftpBrowserEntry | null } | null
   >(null);
@@ -225,16 +227,26 @@ export function SftpBrowserPage({
     });
   }
 
-  function requestPreview() {
-    if (directory === null || selected?.action !== "preview" || busy) return;
-    setPendingPreview({
-      scope: connectedScope,
-      request: {
-        id: ++requestRef.current,
-        browserHandle: directory.browserHandle,
-        fileHandle: selected.entryHandle,
-      },
-    });
+  /**
+   * Opens one file in a window of its own.
+   *
+   * The pane hands over the two opaque handles it already holds and nothing
+   * else; the window asks main what it was opened for, and main answers with
+   * what it recorded. `editable` is settled here and cannot be changed from
+   * inside the window.
+   */
+  async function openFileWindow(entry: SftpBrowserEntry | null, editable: boolean) {
+    const file = entry ?? selected;
+    if (directory === null || file === null || file.action !== "preview") return;
+    if (fileWindowInFlight.current) return;
+    fileWindowInFlight.current = true;
+    try {
+      await api.openFileEditor(directory.browserHandle, file.entryHandle, file.name, editable);
+    } catch {
+      setOperationError("打不开这个文件的窗口，连接可能已经断了。");
+    } finally {
+      fileWindowInFlight.current = false;
+    }
   }
 
   function selectEntry(entryHandle: string) {
@@ -275,7 +287,11 @@ export function SftpBrowserPage({
     setReceipt(null);
     setOperationError(null);
     if (action === "open" && entry !== null) return requestDirectory(entry.entryHandle);
-    if (action === "preview") return requestPreview();
+    // Both open the same window; only the permission to write differs, and
+    // that is settled by main when it creates the window.
+    if (action === "preview" || action === "edit") {
+      return void openFileWindow(entry, action === "edit");
+    }
     if (action === "download") return void downloadSelected();
     if (action === "properties") {
       if (entry !== null) setProperties(entry);
@@ -498,13 +514,14 @@ export function SftpBrowserPage({
             目录共有 {directory.observedEntryCount} 项，当前只显示前 {directory.displayedEntryCount} 项。
           </p>}
 
-          <SftpBrowserDetail
-            transferNotice={transferNotice}
-            selected={selected}
-            previewStatus={visibleState.previewStatus}
-            preview={visibleState.preview}
-            previewError={visibleState.previewError}
-          />
+          {/* Only the transfer result stays inline. The panel that used to sit
+              here held a text preview as well, and it cost a permanent third
+              of the pane to show a few wrapped lines of a file — the file now
+              opens in a window of its own, where it can be read and edited at
+              a usable size. */}
+          {transferNotice === null ? null : (
+            <p className="sftp-browser-transfer" role="status">{transferNotice}</p>
+          )}
 
           {menu === null ? null : (
             <SftpContextMenu
@@ -611,45 +628,6 @@ export function SftpBrowserTable({
         </button>
       ))}
     </div>
-  );
-}
-
-/**
- * The preview surface. The row already shows name, size and time, and the
- * context menu owns the actions, so this only appears when it has something
- * the table cannot show: file text, a transfer result, or a read failure.
- */
-export function SftpBrowserDetail({
-  selected,
-  previewStatus,
-  preview,
-  previewError,
-  transferNotice = null,
-}: {
-  selected: SftpBrowserEntry | null;
-  previewStatus: SftpBrowserLoadStatus;
-  preview: SftpTextPreview | null;
-  previewError: string | null;
-  transferNotice?: string | null;
-}) {
-  const previewing = selected?.action === "preview" &&
-    (previewStatus === "loading" || previewStatus === "error" || preview !== null);
-  if (transferNotice === null && !previewing) return null;
-  return (
-    <section className="sftp-browser-detail" aria-label="预览">
-      {transferNotice === null ? null : (
-        <p className="sftp-browser-transfer" role="status">{transferNotice}</p>
-      )}
-      {previewing ? (
-        <>
-          <p className="sftp-browser-preview-name">{selected?.name}</p>
-          {previewStatus === "loading" ? <SftpBrowserStatus label="正在读取文本…" compact />
-            : previewStatus === "error"
-              ? <SftpBrowserError message={previewError ?? "文本预览不可用。"} compact />
-              : preview === null ? null : <SftpTextPreviewView preview={preview} />}
-        </>
-      ) : null}
-    </section>
   );
 }
 

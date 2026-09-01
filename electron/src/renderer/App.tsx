@@ -53,9 +53,6 @@ const Notes = lazy(async () => ({ default: (await import("./Notes")).Notes }));
 const ConfigurationPage = lazy(async () => ({ default: (await import("./ConfigurationPage")).ConfigurationPage }));
 const SystemInfoPage = lazy(async () => ({ default: (await import("./SystemInfoPage")).SystemInfoPage }));
 const AiHistoryPage = lazy(async () => ({ default: (await import("./AiHistoryPage")).AiHistoryPage }));
-const SnapshotPage = lazy(async () => ({ default: (await import("./SnapshotPage")).SnapshotPage }));
-const FirewallPage = lazy(async () => ({ default: (await import("./FirewallPage")).FirewallPage }));
-const MiddlewarePage = lazy(async () => ({ default: (await import("./MiddlewarePage")).MiddlewarePage }));
 const CheckAuditPage = lazy(async () => ({ default: (await import("./CheckAuditPage")).CheckAuditPage }));
 const IntegrityPage = lazy(async () => ({ default: (await import("./IntegrityPage")).IntegrityPage }));
 const LogAnalysisPage = lazy(async () => ({ default: (await import("./LogAnalysisPage")).LogAnalysisPage }));
@@ -91,7 +88,6 @@ const groupLabels: Record<PageGroup, string> = {
   target: "目标",
   triage: "摸底",
   investigation: "调查",
-  response: "处置",
   operations: "运维",
   intelligence: "助手",
 };
@@ -484,22 +480,6 @@ export function App() {
               api={window.lovelyres}
               writeClipboard={window.lovelyres.writeClipboard}
             />
-          ) : activePage.id === "snapshot" ? (
-            <SnapshotPage
-              bindingHandle={activeTarget?.bindingHandle ?? null}
-              api={window.lovelyres}
-            />
-          ) : activePage.id === "firewall" ? (
-            <FirewallPage
-              bindingHandle={activeTarget?.bindingHandle ?? null}
-              api={window.lovelyres}
-              writeClipboard={window.lovelyres.writeClipboard}
-            />
-          ) : activePage.id === "middleware" ? (
-            <MiddlewarePage
-              bindingHandle={activeTarget?.bindingHandle ?? null}
-              api={window.lovelyres}
-            />
           ) : activePage.id === "check-audit" ? (
             <CheckAuditPage
               bindingHandle={activeTarget?.bindingHandle ?? null}
@@ -635,10 +615,6 @@ export function App() {
             </button>
           ) : null}
           {targetError !== null ? <span className="statusbar-error" role="alert">{targetError}</span> : null}
-        </div>
-        <div className="statusbar-group statusbar-meta">
-          <span>后端已连接</span>
-          <span>v{bootstrap.appVersion}</span>
         </div>
       </footer>
     </div>

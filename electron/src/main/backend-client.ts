@@ -26,12 +26,20 @@ import {
   type LogSourceReadInput,
   type LogSourceReadResult,
   type LogSourceSnapshot,
+  type KubernetesActionCancellation,
+  type KubernetesActionPlan,
+  type KubernetesActionReceipt,
   type KubernetesAvailability,
+  type KubernetesWriteAction,
   type KubernetesListInput,
   type KubernetesSnapshot,
   type KubernetesTextResult,
   type DockerCollectionKind,
   type DockerContainerSnapshot,
+  type DockerActionCancellation,
+  type DockerActionPlan,
+  type DockerActionReceipt,
+  type DockerWriteAction,
   type DockerLogs,
   type DockerReadCollection,
   type DockerReadInspection,
@@ -65,9 +73,6 @@ import {
   type IntegrityComparisonPoll,
   type IntegrityComparisonStarted,
   type IntegrityPresetCatalog,
-  type MiddlewareConfiguration,
-  type MiddlewareDiscovery,
-  type MiddlewareHistory,
   type ConfigCatalog,
   type ConfigClosedResult,
   type ConfigDraft,
@@ -82,8 +87,6 @@ import {
   type DisposalReportExportFormat,
   type DisposalReportPreviewFormat,
   type DisposalReportSnapshot,
-  type FirewallHistory,
-  type FirewallInspection,
   type ConnectionDeleteCancellation,
   type ConnectionDeletePrompt,
   type ConnectionDeleteResult,
@@ -110,19 +113,20 @@ import {
   type SettingsMutationProposal,
   type SettingsMutationResult,
   type SettingsSnapshot,
-  type SnapshotDetail,
-  type SnapshotDiffInput,
-  type SnapshotDiffResult,
-  type SnapshotListResult,
   type SshAttemptCancellation,
   type SshAttemptStarted,
   type SshAttemptStatus,
   type SshBindingDisconnection,
   type SystemInfoDetail,
+  type SystemInfoRowActions,
+  type SystemInfoRowInspection,
+  type SystemInfoRowPlan,
+  type SystemInfoRowReceipt,
   type SystemInfoSummary,
   type SystemInfoTabCatalogEntry,
   type SystemInfoTabKey,
   type SystemInfoTable,
+  type ContainerTerminalOpened,
   type TerminalClosed,
   type TerminalInputAcknowledgement,
   type TerminalOpened,
@@ -152,14 +156,24 @@ import {
   isLogSourceSnapshot,
   isKubernetesAvailability,
   isKubernetesListInput,
+  isKubernetesActionCancellation,
+  isKubernetesActionPlan,
+  isKubernetesActionReceipt,
   isKubernetesOpaqueHandle,
+  isKubernetesResourceName,
+  isKubernetesWriteAction,
   isKubernetesSnapshot,
   isKubernetesTextResult,
   isDockerCollectionKind,
   isDockerContainerSnapshot,
   isDockerLogs,
   isDockerLogTail,
+  isDockerActionCancellation,
+  isDockerActionPlan,
+  isDockerActionReceipt,
+  isDockerContainerName,
   isDockerOpaqueHandle,
+  isDockerWriteAction,
   isDockerReadCollection,
   isDockerReadInspection,
   isDockerResourceKind,
@@ -197,10 +211,6 @@ import {
   isIntegrityOpaqueHandle,
   isIntegrityPollRequest,
   isIntegrityPresetCatalog,
-  isMiddlewareConfiguration,
-  isMiddlewareDiscovery,
-  isMiddlewareHistory,
-  isMiddlewareOpaqueHandle,
   isAiHistoryExportFormat,
   isAiHistoryId,
   isAiHistoryListPage,
@@ -227,9 +237,6 @@ import {
   isDisposalReportOpaqueHandle,
   isDisposalReportPreviewFormat,
   isDisposalReportSnapshot,
-  isFirewallHistory,
-  isFirewallInspection,
-  isFirewallOpaqueHandle,
   isConfigClosedResult,
   isConfigDraft,
   isConnectionDeleteCancellation,
@@ -257,19 +264,22 @@ import {
   isSettingsMutationResult,
   isSettingsProviderId,
   isSettingsSnapshot,
-  isSnapshotDetail,
-  isSnapshotDiffInput,
-  isSnapshotDiffResult,
-  isSnapshotListResult,
-  isSnapshotOpaqueHandle,
   isSshAttemptCancellation,
   isSshAttemptStarted,
   isSshAttemptStatus,
   isSshBindingDisconnection,
+  isSshOpaqueHandle,
   isSystemInfoCatalog,
   isSystemInfoDetail,
+  isSystemInfoOpaqueHandle,
+  isSystemInfoRowActionKey,
+  isSystemInfoRowActions,
+  isSystemInfoRowInspection,
+  isSystemInfoRowPlan,
+  isSystemInfoRowReceipt,
   isSystemInfoSummary,
   isSystemInfoTable,
+  isContainerTerminalOpened,
   isTerminalBindingHandle,
   isTerminalClosed,
   isTerminalHandle,
@@ -321,6 +331,16 @@ const REMOTE_REQUEST_TIMEOUT_MS = 60_000;
 const EMERGENCY_COMMAND_CATALOG_TIMEOUT_MS = 45_000;
 /** Above emergency_command_api's own EXECUTION_DEADLINE of seventy-five seconds. */
 const EMERGENCY_COMMAND_RUN_TIMEOUT_MS = 90_000;
+/**
+ * Longer than the sidecar's own execution deadline for a container action.
+ *
+ * Bound below it and a slow host turns a real receipt — which says what the
+ * verification read back, and whether a restore ran — into "the request timed
+ * out", which tells the operator nothing about what the host now looks like.
+ */
+const DOCKER_ACTION_TIMEOUT_MS = 150_000;
+/** Same reasoning: longer than the sidecar deadline for a workload action. */
+const KUBERNETES_ACTION_TIMEOUT_MS = 150_000;
 const SFTP_BROWSER_TIMEOUT_MS = 30_000;
 const SFTP_TRANSFER_TIMEOUT_MS = 190_000;
 const SFTP_OPERATION_TIMEOUT_MS = 100_000;
@@ -335,30 +355,26 @@ export const SYSTEM_INFO_RPC_METHODS = Object.freeze({
   summary: "system-info.summary.get",
   collect: "system-info.table.collect",
   detail: "system-info.detail.get",
+  rowActions: "system-info.row.actions.list",
+  rowInspect: "system-info.row.inspect",
+  rowPlan: "system-info.row.action.plan",
+  rowConfirm: "system-info.row.action.confirm",
+  rowExecute: "system-info.row.action.execute",
+  rowCancel: "system-info.row.action.cancel",
 } as const);
 
-export const SNAPSHOT_READ_RPC_METHODS = Object.freeze({
-  list: "snapshot.list",
-  detail: "snapshot.detail.get",
-  diff: "snapshot.forensic.diff",
-} as const);
-
-export const FIREWALL_READ_RPC_METHODS = Object.freeze({
-  inspect: "firewall.inspect",
-  listHistory: "firewall.change-history.list",
-} as const);
+/** The sidecar gives a read-only row action 45 seconds; this leaves room to hear back. */
+const SYSTEM_INFO_ROW_INSPECT_TIMEOUT_MS = 60_000;
+/** Planning reads the row's live state from the target first. */
+const SYSTEM_INFO_ROW_PLAN_TIMEOUT_MS = 45_000;
+/** Execution covers the change, the journal, the verification and a restore. */
+const SYSTEM_INFO_ROW_EXECUTE_TIMEOUT_MS = 130_000;
 
 export const BASELINE_READ_RPC_METHODS = Object.freeze({
   catalog: "baseline.catalog.get",
   scan: "baseline.scan",
   listHistory: "baseline.history.list",
   readFile: "baseline.file.read",
-} as const);
-
-export const MIDDLEWARE_READ_RPC_METHODS = Object.freeze({
-  discover: "middleware.discover",
-  loadConfiguration: "middleware.configuration.load",
-  listHistory: "middleware.history.list",
 } as const);
 
 export const CHECK_AUDIT_READ_RPC_METHODS = Object.freeze({
@@ -381,12 +397,30 @@ export const KUBERNETES_READ_RPC_METHODS = Object.freeze({
   podLogs: "kubernetes.pod.logs.get",
 } as const);
 
+export const KUBERNETES_WRITE_RPC_METHODS = Object.freeze({
+  planAction: "kubernetes.workload.action.plan",
+  confirmAction: "kubernetes.workload.action.confirm",
+  executeAction: "kubernetes.workload.action.execute",
+  cancelAction: "kubernetes.workload.action.cancel",
+} as const);
+
 export const DOCKER_READ_RPC_METHODS = Object.freeze({
   refreshContainers: "docker.containers.refresh",
   getCollection: "docker.collection.get",
   inspectResource: "docker.resource.inspect",
   getSecurityAudit: "docker.security.audit.get",
   getContainerLogs: "docker.container.logs.get",
+} as const);
+
+export const DOCKER_TERMINAL_RPC_METHODS = Object.freeze({
+  open: "docker.container.terminal.open",
+} as const);
+
+export const DOCKER_WRITE_RPC_METHODS = Object.freeze({
+  planAction: "docker.container.action.plan",
+  confirmAction: "docker.container.action.confirm",
+  executeAction: "docker.container.action.execute",
+  cancelAction: "docker.container.action.cancel",
 } as const);
 
 export const EMERGENCY_COMMAND_RPC_METHODS = Object.freeze({
@@ -551,6 +585,21 @@ const REMOTE_NAMESPACES: ReadonlySet<string> = new Set([
  * passes one of its own. The SSH namespace is deliberately absent: connecting
  * is a poll loop of short calls, and the attempt carries its own deadline.
  */
+/** A row is named by two opaque handles and a bounded, non-empty row id. */
+function isSystemInfoRowRequest(
+  bindingHandle: string,
+  snapshotHandle: string,
+  rowId: string,
+): boolean {
+  return (
+    isSshOpaqueHandle(bindingHandle) &&
+    isSystemInfoOpaqueHandle(snapshotHandle) &&
+    typeof rowId === "string" &&
+    rowId.trim().length > 0 &&
+    Buffer.byteLength(rowId, "utf8") <= 256
+  );
+}
+
 function defaultTimeoutFor(method: string): number {
   const namespace = method.split(".")[0] ?? "";
   return REMOTE_NAMESPACES.has(namespace) ? REMOTE_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
@@ -925,70 +974,112 @@ export class BackendClient {
     return value;
   }
 
-  async listSnapshots(bindingHandle: string): Promise<SnapshotListResult> {
-    if (!isSnapshotOpaqueHandle(bindingHandle)) {
-      throw new Error("The snapshot binding is invalid.");
-    }
-    const value = await this.#request(SNAPSHOT_READ_RPC_METHODS.list, { bindingHandle });
-    if (!isSnapshotListResult(value)) {
-      throw new Error("The backend returned an invalid snapshot list.");
-    }
-    return value;
-  }
-
-  async getSnapshotDetail(
+  async listSystemInfoRowActions(
     bindingHandle: string,
     snapshotHandle: string,
-  ): Promise<SnapshotDetail> {
-    if (!isSnapshotOpaqueHandle(bindingHandle) || !isSnapshotOpaqueHandle(snapshotHandle)) {
-      throw new Error("The snapshot detail request is invalid.");
+    rowId: string,
+  ): Promise<SystemInfoRowActions> {
+    if (!isSystemInfoRowRequest(bindingHandle, snapshotHandle, rowId)) {
+      throw new Error("The system-information row request is invalid.");
     }
-    const value = await this.#request(SNAPSHOT_READ_RPC_METHODS.detail, {
+    const value = await this.#request(SYSTEM_INFO_RPC_METHODS.rowActions, {
       bindingHandle,
       snapshotHandle,
+      rowId,
     });
-    if (!isSnapshotDetail(value) || value.snapshotHandle !== snapshotHandle) {
-      throw new Error("The backend returned invalid snapshot detail.");
+    if (!isSystemInfoRowActions(value) || value.rowId !== rowId) {
+      throw new Error("The backend returned invalid system-information row actions.");
     }
     return value;
   }
 
-  async diffForensicSnapshots(
+  async inspectSystemInfoRow(
     bindingHandle: string,
-    input: SnapshotDiffInput,
-  ): Promise<SnapshotDiffResult> {
-    if (!isSnapshotOpaqueHandle(bindingHandle) || !isSnapshotDiffInput(input)) {
-      throw new Error("The forensic snapshot diff request is invalid.");
+    snapshotHandle: string,
+    rowId: string,
+    action: string,
+  ): Promise<SystemInfoRowInspection> {
+    if (
+      !isSystemInfoRowRequest(bindingHandle, snapshotHandle, rowId) ||
+      !isSystemInfoRowActionKey(action)
+    ) {
+      throw new Error("The system-information row inspection request is invalid.");
     }
-    const value = await this.#request(SNAPSHOT_READ_RPC_METHODS.diff, { bindingHandle, input });
-    if (!isSnapshotDiffResult(value) ||
-      value.olderSnapshotHandle !== input.olderSnapshotHandle ||
-      value.newerSnapshotHandle !== input.newerSnapshotHandle) {
-      throw new Error("The backend returned an invalid forensic snapshot diff.");
-    }
-    return value;
-  }
-
-  async inspectFirewall(bindingHandle: string): Promise<FirewallInspection> {
-    if (!isFirewallOpaqueHandle(bindingHandle)) {
-      throw new Error("The firewall binding is invalid.");
-    }
-    const value = await this.#request(FIREWALL_READ_RPC_METHODS.inspect, { bindingHandle });
-    if (!isFirewallInspection(value)) {
-      throw new Error("The backend returned an invalid firewall inspection.");
+    const value = await this.#request(SYSTEM_INFO_RPC_METHODS.rowInspect, {
+      bindingHandle,
+      snapshotHandle,
+      rowId,
+      action,
+    }, SYSTEM_INFO_ROW_INSPECT_TIMEOUT_MS);
+    if (!isSystemInfoRowInspection(value) || value.rowId !== rowId || value.action !== action) {
+      throw new Error("The backend returned an invalid system-information row inspection.");
     }
     return value;
   }
 
-  async listFirewallChangeHistory(bindingHandle: string): Promise<FirewallHistory> {
-    if (!isFirewallOpaqueHandle(bindingHandle)) {
-      throw new Error("The firewall binding is invalid.");
+  async planSystemInfoRowAction(
+    bindingHandle: string,
+    snapshotHandle: string,
+    rowId: string,
+    action: string,
+  ): Promise<SystemInfoRowPlan> {
+    if (
+      !isSystemInfoRowRequest(bindingHandle, snapshotHandle, rowId) ||
+      !isSystemInfoRowActionKey(action)
+    ) {
+      throw new Error("The system-information row plan request is invalid.");
     }
-    const value = await this.#request(FIREWALL_READ_RPC_METHODS.listHistory, { bindingHandle });
-    if (!isFirewallHistory(value)) {
-      throw new Error("The backend returned invalid firewall change history.");
+    const value = await this.#request(SYSTEM_INFO_RPC_METHODS.rowPlan, {
+      bindingHandle,
+      snapshotHandle,
+      rowId,
+      action,
+    }, SYSTEM_INFO_ROW_PLAN_TIMEOUT_MS);
+    if (!isSystemInfoRowPlan(value) || value.rowId !== rowId || value.action !== action) {
+      throw new Error("The backend returned an invalid system-information row plan.");
     }
     return value;
+  }
+
+  async confirmSystemInfoRowAction(
+    bindingHandle: string,
+    planHandle: string,
+  ): Promise<SystemInfoRowPlan> {
+    if (!isSshOpaqueHandle(bindingHandle) || !isSystemInfoOpaqueHandle(planHandle)) {
+      throw new Error("The system-information row confirmation is invalid.");
+    }
+    const value = await this.#request(SYSTEM_INFO_RPC_METHODS.rowConfirm, {
+      bindingHandle,
+      planHandle,
+    });
+    if (!isSystemInfoRowPlan(value) || value.planHandle !== planHandle || !value.confirmed) {
+      throw new Error("The backend returned an invalid system-information row plan.");
+    }
+    return value;
+  }
+
+  async executeSystemInfoRowAction(
+    bindingHandle: string,
+    planHandle: string,
+  ): Promise<SystemInfoRowReceipt> {
+    if (!isSshOpaqueHandle(bindingHandle) || !isSystemInfoOpaqueHandle(planHandle)) {
+      throw new Error("The system-information row execution request is invalid.");
+    }
+    const value = await this.#request(SYSTEM_INFO_RPC_METHODS.rowExecute, {
+      bindingHandle,
+      planHandle,
+    }, SYSTEM_INFO_ROW_EXECUTE_TIMEOUT_MS);
+    if (!isSystemInfoRowReceipt(value) || value.planHandle !== planHandle) {
+      throw new Error("The backend returned an invalid system-information row receipt.");
+    }
+    return value;
+  }
+
+  async cancelSystemInfoRowAction(bindingHandle: string, planHandle: string): Promise<void> {
+    if (!isSshOpaqueHandle(bindingHandle) || !isSystemInfoOpaqueHandle(planHandle)) {
+      throw new Error("The system-information row cancellation is invalid.");
+    }
+    await this.#request(SYSTEM_INFO_RPC_METHODS.rowCancel, { bindingHandle, planHandle });
   }
 
   async getBaselineCatalog(): Promise<BaselineCatalog> {
@@ -1031,47 +1122,6 @@ export class BackendClient {
     });
     if (!isBaselineFile(value) || value.itemHandle !== itemHandle) {
       throw new Error("The backend returned an invalid baseline file.");
-    }
-    return value;
-  }
-
-  async discoverMiddleware(bindingHandle: string): Promise<MiddlewareDiscovery> {
-    if (!isMiddlewareOpaqueHandle(bindingHandle)) {
-      throw new Error("The middleware binding is invalid.");
-    }
-    const value = await this.#request(MIDDLEWARE_READ_RPC_METHODS.discover, { bindingHandle });
-    if (!isMiddlewareDiscovery(value)) {
-      throw new Error("The backend returned invalid middleware discovery.");
-    }
-    return value;
-  }
-
-  async loadMiddlewareConfiguration(
-    bindingHandle: string,
-    discoveryHandle: string,
-    instanceHandle: string,
-  ): Promise<MiddlewareConfiguration> {
-    if (![bindingHandle, discoveryHandle, instanceHandle].every(isMiddlewareOpaqueHandle)) {
-      throw new Error("The middleware configuration handles are invalid.");
-    }
-    const value = await this.#request(MIDDLEWARE_READ_RPC_METHODS.loadConfiguration, {
-      bindingHandle,
-      discoveryHandle,
-      instanceHandle,
-    });
-    if (!isMiddlewareConfiguration(value)) {
-      throw new Error("The backend returned invalid middleware configuration.");
-    }
-    return value;
-  }
-
-  async listMiddlewareHistory(bindingHandle: string): Promise<MiddlewareHistory> {
-    if (!isMiddlewareOpaqueHandle(bindingHandle)) {
-      throw new Error("The middleware binding is invalid.");
-    }
-    const value = await this.#request(MIDDLEWARE_READ_RPC_METHODS.listHistory, { bindingHandle });
-    if (!isMiddlewareHistory(value)) {
-      throw new Error("The backend returned invalid middleware history.");
     }
     return value;
   }
@@ -1323,6 +1373,93 @@ export class BackendClient {
     return value;
   }
 
+  async planKubernetesWorkloadAction(
+    bindingHandle: string,
+    snapshotHandle: string,
+    rowHandle: string,
+    resourceName: string,
+    action: KubernetesWriteAction,
+  ): Promise<KubernetesActionPlan> {
+    if (
+      ![bindingHandle, snapshotHandle, rowHandle].every(isKubernetesOpaqueHandle) ||
+      !isKubernetesResourceName(resourceName) ||
+      !isKubernetesWriteAction(action)
+    ) {
+      throw new Error("The Kubernetes workload action plan request is invalid.");
+    }
+    const value = await this.#request(KUBERNETES_WRITE_RPC_METHODS.planAction, {
+      bindingHandle,
+      snapshotHandle,
+      rowHandle,
+      resourceName,
+      action,
+    });
+    // The plan has to be for the workload and action that were asked for. One
+    // that came back describing something else is one the operator would be
+    // approving without having chosen it.
+    if (
+      !isKubernetesActionPlan(value) ||
+      value.rowHandle !== rowHandle ||
+      value.action !== action.kind ||
+      value.confirmed
+    ) {
+      throw new Error("The backend returned an invalid Kubernetes workload action plan.");
+    }
+    return value;
+  }
+
+  async confirmKubernetesWorkloadAction(
+    bindingHandle: string,
+    planHandle: string,
+  ): Promise<KubernetesActionPlan> {
+    if (![bindingHandle, planHandle].every(isKubernetesOpaqueHandle)) {
+      throw new Error("The Kubernetes workload action confirmation is invalid.");
+    }
+    const value = await this.#request(KUBERNETES_WRITE_RPC_METHODS.confirmAction, {
+      bindingHandle,
+      planHandle,
+    });
+    if (!isKubernetesActionPlan(value) || value.planHandle !== planHandle || !value.confirmed) {
+      throw new Error("The backend returned an invalid Kubernetes workload action confirmation.");
+    }
+    return value;
+  }
+
+  async executeKubernetesWorkloadAction(
+    bindingHandle: string,
+    planHandle: string,
+  ): Promise<KubernetesActionReceipt> {
+    if (![bindingHandle, planHandle].every(isKubernetesOpaqueHandle)) {
+      throw new Error("The Kubernetes workload action request is invalid.");
+    }
+    const value = await this.#request(
+      KUBERNETES_WRITE_RPC_METHODS.executeAction,
+      { bindingHandle, planHandle },
+      KUBERNETES_ACTION_TIMEOUT_MS,
+    );
+    if (!isKubernetesActionReceipt(value) || value.planHandle !== planHandle) {
+      throw new Error("The backend returned an invalid Kubernetes workload action receipt.");
+    }
+    return value;
+  }
+
+  async cancelKubernetesWorkloadAction(
+    bindingHandle: string,
+    planHandle: string,
+  ): Promise<KubernetesActionCancellation> {
+    if (![bindingHandle, planHandle].every(isKubernetesOpaqueHandle)) {
+      throw new Error("The Kubernetes workload action cancellation is invalid.");
+    }
+    const value = await this.#request(KUBERNETES_WRITE_RPC_METHODS.cancelAction, {
+      bindingHandle,
+      planHandle,
+    });
+    if (!isKubernetesActionCancellation(value)) {
+      throw new Error("The backend returned an invalid Kubernetes workload action cancellation.");
+    }
+    return value;
+  }
+
   async refreshDockerContainers(bindingHandle: string): Promise<DockerContainerSnapshot> {
     if (!isDockerOpaqueHandle(bindingHandle)) {
       throw new Error("The Docker container refresh request is invalid.");
@@ -1440,6 +1577,127 @@ export class BackendClient {
     return value;
   }
 
+  async planDockerContainerAction(
+    bindingHandle: string,
+    snapshotHandle: string,
+    containerHandle: string,
+    containerName: string,
+    action: DockerWriteAction,
+  ): Promise<DockerActionPlan> {
+    if (
+      ![bindingHandle, snapshotHandle, containerHandle].every(isDockerOpaqueHandle) ||
+      !isDockerContainerName(containerName) ||
+      !isDockerWriteAction(action)
+    ) {
+      throw new Error("The Docker container action plan request is invalid.");
+    }
+    const value = await this.#request(DOCKER_WRITE_RPC_METHODS.planAction, {
+      bindingHandle,
+      snapshotHandle,
+      containerHandle,
+      containerName,
+      action,
+    });
+    // The plan has to be for the container and action that were asked for.
+    // A plan that came back describing something else is one the operator
+    // would be approving without having chosen it.
+    if (
+      !isDockerActionPlan(value) ||
+      value.containerHandle !== containerHandle ||
+      value.action !== action ||
+      value.confirmed
+    ) {
+      throw new Error("The backend returned an invalid Docker container action plan.");
+    }
+    return value;
+  }
+
+  async confirmDockerContainerAction(
+    bindingHandle: string,
+    planHandle: string,
+  ): Promise<DockerActionPlan> {
+    if (![bindingHandle, planHandle].every(isDockerOpaqueHandle)) {
+      throw new Error("The Docker container action confirmation is invalid.");
+    }
+    const value = await this.#request(DOCKER_WRITE_RPC_METHODS.confirmAction, {
+      bindingHandle,
+      planHandle,
+    });
+    if (!isDockerActionPlan(value) || value.planHandle !== planHandle || !value.confirmed) {
+      throw new Error("The backend returned an invalid Docker container action confirmation.");
+    }
+    return value;
+  }
+
+  async executeDockerContainerAction(
+    bindingHandle: string,
+    planHandle: string,
+  ): Promise<DockerActionReceipt> {
+    if (![bindingHandle, planHandle].every(isDockerOpaqueHandle)) {
+      throw new Error("The Docker container action request is invalid.");
+    }
+    const value = await this.#request(
+      DOCKER_WRITE_RPC_METHODS.executeAction,
+      { bindingHandle, planHandle },
+      DOCKER_ACTION_TIMEOUT_MS,
+    );
+    if (!isDockerActionReceipt(value) || value.planHandle !== planHandle) {
+      throw new Error("The backend returned an invalid Docker container action receipt.");
+    }
+    return value;
+  }
+
+  async cancelDockerContainerAction(
+    bindingHandle: string,
+    planHandle: string,
+  ): Promise<DockerActionCancellation> {
+    if (![bindingHandle, planHandle].every(isDockerOpaqueHandle)) {
+      throw new Error("The Docker container action cancellation is invalid.");
+    }
+    const value = await this.#request(DOCKER_WRITE_RPC_METHODS.cancelAction, {
+      bindingHandle,
+      planHandle,
+    });
+    if (!isDockerActionCancellation(value)) {
+      throw new Error("The backend returned an invalid Docker container action cancellation.");
+    }
+    return value;
+  }
+
+  /**
+   * Open a shell inside a listed container.
+   *
+   * Takes the same opaque handles every other Docker call takes and returns
+   * the same terminal handle a host shell does, so the poll, input, resize and
+   * close paths below need no container-aware branch at all.
+   */
+  async openDockerContainerTerminal(
+    bindingHandle: string,
+    snapshotHandle: string,
+    containerHandle: string,
+    columns: number,
+    rows: number,
+  ): Promise<ContainerTerminalOpened> {
+    if (
+      !isTerminalBindingHandle(bindingHandle) ||
+      ![snapshotHandle, containerHandle].every(isDockerOpaqueHandle) ||
+      !isTerminalSize(columns, rows)
+    ) {
+      throw new Error("The container terminal open request is invalid.");
+    }
+    const value = await this.#request(DOCKER_TERMINAL_RPC_METHODS.open, {
+      bindingHandle,
+      snapshotHandle,
+      containerHandle,
+      columns,
+      rows,
+    });
+    if (!isContainerTerminalOpened(value) || value.columns !== columns || value.rows !== rows) {
+      throw new Error("The backend returned an invalid container terminal open response.");
+    }
+    return value;
+  }
+
   async loadEmergencyCommandCatalog(bindingHandle: string): Promise<EmergencyCommandCatalog> {
     if (!isEmergencyCommandOpaqueHandle(bindingHandle)) {
       throw new Error("The emergency command catalog request is invalid.");
@@ -1457,14 +1715,19 @@ export class BackendClient {
     bindingHandle: string,
     snapshotHandle: string,
     commandHandle: string,
+    containerHandle?: string,
   ): Promise<EmergencyCommandResult> {
-    if (![bindingHandle, snapshotHandle, commandHandle].every(isEmergencyCommandOpaqueHandle)) {
+    if (
+      ![bindingHandle, snapshotHandle, commandHandle].every(isEmergencyCommandOpaqueHandle) ||
+      !(containerHandle === undefined || isEmergencyCommandOpaqueHandle(containerHandle))
+    ) {
       throw new Error("The emergency command run request is invalid.");
     }
     const value = await this.#request(EMERGENCY_COMMAND_RPC_METHODS.run, {
       bindingHandle,
       snapshotHandle,
       commandHandle,
+      containerHandle,
     }, EMERGENCY_COMMAND_RUN_TIMEOUT_MS);
     if (
       !isEmergencyCommandResult(value) ||

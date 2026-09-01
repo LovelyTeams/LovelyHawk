@@ -263,6 +263,11 @@ impl SftpBrowserApi {
             observed_line_count: projected.observed_line_count,
             displayed_line_count: projected.displayed_line_count,
             truncated: projected.truncated,
+            // Over `source`, the whole file, not over the projection handed
+            // back. A hash of what was displayed would happily authorise
+            // writing a truncated file over a complete one.
+            sha256: hex_digest(source.as_bytes()),
+            exact: projected.exact,
         };
         ensure_serialized_bound(&dto, MAX_TEXT_RESPONSE_BYTES)?;
         self.validate_binding(&scope)?;
@@ -569,6 +574,21 @@ pub(crate) struct SftpTextPreviewDto {
     pub(crate) observed_line_count: u32,
     pub(crate) displayed_line_count: u32,
     pub(crate) truncated: bool,
+    /// Of the file as read, not of the text that was handed back.
+    ///
+    /// The editor sends this back when it saves, and the write only lands if
+    /// the file on the target still hashes to it — so an edit begun before
+    /// somebody else changed the file is refused rather than silently
+    /// overwriting their change. It is also why the two must not be confused:
+    /// when `truncated` is true this is still the whole file's hash, and the
+    /// text is not the whole file, so saving is refused outright.
+    pub(crate) sha256: String,
+    /// Whether the text above is the file byte for byte. False means the
+    /// projection changed something — a line ending, a control character, a
+    /// dropped tail — and the editor refuses to save, because saving would
+    /// write the change the projection made rather than the one the operator
+    /// made.
+    pub(crate) exact: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1231,6 +1251,30 @@ struct ProjectedText {
     observed_line_count: u32,
     displayed_line_count: u32,
     truncated: bool,
+    /// Whether this text is the file, byte for byte.
+    ///
+    /// The projection splits on lines and rejoins with `\n`, which was fine
+    /// while it only fed a preview and is not fine now that it feeds an
+    /// editor: a file ending in a newline came back without one, and a file
+    /// with CRLF endings came back with LF. Saving either would have quietly
+    /// rewritten the file for no reason the operator asked for — on a sudoers
+    /// file or a shell script that is a real change.
+    ///
+    /// Computed by comparison rather than by tracking each transformation, so
+    /// it cannot drift from what the projection actually did.
+    exact: bool,
+}
+
+/// Lowercase hex, the form the core's own compare-and-write expects.
+fn hex_digest(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+
+    use sha2::{Digest, Sha256};
+    let mut out = String::with_capacity(64);
+    for byte in Sha256::digest(bytes) {
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
 }
 
 fn project_text(source: &str) -> Result<ProjectedText, SftpBrowserApiError> {
@@ -1266,12 +1310,21 @@ fn project_text(source: &str) -> Result<ProjectedText, SftpBrowserApiError> {
         lines.push(projected);
     }
     truncated |= observed > lines.len();
+    let mut text = lines.join("\n");
+    // Put back the final newline the split removed. Most text files on a Unix
+    // host end with one, and an editor that drops it changes every file it
+    // opens.
+    if !truncated && source.ends_with('\n') {
+        text.push('\n');
+    }
+    let exact = !truncated && text == source;
     Ok(ProjectedText {
-        text: lines.join("\n"),
         observed_line_count,
         displayed_line_count: u32::try_from(lines.len())
             .map_err(|_| SftpBrowserApiError::InvalidText)?,
         truncated,
+        exact,
+        text,
     })
 }
 
@@ -1392,6 +1445,17 @@ pub(crate) enum SftpOperationRequest {
         staged_handle: String,
         name: String,
     },
+    /// Write edited text back over a file the operator opened.
+    ///
+    /// `expected_sha256` is the hash the read handed out. The core's
+    /// compare-and-write refuses if the file no longer hashes to it, so an
+    /// edit that began before somebody else changed the file fails loudly
+    /// instead of quietly discarding their work.
+    WriteText {
+        entry_handle: String,
+        text: String,
+        expected_sha256: String,
+    },
 }
 
 impl SftpOperationRequest {
@@ -1403,6 +1467,7 @@ impl SftpOperationRequest {
             Self::Remove { .. } => "remove",
             Self::Archive { .. } => "archive",
             Self::Upload { .. } => "upload",
+            Self::WriteText { .. } => "write-text",
         }
     }
 }
@@ -1679,6 +1744,33 @@ impl SftpBrowserApi {
             SftpOperationRequest::Remove { entry_handle } => {
                 PlannedMutation::Remote(SftpMutation::Remove {
                     path: node(entry_handle)?.path,
+                })
+            }
+            SftpOperationRequest::WriteText {
+                entry_handle,
+                text,
+                expected_sha256,
+            } => {
+                // Same ceiling the read side uses. A file too large to have
+                // been read whole is a file that must not be written back.
+                if text.len() > MAX_CORE_TEXT_BYTES {
+                    return Err(SftpBrowserApiError::InvalidHandle);
+                }
+                if expected_sha256.len() != 64
+                    || !expected_sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
+                {
+                    return Err(SftpBrowserApiError::InvalidHandle);
+                }
+                let target = node(entry_handle)?;
+                PlannedMutation::Remote(SftpMutation::AtomicWriteIfMatch {
+                    // Canonical path checked as well as the hash: a symlink
+                    // swapped under the editor would otherwise land the write
+                    // somewhere the operator never opened.
+                    expected_canonical_path: Some(target.path.clone()),
+                    backup_directory: target.path.parent().ok(),
+                    path: target.path,
+                    expected_sha256: expected_sha256.to_ascii_lowercase(),
+                    content: text.clone().into_bytes(),
                 })
             }
             SftpOperationRequest::Archive {
@@ -2151,8 +2243,80 @@ mod tests {
             observed_line_count: projected.observed_line_count,
             displayed_line_count: projected.displayed_line_count,
             truncated: projected.truncated,
+            sha256: hex_digest(source.as_bytes()),
+            exact: projected.exact,
         };
         ensure_serialized_bound(&dto, MAX_TEXT_RESPONSE_BYTES).unwrap();
+    }
+
+    /// What comes back is the file, or it is marked as not the file.
+    ///
+    /// The projection splits on lines and rejoins with `\n`. That was fine
+    /// while it fed a preview and became a data-loss bug the moment it fed an
+    /// editor: a file ending in a newline read back without one, so opening it
+    /// and saving without typing anything would have removed the newline, and
+    /// a CRLF file would have been converted to LF. `exact` is what the editor
+    /// checks before it offers to save at all.
+    #[test]
+    fn the_projection_is_either_the_file_or_says_it_is_not() {
+        for faithful in [
+            "one\ntwo\nthree\n",
+            "one\ntwo\nthree",
+            "",
+            "\n",
+            "single line",
+            "trailing blank\n\n",
+        ] {
+            let projected = project_text(faithful).unwrap();
+            assert!(projected.exact, "{faithful:?} should round-trip");
+            assert_eq!(projected.text, faithful, "{faithful:?} came back changed");
+        }
+
+        // CRLF: Rust's `lines()` eats the carriage return, so the text is a
+        // different file. It is still shown — it is just not writable.
+        let crlf = project_text("one\r\ntwo\r\n").unwrap();
+        assert!(!crlf.exact);
+        assert_eq!(crlf.text, "one\ntwo\n");
+
+        // A control character the projection strips is the same story.
+        let control = project_text("before\u{0}after\n").unwrap();
+        assert!(!control.exact);
+
+        // And a file too long to have been read whole is never exact, because
+        // what came back is missing its tail.
+        let long = (0..MAX_TEXT_LINES + 5)
+            .map(|index| format!("line-{index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let truncated = project_text(&long).unwrap();
+        assert!(truncated.truncated);
+        assert!(!truncated.exact);
+    }
+
+    /// The hash is of the whole file, never of the text that was handed back.
+    ///
+    /// It authorises a write, so hashing the projection would let a truncated
+    /// read authorise replacing a complete file with the part that fitted.
+    #[test]
+    fn the_read_hash_covers_the_whole_file_not_the_projection() {
+        let source = (0..MAX_TEXT_LINES + 50)
+            .map(|index| format!("line-{index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let projected = project_text(&source).unwrap();
+        assert!(projected.truncated);
+        assert_ne!(projected.text, source);
+        assert_eq!(hex_digest(source.as_bytes()).len(), 64);
+        assert_ne!(
+            hex_digest(source.as_bytes()),
+            hex_digest(projected.text.as_bytes()),
+        );
+        // Lowercase hex, which is what the core's compare-and-write expects.
+        assert!(
+            hex_digest(source.as_bytes())
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        );
     }
 
     #[test]

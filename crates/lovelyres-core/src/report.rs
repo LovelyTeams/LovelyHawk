@@ -811,6 +811,9 @@ const fn chapter_label(value: usize) -> &'static str {
     }
 }
 
+/// Nothing writes `firewall`, `batch` or `snapshot` any more — those features
+/// were removed — but a journal written before that still names them, and a
+/// report that fell back to "其他操作" would lose what the entry was about.
 fn source_label(source: &str) -> &str {
     match source {
         "baseline" | "baseline-restore" => "基线修复",

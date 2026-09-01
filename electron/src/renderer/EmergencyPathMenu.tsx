@@ -1,4 +1,6 @@
-import { useEffect, useRef, type ReactElement } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactElement } from "react";
+
+import { menuMaxHeight, placeMenu } from "./menu-placement";
 
 import type { EmergencyCommandPathOffer } from "../shared/emergency-command-contract";
 import { InfoIcon, PermissionIcon, TrashIcon } from "./file-icons";
@@ -58,6 +60,19 @@ export function EmergencyPathMenu({
   onDismiss,
 }: EmergencyPathMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
+  // Measured, then placed, before the browser paints. See menu-placement.ts:
+  // this menu had the same edge problem the SFTP one did.
+  const [placed, setPlaced] = useState<{ x: number; y: number } | null>(null);
+  const [ceiling, setCeiling] = useState<number | null>(null);
+
+  useLayoutEffect(() => {
+    const node = ref.current;
+    if (node === null) return;
+    const box = node.getBoundingClientRect();
+    const viewport = { width: window.innerWidth, height: window.innerHeight };
+    setPlaced(placeMenu(position, { width: box.width, height: box.height }, viewport));
+    setCeiling(menuMaxHeight(viewport.height));
+  }, [position, offer]);
 
   useEffect(() => {
     ref.current?.querySelector("button")?.focus();
@@ -83,7 +98,12 @@ export function EmergencyPathMenu({
       className="emergency-path-menu"
       role="menu"
       data-testid="emergency-path-menu"
-      style={{ left: `${position.x}px`, top: `${position.y}px` }}
+      style={{
+        left: `${(placed ?? position).x}px`,
+        top: `${(placed ?? position).y}px`,
+        maxHeight: ceiling === null ? undefined : `${ceiling}px`,
+        visibility: placed === null ? "hidden" : undefined,
+      }}
     >
       <p className="emergency-path-menu-title" title={offer.path}>{offer.path}</p>
       {ITEMS.map((item) => (

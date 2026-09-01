@@ -19,10 +19,40 @@ export interface EmergencyCommandCatalogItem {
   timeoutSeconds: number;
 }
 
+export const emergencyCommandPlaces = ["container", "pod"] as const;
+export type EmergencyCommandPlace = typeof emergencyCommandPlaces[number];
+
+/**
+ * A place on this target that a check can be pointed at.
+ *
+ * A container of its runtime, or a pod of the cluster it can reach. Name and
+ * image so a person can pick the right one; a handle so the run can name it.
+ * No container id and no raw pod reference — the same rule the Docker and
+ * Kubernetes panes follow.
+ */
+export interface EmergencyCommandContainer {
+  containerHandle: string;
+  /**
+   * Which kind of place this is.
+   *
+   * Carried rather than guessed from the name, so the pane can say "容器" or
+   * "Pod" truthfully instead of calling everything a container.
+   */
+  kind: EmergencyCommandPlace;
+  /** A container's name, or a pod as `namespace/name`. */
+  name: string;
+  image: string;
+}
+
 export interface EmergencyCommandCatalog {
   snapshotHandle: string;
   expiresInSeconds: number;
   commands: EmergencyCommandCatalogItem[];
+  /**
+   * Empty when the target has no container runtime, which is the ordinary
+   * case and not an error.
+   */
+  containers: EmergencyCommandContainer[];
 }
 
 /**
@@ -96,7 +126,18 @@ export interface EmergencyPathReceipt {
 
 export interface EmergencyCommandApi {
   loadEmergencyCommandCatalog(bindingHandle: string): Promise<unknown>;
-  runEmergencyCommand(bindingHandle: string, snapshotHandle: string, commandHandle: string): Promise<unknown>;
+  /**
+   * Runs one catalogue check.
+   *
+   * With a container handle the same check runs inside that container instead
+   * of on the target itself; the handle must come from the same catalogue.
+   */
+  runEmergencyCommand(
+    bindingHandle: string,
+    snapshotHandle: string,
+    commandHandle: string,
+    containerHandle?: string,
+  ): Promise<unknown>;
   inspectEmergencyPath(bindingHandle: string, pathHandle: string): Promise<unknown>;
   planEmergencyPathAction(
     bindingHandle: string,
@@ -112,6 +153,7 @@ type JsonRecord = Record<string, unknown>;
 const encoder = new TextEncoder();
 const categorySet = new Set<string>(emergencyCommandCategories);
 const resultKindSet = new Set<string>(emergencyCommandResultKinds);
+const placeSet = new Set<string>(emergencyCommandPlaces);
 const pathActionSet = new Set<string>(emergencyPathActions);
 const pathKindSet = new Set<string>(["file", "directory", "symlink", "other"]);
 const planStateSet = new Set<string>(["planned", "confirmed", "spent"]);
@@ -165,12 +207,23 @@ function catalogItem(value: unknown): value is EmergencyCommandCatalogItem {
 }
 
 export function isEmergencyCommandCatalog(value: unknown): value is EmergencyCommandCatalog {
-  if (!record(value) || !exact(value, ["snapshotHandle", "expiresInSeconds", "commands"]) ||
+  if (!record(value) || !exact(value, ["snapshotHandle", "expiresInSeconds", "commands", "containers"]) ||
     !isEmergencyCommandOpaqueHandle(value.snapshotHandle) || value.expiresInSeconds !== 300 ||
     !Array.isArray(value.commands) || value.commands.length > 256 || !value.commands.every(catalogItem) ||
+    !Array.isArray(value.containers) || value.containers.length > 64 ||
+    !value.containers.every(catalogContainer) ||
     !serializedWithin(value, 256 * 1_024)) return false;
   const commands = value.commands as EmergencyCommandCatalogItem[];
-  return new Set(commands.map((command) => command.commandHandle)).size === commands.length;
+  const containers = value.containers as EmergencyCommandContainer[];
+  return new Set(commands.map((command) => command.commandHandle)).size === commands.length &&
+    new Set(containers.map((container) => container.containerHandle)).size === containers.length;
+}
+
+function catalogContainer(value: unknown): value is EmergencyCommandContainer {
+  return record(value) && exact(value, ["containerHandle", "kind", "name", "image"]) &&
+    isEmergencyCommandOpaqueHandle(value.containerHandle) &&
+    typeof value.kind === "string" && placeSet.has(value.kind) &&
+    catalogText(value.name, 128) && catalogText(value.image, 128);
 }
 
 /**

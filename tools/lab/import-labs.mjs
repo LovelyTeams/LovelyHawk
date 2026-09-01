@@ -1,4 +1,4 @@
-// Writes the nine lab hosts into LovelyRes's own connection store, passwords
+// Writes every lab host into LovelyRes's own connection store, passwords
 // included, so the window opens with all of them ready to connect.
 //
 // Re-running is the normal thing to do: the WSL virtual machine takes a new
@@ -13,7 +13,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { Sidecar } from "./rpc-harness.mjs";
-import { ARENA_PORT, LAB_PORTS, SERVICE_PORTS } from "./lab-target.mjs";
+import {
+  ARENA_PORT,
+  LAB_PORTS,
+  ORCHESTRATION_PORTS,
+  SERVICE_PORTS,
+} from "./lab-target.mjs";
 
 const PASSWORD = "LabRoot#2026";
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -51,8 +56,9 @@ function labId(index) {
  *
  * The arena comes first because it is the one to start with: a single Ubuntu
  * server with everything on it. The intrusion hosts are nine distributions
- * made to look compromised, and the service hosts each run one real product
- * with a deliberately bad configuration.
+ * made to look compromised, the service hosts each run one real product with a
+ * deliberately bad configuration, and the orchestration hosts are the ones the
+ * Docker and Kubernetes pages need — including one machine that runs both.
  *
  * Ids are numbered per family from a fixed base, so adding a family cannot
  * shift the ids of the ones already in the store and leave orphans behind.
@@ -82,7 +88,35 @@ const FAMILIES = [
     label: (name) => `配置不合规 ${name}`,
     note: (name) => `WSL Docker 靶机 svc-${name}，配置故意留了典型问题；见 tools/lab/services/README.md。`,
   },
+  {
+    // A block of its own, well clear of the families above, so adding a host
+    // here can never shift an id that is already in someone's store.
+    base: 920,
+    ports: ORCHESTRATION_PORTS,
+    group: "实验靶机 · 容器编排",
+    label: (name) => ORCHESTRATION_LABELS[name] ?? name,
+    note: (name) => `${ORCHESTRATION_NOTES[name]}见 tools/lab/orchestration/README.md。`,
+  },
 ];
+
+/** These four differ enough from each other that one phrasing cannot cover them. */
+const ORCHESTRATION_LABELS = {
+  docker: "容器编排 Docker 主机",
+  kubernetes: "容器编排 Kubernetes 客户端",
+  podman: "容器编排 Podman 主机",
+  "container-arena": "容器编排 综合（Docker + K8s）",
+};
+
+const ORCHESTRATION_NOTES = {
+  docker: "WSL Docker 靶机 svc-docker：跑自己的 Docker daemon，16 个容器里 9 个各对应"
+    + "安全审计的一条分支，另有一个 Compose 项目。",
+  kubernetes: "WSL Docker 靶机 svc-kubernetes：Ubuntu + kubectl，指向真的单节点 k3s 集群，"
+    + "上面有故意留的 ImagePullBackOff 与 CrashLoopBackOff。",
+  podman: "WSL Docker 靶机 svc-podman：AlmaLinux 9 + Podman，机器上故意一个 docker 都没有，"
+    + "用来验证工具会自己探测运行时而不是假设是 Docker。",
+  "container-arena": "WSL Docker 靶机 svc-arena：一台机器上同时跑 Docker 和 k3s，"
+    + "Docker 页与 Kubernetes 页看的是同一个 SSH 目标 —— 真实赛场机器的样子，日常调试首选这台。",
+};
 
 function draft(family, name, host, port, id) {
   return {

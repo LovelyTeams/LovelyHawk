@@ -12,20 +12,41 @@ export function isTrustedRendererUrl(rawUrl: string): boolean {
   }
 }
 
+/**
+ * The windows that share the terminal preload, and therefore the target the
+ * main process resolved for them.
+ *
+ * A closed set, spelled out: the file editor joined it so a file can be opened
+ * at a readable size and written back, and it reaches the same SFTP handlers
+ * the browser does. Anything not on this list is not one of these windows and
+ * gets none of them.
+ */
+export const TERMINAL_FAMILY_WINDOWS = ["terminal", "file-editor"] as const;
+export type TerminalFamilyWindow = (typeof TERMINAL_FAMILY_WINDOWS)[number];
+
 export function isTerminalRendererUrl(rawUrl: string): boolean {
+  return terminalRendererWindow(rawUrl) !== null;
+}
+
+/** Which of the family a URL is, or null when it is not one of them. */
+export function terminalRendererWindow(rawUrl: string): TerminalFamilyWindow | null {
   try {
     const url = new URL(rawUrl);
-    return (
-      url.protocol === `${RENDERER_SCHEME}:` &&
-      url.host === RENDERER_HOST &&
-      url.pathname === "/" &&
-      url.search === "?window=terminal" &&
-      url.hash === "" &&
-      url.searchParams.size === 1 &&
-      url.searchParams.get("window") === "terminal"
-    );
+    if (
+      url.protocol !== `${RENDERER_SCHEME}:` ||
+      url.host !== RENDERER_HOST ||
+      url.pathname !== "/" ||
+      url.hash !== "" ||
+      url.searchParams.size !== 1
+    ) {
+      return null;
+    }
+    const kind = url.searchParams.get("window");
+    return (TERMINAL_FAMILY_WINDOWS as readonly string[]).includes(kind ?? "")
+      ? kind as TerminalFamilyWindow
+      : null;
   } catch {
-    return false;
+    return null;
   }
 }
 

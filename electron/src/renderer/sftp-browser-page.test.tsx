@@ -14,7 +14,6 @@ import {
   SftpBrowserError,
   SftpBrowserPage,
   SftpBrowserStatus,
-  SftpBrowserDetail,
   SftpBrowserTable,
   SftpTextPreviewView,
 } from "./SftpBrowserPage";
@@ -31,6 +30,7 @@ const api: SftpBrowserApi & LocalBrowserApi = {
   executeSftpOperation: async () => { throw new Error(); },
   cancelSftpOperation: async () => { throw new Error(); },
   stageSftpUpload: async () => { throw new Error(); },
+  openFileEditor: async () => ({ opened: true, reused: false }),
 };
 
 const hostileName = "<script>steal()<img src=x onerror=steal()>";
@@ -51,6 +51,8 @@ const preview: SftpTextPreview = {
   observedLineCount: 4,
   displayedLineCount: 2,
   truncated: true,
+  sha256: "a".repeat(64),
+  exact: false,
 };
 
 describe("SftpBrowserPage", () => {
@@ -73,19 +75,6 @@ describe("SftpBrowserPage", () => {
     expect(rows).not.toContain("预览文本");
     expect(rows).not.toContain("打开目录");
 
-    // The preview surface stays out of the way until it has something the
-    // table cannot show.
-    const idle = renderToStaticMarkup(<SftpBrowserDetail selected={entries[1]!} previewStatus="idle"
-      preview={null} previewError={null} />);
-    expect(idle).toBe("");
-
-    const failed = renderToStaticMarkup(<SftpBrowserDetail selected={entries[1]!} previewStatus="error"
-      preview={null} previewError="固定公开错误" />);
-    expect(failed).toContain("固定公开错误");
-
-    const symlink = renderToStaticMarkup(<SftpBrowserDetail selected={entries[2]!} previewStatus="idle"
-      preview={null} previewError={null} />);
-    expect(symlink).toBe("");
   });
 
   /** The design asks for a table; every column has to come from the contract. */

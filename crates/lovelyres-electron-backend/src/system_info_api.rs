@@ -19,7 +19,7 @@ use lovelyres_core::{
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::ssh_api::SshApi;
+use crate::{ssh_api::SshApi, system_info_action_api::RowPlanRegistry};
 
 const MAX_REQUEST_ROWS: usize = 500;
 const MAX_SNAPSHOTS: usize = 16;
@@ -32,9 +32,12 @@ const MAX_ROW_ID_BYTES: usize = 256;
 const SNAPSHOT_TTL: Duration = Duration::from_secs(5 * 60);
 
 pub(crate) struct SystemInfoApi {
-    services: BackendServices,
-    ssh: Arc<SshApi>,
+    pub(crate) services: BackendServices,
+    pub(crate) ssh: Arc<SshApi>,
     snapshots: Mutex<SnapshotRegistry>,
+    /// Changes an operator asked for from a row and has not yet approved or
+    /// run. See `system_info_action_api`.
+    pub(crate) plans: Mutex<RowPlanRegistry>,
 }
 
 impl fmt::Debug for SystemInfoApi {
@@ -57,7 +60,46 @@ impl SystemInfoApi {
             services,
             ssh,
             snapshots: Mutex::new(SnapshotRegistry::default()),
+            plans: Mutex::new(RowPlanRegistry::default()),
         }
+    }
+
+    /// Forgets everything held for a binding that is going away, so a stale
+    /// window cannot act through a handle the target no longer backs.
+    pub(crate) fn close_binding(&self, binding_handle: &str) {
+        if let Ok(mut snapshots) = self.snapshots.lock() {
+            snapshots
+                .snapshots
+                .retain(|_, snapshot| snapshot.binding_handle != binding_handle);
+        }
+        if let Ok(mut plans) = self.plans.lock() {
+            plans.close_binding(binding_handle);
+        }
+    }
+
+    /// The live session and the table one snapshot handle names, checked the
+    /// way `detail` checks them. `row_id` is only bounded here; whether it
+    /// names a row of that table is the caller's question.
+    pub(crate) fn snapshot_for(
+        &self,
+        binding_handle: &str,
+        snapshot_handle: &str,
+        row_id: &str,
+    ) -> Result<(BoundSshSession, SystemInfoTable), SystemInfoApiError> {
+        if snapshot_handle.is_empty() || snapshot_handle.len() > MAX_HANDLE_BYTES {
+            return Err(SystemInfoApiError::InvalidSnapshot);
+        }
+        if row_id.is_empty() || row_id.len() > MAX_ROW_ID_BYTES {
+            return Err(SystemInfoApiError::InvalidRow);
+        }
+        let session = self.binding_session(binding_handle)?;
+        let table = self.lock_snapshots()?.table(
+            binding_handle,
+            session.target(),
+            snapshot_handle,
+            Instant::now(),
+        )?;
+        Ok((session, table))
     }
 
     pub(crate) fn catalog() -> Vec<SystemInfoTabDto> {
@@ -136,13 +178,16 @@ impl SystemInfoApi {
         Ok(detail.into())
     }
 
-    fn binding_session(&self, binding_handle: &str) -> Result<BoundSshSession, SystemInfoApiError> {
+    pub(crate) fn binding_session(
+        &self,
+        binding_handle: &str,
+    ) -> Result<BoundSshSession, SystemInfoApiError> {
         self.ssh
             .binding_session_clone(binding_handle)
             .map_err(|_| SystemInfoApiError::BindingUnavailable)
     }
 
-    fn ensure_binding_unchanged(
+    pub(crate) fn ensure_binding_unchanged(
         &self,
         binding_handle: &str,
         expected: &BoundSshSession,
@@ -173,6 +218,15 @@ pub(crate) enum SystemInfoApiError {
     InvalidRow,
     DetailUnavailable,
     RegistryUnavailable,
+    /// The action key is not one the sidecar hands out.
+    InvalidAction,
+    /// The action is real but the core refused it for this row: the process
+    /// is gone, the connection is not TCP, the line is already a comment.
+    ActionUnavailable,
+    /// The plan handle names nothing, expired, or belongs to another binding.
+    PlanStale,
+    PlanNotConfirmed,
+    Deadline,
 }
 
 impl fmt::Debug for SystemInfoApiError {
@@ -187,6 +241,11 @@ impl fmt::Debug for SystemInfoApiError {
             Self::InvalidRow => "InvalidRow",
             Self::DetailUnavailable => "DetailUnavailable",
             Self::RegistryUnavailable => "RegistryUnavailable",
+            Self::InvalidAction => "InvalidAction",
+            Self::ActionUnavailable => "ActionUnavailable",
+            Self::PlanStale => "PlanStale",
+            Self::PlanNotConfirmed => "PlanNotConfirmed",
+            Self::Deadline => "Deadline",
         };
         formatter.write_str(name)
     }
@@ -204,6 +263,11 @@ impl fmt::Display for SystemInfoApiError {
             Self::InvalidRow => "the system-information row is invalid",
             Self::DetailUnavailable => "this system-information row has no detail request",
             Self::RegistryUnavailable => "the system-information snapshot registry is unavailable",
+            Self::InvalidAction => "the system-information row action is invalid",
+            Self::ActionUnavailable => "the system-information row action does not apply",
+            Self::PlanStale => "the system-information plan is missing, expired, or spent",
+            Self::PlanNotConfirmed => "the system-information plan has not been confirmed",
+            Self::Deadline => "the system-information row action exceeded its deadline",
         })
     }
 }
@@ -632,7 +696,7 @@ const fn risk_key(risk: SystemInfoRisk) -> &'static str {
     }
 }
 
-const fn tab_key(tab: SystemInfoTab) -> &'static str {
+pub(crate) const fn tab_key(tab: SystemInfoTab) -> &'static str {
     match tab {
         SystemInfoTab::Processes => "processes",
         SystemInfoTab::Network => "network",

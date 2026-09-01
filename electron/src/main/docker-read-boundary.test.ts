@@ -29,11 +29,11 @@ function expectLiteralErrorsOnly(source: string, expectedCount: number): void {
 }
 
 describe("central Docker Electron read boundary", () => {
-  it("keeps the exact five read methods in the frozen exact 117 preload", () => {
+  it("keeps the exact five read methods in the frozen exact 124 preload", () => {
     const body = frozenApiBody();
     const names = [...body.matchAll(/^  (?<name>[A-Za-z_$][A-Za-z0-9_$]*):/gmu)]
       .map((match) => match.groups?.name);
-    expect(names).toHaveLength(117);
+    expect(names).toHaveLength(124);
     for (const name of [
       "refreshDockerContainers",
       "getDockerCollection",
@@ -57,9 +57,12 @@ describe("central Docker Electron read boundary", () => {
       "lovelyres:docker:container:logs:get",
     ]) expect((mainSource.match(new RegExp(channel, "gu")) ?? [])).toHaveLength(1);
 
+    // Ends where reading ends. The action routes live immediately after and
+    // have their own boundary test; letting them into this slice would make
+    // the read counts drift every time an action is added.
     const boundary = mainSource.slice(
       mainSource.indexOf('ipcMain.handle("lovelyres:docker:containers:refresh"'),
-      mainSource.indexOf('ipcMain.handle("lovelyres:emergency-command:catalog:load"'),
+      mainSource.indexOf('ipcMain.handle("lovelyres:docker:container:action:plan"'),
     );
     const exactKeyValidator = mainSource.slice(
       mainSource.indexOf("function hasExactKeys("),
@@ -105,7 +108,7 @@ describe("central Docker Electron read boundary", () => {
 
     const boundary = backendClientSource.slice(
       backendClientSource.indexOf("async refreshDockerContainers"),
-      backendClientSource.indexOf("async loadEmergencyCommandCatalog"),
+      backendClientSource.indexOf("async planDockerContainerAction"),
     );
     for (const validator of [
       "isDockerContainerSnapshot",
@@ -142,9 +145,41 @@ describe("central Docker Electron read boundary", () => {
     expect(api).toMatch(
       /getDockerLogs\(\s*bindingHandle: string,\s*snapshotHandle: string,\s*containerHandle: string,\s*tail: number,\s*\): Promise<DockerLogs>;/u,
     );
-    expect(api).not.toMatch(
-      /\b(?:scale|restart|delete|prune|exec|file|terminal|export|generic|shell|process|invoke)\b/iu,
-    );
+    // The surface is closed by enumeration rather than by banning verbs. A
+    // word blacklist could only catch a name someone happened to choose
+    // badly, and it fired on this file's own documentation the moment a
+    // method was called what it is; this fails for anything added at all.
+    // The slice starts mid-line, at the first method's name, so the leading
+    // indentation the pattern anchors on is put back before scanning.
+    const methods = [...`  ${api}`.matchAll(/^ {2}(?<name>[A-Za-z_$][A-Za-z0-9_$]*)\(/gmu)]
+      .map((match) => match.groups?.name);
+    expect(methods).toEqual([
+      "refreshDockerContainers",
+      "getDockerCollection",
+      "inspectDockerResource",
+      "getDockerSecurityAudit",
+      "getDockerLogs",
+      "planDockerContainerAction",
+      "confirmDockerContainerAction",
+      "executeDockerContainerAction",
+      "cancelDockerContainerAction",
+      "openDockerContainerTerminal",
+    ]);
+
+    // What actually has to stay opaque is what crosses, so check the
+    // parameters. Comments are stripped first: prose is not a parameter, and
+    // treating it as one is what made the previous rule unusable.
+    const declarations = api.replace(/\/\*[\s\S]*?\*\//gu, "").replace(/\/\/[^\r\n]*/gu, "");
+    const parameters = [...declarations.matchAll(/(?<name>\w+): (?<type>[A-Za-z][\w.<>]*)/gu)]
+      .map((match) => ({ name: match.groups?.name ?? "", type: match.groups?.type ?? "" }));
+    expect(parameters.length).toBeGreaterThan(20);
+    for (const { name, type } of parameters) {
+      // Closed enums and bounded numbers pass on their type alone. Everything
+      // else must be an opaque handle, or the one display-only name the
+      // action dialog and the terminal window title need.
+      if (["DockerCollectionKind", "DockerResourceKind", "DockerWriteAction", "number"].includes(type)) continue;
+      expect({ name, type }).toEqual({ name: expect.stringMatching(/Handle$|^containerName$/u), type: "string" });
+    }
   });
 
   it("mounts the page with only the current opaque binding handle", () => {

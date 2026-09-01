@@ -7,15 +7,20 @@ import type {
   KubernetesReadApi,
   KubernetesSnapshot,
 } from "../shared/kubernetes-read-contract";
+import type { KubernetesWriteApi } from "../shared/kubernetes-write-contract";
 import { KubernetesPage } from "./KubernetesPage";
 import { kubernetesReadScope } from "./kubernetes-read-helpers";
 import { createKubernetesReadState, type KubernetesReadState } from "./kubernetes-read-state";
 
-const api: KubernetesReadApi = {
+const api: KubernetesReadApi & KubernetesWriteApi = {
   getKubernetesAvailability: vi.fn(async () => ({})),
   listKubernetesResources: vi.fn(async () => ({})),
   getKubernetesResourceDetail: vi.fn(async () => ({})),
   getKubernetesPodLogs: vi.fn(async () => ({})),
+  planKubernetesWorkloadAction: vi.fn(async () => ({})),
+  confirmKubernetesWorkloadAction: vi.fn(async () => ({})),
+  executeKubernetesWorkloadAction: vi.fn(async () => ({})),
+  cancelKubernetesWorkloadAction: vi.fn(async () => ({})),
 };
 const bindingHandle = "binding-secret-capability";
 const hostile = "</pre><script>steal()</script><img src=x onerror=steal()>";
@@ -132,7 +137,7 @@ describe("standalone Kubernetes read page", () => {
   it("renders disconnected, empty, error, and truncation states without invented rows", () => {
     let html = renderToStaticMarkup(<KubernetesPage bindingHandle={null} api={api} />);
     expect(html).toContain("连接目标后调查 Kubernetes");
-    expect(html).toContain("不会修改集群");
+    expect(html).toContain("要先确认再执行");
 
     const empty = readyState();
     empty.snapshot = { ...pods(), displayed: 0, rows: [], namespaceScoped: true };

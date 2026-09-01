@@ -112,6 +112,18 @@ const terminalApi: TerminalApi = Object.freeze({
   openLocalBrowser: () => ipcRenderer.invoke("lovelyres:terminal:local:open"),
   listLocalDirectory: (directoryHandle: string) =>
     ipcRenderer.invoke("lovelyres:terminal:local:list", directoryHandle),
+  openFileEditor: (
+    browserHandle: string,
+    entryHandle: string,
+    name: string,
+    editable: boolean,
+  ) => ipcRenderer.invoke("lovelyres:terminal:file-editor:open", {
+    browserHandle,
+    entryHandle,
+    name,
+    editable,
+  }),
+  fileEditorTarget: () => ipcRenderer.invoke("lovelyres:terminal:file-editor:target"),
 });
 
 contextBridge.exposeInMainWorld("lovelyresTerminal", terminalApi);

@@ -118,18 +118,6 @@ impl TargetContext {
         let state = self.state.read();
         validate_state(&state, guard)
     }
-
-    /// Apply a short synchronous result while preventing a concurrent target
-    /// activation from slipping between the guard check and local persistence.
-    pub(crate) fn apply_if_current<T>(
-        &self,
-        guard: &TargetGuard,
-        apply: impl FnOnce() -> CoreResult<T>,
-    ) -> CoreResult<T> {
-        let state = self.state.read();
-        validate_state(&state, guard)?;
-        apply()
-    }
 }
 
 fn validate_state(state: &TargetState, guard: &TargetGuard) -> CoreResult<()> {
@@ -202,23 +190,6 @@ mod tests {
             context.current_guard(),
             Err(CoreError::NoActiveTarget)
         ));
-    }
-
-    #[test]
-    fn stale_guard_cannot_apply_a_local_result() {
-        let context = TargetContext::new();
-        let stale = context.activate(identity("host-a")).unwrap();
-        context.activate(identity("host-b")).unwrap();
-        let mut applied = false;
-        assert!(
-            context
-                .apply_if_current(&stale, || {
-                    applied = true;
-                    Ok(())
-                })
-                .is_err()
-        );
-        assert!(!applied);
     }
 
     #[test]

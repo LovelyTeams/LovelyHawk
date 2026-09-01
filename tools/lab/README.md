@@ -32,6 +32,64 @@ LovelyRes 的连接库。打开应用就能在连接管理里直接点，不用�
 WSL 重启后虚机会换地址，再跑一次 `pnpm lab:up` 就把九条连接的地址都刷新了（原地更新，
 不会产生重复条目）。
 
+### 靶机集体挂掉，先别查靶机
+
+表现是**所有靶机的退出码相同、退出时间也相同**（`Exited (255)` 或 `Exited (128)`）。
+判据：靶机的 PID 1 是 `exec sleep infinity`（见 `services/entrypoint.sh`），它自己不会退出，
+所以非零退出码一定来自外面；`docker inspect` 里 `OOMKilled=false` 可以排除内存不够。
+
+**直接原因是虚机里的 docker 守护进程停过一次又起来了**，不是靶机自己的问题。查证：
+
+```bash
+wsl -d Ubuntu -u root -- journalctl -u docker --no-pager | grep 'systemd\[1\]'
+```
+
+看 `Started docker.service` 的时间，和靶机的退出时间对得上就是它。
+
+触发条件是**机器上一个 `wsl.exe` 进程都不剩**：最后一个退出后几秒，虚机里的 docker
+守护进程和所有容器就没了；下一次 `wsl.exe` 进来时 `docker.service` 被重新拉起来，
+但容器不会跟着回来。
+
+这不是「发行版重启了」——`journalctl --list-boots` 显示 boot id 自始至终没变、uptime
+连续。所以 `/etc/wsl.conf` 里的 `systemd=true` 帮不上忙，`systemctl is-enabled docker`
+显示 enabled 也帮不上忙。2026-09-02 记到三次，都是同一个 boot 里发生的：
+
+| 最后一个 wsl.exe 退出 | `Starting docker.service` | 容器退出 |
+| --- | --- | --- |
+| ~00:29 | 00:30:17 | 同一窗口 |
+| ~02:10 | 02:10:58 | 02:10:55 |
+| ~03:51 | 03:51:39 | 同一窗口 |
+
+反过来也成立：中间用一个长命令占着的那 97 分钟，靶机一台没掉。所以要长时间跑测试，
+先开个后台进程占住，再起靶机：
+
+```bash
+wsl -d Ubuntu -e sleep 5400 &
+```
+
+守护进程刚起来的那十几秒里**别急着起靶机**：`--privileged` 的那两台会撞上
+`devices.allow: invalid argument`（cgroup 还没就绪），`docker start` 直接失败，
+但过一会儿重试就好了。`restart.sh` 报告「已启动」而靶机其实没起来，多半就是这个——
+所以起完要复查一次 `docker ps -a --filter status=exited`。
+
+被这样杀掉之后，跑着守护进程的那两台靶机自己起不来，各有各的理由，两条都已经在
+entrypoint 里处理了：`svc-docker` 的 `/var/run/docker.pid` 留在可写层，下次启动时那个
+pid 号**要是**正好被新命名空间里的别的进程占着，dockerd 就拒绝启动（占没占上看运气，
+所以这个故障是时灵时不灵的）；`svc-podman` 缓存了上次的 boot id，对不上就拒绝执行任何
+命令（这条是必现的）。`svc-arena` 用的是 `--tmpfs /var/run`，pid 文件活不过进程，所以不需要。
+
+**改的是 entrypoint，所以镜像不重建就还是老样子。** 2026-09-02 验过：两台各重建一次，
+再 `docker kill` 硬杀、`docker start` 起回来，内层守护进程都自己活了，内层容器也跟着回来。
+只要内层守护进程起得来，`plant.sh` 会在 entrypoint 里重跑一遍，把内层容器恢复成预期状态
+（它们自己没有 restart 策略——「停着的容器」也是靶机的一部分）。守护进程要是没起来，
+`plant.sh` 的等待循环会超时退出，那时内层就一个都不会回来，得手工补：
+
+```bash
+wsl -d Ubuntu -u root -- docker exec svc-docker sh -c 'docker ps -a --format "{{.Names}}" | grep -vE "^(stopped-worker|stopped-batch)$" | xargs -r docker start'
+```
+
+`/var/lib/docker` 那个卷要是被写坏了（dockerd 启动时 panic），修不回来，删掉卷重建靶机。
+
 | 命令 | 作用 |
 | --- | --- |
 | `pnpm lab:up` | 起容器 + 写连接库 |

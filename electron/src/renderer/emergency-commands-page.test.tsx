@@ -283,7 +283,14 @@ describe("EmergencyCommandsPage", () => {
   it("keeps phase one free of arbitrary input and adjacent action surfaces", () => {
     const source = readFileSync(new URL("./EmergencyCommandsPage.tsx", import.meta.url), "utf8");
     expect(source).toContain("api.loadEmergencyCommandCatalog(bindingHandle)");
-    expect(source).toContain("api.runEmergencyCommand(bindingHandle, request.snapshotHandle, request.commandHandle)");
+    // Handles and nothing else, plus where to run it — and that is a handle
+    // from the same catalogue too, never a container name or id.
+    expect(source).toMatch(
+      /api\.runEmergencyCommand\(\s*bindingHandle,\s*request\.snapshotHandle,\s*request\.commandHandle,\s*containerHandle \?\? undefined,\s*\)/u,
+    );
+    // Null is the target itself, which stays the default.
+    expect(source).toContain("useState<string | null>(null)");
+    expect(source).toContain("event.currentTarget.value === \"\" ? null : event.currentTarget.value");
     expect(source).toContain("bindingHandle: string | null;");
     expect(source).not.toContain("SshTargetSummary");
     expect(source).not.toContain("EmergencyCommandsConnection");
@@ -303,7 +310,25 @@ describe("EmergencyCommandsPage", () => {
       "sessionId:",
       "generation:",
     ]) expect(source).not.toContain(forbidden);
-    expect(source).not.toMatch(/runEmergencyCommand\([^,]+,[^,]+,[^,)]+,[^)]/u);
+    // The run call carries handles and nothing else. It used to be pinned as
+    // "no fourth argument at all", which stopped being the right rule once
+    // there was a legitimate fourth — so the rule now names what that one may
+    // be rather than forbidding the position.
+    for (const call of source.match(/api\.runEmergencyCommand\([\s\S]*?\)/gu) ?? []) {
+      const passed = call
+        .slice(call.indexOf("(") + 1, call.lastIndexOf(")"))
+        .split(",")
+        .map((argument) => argument.trim())
+        .filter((argument) => argument !== "");
+      expect(passed).toHaveLength(4);
+      // The first three are plain identifiers the page was handed — never a
+      // literal, a template or anything it composed itself.
+      for (const argument of passed.slice(0, 3)) {
+        expect(argument).toMatch(/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?$/u);
+      }
+      // And the fourth is the container, or the target when there is none.
+      expect(passed[3]).toBe("containerHandle ?? undefined");
+    }
   });
 
   it("uses global theme tokens with no color literals", () => {

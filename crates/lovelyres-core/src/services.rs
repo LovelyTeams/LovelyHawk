@@ -9,7 +9,6 @@ use tokio::runtime::Handle;
 use crate::ai::AiService;
 use crate::audit::AuditService;
 use crate::baseline::BaselineService;
-use crate::batch::BatchService;
 use crate::command_workbench::CommandWorkbenchService;
 use crate::connections::ConnectionRepository;
 use crate::crypto::CryptoVault;
@@ -17,7 +16,6 @@ use crate::database::DatabaseService;
 use crate::detection::DetectionService;
 use crate::docker::DockerService;
 use crate::file_analysis::FileAnalysisService;
-use crate::firewall::FirewallService;
 use crate::integrity::IntegrityService;
 use crate::investigation::InvestigationRepositories;
 use crate::java::JavaService;
@@ -30,7 +28,6 @@ use crate::path_guard::PathGuard;
 use crate::report::ReportService;
 use crate::settings::SettingsRepository;
 use crate::sftp::SftpService;
-use crate::snapshot::SnapshotService;
 use crate::ssh::{BoundSshSession, SshService};
 use crate::ssh_compat::SshCompatibilityService;
 use crate::system_info::SystemInfoService;
@@ -63,10 +60,7 @@ pub struct BackendServices {
     ai: Option<AiService>,
     audit: AuditService,
     commands: CommandWorkbenchService,
-    snapshots: SnapshotService,
-    firewall: FirewallService,
     baseline: BaselineService,
-    batch: BatchService,
     java: JavaService,
 }
 
@@ -109,28 +103,10 @@ impl BackendServices {
         let integrity = IntegrityService::new(ssh.clone(), target.clone(), store.clone());
         let investigation = InvestigationRepositories::new(store.clone());
         let report = ReportService::new(target.clone(), operation_journal.clone());
-        let snapshots = SnapshotService::new(
-            ssh.clone(),
-            target.clone(),
-            store.clone(),
-            operation_journal.clone(),
-        );
-        let firewall = FirewallService::new(
-            ssh.clone(),
-            target.clone(),
-            store.clone(),
-            operation_journal.clone(),
-        );
         let baseline = BaselineService::new(
             ssh.clone(),
             target.clone(),
             store.clone(),
-            operation_journal.clone(),
-        );
-        let batch = BatchService::new(
-            store.clone(),
-            connections.clone(),
-            ssh.clone(),
             operation_journal.clone(),
         );
         let java = JavaService::new(
@@ -169,17 +145,10 @@ impl BackendServices {
             ai,
             audit,
             commands,
-            snapshots,
-            firewall,
             baseline,
-            batch,
             java,
             store,
         })
-    }
-
-    pub fn firewall(&self) -> &FirewallService {
-        &self.firewall
     }
 
     pub fn baseline(&self) -> &BaselineService {
@@ -188,10 +157,6 @@ impl BackendServices {
 
     pub fn middleware(&self) -> &MiddlewareService {
         &self.middleware
-    }
-
-    pub fn batch(&self) -> &BatchService {
-        &self.batch
     }
 
     pub fn java(&self) -> &JavaService {
@@ -286,10 +251,6 @@ impl BackendServices {
 
     pub fn commands(&self) -> &CommandWorkbenchService {
         &self.commands
-    }
-
-    pub fn snapshots(&self) -> &SnapshotService {
-        &self.snapshots
     }
 
     pub fn activate_target(&self, identity: TargetIdentity) -> CoreResult<TargetGuard> {

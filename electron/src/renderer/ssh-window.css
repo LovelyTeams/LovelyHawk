@@ -383,6 +383,11 @@
   border-radius: 9px;
   background: var(--surface);
   box-shadow: var(--shadow-md);
+  /* Placement pins a menu taller than the window to the margin; this is what
+     turns the remainder into a scroll instead of a clip. The item that used to
+     fall off the bottom edge was 删除. See menu-placement.ts. */
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .sftp-context-menu-title {
@@ -395,6 +400,9 @@
 }
 
 .sftp-context-menu button {
+  /* The menu scrolls when it is taller than the window, and a scrolling flex
+     column shrinks its children by default. */
+  flex: none;
   display: flex;
   align-items: center;
   gap: 8px;

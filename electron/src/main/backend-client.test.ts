@@ -13,14 +13,12 @@ import {
   COMMAND_HISTORY_RPC_METHODS,
   DISPOSAL_REPORT_RPC_METHODS,
   DOCKER_READ_RPC_METHODS,
-  FIREWALL_READ_RPC_METHODS,
   INTEGRITY_RPC_METHODS,
   KUBERNETES_READ_RPC_METHODS,
   LOG_ANALYSIS_READ_RPC_METHODS,
   PACKET_CAPTURE_LIVE_RPC_METHODS,
   QUICK_DETECTION_RPC_METHODS,
   SETTINGS_RPC_METHODS,
-  SNAPSHOT_READ_RPC_METHODS,
   SYSTEM_INFO_RPC_METHODS,
   TERMINAL_RPC_METHODS,
   stopChildProcess,
@@ -58,6 +56,11 @@ describe("sidecar request deadlines", () => {
     expect(operation).toBeGreaterThan(sidecar("sftp_browser_api.rs", "EXECUTE_DEADLINE"));
     const transfer = value("SFTP_TRANSFER_TIMEOUT_MS");
     expect(transfer).toBeGreaterThan(sidecar("sftp_browser_api.rs", "TRANSFER_DEADLINE"));
+    // A container action covers the mutation, the journal, the verification
+    // read and possibly a restore, so its sidecar deadline is the longest one
+    // here and the client's has to clear it.
+    const action = value("DOCKER_ACTION_TIMEOUT_MS");
+    expect(action).toBeGreaterThan(sidecar("docker_write_api.rs", "EXECUTE_DEADLINE"));
 
     // Anything that runs a command on a target waits past the forty-five
     // seconds the core allows a single one.
@@ -148,48 +151,46 @@ describe("AI history backend client boundary", () => {
 });
 
 describe("system-info backend client boundary", () => {
-  it("pins exactly four RPC methods and validates every response DTO", () => {
+  it("pins exactly ten RPC methods and validates every response DTO", () => {
     expect(SYSTEM_INFO_RPC_METHODS).toEqual({
       catalog: "system-info.catalog.get",
       summary: "system-info.summary.get",
       collect: "system-info.table.collect",
       detail: "system-info.detail.get",
+      rowActions: "system-info.row.actions.list",
+      rowInspect: "system-info.row.inspect",
+      rowPlan: "system-info.row.action.plan",
+      rowConfirm: "system-info.row.action.confirm",
+      rowExecute: "system-info.row.action.execute",
+      rowCancel: "system-info.row.action.cancel",
     });
-    expect(Object.keys(SYSTEM_INFO_RPC_METHODS)).toHaveLength(4);
+    expect(Object.keys(SYSTEM_INFO_RPC_METHODS)).toHaveLength(10);
     expect(BackendClient.prototype.getSystemInfoCatalog.toString()).toContain("isSystemInfoCatalog");
     expect(BackendClient.prototype.getSystemInfoSummary.toString()).toContain("isSystemInfoSummary");
     expect(BackendClient.prototype.collectSystemInfo.toString()).toContain("isSystemInfoTable");
     expect(BackendClient.prototype.getSystemInfoDetail.toString()).toContain("isSystemInfoDetail");
-  });
-});
-
-describe("Snapshot read backend client boundary", () => {
-  it("pins exactly three target-scoped RPC methods and validates every response DTO", () => {
-    expect(SNAPSHOT_READ_RPC_METHODS).toEqual({
-      list: "snapshot.list",
-      detail: "snapshot.detail.get",
-      diff: "snapshot.forensic.diff",
-    });
-    expect(Object.keys(SNAPSHOT_READ_RPC_METHODS)).toHaveLength(3);
-    expect(BackendClient.prototype.listSnapshots.toString()).toContain("isSnapshotListResult");
-    expect(BackendClient.prototype.getSnapshotDetail.toString()).toContain("isSnapshotDetail");
-    expect(BackendClient.prototype.diffForensicSnapshots.toString()).toContain("isSnapshotDiffResult");
-  });
-});
-
-describe("Firewall read backend client boundary", () => {
-  it("pins exactly two target-scoped RPC methods and validates both response DTOs", () => {
-    expect(FIREWALL_READ_RPC_METHODS).toEqual({
-      inspect: "firewall.inspect",
-      listHistory: "firewall.change-history.list",
-    });
-    expect(Object.keys(FIREWALL_READ_RPC_METHODS)).toHaveLength(2);
-    expect(BackendClient.prototype.inspectFirewall.toString()).toContain("isFirewallInspection");
-    expect(BackendClient.prototype.inspectFirewall.toString()).toContain("isFirewallOpaqueHandle");
-    expect(BackendClient.prototype.listFirewallChangeHistory.toString())
-      .toContain("isFirewallHistory");
-    expect(BackendClient.prototype.listFirewallChangeHistory.toString())
-      .toContain("isFirewallOpaqueHandle");
+    // Row actions: every response is checked and correlated with what was
+    // asked, so a reply about another row or another action is refused.
+    const rowActions = BackendClient.prototype.listSystemInfoRowActions.toString();
+    expect(rowActions).toContain("isSystemInfoRowActions");
+    expect(rowActions).toContain("value.rowId !== rowId");
+    const inspect = BackendClient.prototype.inspectSystemInfoRow.toString();
+    expect(inspect).toContain("isSystemInfoRowActionKey");
+    expect(inspect).toContain("isSystemInfoRowInspection");
+    expect(inspect).toContain("value.action !== action");
+    const plan = BackendClient.prototype.planSystemInfoRowAction.toString();
+    expect(plan).toContain("isSystemInfoRowActionKey");
+    expect(plan).toContain("isSystemInfoRowPlan");
+    expect(plan).toContain("value.action !== action");
+    const confirm = BackendClient.prototype.confirmSystemInfoRowAction.toString();
+    expect(confirm).toContain("value.planHandle !== planHandle");
+    expect(confirm).toContain("!value.confirmed");
+    const execute = BackendClient.prototype.executeSystemInfoRowAction.toString();
+    expect(execute).toContain("isSystemInfoRowReceipt");
+    expect(execute).toContain("value.planHandle !== planHandle");
+    const cancel = BackendClient.prototype.cancelSystemInfoRowAction.toString();
+    expect(cancel).toContain("isSystemInfoOpaqueHandle");
+    expect(cancel).toContain("planHandle");
   });
 });
 

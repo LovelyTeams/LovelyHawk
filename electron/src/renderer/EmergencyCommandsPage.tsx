@@ -52,6 +52,11 @@ export function EmergencyCommandsPage({ bindingHandle, api }: EmergencyCommandsP
   const [state, dispatch] = useReducer(emergencyCommandReducer, undefined, createEmergencyCommandState);
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [runVersion, setRunVersion] = useState(0);
+  // Where the checks run: the target itself, one of its containers, or a pod
+  // of the cluster it can reach. Null is the target, and stays the default —
+  // a check aimed at one container answers a narrower question than most
+  // operators are asking when they open this page.
+  const [containerHandle, setContainerHandle] = useState<string | null>(null);
   // The backend result carries no duration, so time the round trip the operator
   // actually waited for.
   const [runElapsedMs, setRunElapsedMs] = useState<number | null>(null);
@@ -101,7 +106,12 @@ export function EmergencyCommandsPage({ bindingHandle, api }: EmergencyCommandsP
     runStartedAtRef.current = Date.now();
     setRunElapsedMs(null);
     dispatch({ type: "run-started", scope, request });
-    void api.runEmergencyCommand(bindingHandle, request.snapshotHandle, request.commandHandle).then((value) => {
+    void api.runEmergencyCommand(
+      bindingHandle,
+      request.snapshotHandle,
+      request.commandHandle,
+      containerHandle ?? undefined,
+    ).then((value) => {
       if (cancelled) return;
       const startedAt = runStartedAtRef.current;
       if (startedAt !== null) setRunElapsedMs(Date.now() - startedAt);
@@ -145,7 +155,12 @@ export function EmergencyCommandsPage({ bindingHandle, api }: EmergencyCommandsP
         const startedAt = Date.now();
         let entry;
         try {
-          const value = await api.runEmergencyCommand(bindingHandle, run.snapshotHandle, commandHandle);
+          const value = await api.runEmergencyCommand(
+            bindingHandle,
+            run.snapshotHandle,
+            commandHandle,
+            containerHandle ?? undefined,
+          );
           if (!isEmergencyCommandResult(value) || value.snapshotHandle !== run.snapshotHandle ||
             value.commandHandle !== commandHandle) throw new Error();
           entry = { commandHandle, result: value, error: null, elapsedMs: Date.now() - startedAt };
@@ -193,6 +208,28 @@ export function EmergencyCommandsPage({ bindingHandle, api }: EmergencyCommandsP
             disabled={state.catalog === null}
             onChange={(event) => dispatch({ type: "search-changed", search: event.currentTarget.value })} />
         </div>
+        {/* Where the checks run. Only offered when the target actually has
+            containers, so a machine without a runtime keeps a toolbar with
+            nothing dead on it. */}
+        {(state.catalog?.containers.length ?? 0) > 0 && (
+          <label className="emergency-commands-scope">
+            <span>运行位置</span>
+            <select
+              value={containerHandle ?? ""}
+              disabled={state.runStatus === "loading"}
+              onChange={(event) => setContainerHandle(
+                event.currentTarget.value === "" ? null : event.currentTarget.value,
+              )}
+            >
+              <option value="">这台主机</option>
+              {state.catalog?.containers.map((container) => (
+                <option key={container.containerHandle} value={container.containerHandle}>
+                  {container.kind === "pod" ? "Pod" : "容器"} {container.name}（{container.image}）
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <div className="emergency-commands-meta">
           <span className="emergency-commands-readonly"><LockIcon />只读</span>
           {state.catalog !== null && <span>{filtered.length === state.catalog.commands.length ?

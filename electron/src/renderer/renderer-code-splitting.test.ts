@@ -7,8 +7,7 @@ const app = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 /** Every page the registry can show. Each one is its own chunk. */
 const PAGES = [
   "SecurityReference", "Notes", "ConfigurationPage", "SystemInfoPage", "AiHistoryPage",
-  "SnapshotPage", "FirewallPage", "MiddlewarePage", "CheckAuditPage",
-  "IntegrityPage", "LogAnalysisPage", "PacketCapturePage",
+  "CheckAuditPage", "IntegrityPage", "LogAnalysisPage", "PacketCapturePage",
   "KubernetesPage", "DockerPage", "EmergencyCommandsPage",
 ];
 

@@ -723,6 +723,10 @@ impl Drop for SshTerminalSession {
 
 #[async_trait]
 impl TerminalTransport for SshTerminalSession {
+    fn events(&self) -> &TerminalEventReceiver {
+        &self.events
+    }
+
     async fn write_input(&self, bytes: Vec<u8>) -> CoreResult<()> {
         if bytes.is_empty() {
             return Ok(());
@@ -868,19 +872,6 @@ impl SshService {
             result,
             verified_plan,
         })
-    }
-
-    pub(crate) async fn connect_if_snapshot(
-        &self,
-        connection_id: &str,
-        expected_snapshot_digest: &str,
-        confirmations: HostKeyConfirmations,
-    ) -> CoreResult<SshConnectionStatus> {
-        let resolved = self
-            .connections
-            .resolve_for_backend_if_snapshot(connection_id, expected_snapshot_digest)?;
-        self.connect_resolved(connection_id, resolved, confirmations.into())
-            .await
     }
 
     async fn connect_resolved(

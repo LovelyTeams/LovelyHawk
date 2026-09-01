@@ -15,11 +15,11 @@ function frozenApiBody(): string {
 }
 
 describe("central Baseline Electron boundary", () => {
-  it("keeps all four Baseline methods in the central exact 117 preload", () => {
+  it("keeps all four Baseline methods in the central exact 124 preload", () => {
     const body = frozenApiBody();
     const names = [...body.matchAll(/^  (?<name>[A-Za-z_$][A-Za-z0-9_$]*):/gmu)]
       .map((match) => match.groups?.name);
-    expect(names).toHaveLength(117);
+    expect(names).toHaveLength(124);
     for (const name of [
       "getBaselineCatalog",
       "scanBaseline",
@@ -53,7 +53,7 @@ describe("central Baseline Electron boundary", () => {
     ]) expect((mainSource.match(new RegExp(channel, "gu")) ?? [])).toHaveLength(1);
     const boundary = mainSource.slice(
       mainSource.indexOf('ipcMain.handle("lovelyres:baseline:catalog:get"'),
-      mainSource.indexOf('ipcMain.handle("lovelyres:middleware:discover"'),
+      mainSource.indexOf('ipcMain.handle("lovelyres:check-audit:catalog:get"'),
     );
     expect((boundary.match(/values\.length !== 0/gu) ?? [])).toHaveLength(1);
     expect((boundary.match(/values\.length !== 1/gu) ?? [])).toHaveLength(3);

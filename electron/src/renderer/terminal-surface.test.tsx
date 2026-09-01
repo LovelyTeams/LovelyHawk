@@ -30,6 +30,8 @@ const api: TerminalApi = {
   stageSftpUpload: vi.fn(async () => ({})),
   openLocalBrowser: vi.fn(async () => ({})),
   listLocalDirectory: vi.fn(async () => ({})),
+  openFileEditor: vi.fn(async () => ({ opened: true, reused: false })),
+  fileEditorTarget: vi.fn(async () => ({})),
 };
 
 describe("standalone xterm surface", () => {

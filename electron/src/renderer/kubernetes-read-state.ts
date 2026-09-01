@@ -85,6 +85,7 @@ export type KubernetesReadAction =
       context: string;
       error: string;
     }
+  | { type: "row-cleared"; scope: string }
   | { type: "row-selected"; scope: string; snapshotHandle: string; rowHandle: string }
   | {
       type: "detail-started";
@@ -316,6 +317,17 @@ export function kubernetesReadReducer(
         detailStatus: "idle",
         detail: null,
         error: action.error,
+      };
+    case "row-cleared":
+      if (action.scope !== state.scope) return state;
+      // The in-flight read goes with it, so a late reply cannot repopulate a
+      // dialog the operator has just closed.
+      return {
+        ...state,
+        selectedRowHandle: null,
+        detailStatus: "idle",
+        detailRequest: 0,
+        detail: null,
       };
     case "row-selected": {
       if (action.scope !== state.scope) return state;

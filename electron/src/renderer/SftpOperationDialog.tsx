@@ -38,6 +38,7 @@ const KIND_LABELS: Record<SftpOperationKind, string> = {
   remove: "删除",
   archive: "打包",
   upload: "上传",
+  "write-text": "保存修改",
 };
 
 /**

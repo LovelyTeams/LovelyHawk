@@ -18,6 +18,7 @@ import {
 
 const catalog: EmergencyCommandCatalog = {
   snapshotHandle: "snapshot-opaque",
+  containers: [],
   expiresInSeconds: 300,
   commands: [{
     commandHandle: "command-opaque",
@@ -189,11 +190,17 @@ describe("emergency command contract", () => {
   it("declares exactly seven finite methods and no raw execution arguments", () => {
     const source = readFileSync(new URL("./emergency-command-contract.ts", import.meta.url), "utf8");
     const api = source.slice(source.indexOf("export interface EmergencyCommandApi"), source.indexOf("type JsonRecord"));
-    // Seven methods: six fit on one line, planEmergencyPathAction does not.
+    // Seven methods: five fit on one line, planEmergencyPathAction and
+    // runEmergencyCommand do not — the latter since it gained the container it
+    // may be pointed at.
     expect(api.match(/^  [a-zA-Z][A-Za-z]*\(/gmu)).toHaveLength(7);
-    expect(api.match(/^\s{2}[a-zA-Z].*Promise<(?:unknown|void)>;/gmu)).toHaveLength(6);
+    expect(api.match(/^\s{2}[a-zA-Z].*Promise<(?:unknown|void)>;/gmu)).toHaveLength(5);
     expect(api).toContain("loadEmergencyCommandCatalog(bindingHandle: string)");
-    expect(api).toContain("runEmergencyCommand(bindingHandle: string, snapshotHandle: string, commandHandle: string)");
+    // Optional, and the only thing it may be besides absent is a handle: the
+    // renderer cannot name a container by id or by name.
+    expect(api).toMatch(
+      /runEmergencyCommand\(\s*bindingHandle: string,\s*snapshotHandle: string,\s*commandHandle: string,\s*containerHandle\?: string,\s*\): Promise<unknown>;/u,
+    );
     expect(api).toContain("inspectEmergencyPath(bindingHandle: string, pathHandle: string)");
     expect(api).toContain("confirmEmergencyPathAction(bindingHandle: string, planHandle: string)");
     expect(api).toContain("executeEmergencyPathAction(bindingHandle: string, planHandle: string)");

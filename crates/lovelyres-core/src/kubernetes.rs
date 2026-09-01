@@ -346,6 +346,72 @@ impl KubernetesPodLogsRequest {
     }
 }
 
+/// One container of one pod, as a place to run a fixed catalogue check.
+///
+/// Names are validated the same way the log request validates them, so a
+/// namespace or pod name that is not a DNS label cannot be built into a
+/// command at all. There is no constructor taking a command: the caller
+/// chooses a container, never what runs in it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KubernetesExecTarget {
+    namespace: String,
+    pod: String,
+    /// Absent means the pod's default container, which is what `kubectl exec`
+    /// picks when a pod has exactly one.
+    container: Option<String>,
+}
+
+impl KubernetesExecTarget {
+    pub fn new(namespace: impl Into<String>, pod: impl Into<String>) -> CoreResult<Self> {
+        let namespace = namespace.into();
+        let pod = pod.into();
+        validate_dns_label("Kubernetes namespace", &namespace)?;
+        validate_dns_subdomain("Kubernetes pod name", &pod)?;
+        Ok(Self {
+            namespace,
+            pod,
+            container: None,
+        })
+    }
+
+    pub fn with_container(mut self, container: impl Into<String>) -> CoreResult<Self> {
+        let container = container.into();
+        validate_dns_label("Kubernetes container name", &container)?;
+        self.container = Some(container);
+        Ok(self)
+    }
+
+    pub fn namespace(&self) -> &str {
+        &self.namespace
+    }
+
+    pub fn pod(&self) -> &str {
+        &self.pod
+    }
+
+    pub fn container(&self) -> Option<&str> {
+        self.container.as_deref()
+    }
+
+    /// Wraps a command so it runs inside this pod's container.
+    ///
+    /// `sh -c` and no TTY: this is one non-interactive command, and the
+    /// catalogue's commands are POSIX sh already. `--` keeps a command that
+    /// begins with a dash from being read as more kubectl flags.
+    pub fn exec_command(&self, command: &str) -> String {
+        let mut built = format!(
+            "kubectl exec {} -n {}",
+            shq(&self.pod),
+            shq(&self.namespace)
+        );
+        if let Some(container) = &self.container {
+            built.push_str(&format!(" -c {}", shq(container)));
+        }
+        built.push_str(&format!(" -- sh -c {}", shq(command)));
+        built
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KubernetesText {
     pub text: String,
@@ -1301,8 +1367,14 @@ fn mutation_patch_command(
     let namespace = namespace
         .map(|value| format!(" -n {}", shq(value)))
         .unwrap_or_default();
+    // `-o json` because the caller parses this output back into a snapshot and
+    // checks it reached the exact reviewed state. Without it kubectl prints
+    // one line of prose — "deployment.apps/ledger patched" — the parse fails,
+    // and the workflow reports a failure for a change that already happened.
+    // Telling an operator nothing was done when something was is worse than
+    // any error here.
     Ok(format!(
-        "kubectl patch {resource} {}{namespace} --type=json -p {}",
+        "kubectl patch {resource} {}{namespace} --type=json -p {} -o json",
         shq(name),
         shq(&patch)
     ))
@@ -1701,6 +1773,10 @@ struct RawContainer {
 #[serde(default, rename_all = "camelCase")]
 struct RawPodStatus {
     phase: String,
+    /// Not `podIp`. Kubernetes writes `podIP`, with both letters capital, and
+    /// camelCase would quietly produce the wrong name and leave every running
+    /// pod looking as if it had no address at all.
+    #[serde(rename = "podIP")]
     pod_ip: String,
     container_statuses: Vec<RawContainerStatus>,
 }
@@ -2017,6 +2093,42 @@ mod tests {
         assert_eq!(bounded.items[0].images[0].chars().count(), MAX_CELL_CHARS);
     }
 
+    /// Every column of a fully populated row, read back one by one.
+    ///
+    /// The bounds test above parses the same shape and only ever looks at the
+    /// row count and the id, so `podIP` deserialised into nothing for as long
+    /// as the page has existed and no test noticed: on a real cluster the
+    /// address column was blank for every running pod.
+    #[test]
+    fn a_populated_pod_row_carries_every_column_it_was_given() {
+        let output = serde_json::json!({"items": [{
+            "metadata": {
+                "uid": "uid-1",
+                "name": "access-logger",
+                "namespace": "frontend",
+                "creationTimestamp": "2026-08-27T00:25:52Z"
+            },
+            "spec": {"nodeName": "worker-1", "containers": [{"image": "alpine:3.20"}]},
+            "status": {
+                "phase": "Running",
+                "podIP": "10.42.0.9",
+                "containerStatuses": [{"ready": true, "restartCount": 3}]
+            }
+        }]})
+        .to_string();
+
+        let row = parse_pods(&output, 10).unwrap().items.remove(0);
+        assert_eq!(row.name, "access-logger");
+        assert_eq!(row.namespace, "frontend");
+        assert_eq!(row.node, "worker-1");
+        assert_eq!(row.phase, "Running");
+        assert_eq!(row.pod_ip, "10.42.0.9");
+        assert_eq!(row.images, vec!["alpine:3.20".to_owned()]);
+        assert_eq!(row.ready_containers, 1);
+        assert_eq!(row.restarts, 3);
+        assert_eq!(row.created_at, "2026-08-27T00:25:52Z");
+    }
+
     #[test]
     fn oversized_json_and_text_are_bounded() {
         let oversized = format!(
@@ -2299,6 +2411,20 @@ mod tests {
         assert!(node_command.contains("spec/unschedulable"));
         assert!(!node_command.contains("kubectl exec"));
         assert!(!node_command.contains("kubectl apply"));
+
+        // Both patches have to ask for the object back, because the caller
+        // parses the response and refuses to claim success without it. Left
+        // off, kubectl prints one line of prose, the parse fails, and the
+        // workflow reports a failure for a change that already landed.
+        for command in [&deployment_command, &node_command] {
+            assert!(
+                command.ends_with(" -o json"),
+                "patch does not ask for the object back"
+            );
+            assert!(
+                parse_mutation_snapshot(&deployment_plan, "deployment.apps/api patched").is_err()
+            );
+        }
     }
 
     #[tokio::test]

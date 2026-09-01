@@ -101,6 +101,78 @@ export interface SystemInfoDetail {
   fields: SystemInfoDetailField[];
 }
 
+/**
+ * What a right-click on one row may ask for.
+ *
+ * `inspect` runs a read-only command on the target and shows its output.
+ * `change` asks for a plan first; nothing runs until the operator has read it
+ * and confirmed, and the plan is spent by one execution.
+ */
+export type SystemInfoRowActionKind = "inspect" | "change";
+
+export interface SystemInfoRowActionEntry {
+  /** A fixed key such as `process.open-files`; the sidecar accepts no other. */
+  key: string;
+  label: string;
+  kind: SystemInfoRowActionKind;
+  /** Whether the menu paints it as something that stops or removes. */
+  dangerous: boolean;
+}
+
+export interface SystemInfoRowActionGroup {
+  key: string;
+  label: string;
+  actions: SystemInfoRowActionEntry[];
+}
+
+/** The actions one row can take, decided by the sidecar from the row it kept. */
+export interface SystemInfoRowActions {
+  tab: SystemInfoTabKey;
+  rowId: string;
+  /** What the row is, in the table's own words. Display only. */
+  subject: string;
+  groups: SystemInfoRowActionGroup[];
+}
+
+export interface SystemInfoRowInspection {
+  tab: SystemInfoTabKey;
+  rowId: string;
+  action: string;
+  label: string;
+  subject: string;
+  output: string;
+  truncated: boolean;
+}
+
+/** What a change would do, before any of it is done. */
+export interface SystemInfoRowPlan {
+  planHandle: string;
+  tab: SystemInfoTabKey;
+  rowId: string;
+  action: string;
+  label: string;
+  subject: string;
+  summary: string;
+  dangerous: boolean;
+  restoreDescription: string | null;
+  confirmed: boolean;
+  expiresInSeconds: number;
+}
+
+/** What happened, after the target was read back. */
+export interface SystemInfoRowReceipt {
+  planHandle: string;
+  tab: SystemInfoTabKey;
+  rowId: string;
+  action: string;
+  label: string;
+  subject: string;
+  /** Whether the target, read again afterwards, is in the state the plan said. */
+  verified: boolean;
+  detail: string;
+  restored: boolean;
+}
+
 export interface SystemInfoApi {
   getSystemInfoCatalog(): Promise<unknown>;
   getSystemInfoSummary(bindingHandle: string): Promise<unknown>;
@@ -114,6 +186,26 @@ export interface SystemInfoApi {
     snapshotHandle: string,
     rowId: string,
   ): Promise<unknown>;
+  listSystemInfoRowActions(
+    bindingHandle: string,
+    snapshotHandle: string,
+    rowId: string,
+  ): Promise<unknown>;
+  inspectSystemInfoRow(
+    bindingHandle: string,
+    snapshotHandle: string,
+    rowId: string,
+    action: string,
+  ): Promise<unknown>;
+  planSystemInfoRowAction(
+    bindingHandle: string,
+    snapshotHandle: string,
+    rowId: string,
+    action: string,
+  ): Promise<unknown>;
+  confirmSystemInfoRowAction(bindingHandle: string, planHandle: string): Promise<unknown>;
+  executeSystemInfoRowAction(bindingHandle: string, planHandle: string): Promise<unknown>;
+  cancelSystemInfoRowAction(bindingHandle: string, planHandle: string): Promise<void>;
 }
 
 interface CatalogDefinition {
@@ -310,4 +402,120 @@ export function isSystemInfoDetail(value: unknown): value is SystemInfoDetail {
     if (totalBytes > MAX_DETAIL_BYTES) return false;
   }
   return true;
+}
+
+const MAX_ROW_ACTION_GROUPS = 16;
+const MAX_ROW_ACTIONS = 128;
+const MAX_ROW_INSPECTION_BYTES = 256 * 1_024;
+const MAX_ROW_PLAN_TEXT_BYTES = 4_096;
+const ROW_ACTION_KEY_PATTERN = /^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*){1,2}$/u;
+const ROW_ACTION_GROUP_PATTERN = /^[a-z][a-z0-9-]*$/u;
+
+/** Two or three kebab-case segments, nothing else: `process.signal.kill`. */
+export function isSystemInfoRowActionKey(value: unknown): value is string {
+  return utf8(value, 64) && ROW_ACTION_KEY_PATTERN.test(value);
+}
+
+export function isSystemInfoRowActionKind(value: unknown): value is SystemInfoRowActionKind {
+  return value === "inspect" || value === "change";
+}
+
+function isRowSubject(value: unknown): value is string {
+  return utf8(value, 1_024, true);
+}
+
+export function isSystemInfoRowActions(value: unknown): value is SystemInfoRowActions {
+  if (
+    !isRecord(value) ||
+    !exact(value, ["tab", "rowId", "subject", "groups"]) ||
+    !isSystemInfoTabKey(value.tab) ||
+    !utf8(value.rowId, 256) ||
+    !isRowSubject(value.subject) ||
+    !Array.isArray(value.groups) ||
+    value.groups.length > MAX_ROW_ACTION_GROUPS
+  ) return false;
+  const groupKeys = new Set<string>();
+  const actionKeys = new Set<string>();
+  for (const group of value.groups) {
+    if (
+      !isRecord(group) ||
+      !exact(group, ["key", "label", "actions"]) ||
+      !utf8(group.key, 64) ||
+      !ROW_ACTION_GROUP_PATTERN.test(group.key) ||
+      groupKeys.has(group.key) ||
+      !utf8(group.label, 128) ||
+      !Array.isArray(group.actions) ||
+      group.actions.length === 0
+    ) return false;
+    groupKeys.add(group.key);
+    for (const action of group.actions) {
+      if (
+        !isRecord(action) ||
+        !exact(action, ["key", "label", "kind", "dangerous"]) ||
+        !isSystemInfoRowActionKey(action.key) ||
+        actionKeys.has(action.key) ||
+        !utf8(action.label, 128) ||
+        !isSystemInfoRowActionKind(action.kind) ||
+        typeof action.dangerous !== "boolean"
+      ) return false;
+      actionKeys.add(action.key);
+      if (actionKeys.size > MAX_ROW_ACTIONS) return false;
+    }
+  }
+  return true;
+}
+
+export function isSystemInfoRowInspection(value: unknown): value is SystemInfoRowInspection {
+  return (
+    isRecord(value) &&
+    exact(value, ["tab", "rowId", "action", "label", "subject", "output", "truncated"]) &&
+    isSystemInfoTabKey(value.tab) &&
+    utf8(value.rowId, 256) &&
+    isSystemInfoRowActionKey(value.action) &&
+    utf8(value.label, 128) &&
+    isRowSubject(value.subject) &&
+    utf8(value.output, MAX_ROW_INSPECTION_BYTES, true) &&
+    typeof value.truncated === "boolean"
+  );
+}
+
+export function isSystemInfoRowPlan(value: unknown): value is SystemInfoRowPlan {
+  return (
+    isRecord(value) &&
+    exact(value, [
+      "planHandle", "tab", "rowId", "action", "label", "subject", "summary", "dangerous",
+      "restoreDescription", "confirmed", "expiresInSeconds",
+    ]) &&
+    isSystemInfoOpaqueHandle(value.planHandle) &&
+    isSystemInfoTabKey(value.tab) &&
+    utf8(value.rowId, 256) &&
+    isSystemInfoRowActionKey(value.action) &&
+    utf8(value.label, 128) &&
+    isRowSubject(value.subject) &&
+    utf8(value.summary, MAX_ROW_PLAN_TEXT_BYTES) &&
+    typeof value.dangerous === "boolean" &&
+    (value.restoreDescription === null || utf8(value.restoreDescription, MAX_ROW_PLAN_TEXT_BYTES)) &&
+    typeof value.confirmed === "boolean" &&
+    safeUnsigned(value.expiresInSeconds) &&
+    value.expiresInSeconds >= 1 &&
+    value.expiresInSeconds <= 3_600
+  );
+}
+
+export function isSystemInfoRowReceipt(value: unknown): value is SystemInfoRowReceipt {
+  return (
+    isRecord(value) &&
+    exact(value, [
+      "planHandle", "tab", "rowId", "action", "label", "subject", "verified", "detail", "restored",
+    ]) &&
+    isSystemInfoOpaqueHandle(value.planHandle) &&
+    isSystemInfoTabKey(value.tab) &&
+    utf8(value.rowId, 256) &&
+    isSystemInfoRowActionKey(value.action) &&
+    utf8(value.label, 128) &&
+    isRowSubject(value.subject) &&
+    typeof value.verified === "boolean" &&
+    utf8(value.detail, MAX_ROW_PLAN_TEXT_BYTES, true) &&
+    typeof value.restored === "boolean"
+  );
 }

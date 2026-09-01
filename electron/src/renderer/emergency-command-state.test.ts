@@ -10,6 +10,7 @@ import { createEmergencyCommandState, emergencyCommandReducer } from "./emergenc
 
 const catalog: EmergencyCommandCatalog = {
   snapshotHandle: "snapshot-one",
+  containers: [],
   expiresInSeconds: 300,
   commands: [
     { commandHandle: "command-network", category: "network", title: "监听端口", description: "网络状态", timeoutSeconds: 30 },

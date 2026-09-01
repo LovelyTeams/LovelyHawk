@@ -342,6 +342,15 @@
 
 ## Electron 迁移期切片接线状态
 
+### 2026-08-27 移除的四个切片
+
+边界隔离（firewall）、取证快照（snapshot）、中间件（middleware）、多机批量（batch-servers）
+按需求整体移除。下文里凡是描述这四个切片的段落只保留历史记录，**不再对应任何现存代码**：
+它们的页面、契约、preload 方法、主进程 IPC、后端 RPC 与 `lovelyres-core` 里只被它们用到的
+`firewall.rs`/`snapshot.rs`/`batch.rs` 都已删除。它们提到的"仍待实机验收"因此一并作废，
+不需要再排期。`middleware.rs` 与 `middleware_document.rs` 保留——那是配置生成器的产品路径
+知识，跟中间件页面无关。
+
 ### 已中央接线但仍为 Pending
 
 - SSH terminal 已不再是 `UNWIRED`。`crates/lovelyres-electron-backend/src/terminal_api.rs` 的七个固定
@@ -392,6 +401,41 @@
 packaged 验收不足而继续为 `Pending` 的切片。每一条都必须按其明确状态解读，不能因为源码、测试或
 某一阶段接线存在就把整个页面或 overlay 标记为完成：
 
+- **容器运行时不再写死成 Docker（2026-08-27）。** 后端原来在六处硬编码
+  `ContainerRuntime::Docker`，核心声明支持 Podman 却没有任何地方会选它——**在只装 Podman
+  的机器上，Docker 页的每个问题都返回空**，读起来像"这台机器没有容器"，是最坏的一种错答案。
+  国产发行版与 RHEL 系（openEuler、Anolis、AlmaLinux、Rocky）默认就是这个形状。
+  现在开快照时探测一次（`DockerService::detect_runtime`），把结果随快照带下去，之后每次
+  调用都用它；"没装任何运行时" 与 "装了但不响应" 分成 `docker-runtime-absent` 与
+  `docker-runtime-not-running` 两个答复。容器动作也跟着走对——身份里带着运行时，所以
+  Podman 主机上生成的是 `podman stop`。
+
+  同轮修掉解析层的一串 Docker 形状假设：`Id`/`ID`、`Names` 数组、`Status` 空而值在
+  `State`、`CreatedAt` 空而值在 `Created`、`Ports` 结构化数组、`Command` 数组、网络清单
+  的全小写下划线键。另外 SSH 层把 stderr 并进 stdout，Podman 在 cgroups-v1 主机上每条
+  命令先打一句弃用告警，三处解析器（逐行 JSON、整体 JSON 数组、`id<TAB>状态`）都因此
+  全盘失败；规则改成"不以 `{` 开头的行跳过，以 `{` 开头却解析不了的仍然报错"。
+  验收靶机 `svc-podman`（AlmaLinux 9 + Podman，构建时断言机器上没有 `docker`）与
+  `tools/lab/probe-podman.mjs`。**未覆盖**：`podman stats` 在这台嵌套 cgroups-v1 靶机上
+  读不到 cgroup，探针明确标注不覆盖，真实主机上没有这一层。
+
+- **Kubernetes 工作负载动作（2026-08-27）已中央接线**，preload 从 113 变 117：
+  `planKubernetesWorkloadAction` 等四个方法。渲染层只发行句柄与三种闭合形状之一
+  （`scale-deployment` 带副本数、`cordon`、`uncordon`），namespace、名称、UID 都到不了它
+  手上；核心的比较-并-设置补丁、日志、回读复核与按精确 revision 回滚原样复用。
+  同轮修掉一个**做成了却报没做成**的问题：`kubectl patch` 少了 `-o json`，kubectl 打印
+  一行 `deployment.apps/ledger patched`，调用方按 JSON 解析失败，于是整个流程报错——而
+  补丁其实已经生效。操作员看到失败会再做一次。验收见
+  `tools/lab/probe-kubernetes-action.mjs`。
+
+- **Kubernetes 只读路径（2026-08-27）第一次对着真集群跑过**，并查出一个从这个页面存在起就有的问题：
+  `crates/lovelyres-core/src/kubernetes.rs` 的 `RawPodStatus` 用 `rename_all = "camelCase"` 把
+  `pod_ip` 变成 `podIp`，而 Kubernetes 发的是 `podIP`——**Pod 列表的地址列在任何真实集群上都是空的**。
+  原解析测试的 fixture 里写了 `podIP`，但只断言行数和 id，所以一直没抓到；现在补了逐列断言的
+  `a_populated_pod_row_carries_every_column_it_was_given`。靶机与探针见
+  `tools/lab/orchestration/`、`tools/lab/probe-kubernetes.mjs`。Kubernetes 的写路径
+  （Deployment 扩缩容、节点 cordon/uncordon）核心里有，仍未接线。
+
 - 全局取消按内容遮蔽（2026-08-25）：sidecar 与渲染层契约里按 credential 词形（`password=`、`token=`、
   `bearer `、URL userinfo 等）遮蔽或拒绝的实现已全部移除，涉及 baseline、check-audit、docker、integrity、
   kubernetes、middleware、packet-capture、snapshot、log-analysis 九处。取证快照原先有七个采集器整段只返回
@@ -407,10 +451,96 @@ packaged 验收不足而继续为 `Pending` 的切片。每一条都必须按其
   从 20 收到 19。core 的 `detection.rs` 保留：baseline、compliance、report 与 services 仍在用它。
   该切片在 ledger 的 `pages` 中不再存在；`verificationRuns` 里的历史记录按原样保留，因为那些运行
   当时确实发生过。
+- **Docker 容器动作（2026-08-27）已中央接线，并且是第一条在真 daemon 上跑通的写路径。**
+  `crates/lovelyres-electron-backend/src/docker_write_api.rs` 新增，preload 从 109 变 113：
+  `planDockerContainerAction`、`confirmDockerContainerAction`、`executeDockerContainerAction`、
+  `cancelDockerContainerAction`。渲染层只发容器句柄（由自己那份快照发出、由只读侧在同一套
+  scope/token/过期规则下解回身份）和一个闭集里的动作词；容器 id、运行时动词、命令都到不了它手上。
+  计划有 5 分钟 TTL，确认与执行是两次调用，执行时计划先离开 registry 再 await，所以一个计划最多跑一次。
+  核心的 plan→confirm→execute→journal→verify→restore 原样复用，回执给的是**复核读回的状态**，
+  不是命令的退出码。
+
+  同轮改掉三处只有对着真机才会暴露的问题：`probe_state` 的 `--format` 里写了裸 `\t`，Go 模板原样
+  打印成反斜杠加 t，解析器按真 tab 切分——**任何容器动作在真 Docker 上从来没能通过状态探测**；
+  计划摘要与回滚说明是英文且带 64 位全长容器 id，现在是中文短 id；验证回执 `observed container
+  state: ...` 也改成中文。验收证据是 `tools/lab/probe-docker-action.mjs`，在 `svc-docker` 上覆盖
+  计划→未确认拒绝→确认→执行→主机侧独立复核、同计划不能跑第二次、状态不符时计划阶段就拒、伪造句柄
+  解不到东西、达不到目标状态时验证判失败并回滚、取消。
+
+- **系统信息表格的右键菜单（2026-09-02）已接线：核心里按行的排查与处置动作，界面上终于能点到。**
+  `lovelyres-core::system_info` 早就有一整套按标签划分的按行动作——进程 40 项排查加
+  SIGTERM/SIGKILL、服务 19 项排查加启停/启用/禁用、用户与登录历史的账户锁定/解锁、
+  网络/外连/开放端口 19 项排查加断开 TCP 连接、计划任务/定时器/SSH 密钥/SUID/
+  sudoers/内核模块/环境变量/软件包/Shell 配置各自的排查，以及删除独立 cron 文件、
+  注释 Shell 行、去 SUID 位/权限隔离、内核模块黑名单这几项改动——request builder、
+  plan/execute、journal、verify、restore 全写完测完了，但没有任何调用方。现在后端多一个
+  `system_info_action_api.rs`：动作用闭集 key 寻址（`process.open-files`、
+  `process.signal.kill`、`network.disconnect`……），key 直接由核心枚举的 serde 名生成，
+  解析不回来的就是不存在；**哪些动作对这一行可用，由后端拿它自己保存的快照按行算出来**
+  （request builder 是纯函数，不碰目标机），所以 UDP 行没有"断开连接"，已经是注释的
+  Shell 行没有"注释此行"，用户名不合法的行什么都没有。6 个 RPC / IPC / preload 方法：
+  `listSystemInfoRowActions`、`inspectSystemInfoRow`、`planSystemInfoRowAction`、
+  `confirmSystemInfoRowAction`、`executeSystemInfoRowAction`、`cancelSystemInfoRowAction`，
+  preload 从 118 变 124。渲染层只会说"这个快照的这一行、这个 key"——没有 PID、
+  单元名、路径、命令穿过边界；改动类动作走 plan → confirm → execute 三步、计划句柄
+  一次性、5 分钟过期、断开连接时连同快照一起清掉。右键菜单本身还带三个本地项：
+  复制这一格、复制整行、查看详情；Shell 配置那种按文件显示的标签，每一行也能右键。
+  真实靶机上的执行路径（尤其是 SIGKILL、断连、锁账户、去 SUID 位）仍待实机验收；
+  当前证据是后端 6 个模块测试 + 1 个 RPC 级拒绝测试、渲染层契约/菜单/对话框测试、
+  主进程边界测试和源码门禁。
+
+- **Docker 容器终端（2026-08-27）已接线，是核心早就写好、界面上一直没有的第一件。**
+  核心的 `DockerService::open_terminal` 与 `TerminalLaunch::ContainerExec` 存在已久，
+  但从来没有任何调用方——一整条 PTY 路径写完了、测过了、没接过。现在
+  `docker.container.terminal.open` 一个 RPC 打通：只读侧把容器句柄解回身份，核心探出这个
+  镜像里真有的 shell，终端 registry 照常开一个槽。preload 从 117 变 118，只多
+  `openDockerContainerTerminal` 一个方法——**渲染层给不出 shell，也给不出容器 id**，
+  它只能开一个窗口。终端窗口自己的那套 API 一个字没改：窗口是什么类型在创建时就定死了，
+  窗口里的渲染层只会说"给我开个终端"。窗口按 binding + 容器句柄分别记名，所以宿主 shell
+  和容器 shell 可以并排开着；断开连接照旧把这个 binding 上的窗口全带走。
+
+  新增 `DockerService::detect_shell`：按 `bash → ash → sh` 探一次。写死 bash 在
+  busybox 镜像上必挂，一律用 sh 又白扔掉有 bash 那些镜像上的行编辑与历史。
+
+  同轮查出三个只有真开一个 shell 才会暴露的问题，都记在
+  `tools/lab/orchestration/README.md`：**终端 id 由核心自己造，而调用方拿自己登记的 id
+  核对每条事件——开得起来，第一次 poll 就报协议违规，窗口当场死**；**停着的容器被答成
+  "这个镜像里没有 shell"**，把人打发去重建镜像；**靶机十六个容器全是 alpine，"优先挑 bash"
+  这条分支在真机上从没走过**（现在加了 `app-shell`，Debian 的）。验收证据是
+  `pnpm lab:docker-terminal`：挑对 shell、敲进去的命令回显得出来、确认人真在容器里而不是
+  宿主机上、停着的容器给的是"没在跑"、伪造句柄解不到东西——在 `svc-docker`、`svc-arena`
+  与只有 Podman 的 `svc-podman` 上都跑通。
+
+  仍缺：网络/卷删除、Compose 动作（Compose 项目目前没有句柄）、容器内文件读写。
+
+- **镜像详情（2026-09-02）已接线，是当初点名的三件事里的最后一件。**
+  镜像页原本只有一张卡片，列仓库、标签、摘要、大小、创建时间——全是清单里已有的字段，
+  点不开也问不出任何清单答不了的问题。现在核心新增 `DockerService::inspect_image`，
+  镜像行拿到自己的句柄（和网络/卷一样是 opaque 的，全长 id 留在后端），
+  `docker.resource.inspect` 多认一种 `kind: "image"`。
+
+  读的是两条命令而不是一条，因为它们答的是两个问题，只有凑齐才有用：
+  `image inspect` 说这个镜像**起来之后会做什么**——以谁的身份跑、入口点是什么、
+  烤进去了哪些环境变量、暴露了哪些端口；`image history` 说它**是怎么变成这样的**，
+  别人往里加的那一层就在这里露出来。history 读不到不算失败：按 digest 拉下来的镜像
+  本地就没有构建记录，配置照样值得看。
+
+  「运行身份」这一栏会把空值直接写成「root（镜像没有指定用户）」——镜像没设 user 就是 root，
+  而运行时表达这件事的方式是把字段留空，照原样显示等于把最该看见的答案藏起来。
+  内置环境变量一律原样显示，理由和别处一样：烤进镜像里的凭据是**要找的东西**，
+  不是要遮的东西。
+
+  同轮查出两个只有真读一台主机才会暴露的问题：**`image ls` 是一个 tag 一行，
+  同一个镜像挂两个 tag 就是两行同 id**（走镜像源的主机上必然如此），按 id 去重会把
+  整个标签页判成快照失效；**Podman 的字段名和 Docker 不一样，而且 size 和创建时间给的是数字**
+  ——照 Docker 的形状读，这两列一个空一个是一串秒数。两者都补了断言。
+  验收证据是 `pnpm lab:docker-image`（自建镜像、拉下来的镜像、伪造句柄，启动命令与
+  运行身份都和主机侧独立复核对齐）与 `pnpm lab:podman` 里新增的镜像段。
+
 - Docker 只读调查 phase 1 已中央接线：`crates/lovelyres-electron-backend/src/docker_read_api.rs`、
   `electron/src/shared/docker-read-contract.ts`、`docker-read-state.ts`、`docker-read-helpers.ts` 与
   `DockerPage.tsx` 已实现真实 opaque SSH binding、完整 `TargetGuard` 前后验证、固定 Docker runtime、
-  有界容器快照，以及 stats/images/networks/volumes/Compose 项目、容器/网络/卷详情、安全审计和日志读取。
+  有界容器快照，以及 stats/images/networks/volumes/Compose 项目、容器/镜像/网络/卷详情、安全审计和日志读取。
   Renderer 只持有 5 分钟 TTL 的 opaque snapshot/resource handles，不发送 session、guard、generation、
   identity、命令或远端路径；后端 registry 限 8 个快照、每快照 3 个并发读取和 2 个并发刷新，并限制全部
   行数、UTF-8 文本、日志、registry 字节与事件结果应用。网络或卷清单刷新会作废其旧资源 handle；容器

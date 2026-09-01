@@ -11,19 +11,19 @@ mod connections_api;
 mod diagnostic_log_api;
 mod disposal_report_api;
 mod docker_read_api;
+mod docker_write_api;
 mod emergency_command_api;
 mod emergency_path_api;
-mod firewall_read_api;
 mod integrity_api;
 mod kubernetes_read_api;
+mod kubernetes_write_api;
 mod log_analysis_read_api;
-mod middleware_read_api;
 mod notes_api;
 mod packet_capture_live_api;
 mod settings_api;
 mod sftp_browser_api;
-mod snapshot_read_api;
 mod ssh_api;
+mod system_info_action_api;
 mod system_info_api;
 mod terminal_api;
 
@@ -60,16 +60,16 @@ use crate::{
     diagnostic_log_api::{DiagnosticLogApi, DiagnosticLogApiError, DiagnosticLogFilterInput},
     disposal_report_api::{DisposalReportApi, DisposalReportApiError, DisposalReportPreviewFormat},
     docker_read_api::{DockerReadApi, DockerReadApiError},
+    docker_write_api::{DockerWriteAction, DockerWriteApi, DockerWriteApiError},
     emergency_command_api::{EmergencyCommandApi, EmergencyCommandApiError},
     emergency_path_api::{EmergencyPathAction, EmergencyPathApiError},
-    firewall_read_api::{FirewallReadApi, FirewallReadApiError},
     integrity_api::{IntegrityApi, IntegrityApiError},
     kubernetes_read_api::{KubernetesListInput, KubernetesReadApi, KubernetesReadApiError},
+    kubernetes_write_api::{KubernetesWriteAction, KubernetesWriteApi, KubernetesWriteApiError},
     log_analysis_read_api::{
         LogAnalysisReadApi, LogAnalysisReadApiError, LogCorrelationInput, LogIocSearchInput,
         LogSourceReadInput,
     },
-    middleware_read_api::{MiddlewareReadApi, MiddlewareReadApiError},
     notes_api::{NotesApi, NotesApiError},
     packet_capture_live_api::{
         PacketCaptureLiveApi, PacketCaptureLiveApiError, PacketCaptureStartInput,
@@ -78,7 +78,6 @@ use crate::{
         SettingsAiApiKeyReplacementInput, SettingsApi, SettingsApiError, SettingsSaveInput,
     },
     sftp_browser_api::{SftpBrowserApi, SftpBrowserApiError, SftpOperationRequest},
-    snapshot_read_api::{SnapshotDiffInput, SnapshotReadApi, SnapshotReadApiError},
     ssh_api::{SecretResponses, SshApi},
     system_info_api::{SystemInfoApi, SystemInfoApiError},
     terminal_api::{TerminalApi, TerminalApiError},
@@ -105,20 +104,23 @@ pub struct BackendState {
     connections: ConnectionsApi,
     disposal_report: DisposalReportApi,
     diagnostic_log: DiagnosticLogApi,
-    docker_read: DockerReadApi,
+    // Shared rather than owned: the mutation side resolves its container
+    // handles through this exact registry, so both must see one snapshot set.
+    docker_read: Arc<DockerReadApi>,
+    docker_write: DockerWriteApi,
     emergency_command: EmergencyCommandApi,
     sftp_browser: SftpBrowserApi,
-    firewall_read: FirewallReadApi,
     integrity: Arc<IntegrityApi>,
-    kubernetes_read: KubernetesReadApi,
+    // Shared: the mutation side resolves its row handles through this exact
+    // registry, so both must see one snapshot set.
+    kubernetes_read: Arc<KubernetesReadApi>,
+    kubernetes_write: KubernetesWriteApi,
     log_analysis_read: LogAnalysisReadApi,
-    middleware_read: MiddlewareReadApi,
     notes: NotesApi,
     note_replays: parking_lot::Mutex<HashMap<String, NoteReplayEntry>>,
     packet_capture_live: PacketCaptureLiveApi,
     ssh: Arc<SshApi>,
     settings: SettingsApi,
-    snapshot_read: SnapshotReadApi,
     system_info: SystemInfoApi,
     terminal: TerminalApi,
 }
@@ -180,17 +182,21 @@ impl BackendState {
         let command_history = CommandHistoryApi::new(services.clone(), Arc::clone(&ssh));
         let disposal_report = DisposalReportApi::new(services.clone(), Arc::clone(&ssh));
         let diagnostic_log = DiagnosticLogApi::new(diagnostic_capture);
-        let docker_read = DockerReadApi::new(services.clone(), Arc::clone(&ssh));
+        let docker_read = Arc::new(DockerReadApi::new(services.clone(), Arc::clone(&ssh)));
+        let docker_write =
+            DockerWriteApi::new(services.clone(), Arc::clone(&ssh), Arc::clone(&docker_read));
         let emergency_command = EmergencyCommandApi::new(services.clone(), Arc::clone(&ssh));
         let sftp_browser = SftpBrowserApi::new(services.clone(), Arc::clone(&ssh));
-        let firewall_read = FirewallReadApi::new(services.clone(), Arc::clone(&ssh));
         let integrity = Arc::new(IntegrityApi::new(services.clone(), Arc::clone(&ssh)));
-        let kubernetes_read = KubernetesReadApi::new(services.clone(), Arc::clone(&ssh));
+        let kubernetes_read = Arc::new(KubernetesReadApi::new(services.clone(), Arc::clone(&ssh)));
+        let kubernetes_write = KubernetesWriteApi::new(
+            services.clone(),
+            Arc::clone(&ssh),
+            Arc::clone(&kubernetes_read),
+        );
         let log_analysis_read = LogAnalysisReadApi::new(services.clone(), Arc::clone(&ssh));
-        let middleware_read = MiddlewareReadApi::new(services.clone(), Arc::clone(&ssh));
         let packet_capture_live = PacketCaptureLiveApi::new(services.clone(), Arc::clone(&ssh));
         let settings = SettingsApi::new(&services);
-        let snapshot_read = SnapshotReadApi::new(services.clone(), Arc::clone(&ssh));
         let system_info = SystemInfoApi::new(services.clone(), Arc::clone(&ssh));
         let terminal = TerminalApi::new(services.clone(), Arc::clone(&ssh));
         Ok(Self {
@@ -204,19 +210,18 @@ impl BackendState {
             disposal_report,
             diagnostic_log,
             docker_read,
+            docker_write,
             emergency_command,
             sftp_browser,
-            firewall_read,
             integrity,
             kubernetes_read,
+            kubernetes_write,
             log_analysis_read,
-            middleware_read,
             notes: NotesApi::default(),
             note_replays: parking_lot::Mutex::new(HashMap::new()),
             packet_capture_live,
             ssh,
             settings,
-            snapshot_read,
             system_info,
             terminal,
         })
@@ -301,6 +306,52 @@ impl BackendState {
             notify.notify_waiters();
             return result;
         }
+    }
+
+    /// Open a shell inside a listed container, on the same terminal machinery
+    /// the host shell uses.
+    ///
+    /// Three steps that have to happen in this order and nowhere else: turn the
+    /// opaque handle back into an identity under the read side's scope rules,
+    /// ask the host which shell that image actually has, then hand both to the
+    /// terminal registry. Composed here rather than inside either module
+    /// because it is the one call that needs both, and neither should grow a
+    /// dependency on the other for it.
+    async fn open_container_terminal(
+        &self,
+        params: &DockerTerminalOpenParams,
+    ) -> Result<DockerContainerTerminalDto, RpcFailure> {
+        let (session, container) = self
+            .docker_read
+            .resolve_container_for_mutation(
+                &params.binding_handle,
+                &params.snapshot_handle,
+                &params.container_handle,
+            )
+            .map_err(docker_read_failure)?;
+        let shell = self
+            .services
+            .docker()
+            .detect_shell(&session, &container)
+            .await
+            .map_err(container_shell_failure)?;
+        let opened = self
+            .terminal
+            .open_container(
+                &params.binding_handle,
+                container,
+                shell,
+                params.columns,
+                params.rows,
+            )
+            .await
+            .map_err(terminal_failure)?;
+        Ok(DockerContainerTerminalDto {
+            handle: opened.handle,
+            columns: opened.columns,
+            rows: opened.rows,
+            shell: shell.label(),
+        })
     }
 
     async fn dispatch(&self, request: RpcRequest) -> RpcResponse {
@@ -430,16 +481,16 @@ impl BackendState {
                 match parse_params::<SshBindingParams>(request.params) {
                     Ok(params) => match self.terminal.close_binding(&params.binding_handle).await {
                         Ok(()) => {
-                            self.snapshot_read.close_binding(&params.binding_handle);
-                            self.firewall_read.close_binding(&params.binding_handle);
                             self.baseline_read.close_binding(&params.binding_handle);
-                            self.middleware_read.close_binding(&params.binding_handle);
                             self.check_audit_read.close_binding(&params.binding_handle);
                             self.integrity.close_binding(&params.binding_handle);
                             self.log_analysis_read.close_binding(&params.binding_handle);
                             self.kubernetes_read.close_binding(&params.binding_handle);
+                            self.kubernetes_write.close_binding(&params.binding_handle);
                             self.emergency_command.close_binding(&params.binding_handle);
                             self.docker_read.close_binding(&params.binding_handle);
+                            self.docker_write.close_binding(&params.binding_handle);
+                            self.system_info.close_binding(&params.binding_handle);
                             self.sftp_browser.close_binding(&params.binding_handle);
                             self.packet_capture_live
                                 .close_binding(&params.binding_handle)
@@ -571,46 +622,80 @@ impl BackendState {
                     Err(failure) => Err(failure),
                 }
             }
-            RpcMethod::SnapshotList => parse_params::<SnapshotBindingParams>(request.params)
-                .and_then(|params| {
-                    self.snapshot_read
-                        .list_snapshots(&params.binding_handle)
-                        .map(to_value)
-                        .map_err(snapshot_read_failure)
-                }),
-            RpcMethod::SnapshotDetailGet => parse_params::<SnapshotDetailParams>(request.params)
-                .and_then(|params| {
-                    self.snapshot_read
-                        .get_detail(&params.binding_handle, &params.snapshot_handle)
-                        .map(to_value)
-                        .map_err(snapshot_read_failure)
-                }),
-            RpcMethod::SnapshotForensicDiff => parse_params::<SnapshotDiffParams>(request.params)
-                .and_then(|params| {
-                    self.snapshot_read
-                        .diff_forensic(&params.binding_handle, params.input)
-                        .map(to_value)
-                        .map_err(snapshot_read_failure)
-                }),
-            RpcMethod::FirewallInspect => {
-                match parse_params::<FirewallBindingParams>(request.params) {
+            RpcMethod::SystemInfoRowActionsList => {
+                match parse_params::<SystemInfoDetailParams>(request.params) {
                     Ok(params) => self
-                        .firewall_read
-                        .inspect(&params.binding_handle)
-                        .await
+                        .system_info
+                        .row_actions(
+                            &params.binding_handle,
+                            &params.snapshot_handle,
+                            &params.row_id,
+                        )
                         .map(to_value)
-                        .map_err(firewall_read_failure),
+                        .map_err(system_info_failure),
                     Err(failure) => Err(failure),
                 }
             }
-            RpcMethod::FirewallChangeHistoryList => {
-                match parse_params::<FirewallBindingParams>(request.params) {
+            RpcMethod::SystemInfoRowInspect => {
+                match parse_params::<SystemInfoRowActionParams>(request.params) {
                     Ok(params) => self
-                        .firewall_read
-                        .list_history(&params.binding_handle)
+                        .system_info
+                        .inspect_row(
+                            &params.binding_handle,
+                            &params.snapshot_handle,
+                            &params.row_id,
+                            &params.action,
+                        )
                         .await
                         .map(to_value)
-                        .map_err(firewall_read_failure),
+                        .map_err(system_info_failure),
+                    Err(failure) => Err(failure),
+                }
+            }
+            RpcMethod::SystemInfoRowActionPlan => {
+                match parse_params::<SystemInfoRowActionParams>(request.params) {
+                    Ok(params) => self
+                        .system_info
+                        .plan_row_action(
+                            &params.binding_handle,
+                            &params.snapshot_handle,
+                            &params.row_id,
+                            &params.action,
+                        )
+                        .await
+                        .map(to_value)
+                        .map_err(system_info_failure),
+                    Err(failure) => Err(failure),
+                }
+            }
+            RpcMethod::SystemInfoRowActionConfirm => {
+                match parse_params::<SystemInfoPlanParams>(request.params) {
+                    Ok(params) => self
+                        .system_info
+                        .confirm_row_action(&params.binding_handle, &params.plan_handle)
+                        .map(to_value)
+                        .map_err(system_info_failure),
+                    Err(failure) => Err(failure),
+                }
+            }
+            RpcMethod::SystemInfoRowActionExecute => {
+                match parse_params::<SystemInfoPlanParams>(request.params) {
+                    Ok(params) => self
+                        .system_info
+                        .execute_row_action(&params.binding_handle, &params.plan_handle)
+                        .await
+                        .map(to_value)
+                        .map_err(system_info_failure),
+                    Err(failure) => Err(failure),
+                }
+            }
+            RpcMethod::SystemInfoRowActionCancel => {
+                match parse_params::<SystemInfoPlanParams>(request.params) {
+                    Ok(params) => self
+                        .system_info
+                        .cancel_row_action(&params.binding_handle, &params.plan_handle)
+                        .map(|()| to_value(serde_json::json!({ "cancelled": true })))
+                        .map_err(system_info_failure),
                     Err(failure) => Err(failure),
                 }
             }
@@ -652,43 +737,6 @@ impl BackendState {
                         .await
                         .map(to_value)
                         .map_err(baseline_read_failure),
-                    Err(failure) => Err(failure),
-                }
-            }
-            RpcMethod::MiddlewareDiscover => {
-                match parse_params::<MiddlewareBindingParams>(request.params) {
-                    Ok(params) => self
-                        .middleware_read
-                        .discover(&params.binding_handle)
-                        .await
-                        .map(to_value)
-                        .map_err(middleware_read_failure),
-                    Err(failure) => Err(failure),
-                }
-            }
-            RpcMethod::MiddlewareConfigurationLoad => {
-                match parse_params::<MiddlewareConfigurationParams>(request.params) {
-                    Ok(params) => self
-                        .middleware_read
-                        .load_configuration(
-                            &params.binding_handle,
-                            &params.discovery_handle,
-                            &params.instance_handle,
-                        )
-                        .await
-                        .map(to_value)
-                        .map_err(middleware_read_failure),
-                    Err(failure) => Err(failure),
-                }
-            }
-            RpcMethod::MiddlewareHistoryList => {
-                match parse_params::<MiddlewareBindingParams>(request.params) {
-                    Ok(params) => self
-                        .middleware_read
-                        .list_history(&params.binding_handle)
-                        .await
-                        .map(to_value)
-                        .map_err(middleware_read_failure),
                     Err(failure) => Err(failure),
                 }
             }
@@ -837,6 +885,54 @@ impl BackendState {
                     Err(failure) => Err(failure),
                 }
             }
+            RpcMethod::KubernetesWorkloadActionPlan => {
+                match parse_params::<KubernetesActionPlanParams>(request.params) {
+                    Ok(params) => self
+                        .kubernetes_write
+                        .plan(
+                            &params.binding_handle,
+                            &params.snapshot_handle,
+                            &params.row_handle,
+                            &params.resource_name,
+                            params.action,
+                        )
+                        .await
+                        .map(to_value)
+                        .map_err(kubernetes_write_failure),
+                    Err(failure) => Err(failure),
+                }
+            }
+            RpcMethod::KubernetesWorkloadActionConfirm => {
+                match parse_params::<KubernetesPlanParams>(request.params) {
+                    Ok(params) => self
+                        .kubernetes_write
+                        .confirm(&params.binding_handle, &params.plan_handle)
+                        .map(to_value)
+                        .map_err(kubernetes_write_failure),
+                    Err(failure) => Err(failure),
+                }
+            }
+            RpcMethod::KubernetesWorkloadActionExecute => {
+                match parse_params::<KubernetesPlanParams>(request.params) {
+                    Ok(params) => self
+                        .kubernetes_write
+                        .execute(&params.binding_handle, &params.plan_handle)
+                        .await
+                        .map(to_value)
+                        .map_err(kubernetes_write_failure),
+                    Err(failure) => Err(failure),
+                }
+            }
+            RpcMethod::KubernetesWorkloadActionCancel => {
+                match parse_params::<KubernetesPlanParams>(request.params) {
+                    Ok(params) => self
+                        .kubernetes_write
+                        .cancel(&params.binding_handle, &params.plan_handle)
+                        .map(|()| to_value(serde_json::json!({ "cancelled": true })))
+                        .map_err(kubernetes_write_failure),
+                    Err(failure) => Err(failure),
+                }
+            }
             RpcMethod::DockerContainersRefresh => {
                 match parse_params::<DockerBindingParams>(request.params) {
                     Ok(params) => self
@@ -906,6 +1002,60 @@ impl BackendState {
                     Err(failure) => Err(failure),
                 }
             }
+            RpcMethod::DockerContainerActionPlan => {
+                match parse_params::<DockerActionPlanParams>(request.params) {
+                    Ok(params) => self
+                        .docker_write
+                        .plan(
+                            &params.binding_handle,
+                            &params.snapshot_handle,
+                            &params.container_handle,
+                            &params.container_name,
+                            params.action,
+                        )
+                        .await
+                        .map(to_value)
+                        .map_err(docker_write_failure),
+                    Err(failure) => Err(failure),
+                }
+            }
+            RpcMethod::DockerContainerActionConfirm => {
+                match parse_params::<DockerPlanParams>(request.params) {
+                    Ok(params) => self
+                        .docker_write
+                        .confirm(&params.binding_handle, &params.plan_handle)
+                        .map(to_value)
+                        .map_err(docker_write_failure),
+                    Err(failure) => Err(failure),
+                }
+            }
+            RpcMethod::DockerContainerActionExecute => {
+                match parse_params::<DockerPlanParams>(request.params) {
+                    Ok(params) => self
+                        .docker_write
+                        .execute(&params.binding_handle, &params.plan_handle)
+                        .await
+                        .map(to_value)
+                        .map_err(docker_write_failure),
+                    Err(failure) => Err(failure),
+                }
+            }
+            RpcMethod::DockerContainerActionCancel => {
+                match parse_params::<DockerPlanParams>(request.params) {
+                    Ok(params) => self
+                        .docker_write
+                        .cancel(&params.binding_handle, &params.plan_handle)
+                        .map(|()| to_value(serde_json::json!({ "cancelled": true })))
+                        .map_err(docker_write_failure),
+                    Err(failure) => Err(failure),
+                }
+            }
+            RpcMethod::DockerContainerTerminalOpen => {
+                match parse_params::<DockerTerminalOpenParams>(request.params) {
+                    Ok(params) => self.open_container_terminal(&params).await.map(to_value),
+                    Err(failure) => Err(failure),
+                }
+            }
             RpcMethod::EmergencyCommandCatalogLoad => {
                 match parse_params::<EmergencyCommandBindingParams>(request.params) {
                     Ok(params) => self
@@ -925,6 +1075,7 @@ impl BackendState {
                             &params.binding_handle,
                             &params.snapshot_handle,
                             &params.command_handle,
+                            params.container_handle.as_deref(),
                         )
                         .await
                         .map(to_value)
@@ -1843,16 +1994,18 @@ enum RpcMethod {
     SystemInfoTableCollect,
     #[serde(rename = "system-info.detail.get")]
     SystemInfoDetailGet,
-    #[serde(rename = "snapshot.list")]
-    SnapshotList,
-    #[serde(rename = "snapshot.detail.get")]
-    SnapshotDetailGet,
-    #[serde(rename = "snapshot.forensic.diff")]
-    SnapshotForensicDiff,
-    #[serde(rename = "firewall.inspect")]
-    FirewallInspect,
-    #[serde(rename = "firewall.change-history.list")]
-    FirewallChangeHistoryList,
+    #[serde(rename = "system-info.row.actions.list")]
+    SystemInfoRowActionsList,
+    #[serde(rename = "system-info.row.inspect")]
+    SystemInfoRowInspect,
+    #[serde(rename = "system-info.row.action.plan")]
+    SystemInfoRowActionPlan,
+    #[serde(rename = "system-info.row.action.confirm")]
+    SystemInfoRowActionConfirm,
+    #[serde(rename = "system-info.row.action.execute")]
+    SystemInfoRowActionExecute,
+    #[serde(rename = "system-info.row.action.cancel")]
+    SystemInfoRowActionCancel,
     #[serde(rename = "baseline.catalog.get")]
     BaselineCatalogGet,
     #[serde(rename = "baseline.scan")]
@@ -1861,12 +2014,6 @@ enum RpcMethod {
     BaselineHistoryList,
     #[serde(rename = "baseline.file.read")]
     BaselineFileRead,
-    #[serde(rename = "middleware.discover")]
-    MiddlewareDiscover,
-    #[serde(rename = "middleware.configuration.load")]
-    MiddlewareConfigurationLoad,
-    #[serde(rename = "middleware.history.list")]
-    MiddlewareHistoryList,
     #[serde(rename = "check-audit.catalog.get")]
     CheckAuditCatalogGet,
     #[serde(rename = "check-audit.status.collect")]
@@ -1889,6 +2036,14 @@ enum RpcMethod {
     KubernetesResourceDetailGet,
     #[serde(rename = "kubernetes.pod.logs.get")]
     KubernetesPodLogsGet,
+    #[serde(rename = "kubernetes.workload.action.plan")]
+    KubernetesWorkloadActionPlan,
+    #[serde(rename = "kubernetes.workload.action.confirm")]
+    KubernetesWorkloadActionConfirm,
+    #[serde(rename = "kubernetes.workload.action.execute")]
+    KubernetesWorkloadActionExecute,
+    #[serde(rename = "kubernetes.workload.action.cancel")]
+    KubernetesWorkloadActionCancel,
     #[serde(rename = "docker.containers.refresh")]
     DockerContainersRefresh,
     #[serde(rename = "docker.collection.get")]
@@ -1899,6 +2054,16 @@ enum RpcMethod {
     DockerSecurityAuditGet,
     #[serde(rename = "docker.container.logs.get")]
     DockerContainerLogsGet,
+    #[serde(rename = "docker.container.action.plan")]
+    DockerContainerActionPlan,
+    #[serde(rename = "docker.container.action.confirm")]
+    DockerContainerActionConfirm,
+    #[serde(rename = "docker.container.action.execute")]
+    DockerContainerActionExecute,
+    #[serde(rename = "docker.container.action.cancel")]
+    DockerContainerActionCancel,
+    #[serde(rename = "docker.container.terminal.open")]
+    DockerContainerTerminalOpen,
     #[serde(rename = "emergency-command.catalog.load")]
     EmergencyCommandCatalogLoad,
     #[serde(rename = "emergency-command.run")]
@@ -2171,28 +2336,19 @@ struct SystemInfoDetailParams {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct SnapshotBindingParams {
-    binding_handle: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct SnapshotDetailParams {
+struct SystemInfoRowActionParams {
     binding_handle: String,
     snapshot_handle: String,
+    row_id: String,
+    /// One of the fixed keys the sidecar hands out; anything else is nothing.
+    action: String,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct SnapshotDiffParams {
+struct SystemInfoPlanParams {
     binding_handle: String,
-    input: SnapshotDiffInput,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FirewallBindingParams {
-    binding_handle: String,
+    plan_handle: String,
 }
 
 #[derive(Deserialize)]
@@ -2207,20 +2363,6 @@ struct BaselineFileParams {
     binding_handle: String,
     /// Which catalogue item to open the file of. Never a path.
     item_handle: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct MiddlewareBindingParams {
-    binding_handle: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct MiddlewareConfigurationParams {
-    binding_handle: String,
-    discovery_handle: String,
-    instance_handle: String,
 }
 
 #[derive(Deserialize)]
@@ -2299,6 +2441,29 @@ struct KubernetesRowParams {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct KubernetesActionPlanParams {
+    binding_handle: String,
+    snapshot_handle: String,
+    /// Which workload, as the snapshot that listed it named it. Never a
+    /// namespace, a name or a UID.
+    row_handle: String,
+    /// The name the pane is showing, echoed back so the confirmation dialog
+    /// can say what it is about to act on. Display only: the workload is
+    /// resolved from the handle above, so a forged name mislabels nothing but
+    /// the operator's own dialog.
+    resource_name: String,
+    action: KubernetesWriteAction,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct KubernetesPlanParams {
+    binding_handle: String,
+    plan_handle: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DockerBindingParams {
     binding_handle: String,
 }
@@ -2336,6 +2501,57 @@ struct DockerLogsParams {
     tail: usize,
 }
 
+/// What the window needs once a container shell is open.
+///
+/// `shell` is there so the window can say which shell it got: on an image with
+/// no bash, landing in `sh` without being told reads as the terminal being
+/// broken rather than as the image being thin.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DockerContainerTerminalDto {
+    handle: String,
+    columns: u16,
+    rows: u16,
+    shell: &'static str,
+}
+
+/// Opening a shell inside a container the pane already listed.
+///
+/// No shell program and no container id: the shell is probed on the host and
+/// the container comes from the same opaque handle every other Docker call
+/// takes, so a caller cannot name a container the pane never showed it.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DockerTerminalOpenParams {
+    binding_handle: String,
+    snapshot_handle: String,
+    container_handle: String,
+    columns: u16,
+    rows: u16,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DockerActionPlanParams {
+    binding_handle: String,
+    snapshot_handle: String,
+    /// Which container, as the snapshot that listed it named it. Never an id.
+    container_handle: String,
+    /// The name the pane is showing, echoed back so the confirmation dialog
+    /// can say what it is about to act on. Display only: the identity is
+    /// resolved from the handle above, so a forged name mislabels nothing but
+    /// the operator's own dialog.
+    container_name: String,
+    action: DockerWriteAction,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DockerPlanParams {
+    binding_handle: String,
+    plan_handle: String,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct EmergencyCommandBindingParams {
@@ -2348,6 +2564,10 @@ struct EmergencyCommandRunParams {
     binding_handle: String,
     snapshot_handle: String,
     command_handle: String,
+    /// Absent runs the check on the target itself; present runs it inside one
+    /// of the containers the same catalogue offered.
+    #[serde(default)]
+    container_handle: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -2420,6 +2640,13 @@ struct SftpBrowserOperationParams {
     format: Option<String>,
     #[serde(default)]
     staged_handle: Option<String>,
+    /// The edited text, for `write-text` and nothing else.
+    #[serde(default)]
+    text: Option<String>,
+    /// The hash the read handed out, so the write can refuse a file that has
+    /// changed underneath the editor since it was opened.
+    #[serde(default)]
+    expected_sha256: Option<String>,
 }
 
 impl SftpBrowserOperationParams {
@@ -2464,6 +2691,14 @@ impl SftpBrowserOperationParams {
                     .clone()
                     .ok_or_else(sftp_browser_request_failure)?,
                 name: name()?,
+            },
+            "write-text" => SftpOperationRequest::WriteText {
+                entry_handle: single()?,
+                text: self.text.clone().ok_or_else(sftp_browser_request_failure)?,
+                expected_sha256: self
+                    .expected_sha256
+                    .clone()
+                    .ok_or_else(sftp_browser_request_failure)?,
             },
             _ => return Err(sftp_browser_request_failure()),
         };
@@ -2944,6 +3179,33 @@ fn ssh_failure(error: CoreError) -> RpcFailure {
     RpcFailure::core("run SSH controller operation", code, public_message, error)
 }
 
+/// Two different problems, told apart before they reach an operator.
+///
+/// A stopped container and an image with no shell both fail the same probe,
+/// and flattening them into one message sent the operator to rebuild an image
+/// when all they had to do was start the container. The subject on the core
+/// error is what separates them.
+fn container_shell_failure(error: CoreError) -> RpcFailure {
+    let not_running = matches!(
+        &error,
+        CoreError::Validation { subject, .. } if *subject == "container terminal"
+    );
+    if not_running {
+        return RpcFailure::core(
+            "open a shell in a container",
+            "docker-container-not-running",
+            "这个容器没在运行，先把它启动起来才能进终端。",
+            error,
+        );
+    }
+    RpcFailure::core(
+        "detect container shell",
+        "docker-container-shell-missing",
+        "这个容器里没有可用的 shell（bash、ash、sh 都没有），打不开终端。",
+        error,
+    )
+}
+
 fn terminal_failure(error: TerminalApiError) -> RpcFailure {
     match error {
         TerminalApiError::Core(source) => RpcFailure::core(
@@ -3068,76 +3330,28 @@ fn system_info_failure(error: SystemInfoApiError) -> RpcFailure {
             public_message: "LovelyRes could not complete the system-information operation.",
             source: None,
         },
-    }
-}
-
-fn snapshot_read_failure(error: SnapshotReadApiError) -> RpcFailure {
-    match error {
-        SnapshotReadApiError::Core | SnapshotReadApiError::RegistryUnavailable => RpcFailure {
-            operation: "run bounded snapshot investigation",
-            code: "snapshot-operation-failed",
-            public_message: "LovelyRes could not complete the snapshot investigation.",
-            source: None,
-        },
-        SnapshotReadApiError::BindingUnavailable => RpcFailure {
-            operation: "validate snapshot SSH binding",
-            code: "snapshot-binding-unavailable",
-            public_message: "The snapshot target binding is missing or stale.",
-            source: None,
-        },
-        SnapshotReadApiError::InvalidHandle | SnapshotReadApiError::InvalidInput => RpcFailure {
-            operation: "validate snapshot request",
+        SystemInfoApiError::InvalidAction => RpcFailure {
+            operation: "validate system-information row action",
             code: "invalid-params",
-            public_message: "The snapshot request parameters are invalid.",
+            public_message: "The system-information row action is not one LovelyRes offers.",
             source: None,
         },
-        SnapshotReadApiError::InvalidSnapshot | SnapshotReadApiError::SnapshotStale => RpcFailure {
-            operation: "validate snapshot capability",
-            code: "snapshot-unavailable",
-            public_message: "The snapshot capability is missing, expired, or stale.",
+        SystemInfoApiError::ActionUnavailable => RpcFailure {
+            operation: "check system-information row action precondition",
+            code: "system-info-action-unavailable",
+            public_message: "That action does not apply to the selected row any more.",
             source: None,
         },
-        SnapshotReadApiError::Capacity => RpcFailure {
-            operation: "bound snapshot investigation",
-            code: "snapshot-capacity",
-            public_message: "The bounded snapshot investigation capacity has been reached.",
+        SystemInfoApiError::PlanStale | SystemInfoApiError::PlanNotConfirmed => RpcFailure {
+            operation: "validate system-information row plan",
+            code: "system-info-plan-unavailable",
+            public_message: "That plan is missing, expired, unconfirmed, or already used.",
             source: None,
         },
-    }
-}
-
-fn firewall_read_failure(error: FirewallReadApiError) -> RpcFailure {
-    match error {
-        FirewallReadApiError::Core | FirewallReadApiError::RegistryUnavailable => RpcFailure {
-            operation: "run bounded firewall investigation",
-            code: "firewall-operation-failed",
-            public_message: "LovelyRes could not complete the firewall investigation.",
-            source: None,
-        },
-        FirewallReadApiError::BindingUnavailable => RpcFailure {
-            operation: "validate firewall SSH binding",
-            code: "firewall-binding-unavailable",
-            public_message: "The firewall target binding is missing or stale.",
-            source: None,
-        },
-        FirewallReadApiError::InvalidHandle => RpcFailure {
-            operation: "validate firewall request",
-            code: "invalid-params",
-            public_message: "The firewall request parameters are invalid.",
-            source: None,
-        },
-        FirewallReadApiError::RegistryCapacity | FirewallReadApiError::ConcurrencyLimit => {
-            RpcFailure {
-                operation: "bound firewall investigation",
-                code: "firewall-capacity",
-                public_message: "The bounded firewall investigation capacity has been reached.",
-                source: None,
-            }
-        }
-        FirewallReadApiError::OutputLimit => RpcFailure {
-            operation: "bound firewall investigation output",
-            code: "firewall-output-limit",
-            public_message: "The firewall investigation result exceeds its safety limit.",
+        SystemInfoApiError::Deadline => RpcFailure {
+            operation: "bound system-information row action deadline",
+            code: "system-info-timeout",
+            public_message: "The system-information row action exceeded its deadline.",
             source: None,
         },
     }
@@ -3179,58 +3393,6 @@ fn baseline_read_failure(error: BaselineReadApiError) -> RpcFailure {
             operation: "bound baseline investigation",
             code: "baseline-capacity",
             public_message: "The bounded baseline investigation capacity has been reached.",
-            source: None,
-        },
-    }
-}
-
-fn middleware_read_failure(error: MiddlewareReadApiError) -> RpcFailure {
-    match error {
-        MiddlewareReadApiError::Core | MiddlewareReadApiError::RegistryUnavailable => RpcFailure {
-            operation: "run bounded middleware investigation",
-            code: "middleware-operation-failed",
-            public_message: "LovelyRes could not complete the middleware investigation.",
-            source: None,
-        },
-        // A host with no systemd cannot answer this, which is neither a
-        // failure nor an empty result. Saying which it is stops an operator
-        // reading "none found" as "nothing is running here".
-        MiddlewareReadApiError::Unsupported => RpcFailure {
-            operation: "enumerate middleware service units",
-            code: "middleware-unsupported-target",
-            public_message: "This host has no systemd, so middleware cannot be found by service unit.",
-            source: None,
-        },
-        MiddlewareReadApiError::BindingUnavailable => RpcFailure {
-            operation: "validate middleware SSH binding",
-            code: "middleware-binding-unavailable",
-            public_message: "The middleware target binding is missing or stale.",
-            source: None,
-        },
-        MiddlewareReadApiError::InvalidHandle
-        | MiddlewareReadApiError::InvalidSnapshot
-        | MiddlewareReadApiError::SnapshotStale => RpcFailure {
-            operation: "validate middleware request",
-            code: "invalid-params",
-            public_message: "The middleware request parameters are invalid or stale.",
-            source: None,
-        },
-        MiddlewareReadApiError::InvalidData => RpcFailure {
-            operation: "validate middleware investigation output",
-            code: "middleware-output-invalid",
-            public_message: "The middleware investigation result is invalid.",
-            source: None,
-        },
-        MiddlewareReadApiError::OutputLimit => RpcFailure {
-            operation: "bound middleware investigation output",
-            code: "middleware-output-limit",
-            public_message: "The middleware investigation result exceeds its safety limit.",
-            source: None,
-        },
-        MiddlewareReadApiError::ConcurrencyLimit => RpcFailure {
-            operation: "bound middleware investigation",
-            code: "middleware-capacity",
-            public_message: "The bounded middleware investigation capacity has been reached.",
             source: None,
         },
     }
@@ -3317,6 +3479,69 @@ fn log_analysis_read_failure(error: LogAnalysisReadApiError) -> RpcFailure {
     }
 }
 
+fn kubernetes_write_failure(error: KubernetesWriteApiError) -> RpcFailure {
+    match error {
+        KubernetesWriteApiError::Core | KubernetesWriteApiError::RegistryUnavailable => {
+            RpcFailure {
+                operation: "plan or run a Kubernetes workload action",
+                code: "kubernetes-action-failed",
+                public_message: "LovelyRes could not complete the workload action.",
+                source: None,
+            }
+        }
+        KubernetesWriteApiError::BindingUnavailable => RpcFailure {
+            operation: "validate Kubernetes action SSH binding",
+            code: "kubernetes-binding-unavailable",
+            public_message: "The Kubernetes target binding is missing or stale.",
+            source: None,
+        },
+        KubernetesWriteApiError::InvalidHandle => RpcFailure {
+            operation: "validate Kubernetes action request",
+            code: "invalid-params",
+            public_message: "The workload action request parameters are invalid.",
+            source: None,
+        },
+        // Named apart from a plain refusal: this one says the operator asked
+        // for something that does not apply to what they clicked.
+        KubernetesWriteApiError::ActionKindMismatch => RpcFailure {
+            operation: "match a Kubernetes action to the resource it names",
+            code: "kubernetes-action-kind-mismatch",
+            public_message: "That action does not apply to this kind of resource.",
+            source: None,
+        },
+        KubernetesWriteApiError::InvalidRow => RpcFailure {
+            operation: "resolve the workload an action names",
+            code: "kubernetes-resource-unavailable",
+            public_message: "That resource is no longer in the list this action was planned from.",
+            source: None,
+        },
+        KubernetesWriteApiError::PlanStale => RpcFailure {
+            operation: "validate Kubernetes action plan",
+            code: "kubernetes-action-plan-invalid",
+            public_message: "The workload action plan is missing, expired, or already used.",
+            source: None,
+        },
+        KubernetesWriteApiError::PlanNotConfirmed => RpcFailure {
+            operation: "require confirmation before a Kubernetes action runs",
+            code: "kubernetes-action-not-confirmed",
+            public_message: "The workload action has not been confirmed.",
+            source: None,
+        },
+        KubernetesWriteApiError::Capacity => RpcFailure {
+            operation: "bound pending Kubernetes action plans",
+            code: "kubernetes-action-capacity",
+            public_message: "Too many workload action plans are pending.",
+            source: None,
+        },
+        KubernetesWriteApiError::Deadline => RpcFailure {
+            operation: "bound the Kubernetes action deadline",
+            code: "kubernetes-action-timeout",
+            public_message: "The workload action did not finish in time.",
+            source: None,
+        },
+    }
+}
+
 fn kubernetes_read_failure(error: KubernetesReadApiError) -> RpcFailure {
     match error {
         KubernetesReadApiError::Core(_) | KubernetesReadApiError::RegistryUnavailable => {
@@ -3370,12 +3595,83 @@ fn kubernetes_read_failure(error: KubernetesReadApiError) -> RpcFailure {
     }
 }
 
+fn docker_write_failure(error: DockerWriteApiError) -> RpcFailure {
+    match error {
+        DockerWriteApiError::Core | DockerWriteApiError::RegistryUnavailable => RpcFailure {
+            operation: "plan or run a Docker container action",
+            code: "docker-action-failed",
+            public_message: "LovelyRes could not complete the container action.",
+            source: None,
+        },
+        DockerWriteApiError::BindingUnavailable => RpcFailure {
+            operation: "validate Docker action SSH binding",
+            code: "docker-binding-unavailable",
+            public_message: "The Docker target binding is missing or stale.",
+            source: None,
+        },
+        DockerWriteApiError::InvalidHandle => RpcFailure {
+            operation: "validate Docker action request",
+            code: "invalid-params",
+            public_message: "The container action request parameters are invalid.",
+            source: None,
+        },
+        DockerWriteApiError::InvalidContainer => RpcFailure {
+            operation: "resolve the container an action names",
+            code: "docker-container-unavailable",
+            public_message: "That container is no longer in the list this action was planned from.",
+            source: None,
+        },
+        // Told apart from "not approved" on purpose: one asks the operator to
+        // look again, the other asks them to press confirm.
+        DockerWriteApiError::PlanStale => RpcFailure {
+            operation: "validate Docker action plan",
+            code: "docker-action-plan-invalid",
+            public_message: "The container action plan is missing, expired, or already used.",
+            source: None,
+        },
+        DockerWriteApiError::PlanNotConfirmed => RpcFailure {
+            operation: "require confirmation before a Docker action runs",
+            code: "docker-action-not-confirmed",
+            public_message: "The container action has not been confirmed.",
+            source: None,
+        },
+        DockerWriteApiError::Capacity => RpcFailure {
+            operation: "bound pending Docker action plans",
+            code: "docker-action-capacity",
+            public_message: "Too many container action plans are pending.",
+            source: None,
+        },
+        DockerWriteApiError::Deadline => RpcFailure {
+            operation: "bound the Docker action deadline",
+            code: "docker-action-timeout",
+            public_message: "The container action did not finish in time.",
+            source: None,
+        },
+    }
+}
+
 fn docker_read_failure(error: DockerReadApiError) -> RpcFailure {
     match error {
         DockerReadApiError::Core | DockerReadApiError::RegistryUnavailable => RpcFailure {
             operation: "run bounded Docker read investigation",
             code: "docker-operation-failed",
             public_message: "LovelyRes could not complete the Docker read operation.",
+            source: None,
+        },
+        // Two answers, not one, because they ask different things of the
+        // operator: start the daemon, or stop looking for containers here.
+        // Collapsing them into "no containers" would be the false negative
+        // this detection exists to remove.
+        DockerReadApiError::RuntimeAbsent => RpcFailure {
+            operation: "detect the host container runtime",
+            code: "docker-runtime-absent",
+            public_message: "This host has neither Docker nor Podman installed.",
+            source: None,
+        },
+        DockerReadApiError::RuntimeNotRunning => RpcFailure {
+            operation: "reach the host container runtime",
+            code: "docker-runtime-not-running",
+            public_message: "A container runtime is installed here but is not answering.",
             source: None,
         },
         DockerReadApiError::BindingUnavailable => RpcFailure {
@@ -3901,7 +4197,6 @@ enum PageGroup {
     Target,
     Triage,
     Investigation,
-    Response,
     Operations,
     Intelligence,
 }
@@ -3938,7 +4233,7 @@ struct PageDescriptor {
 fn page_descriptors() -> Vec<PageDescriptor> {
     use CapabilityRequirement::{ConnectedTarget, LocalWorkspace, OptionalAi};
     use MigrationState::{Pending, Ready};
-    use PageGroup::{Intelligence, Investigation, Operations, Response, Target, Triage};
+    use PageGroup::{Intelligence, Investigation, Operations, Target, Triage};
 
     vec![
         PageDescriptor {
@@ -4052,28 +4347,6 @@ fn page_descriptors() -> Vec<PageDescriptor> {
             migration_state: Pending,
         },
         PageDescriptor {
-            id: "firewall",
-            group: Response,
-            title: "边界隔离",
-            icon: "⛨",
-            capability: ConnectedTarget,
-            summary: "审阅并计划边界隔离与恢复。",
-            primary_action: "创建隔离计划",
-            sections: &["当前规则", "隔离计划", "恢复记录"],
-            migration_state: Pending,
-        },
-        PageDescriptor {
-            id: "snapshot",
-            group: Response,
-            title: "取证快照",
-            icon: "◉",
-            capability: ConnectedTarget,
-            summary: "只读查看便携索引中的目录与取证快照。",
-            primary_action: "查看快照",
-            sections: &["目录索引", "取证字段", "只读差异"],
-            migration_state: Pending,
-        },
-        PageDescriptor {
             id: "database",
             group: Operations,
             title: "数据库",
@@ -4085,17 +4358,6 @@ fn page_descriptors() -> Vec<PageDescriptor> {
             migration_state: Pending,
         },
         PageDescriptor {
-            id: "middleware",
-            group: Operations,
-            title: "中间件",
-            icon: "⚙",
-            capability: ConnectedTarget,
-            summary: "无损查看、校验、应用并恢复常见中间件配置。",
-            primary_action: "扫描中间件",
-            sections: &["实例与健康", "完整配置", "变更与恢复"],
-            migration_state: Pending,
-        },
-        PageDescriptor {
             id: "java-hot-update",
             group: Operations,
             title: "Java 热更新",
@@ -4104,17 +4366,6 @@ fn page_descriptors() -> Vec<PageDescriptor> {
             summary: "分析并执行受控 Java 热更新。",
             primary_action: "选择进程",
             sections: &["JVM", "类与方法", "部署记录"],
-            migration_state: Pending,
-        },
-        PageDescriptor {
-            id: "batch-servers",
-            group: Operations,
-            title: "多机批量",
-            icon: "▦",
-            capability: ConnectedTarget,
-            summary: "对多个目标计划和执行一致的任务。",
-            primary_action: "创建批量任务",
-            sections: &["目标", "任务模板", "结果"],
             migration_state: Pending,
         },
         PageDescriptor {
@@ -4429,7 +4680,7 @@ mod tests {
         assert!(response.ok);
         let result = response.result.unwrap();
         assert_eq!(result["protocolVersion"], PROTOCOL_VERSION);
-        assert_eq!(result["pages"].as_array().unwrap().len(), 18);
+        assert_eq!(result["pages"].as_array().unwrap().len(), 14);
         assert!(result.get("dataRoot").is_none());
         assert_eq!(
             result["pages"]
@@ -4923,137 +5174,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn snapshot_read_rpc_routes_are_fixed_scoped_and_reject_renderer_ingredients() {
-        let root = TestRoot::new();
-        let state = BackendState::open(root.0.clone()).unwrap();
-        let binding = "missing-snapshot-binding-marker";
-        let cases = [
-            (
-                "snapshot.list",
-                serde_json::json!({ "bindingHandle": binding }),
-            ),
-            (
-                "snapshot.detail.get",
-                serde_json::json!({
-                    "bindingHandle": binding,
-                    "snapshotHandle": "opaque-snapshot-one"
-                }),
-            ),
-            (
-                "snapshot.forensic.diff",
-                serde_json::json!({
-                    "bindingHandle": binding,
-                    "input": {
-                        "olderSnapshotHandle": "opaque-snapshot-older",
-                        "newerSnapshotHandle": "opaque-snapshot-newer"
-                    }
-                }),
-            ),
-        ];
-        for (method, params) in cases {
-            let response = handle_frame(&state, &request(method, &params.to_string())).await;
-            assert!(!response.ok, "{method} accepted a missing binding");
-            assert_eq!(
-                response.error.as_ref().unwrap().code,
-                "snapshot-binding-unavailable",
-                "{method}"
-            );
-            assert!(!serde_json::to_string(&response).unwrap().contains(binding));
-        }
-
-        let marker = "renderer-forged-snapshot-path-identity-command-secret";
-        for (method, params) in [
-            (
-                "snapshot.list",
-                serde_json::json!({ "bindingHandle": binding, "targetIdentity": marker }),
-            ),
-            (
-                "snapshot.detail.get",
-                serde_json::json!({
-                    "bindingHandle": binding,
-                    "snapshotHandle": "opaque-snapshot-one",
-                    "path": marker
-                }),
-            ),
-            (
-                "snapshot.forensic.diff",
-                serde_json::json!({
-                    "bindingHandle": binding,
-                    "input": {
-                        "olderSnapshotHandle": "opaque-snapshot-older",
-                        "newerSnapshotHandle": "opaque-snapshot-newer",
-                        "snapshotId": marker
-                    }
-                }),
-            ),
-        ] {
-            let response = handle_frame(&state, &request(method, &params.to_string())).await;
-            assert!(!response.ok);
-            assert_eq!(response.error.as_ref().unwrap().code, "invalid-params");
-            assert!(!serde_json::to_string(&response).unwrap().contains(marker));
-        }
-    }
-
-    #[tokio::test]
-    async fn firewall_read_rpc_routes_are_exact_scoped_and_never_echo_renderer_ingredients() {
-        let root = TestRoot::new();
-        let state = BackendState::open(root.0.clone()).unwrap();
-        let binding = "11111111-1111-4111-8111-111111111111";
-        for method in ["firewall.inspect", "firewall.change-history.list"] {
-            let response = handle_frame(
-                &state,
-                &request(
-                    method,
-                    &serde_json::json!({ "bindingHandle": binding }).to_string(),
-                ),
-            )
-            .await;
-            assert!(!response.ok, "{method} accepted a missing binding");
-            let failure = response.error.as_ref().unwrap();
-            assert_eq!(failure.code, "firewall-binding-unavailable", "{method}");
-            assert_eq!(
-                failure.message, "The firewall target binding is missing or stale.",
-                "{method}"
-            );
-            assert!(!serde_json::to_string(&response).unwrap().contains(binding));
-        }
-
-        let marker = "renderer-forged-firewall-command-path-target-secret";
-        for (method, params) in [
-            (
-                "firewall.inspect",
-                serde_json::json!({ "bindingHandle": binding, "command": marker }),
-            ),
-            (
-                "firewall.change-history.list",
-                serde_json::json!({ "bindingHandle": binding, "path": marker }),
-            ),
-        ] {
-            let response = handle_frame(&state, &request(method, &params.to_string())).await;
-            assert!(!response.ok);
-            assert_eq!(response.error.as_ref().unwrap().code, "invalid-params");
-            assert!(!serde_json::to_string(&response).unwrap().contains(marker));
-        }
-
-        let invalid_binding = "HOSTILE_FIREWALL_BINDING_MUST_NOT_ECHO";
-        let response = handle_frame(
-            &state,
-            &request(
-                "firewall.inspect",
-                &serde_json::json!({ "bindingHandle": invalid_binding }).to_string(),
-            ),
-        )
-        .await;
-        assert!(!response.ok);
-        assert_eq!(response.error.as_ref().unwrap().code, "invalid-params");
-        assert!(
-            !serde_json::to_string(&response)
-                .unwrap()
-                .contains(invalid_binding)
-        );
-    }
-
-    #[tokio::test]
     async fn baseline_read_rpc_routes_are_exact_scoped_and_never_echo_renderer_ingredients() {
         let root = TestRoot::new();
         let state = BackendState::open(root.0.clone()).unwrap();
@@ -5110,88 +5230,6 @@ mod tests {
             &state,
             &request(
                 "baseline.scan",
-                &serde_json::json!({ "bindingHandle": invalid_binding }).to_string(),
-            ),
-        )
-        .await;
-        assert!(!response.ok);
-        assert_eq!(response.error.as_ref().unwrap().code, "invalid-params");
-        assert!(
-            !serde_json::to_string(&response)
-                .unwrap()
-                .contains(invalid_binding)
-        );
-    }
-
-    #[tokio::test]
-    async fn middleware_read_rpc_routes_are_exact_scoped_and_never_echo_renderer_ingredients() {
-        let root = TestRoot::new();
-        let state = BackendState::open(root.0.clone()).unwrap();
-        let binding = "11111111-1111-4111-8111-111111111111";
-        let discovery = "22222222-2222-4222-8222-222222222222";
-        let instance = "33333333-3333-4333-8333-333333333333";
-
-        for (method, params) in [
-            (
-                "middleware.discover",
-                serde_json::json!({ "bindingHandle": binding }),
-            ),
-            (
-                "middleware.configuration.load",
-                serde_json::json!({
-                    "bindingHandle": binding,
-                    "discoveryHandle": discovery,
-                    "instanceHandle": instance,
-                }),
-            ),
-            (
-                "middleware.history.list",
-                serde_json::json!({ "bindingHandle": binding }),
-            ),
-        ] {
-            let response = handle_frame(&state, &request(method, &params.to_string())).await;
-            assert!(!response.ok);
-            assert_eq!(
-                response.error.as_ref().unwrap().code,
-                "middleware-binding-unavailable"
-            );
-            let text = serde_json::to_string(&response).unwrap();
-            assert!(!text.contains(binding));
-            assert!(!text.contains(discovery));
-            assert!(!text.contains(instance));
-        }
-
-        let marker = "renderer-forged-middleware-command-path-target-secret";
-        for (method, params) in [
-            (
-                "middleware.discover",
-                serde_json::json!({ "bindingHandle": binding, "command": marker }),
-            ),
-            (
-                "middleware.configuration.load",
-                serde_json::json!({
-                    "bindingHandle": binding,
-                    "discoveryHandle": discovery,
-                    "instanceHandle": instance,
-                    "path": marker,
-                }),
-            ),
-            (
-                "middleware.history.list",
-                serde_json::json!({ "bindingHandle": binding, "targetIdentity": marker }),
-            ),
-        ] {
-            let response = handle_frame(&state, &request(method, &params.to_string())).await;
-            assert!(!response.ok);
-            assert_eq!(response.error.as_ref().unwrap().code, "invalid-params");
-            assert!(!serde_json::to_string(&response).unwrap().contains(marker));
-        }
-
-        let invalid_binding = "../HOSTILE_MIDDLEWARE_BINDING_MUST_NOT_ECHO";
-        let response = handle_frame(
-            &state,
-            &request(
-                "middleware.discover",
                 &serde_json::json!({ "bindingHandle": invalid_binding }).to_string(),
             ),
         )
@@ -5833,6 +5871,7 @@ mod tests {
             "docker.resource.inspect",
             "docker.security.audit.get",
             "docker.container.logs.get",
+            "docker.container.terminal.open",
         ] {
             assert!(
                 serde_json::from_value::<RpcMethod>(serde_json::json!(method)).is_ok(),
@@ -5857,15 +5896,28 @@ mod tests {
             .nth(1)
             .and_then(|value| value.split("struct NoteReplayEntry").next())
             .unwrap();
-        let state_field = ["docker_read: ", "DockerReadApi"].concat();
+        // Shared, because the mutation side resolves its container handles
+        // through the read side's registry. Two registries would let a handle
+        // that names nothing to the pane still name something to an action.
+        let state_field = ["docker_read: ", "Arc<DockerReadApi>"].concat();
         assert_eq!(state.matches(&state_field).count(), 1);
+        assert_eq!(
+            state
+                .matches(&["docker_write: ", "DockerWriteApi"].concat())
+                .count(),
+            1
+        );
         let open = source
             .split("impl BackendState")
             .nth(1)
             .and_then(|value| value.split("async fn replay_note_mutation").next())
             .unwrap();
-        let initializer = ["let docker_read = ", "DockerReadApi::new"].concat();
+        let initializer = ["let docker_read = ", "Arc::new(DockerReadApi::new"].concat();
         assert_eq!(open.matches(&initializer).count(), 1);
+        assert_eq!(
+            open.matches(&["Arc::clone(&docker_read)"].concat()).count(),
+            1
+        );
         let params_start = ["struct Docker", "BindingParams"].concat();
         let params = source
             .split(&params_start)
@@ -5876,14 +5928,52 @@ mod tests {
                     .next()
             })
             .unwrap();
-        for forbidden in [
+        // Field declarations only, not the whole region: what must never
+        // appear is a Docker request *carrying* one of these primitives, and a
+        // struct named after the thing it opens — or a comment explaining why
+        // it carries none of them — is not that. Scanning the raw text made the
+        // check fire on its own documentation, which is the kind of failure
+        // that gets a real rule loosened to shut it up.
+        fn declared_fields(region: &str) -> Vec<&str> {
+            region
+                .lines()
+                .map(str::trim)
+                .filter(|line| {
+                    !line.starts_with("//")
+                        && !line.starts_with('#')
+                        && line.ends_with(',')
+                        && line.contains(": ")
+                })
+                .collect()
+        }
+        const FORBIDDEN_PRIMITIVES: [&str; 9] = [
             "command", "path", "target", "session", "mutation", "file", "terminal", "export",
             "generic",
-        ] {
-            assert!(
-                !params.contains(forbidden),
-                "Docker params exposed forbidden primitive {forbidden}"
-            );
+        ];
+        // Narrowing the scan is only safe if it still fires on the thing it
+        // exists to catch, so prove that here rather than trusting it.
+        let leak = declared_fields(
+            "struct X {\n    /// a terminal handle\n    terminal_handle: String,\n}",
+        );
+        assert_eq!(leak, vec!["terminal_handle: String,"]);
+        assert!(
+            FORBIDDEN_PRIMITIVES
+                .iter()
+                .any(|forbidden| leak[0].contains(forbidden))
+        );
+
+        let fields = declared_fields(params);
+        assert!(
+            !fields.is_empty(),
+            "Docker params field scan matched nothing; the extraction above is broken"
+        );
+        for forbidden in FORBIDDEN_PRIMITIVES {
+            for field in &fields {
+                assert!(
+                    !field.contains(forbidden),
+                    "Docker params exposed forbidden primitive {forbidden} in `{field}`"
+                );
+            }
         }
 
         let cases = [
@@ -6912,14 +7002,8 @@ mod tests {
             .nth(1)
             .and_then(|value| value.split("RpcMethod::TerminalOpen").next())
             .unwrap();
-        let close = branch
-            .find("self.firewall_read.close_binding(&params.binding_handle);")
-            .unwrap();
         let baseline_close = branch
             .find("self.baseline_read.close_binding(&params.binding_handle);")
-            .unwrap();
-        let middleware_close = branch
-            .find("self.middleware_read.close_binding(&params.binding_handle);")
             .unwrap();
         let check_audit_close = branch
             .find("self.check_audit_read.close_binding(&params.binding_handle);")
@@ -6933,25 +7017,33 @@ mod tests {
         let kubernetes_close = branch
             .find("self.kubernetes_read.close_binding(&params.binding_handle);")
             .unwrap();
+        let kubernetes_action_close = branch
+            .find("self.kubernetes_write.close_binding(&params.binding_handle);")
+            .unwrap();
         let emergency_command_close = branch
             .find("self.emergency_command.close_binding(&params.binding_handle);")
             .unwrap();
         let docker_close = branch
             .find("self.docker_read.close_binding(&params.binding_handle);")
             .unwrap();
+        // A pending action plan outlives its binding otherwise, and the next
+        // connection would find an approval it never gave.
+        let docker_action_close = branch
+            .find("self.docker_write.close_binding(&params.binding_handle);")
+            .unwrap();
         let packet_capture_close = branch.find("self.packet_capture_live").unwrap();
         let disconnect = branch
             .find(".disconnect_binding(&params.binding_handle)")
             .unwrap();
-        assert!(close < disconnect);
         assert!(baseline_close < disconnect);
-        assert!(middleware_close < disconnect);
         assert!(check_audit_close < disconnect);
         assert!(integrity_close < disconnect);
         assert!(log_analysis_close < disconnect);
         assert!(kubernetes_close < disconnect);
+        assert!(kubernetes_action_close < disconnect);
         assert!(emergency_command_close < disconnect);
         assert!(docker_close < disconnect);
+        assert!(docker_action_close < disconnect);
         assert!(packet_capture_close < disconnect);
         assert!(integrity_close < packet_capture_close);
     }
@@ -7479,6 +7571,104 @@ mod tests {
         let encoded = serde_json::to_string(&response).unwrap();
         assert!(!encoded.contains("probe-secret-must-not-return"));
         assert!(!encoded.contains("server.example;id"));
+    }
+
+    #[tokio::test]
+    async fn system_info_row_actions_reject_forged_keys_handles_and_stale_bindings() {
+        let root = TestRoot::new();
+        let state = BackendState::open(root.0.clone()).unwrap();
+        let hostile_handle = "missing-binding-must-not-echo";
+
+        // A key outside the closed set is refused as a parameter, before any
+        // binding or snapshot is consulted.
+        for forged in ["process.kill -9", "shell.rm-rf", "", "network.disconnect.now"] {
+            let params = serde_json::json!({
+                "bindingHandle": hostile_handle,
+                "snapshotHandle": "snapshot",
+                "rowId": "row",
+                "action": forged,
+            });
+            let refused = handle_frame(
+                &state,
+                &request("system-info.row.inspect", &params.to_string()),
+            )
+            .await;
+            assert!(!refused.ok, "{forged:?} was not refused");
+            assert_eq!(refused.error.as_ref().unwrap().code, "invalid-params");
+            assert!(!serde_json::to_string(&refused).unwrap().contains(forged.trim()) || forged.is_empty());
+        }
+
+        // A real key with no live binding behind it is a lost target, named
+        // the same way every other target-bound capability names it.
+        for (method, action) in [
+            ("system-info.row.inspect", "process.open-files"),
+            ("system-info.row.action.plan", "process.signal.kill"),
+        ] {
+            let params = serde_json::json!({
+                "bindingHandle": hostile_handle,
+                "snapshotHandle": "snapshot",
+                "rowId": "row",
+                "action": action,
+            });
+            let lost = handle_frame(&state, &request(method, &params.to_string())).await;
+            assert!(!lost.ok);
+            assert_eq!(
+                lost.error.as_ref().unwrap().code,
+                "system-info-binding-unavailable",
+                "{method}: {}",
+                serde_json::to_string(&lost).unwrap()
+            );
+            assert!(!serde_json::to_string(&lost).unwrap().contains(hostile_handle));
+        }
+        let listing = serde_json::json!({
+            "bindingHandle": hostile_handle,
+            "snapshotHandle": "snapshot",
+            "rowId": "row",
+        });
+        let lost = handle_frame(
+            &state,
+            &request("system-info.row.actions.list", &listing.to_string()),
+        )
+        .await;
+        assert_eq!(
+            lost.error.as_ref().unwrap().code,
+            "system-info-binding-unavailable"
+        );
+
+        // Plan handles are only ever the sidecar's own, and a forged one with
+        // no binding is refused without reaching the registry.
+        let plan_params = serde_json::json!({
+            "bindingHandle": hostile_handle,
+            "planHandle": "forged-plan",
+        });
+        for method in [
+            "system-info.row.action.confirm",
+            "system-info.row.action.execute",
+            "system-info.row.action.cancel",
+        ] {
+            let refused = handle_frame(&state, &request(method, &plan_params.to_string())).await;
+            assert!(!refused.ok, "{method} accepted a forged plan");
+            assert_eq!(
+                refused.error.as_ref().unwrap().code,
+                "system-info-binding-unavailable"
+            );
+        }
+
+        // Extra fields are not tolerated: a command smuggled next to the
+        // action is a malformed request, not an ignored one.
+        let smuggled = serde_json::json!({
+            "bindingHandle": hostile_handle,
+            "snapshotHandle": "snapshot",
+            "rowId": "row",
+            "action": "process.open-files",
+            "command": "id",
+        });
+        let refused = handle_frame(
+            &state,
+            &request("system-info.row.inspect", &smuggled.to_string()),
+        )
+        .await;
+        assert_eq!(refused.error.as_ref().unwrap().code, "invalid-params");
     }
 
     #[tokio::test]

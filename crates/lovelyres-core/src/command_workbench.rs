@@ -10,7 +10,9 @@ use serde::{Deserialize, Serialize};
 use crate::{
     CoreError, CoreResult,
     command_findings::{self, LineRule},
+    docker::ContainerIdentity,
     investigation::{AddCommandHistory, CommandHistoryRepository},
+    kubernetes::KubernetesExecTarget,
     ssh::{BoundSshSession, SshCommandOutput, SshService},
     target::TargetContext,
 };
@@ -1506,6 +1508,105 @@ impl CommandWorkbenchService {
         resolve_system_probe(&output)
     }
 
+    /// Which distribution family a container is, asked inside the container.
+    ///
+    /// Never the host's answer. An Alpine container on an Ubuntu host is the
+    /// ordinary case, and picking the Debian form of a command for a busybox
+    /// userland does not fail loudly — it produces empty output and exit zero,
+    /// which reads as "nothing found".
+    pub async fn detect_container_system(
+        &self,
+        session: &BoundSshSession,
+        container: &ContainerIdentity,
+    ) -> CoreResult<SystemFamily> {
+        self.target.validate(session.target())?;
+        let output = self
+            .ssh
+            .execute_bound(
+                session,
+                container_command(container, SYSTEM_PROBE),
+                Duration::from_secs(20),
+            )
+            .await?;
+        self.target.validate(session.target())?;
+        resolve_system_probe(&output)
+    }
+
+    /// Run one catalog command inside a container rather than on the host.
+    ///
+    /// The command text is the catalog's own, chosen for the family detected
+    /// *inside* the container, and wrapped in a preamble that refuses when the
+    /// programs it needs are not there. Without that preamble the interesting
+    /// cases return nothing and succeed: `ps -eo ...` with the flags this
+    /// catalog uses prints an empty page and exits zero on busybox, and an
+    /// empty page is what "no suspicious processes" looks like.
+    pub async fn execute_in_container(
+        &self,
+        session: &BoundSshSession,
+        command_id: &str,
+        family: SystemFamily,
+        container: &ContainerIdentity,
+    ) -> CoreResult<CommandExecutionReceipt> {
+        self.target.validate(session.target())?;
+        let definition = lookup(command_id)?;
+        let inner = guarded_container_command(&definition, family);
+        let where_it_ran = format!("container:{}", container.short_id());
+        self.run_prepared(
+            session,
+            definition,
+            container_command(container, &inner),
+            Some(&where_it_ran),
+        )
+        .await
+    }
+
+    /// Which distribution family a pod's container is, asked inside it.
+    ///
+    /// Same reason as the container probe: the node's answer says nothing
+    /// about the image the pod is running.
+    pub async fn detect_pod_system(
+        &self,
+        session: &BoundSshSession,
+        pod: &KubernetesExecTarget,
+    ) -> CoreResult<SystemFamily> {
+        self.target.validate(session.target())?;
+        let output = self
+            .ssh
+            .execute_bound(
+                session,
+                pod.exec_command(SYSTEM_PROBE),
+                Duration::from_secs(30),
+            )
+            .await?;
+        self.target.validate(session.target())?;
+        resolve_system_probe(&output)
+    }
+
+    /// Run one catalogue command inside a pod's container.
+    ///
+    /// The same guard the Docker path uses, for the same reason: a pod's image
+    /// is usually thinner than a host, and a check whose program is absent
+    /// must say so rather than return the empty page that means "clean".
+    pub async fn execute_in_pod(
+        &self,
+        session: &BoundSshSession,
+        command_id: &str,
+        family: SystemFamily,
+        pod: &KubernetesExecTarget,
+    ) -> CoreResult<CommandExecutionReceipt> {
+        self.target.validate(session.target())?;
+        let definition = lookup(command_id)?;
+        let inner = guarded_container_command(&definition, family);
+        let where_it_ran = format!("pod:{}/{}", pod.namespace(), pod.pod());
+        self.run_prepared(
+            session,
+            definition,
+            pod.exec_command(&inner),
+            Some(&where_it_ran),
+        )
+        .await
+    }
+
     pub async fn execute(
         &self,
         session: &BoundSshSession,
@@ -1515,6 +1616,17 @@ impl CommandWorkbenchService {
         self.target.validate(session.target())?;
         let definition = lookup(command_id)?;
         let command = definition.command_for(family).to_owned();
+        self.run_prepared(session, definition, command, None).await
+    }
+
+    async fn run_prepared(
+        &self,
+        session: &BoundSshSession,
+        definition: CommandDefinition,
+        command: String,
+        // Where it ran, when that was not the target itself.
+        ran_in: Option<&str>,
+    ) -> CoreResult<CommandExecutionReceipt> {
         let output = self
             .ssh
             .execute_bound(
@@ -1536,7 +1648,14 @@ impl CommandWorkbenchService {
             output: command_history_summary(kind, output.exit_code, truncated),
             exit_code: output.exit_code,
             target: session.target().identity.clone(),
-            source: "native-command-workbench".to_owned(),
+            // Where it ran is part of what happened. A finding from inside a
+            // container and the same finding on the host mean different
+            // things, and the history is read later by someone who was not
+            // watching.
+            source: match ran_in {
+                None => "native-command-workbench".to_owned(),
+                Some(place) => format!("native-command-workbench/{place}"),
+            },
         });
         let (history_id, history_warning) = match history {
             Ok(record) => (Some(record.id), None),
@@ -1563,6 +1682,131 @@ impl CommandWorkbenchService {
             history_warning,
         })
     }
+}
+
+/// Shell words that open a command position without naming a program.
+///
+/// Everything else found in a command position is treated as a program and
+/// checked for. Over-guarding a program that is present costs one `command -v`
+/// and changes nothing; under-guarding one that is absent is the bug.
+const SHELL_WORDS: &[&str] = &[
+    "for", "do", "done", "if", "then", "elif", "else", "fi", "while", "until", "case", "esac",
+    "in", "function", "select", "time", "exec", "echo", "printf", "exit", "return", "break",
+    "continue", "shift", "command", "test", "true", "false", "cd", "set", "unset", "export",
+    "local", "readonly", "eval", "read", "wait", "trap", "umask", "alias", "source", "then", ".",
+    ":",
+];
+
+/// The command, refusing rather than answering emptily.
+///
+/// Every program the command needs is checked first, and a missing one ends
+/// the run with a sentence saying so. The alternative is what the catalog does
+/// today on a busybox userland: `ps -eo pid,ppid,user,stat,pcpu,pmem,lstart,
+/// args --sort=-pcpu 2>/dev/null | head` prints nothing and exits zero, and
+/// nothing is exactly what "this container is clean" looks like.
+fn guarded_container_command(definition: &CommandDefinition, family: SystemFamily) -> String {
+    let command = definition.command_for(family);
+    let needed = container_programs_used(command);
+    if needed.is_empty() {
+        return command.to_owned();
+    }
+    let mut guard = String::new();
+    for program in needed {
+        guard.push_str(&format!(
+            "command -v {program} >/dev/null 2>&1 || {{ echo '容器里没有 {program}，本项未执行'; exit 0; }}; ",
+        ));
+    }
+    guard.push_str(command);
+    guard
+}
+
+/// Every program a command string tries to run.
+///
+/// Read out of the command rather than matched against a list of programs
+/// thought likely to be missing. That list was tried: it did not have
+/// `rc-status`, so the Alpine form of the enabled-services check ran, failed,
+/// had its error swallowed by its own `2>/dev/null`, and produced an empty
+/// page with exit 1 — which is precisely the answer the guard exists to
+/// prevent. A list of "things that might be absent" is never finished; the
+/// command itself always says what it needs.
+///
+/// A command position is the start, or whatever follows `;`, `|`, `||`, `&&`
+/// or a newline. The first word there is a program unless it is shell syntax.
+/// Checking one that is present costs nothing, so over-guarding is free and
+/// under-guarding is the bug.
+fn container_programs_used(command: &str) -> Vec<String> {
+    let mut found: Vec<String> = Vec::new();
+    for fragment in command_positions(command) {
+        let Some(word) = fragment.split_whitespace().next() else {
+            continue;
+        };
+        if !is_program_word(word) || found.iter().any(|seen| seen == word) {
+            continue;
+        }
+        // A command that already checks for itself is left alone; a second
+        // check would print the refusal twice.
+        if command.contains(&format!("command -v {word} ")) {
+            continue;
+        }
+        found.push(word.to_owned());
+    }
+    found
+}
+
+/// Splits a command into the places a program name can appear.
+fn command_positions(command: &str) -> Vec<&str> {
+    let mut positions = Vec::new();
+    let mut rest = command;
+    positions.push(rest);
+    while let Some(index) = rest.find(['|', ';', '&', '\n']) {
+        // Step past the whole operator, however many characters it is.
+        let mut after = index + 1;
+        let bytes = rest.as_bytes();
+        while after < bytes.len() && matches!(bytes[after], b'|' | b';' | b'&') {
+            after += 1;
+        }
+        if after >= rest.len() {
+            break;
+        }
+        rest = &rest[after..];
+        positions.push(rest.trim_start());
+    }
+    positions
+}
+
+/// Whether a word in a command position names a program to check for.
+///
+/// Shell keywords do not, and neither does a variable assignment, a redirect,
+/// a subshell or anything quoted — those are syntax, not something `command -v`
+/// can answer about.
+fn is_program_word(word: &str) -> bool {
+    if word.is_empty() || SHELL_WORDS.contains(&word) {
+        return false;
+    }
+    if word.contains('=') || word.contains('$') {
+        return false;
+    }
+    let first = word.as_bytes()[0];
+    if !(first.is_ascii_alphabetic() || first == b'/' || first == b'_') {
+        return false;
+    }
+    word.bytes().all(|byte| {
+        byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'/' | b'+')
+    })
+}
+
+/// Wraps a command so it runs inside the container rather than beside it.
+///
+/// `sh -c` and not the container's best shell: this is one non-interactive
+/// command, `sh` is the one program every image with a userland has, and the
+/// catalog's commands are written for POSIX sh already.
+fn container_command(container: &ContainerIdentity, command: &str) -> String {
+    format!(
+        "{} exec -i -- {} sh -c {}",
+        container.runtime().command(),
+        crate::shell_escape::shq(container.id()),
+        crate::shell_escape::shq(command),
+    )
 }
 
 fn lookup(command_id: &str) -> CoreResult<CommandDefinition> {
@@ -1853,6 +2097,155 @@ mod tests {
     /// returned empty with a zero exit, because stderr is discarded and the
     /// pipe ends in head — so the page reported no SUID backdoors and no
     /// world-writable paths on a host that had both.
+    /// Inside a container, every command that could be absent says so.
+    ///
+    /// This is the whole reason the workbench can be pointed at a container at
+    /// all. The catalog is written for a host: `systemctl`, `ss`, `rpm`, `ip`
+    /// are missing from most images, and busybox provides `ps`, `crontab` and
+    /// `netstat` as applets that take different flags. Neither case fails
+    /// loudly — the catalog's real `ps` invocation prints nothing and exits
+    /// zero on busybox, and an empty page is what "no suspicious processes"
+    /// looks like. So the guard is generated for every command rather than
+    /// written into each of them by hand and forgotten in one.
+    #[test]
+    fn every_container_run_refuses_rather_than_answering_emptily() {
+        let mut guarded = 0usize;
+        for entry in CATALOG {
+            for family in [
+                SystemFamily::Debian,
+                SystemFamily::RedHat,
+                SystemFamily::Alpine,
+                SystemFamily::Other,
+            ] {
+                let raw = entry.command_for(family);
+                let wrapped = guarded_container_command(entry, family);
+                // The command itself is never rewritten, only prefixed.
+                assert!(
+                    wrapped.ends_with(raw),
+                    "{} lost its command",
+                    entry.entry.id
+                );
+                for program in container_programs_used(raw) {
+                    guarded += 1;
+                    assert!(
+                        wrapped.contains(&format!("command -v {program} >/dev/null 2>&1 ||")),
+                        "{} invokes {program} inside a container without saying when it is absent",
+                        entry.entry.id,
+                    );
+                    assert!(
+                        wrapped.contains(&format!("容器里没有 {program}，本项未执行")),
+                        "{} would report an empty result instead of naming {program}",
+                        entry.entry.id,
+                    );
+                }
+            }
+        }
+        // The catalog is host-shaped, so this must be a large number; a small
+        // one would mean the detector stopped recognising anything.
+        assert!(guarded > 100, "only {guarded} guards were generated");
+    }
+
+    /// The detector matches programs, not substrings of other words.
+    #[test]
+    fn the_container_guard_reads_the_command_rather_than_a_list_of_guesses() {
+        assert_eq!(container_programs_used("ss -tnlp"), vec!["ss"]);
+        // The one a hand-kept list forgot, which is why there is no list.
+        assert_eq!(
+            container_programs_used("rc-status -a 2>/dev/null || find /etc/init.d -type f"),
+            vec!["rc-status", "find"],
+        );
+        // Every alternative in a chain is its own command position.
+        assert_eq!(
+            container_programs_used("systemctl x || service y || chkconfig z"),
+            vec!["systemctl", "service", "chkconfig"],
+        );
+        assert_eq!(
+            container_programs_used("ps aux | grep root"),
+            vec!["ps", "grep"],
+        );
+        // Shell syntax is not a program, and neither is an assignment.
+        assert!(container_programs_used("for f in /etc/x; do echo \"$f\"; done").is_empty());
+        assert!(container_programs_used("echo hello").is_empty());
+        assert!(container_programs_used("LR=1 echo x").is_empty());
+        // A command that already checks for itself is not checked twice.
+        let self_guarded =
+            "command -v find >/dev/null 2>&1 || { echo 'x'; exit 0; }; find / -type f";
+        assert!(
+            !container_programs_used(self_guarded)
+                .iter()
+                .any(|p| p == "find")
+        );
+    }
+
+    /// A pod runs the same guarded command through kubectl.
+    #[test]
+    fn the_pod_wrapper_names_the_namespace_and_escapes_its_arguments() {
+        use crate::kubernetes::KubernetesExecTarget;
+
+        let pod = KubernetesExecTarget::new("payments", "ledger-7d9f").unwrap();
+        let built = pod.exec_command("echo hi");
+        assert!(built.starts_with("kubectl exec 'ledger-7d9f' -n 'payments'"));
+        // `--` so a command starting with a dash is not read as more flags.
+        assert!(built.contains(" -- sh -c "));
+        assert!(built.ends_with("'echo hi'"));
+
+        // A pod with several containers names the one to enter.
+        let with_container = pod.clone().with_container("sidecar").unwrap();
+        assert!(
+            with_container
+                .exec_command("echo hi")
+                .contains(" -c 'sidecar' -- ")
+        );
+
+        // Names are validated, so a command cannot be smuggled through one.
+        assert!(KubernetesExecTarget::new("payments; rm -rf /", "ledger").is_err());
+        assert!(KubernetesExecTarget::new("payments", "ledger$(id)").is_err());
+        assert!(pod.clone().with_container("side car").is_err());
+
+        // And a quote in the command cannot end the quoting.
+        let injected = pod.exec_command("echo 'a'; rm -rf /");
+        assert!(!injected.ends_with("rm -rf /"));
+        assert!(injected.contains("'\\''"));
+    }
+
+    /// The catalogue's own Alpine command, not a synthetic string.
+    ///
+    /// This exact entry produced an empty page and exit 1 on a real Alpine
+    /// container: `rc-status` was missing, its error went to `/dev/null`, and
+    /// so did the fallback's. Empty is what "no enabled services" looks like.
+    #[test]
+    fn the_enabled_services_check_refuses_on_alpine_instead_of_returning_nothing() {
+        let definition = CATALOG
+            .iter()
+            .find(|entry| entry.entry.title == "已启用服务")
+            .expect("the enabled-services check is in the catalogue");
+        let guarded = guarded_container_command(definition, SystemFamily::Alpine);
+        assert!(guarded.contains("command -v rc-status >/dev/null 2>&1 ||"));
+        assert!(guarded.contains("容器里没有 rc-status，本项未执行"));
+        assert!(guarded.ends_with(definition.command_for(SystemFamily::Alpine)));
+    }
+
+    /// The command runs in the container, and the identity is escaped.
+    #[test]
+    fn the_container_wrapper_names_the_runtime_and_escapes_its_arguments() {
+        use crate::docker::ContainerRuntime;
+
+        const CONTAINER_A: &str = "aaaaaaaaaaaabbbbbbbbbbbbccccccccccccdddddddddddd11112222";
+        let docker = ContainerIdentity::new(ContainerRuntime::Docker, CONTAINER_A).unwrap();
+        let wrapped = container_command(&docker, "echo hi");
+        assert!(wrapped.starts_with(&format!("docker exec -i -- '{CONTAINER_A}' sh -c ")));
+        assert!(wrapped.ends_with("'echo hi'"));
+        // Podman hosts run podman; assuming docker is how this pane used to
+        // report an empty machine on every RHEL-family target.
+        let podman = ContainerIdentity::new(ContainerRuntime::Podman, CONTAINER_A).unwrap();
+        assert!(container_command(&podman, "echo hi").starts_with("podman exec -i --"));
+        // A command carrying a quote cannot end the quoting and start a new
+        // word of its own.
+        let injected = container_command(&docker, "echo 'a'; rm -rf /");
+        assert!(!injected.ends_with("rm -rf /"));
+        assert!(injected.contains("'\\''"));
+    }
+
     #[test]
     fn a_check_that_needs_find_says_so_when_find_is_absent() {
         let using_find = CATALOG

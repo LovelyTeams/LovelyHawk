@@ -66,18 +66,16 @@ $expectedPreloadBindings = @(
     @{ Name = 'getSystemInfoSummary'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:system-info:summary:get' },
     @{ Name = 'collectSystemInfo'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:system-info:table:collect' },
     @{ Name = 'getSystemInfoDetail'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:system-info:detail:get' },
-    @{ Name = 'listSnapshots'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:snapshot:list' },
-    @{ Name = 'getSnapshotDetail'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:snapshot:detail:get' },
-    @{ Name = 'diffForensicSnapshots'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:snapshot:forensic:diff' },
-    @{ Name = 'inspectFirewall'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:firewall:inspect' },
-    @{ Name = 'listFirewallChangeHistory'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:firewall:change-history:list' },
+    @{ Name = 'listSystemInfoRowActions'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:system-info:row:actions:list' },
+    @{ Name = 'inspectSystemInfoRow'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:system-info:row:inspect' },
+    @{ Name = 'planSystemInfoRowAction'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:system-info:row:action:plan' },
+    @{ Name = 'confirmSystemInfoRowAction'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:system-info:row:action:confirm' },
+    @{ Name = 'executeSystemInfoRowAction'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:system-info:row:action:execute' },
+    @{ Name = 'cancelSystemInfoRowAction'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:system-info:row:action:cancel' },
     @{ Name = 'getBaselineCatalog'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:baseline:catalog:get' },
     @{ Name = 'scanBaseline'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:baseline:scan' },
     @{ Name = 'listBaselineHistory'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:baseline:history:list' },
     @{ Name = 'readBaselineFile'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:baseline:file:read' },
-    @{ Name = 'discoverMiddleware'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:middleware:discover' },
-    @{ Name = 'loadMiddlewareConfiguration'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:middleware:configuration:load' },
-    @{ Name = 'listMiddlewareHistory'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:middleware:history:list' },
     @{ Name = 'getCheckAuditCatalog'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:check-audit:catalog:get' },
     @{ Name = 'collectCheckAuditStatus'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:check-audit:status:collect' },
     @{ Name = 'readCheckAuditLog'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:check-audit:log:read' },
@@ -89,11 +87,20 @@ $expectedPreloadBindings = @(
     @{ Name = 'listKubernetesResources'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:kubernetes:resources:list' },
     @{ Name = 'getKubernetesResourceDetail'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:kubernetes:resource:detail:get' },
     @{ Name = 'getKubernetesPodLogs'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:kubernetes:pod:logs:get' },
+    @{ Name = 'planKubernetesWorkloadAction'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:kubernetes:workload:action:plan' },
+    @{ Name = 'confirmKubernetesWorkloadAction'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:kubernetes:workload:action:confirm' },
+    @{ Name = 'executeKubernetesWorkloadAction'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:kubernetes:workload:action:execute' },
+    @{ Name = 'cancelKubernetesWorkloadAction'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:kubernetes:workload:action:cancel' },
     @{ Name = 'refreshDockerContainers'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:docker:containers:refresh' },
     @{ Name = 'getDockerCollection'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:docker:collection:get' },
     @{ Name = 'inspectDockerResource'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:docker:resource:inspect' },
     @{ Name = 'getDockerSecurityAudit'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:docker:security:audit:get' },
     @{ Name = 'getDockerLogs'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:docker:container:logs:get' },
+    @{ Name = 'planDockerContainerAction'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:docker:container:action:plan' },
+    @{ Name = 'confirmDockerContainerAction'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:docker:container:action:confirm' },
+    @{ Name = 'executeDockerContainerAction'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:docker:container:action:execute' },
+    @{ Name = 'cancelDockerContainerAction'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:docker:container:action:cancel' },
+    @{ Name = 'openDockerContainerTerminal'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:docker:container:terminal:open' },
     @{ Name = 'loadEmergencyCommandCatalog'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:emergency-command:catalog:load' },
     @{ Name = 'runEmergencyCommand'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:emergency-command:run' },
     @{ Name = 'inspectEmergencyPath'; Method = 'invoke'; Registration = 'handle'; Channel = 'lovelyres:emergency-command:path:inspect' },
@@ -163,8 +170,8 @@ $expectedPreloadBindings = @(
     @{ Name = 'notifyRendererReady'; Method = 'send'; Registration = 'on'; Channel = 'lovelyres:renderer-ready' }
 )
 
-if ($expectedPreloadBindings.Count -ne 117) {
-    throw "Electron main preload allowlist must contain exactly 117 methods; found $($expectedPreloadBindings.Count)."
+if ($expectedPreloadBindings.Count -ne 124) {
+    throw "Electron main preload allowlist must contain exactly 124 methods; found $($expectedPreloadBindings.Count)."
 }
 
 function Get-CspPolicyViolation {
@@ -520,12 +527,6 @@ $requiredFiles = @(
     (Join-Path $electronRoot 'src/renderer/command-history.css'),
     (Join-Path $electronRoot 'src/renderer/DisposalReportOverlay.tsx'),
     (Join-Path $electronRoot 'src/renderer/disposal-report.css'),
-    (Join-Path $electronRoot 'src/renderer/SnapshotPage.tsx'),
-    (Join-Path $electronRoot 'src/renderer/snapshot-page.css'),
-    (Join-Path $electronRoot 'src/renderer/FirewallPage.tsx'),
-    (Join-Path $electronRoot 'src/renderer/firewall-page.css'),
-    (Join-Path $electronRoot 'src/renderer/firewall-read-helpers.ts'),
-    (Join-Path $electronRoot 'src/renderer/firewall-read-state.ts'),
     (Join-Path $electronRoot 'src/renderer/BaselinePage.tsx'),
     (Join-Path $electronRoot 'src/renderer/BaselineFilePane.tsx'),
     (Join-Path $electronRoot 'src/renderer/ConfigurationPage.tsx'),
@@ -533,10 +534,6 @@ $requiredFiles = @(
     (Join-Path $electronRoot 'src/renderer/baseline-page.css'),
     (Join-Path $electronRoot 'src/renderer/baseline-read-helpers.ts'),
     (Join-Path $electronRoot 'src/renderer/baseline-read-state.ts'),
-    (Join-Path $electronRoot 'src/renderer/MiddlewarePage.tsx'),
-    (Join-Path $electronRoot 'src/renderer/middleware-page.css'),
-    (Join-Path $electronRoot 'src/renderer/middleware-read-helpers.ts'),
-    (Join-Path $electronRoot 'src/renderer/middleware-read-state.ts'),
     (Join-Path $electronRoot 'src/renderer/CheckAuditPage.tsx'),
     (Join-Path $electronRoot 'src/renderer/check-audit-page.css'),
     (Join-Path $electronRoot 'src/renderer/check-audit-read-helpers.ts'),
@@ -546,10 +543,12 @@ $requiredFiles = @(
     (Join-Path $electronRoot 'src/renderer/log-analysis-read-helpers.ts'),
     (Join-Path $electronRoot 'src/renderer/log-analysis-read-state.ts'),
     (Join-Path $electronRoot 'src/renderer/KubernetesPage.tsx'),
+    (Join-Path $electronRoot 'src/renderer/KubernetesActionDialog.tsx'),
     (Join-Path $electronRoot 'src/renderer/kubernetes-page.css'),
     (Join-Path $electronRoot 'src/renderer/kubernetes-read-helpers.ts'),
     (Join-Path $electronRoot 'src/renderer/kubernetes-read-state.ts'),
     (Join-Path $electronRoot 'src/renderer/DockerPage.tsx'),
+    (Join-Path $electronRoot 'src/renderer/DockerActionDialog.tsx'),
     (Join-Path $electronRoot 'src/renderer/docker-page.css'),
     (Join-Path $electronRoot 'src/renderer/docker-read-helpers.ts'),
     (Join-Path $electronRoot 'src/renderer/docker-read-state.ts'),
@@ -578,10 +577,7 @@ $requiredFiles = @(
     (Join-Path $electronRoot 'src/shared/ai-history-contract.ts'),
     (Join-Path $electronRoot 'src/shared/command-history-contract.ts'),
     (Join-Path $electronRoot 'src/shared/disposal-report-contract.ts'),
-    (Join-Path $electronRoot 'src/shared/snapshot-read-contract.ts'),
-    (Join-Path $electronRoot 'src/shared/firewall-read-contract.ts'),
     (Join-Path $electronRoot 'src/shared/baseline-read-contract.ts'),
-    (Join-Path $electronRoot 'src/shared/middleware-read-contract.ts'),
     (Join-Path $electronRoot 'src/shared/check-audit-read-contract.ts'),
     (Join-Path $electronRoot 'src/shared/log-analysis-read-contract.ts'),
     (Join-Path $electronRoot 'src/shared/kubernetes-read-contract.ts'),
@@ -600,14 +596,13 @@ $requiredFiles = @(
     (Join-Path $backendRoot 'src/ai_history_api.rs'),
     (Join-Path $backendRoot 'src/command_history_api.rs'),
     (Join-Path $backendRoot 'src/disposal_report_api.rs'),
-    (Join-Path $backendRoot 'src/snapshot_read_api.rs'),
-    (Join-Path $backendRoot 'src/firewall_read_api.rs'),
     (Join-Path $backendRoot 'src/baseline_read_api.rs'),
-    (Join-Path $backendRoot 'src/middleware_read_api.rs'),
     (Join-Path $backendRoot 'src/check_audit_read_api.rs'),
     (Join-Path $backendRoot 'src/log_analysis_read_api.rs'),
     (Join-Path $backendRoot 'src/kubernetes_read_api.rs'),
+    (Join-Path $backendRoot 'src/kubernetes_write_api.rs'),
     (Join-Path $backendRoot 'src/docker_read_api.rs'),
+    (Join-Path $backendRoot 'src/docker_write_api.rs'),
     (Join-Path $backendRoot 'src/emergency_command_api.rs'),
     (Join-Path $backendRoot 'src/emergency_path_api.rs'),
     (Join-Path $backendRoot 'src/packet_capture_live_api.rs'),
@@ -615,7 +610,6 @@ $requiredFiles = @(
     (Join-Path $backendRoot 'src/integrity_api.rs'),
     (Join-Path $backendRoot 'src/terminal_api.rs'),
     (Join-Path $backendRoot 'src/main.rs'),
-    (Join-Path $root 'crates/lovelyres-core/src/firewall.rs'),
     (Join-Path $root 'crates/lovelyres-core/src/baseline.rs'),
     (Join-Path $root 'crates/lovelyres-core/src/integrity.rs'),
     (Join-Path $root 'crates/lovelyres-core/src/command_paths.rs')
@@ -642,10 +636,7 @@ $settingsContractPath = Join-Path $electronRoot 'src/shared/settings-contract.ts
 $aiHistoryContractPath = Join-Path $electronRoot 'src/shared/ai-history-contract.ts'
 $commandHistoryContractPath = Join-Path $electronRoot 'src/shared/command-history-contract.ts'
 $disposalReportContractPath = Join-Path $electronRoot 'src/shared/disposal-report-contract.ts'
-$snapshotReadContractPath = Join-Path $electronRoot 'src/shared/snapshot-read-contract.ts'
-$firewallReadContractPath = Join-Path $electronRoot 'src/shared/firewall-read-contract.ts'
 $baselineReadContractPath = Join-Path $electronRoot 'src/shared/baseline-read-contract.ts'
-$middlewareReadContractPath = Join-Path $electronRoot 'src/shared/middleware-read-contract.ts'
 $checkAuditReadContractPath = Join-Path $electronRoot 'src/shared/check-audit-read-contract.ts'
 $logAnalysisReadContractPath = Join-Path $electronRoot 'src/shared/log-analysis-read-contract.ts'
 $kubernetesReadContractPath = Join-Path $electronRoot 'src/shared/kubernetes-read-contract.ts'
@@ -662,19 +653,10 @@ $commandHistoryPanelPath = Join-Path $electronRoot 'src/renderer/CommandHistoryP
 $commandHistoryCssPath = Join-Path $electronRoot 'src/renderer/command-history.css'
 $disposalReportOverlayPath = Join-Path $electronRoot 'src/renderer/DisposalReportOverlay.tsx'
 $disposalReportCssPath = Join-Path $electronRoot 'src/renderer/disposal-report.css'
-$snapshotPagePath = Join-Path $electronRoot 'src/renderer/SnapshotPage.tsx'
-$snapshotCssPath = Join-Path $electronRoot 'src/renderer/snapshot-page.css'
-$firewallPagePath = Join-Path $electronRoot 'src/renderer/FirewallPage.tsx'
-$firewallCssPath = Join-Path $electronRoot 'src/renderer/firewall-page.css'
-$firewallHelpersPath = Join-Path $electronRoot 'src/renderer/firewall-read-helpers.ts'
-$firewallStatePath = Join-Path $electronRoot 'src/renderer/firewall-read-state.ts'
 $baselinePagePath = Join-Path $electronRoot 'src/renderer/BaselinePage.tsx'
 $baselineCssPath = Join-Path $electronRoot 'src/renderer/baseline-page.css'
 $baselineHelpersPath = Join-Path $electronRoot 'src/renderer/baseline-read-helpers.ts'
 $baselineStatePath = Join-Path $electronRoot 'src/renderer/baseline-read-state.ts'
-$middlewarePagePath = Join-Path $electronRoot 'src/renderer/MiddlewarePage.tsx'
-$middlewareHelpersPath = Join-Path $electronRoot 'src/renderer/middleware-read-helpers.ts'
-$middlewareStatePath = Join-Path $electronRoot 'src/renderer/middleware-read-state.ts'
 $checkAuditPagePath = Join-Path $electronRoot 'src/renderer/CheckAuditPage.tsx'
 $checkAuditHelpersPath = Join-Path $electronRoot 'src/renderer/check-audit-read-helpers.ts'
 $checkAuditStatePath = Join-Path $electronRoot 'src/renderer/check-audit-read-state.ts'
@@ -682,9 +664,11 @@ $logAnalysisPagePath = Join-Path $electronRoot 'src/renderer/LogAnalysisPage.tsx
 $logAnalysisHelpersPath = Join-Path $electronRoot 'src/renderer/log-analysis-read-helpers.ts'
 $logAnalysisStatePath = Join-Path $electronRoot 'src/renderer/log-analysis-read-state.ts'
 $kubernetesPagePath = Join-Path $electronRoot 'src/renderer/KubernetesPage.tsx'
+$kubernetesActionDialogPath = Join-Path $electronRoot 'src/renderer/KubernetesActionDialog.tsx'
 $kubernetesHelpersPath = Join-Path $electronRoot 'src/renderer/kubernetes-read-helpers.ts'
 $kubernetesStatePath = Join-Path $electronRoot 'src/renderer/kubernetes-read-state.ts'
 $dockerPagePath = Join-Path $electronRoot 'src/renderer/DockerPage.tsx'
+$dockerActionDialogPath = Join-Path $electronRoot 'src/renderer/DockerActionDialog.tsx'
 $dockerHelpersPath = Join-Path $electronRoot 'src/renderer/docker-read-helpers.ts'
 $dockerStatePath = Join-Path $electronRoot 'src/renderer/docker-read-state.ts'
 $emergencyCommandPagePath = Join-Path $electronRoot 'src/renderer/EmergencyCommandsPage.tsx'
@@ -717,21 +701,18 @@ $settingsApiPath = Join-Path $backendRoot 'src/settings_api.rs'
 $aiHistoryApiPath = Join-Path $backendRoot 'src/ai_history_api.rs'
 $commandHistoryApiPath = Join-Path $backendRoot 'src/command_history_api.rs'
 $disposalReportApiPath = Join-Path $backendRoot 'src/disposal_report_api.rs'
-$snapshotReadApiPath = Join-Path $backendRoot 'src/snapshot_read_api.rs'
-$firewallReadApiPath = Join-Path $backendRoot 'src/firewall_read_api.rs'
 $baselineReadApiPath = Join-Path $backendRoot 'src/baseline_read_api.rs'
-$middlewareReadApiPath = Join-Path $backendRoot 'src/middleware_read_api.rs'
 $checkAuditReadApiPath = Join-Path $backendRoot 'src/check_audit_read_api.rs'
 $logAnalysisReadApiPath = Join-Path $backendRoot 'src/log_analysis_read_api.rs'
 $kubernetesReadApiPath = Join-Path $backendRoot 'src/kubernetes_read_api.rs'
+$kubernetesWriteApiPath = Join-Path $backendRoot 'src/kubernetes_write_api.rs'
 $dockerReadApiPath = Join-Path $backendRoot 'src/docker_read_api.rs'
+$dockerWriteApiPath = Join-Path $backendRoot 'src/docker_write_api.rs'
 $emergencyCommandApiPath = Join-Path $backendRoot 'src/emergency_command_api.rs'
 $packetCaptureLiveApiPath = Join-Path $backendRoot 'src/packet_capture_live_api.rs'
 $diagnosticLogApiPath = Join-Path $backendRoot 'src/diagnostic_log_api.rs'
 $integrityApiPath = Join-Path $backendRoot 'src/integrity_api.rs'
 $backendMainPath = Join-Path $backendRoot 'src/main.rs'
-$coreSnapshotPath = Join-Path $root 'crates/lovelyres-core/src/snapshot.rs'
-$coreFirewallPath = Join-Path $root 'crates/lovelyres-core/src/firewall.rs'
 $coreBaselinePath = Join-Path $root 'crates/lovelyres-core/src/baseline.rs'
 $coreIntegrityPath = Join-Path $root 'crates/lovelyres-core/src/integrity.rs'
 $terminalApiPath = Join-Path $backendRoot 'src/terminal_api.rs'
@@ -749,10 +730,7 @@ $settingsContractText = Get-Content -LiteralPath $settingsContractPath -Raw
 $aiHistoryContractText = Get-Content -LiteralPath $aiHistoryContractPath -Raw
 $commandHistoryContractText = Get-Content -LiteralPath $commandHistoryContractPath -Raw
 $disposalReportContractText = Get-Content -LiteralPath $disposalReportContractPath -Raw
-$snapshotReadContractText = Get-Content -LiteralPath $snapshotReadContractPath -Raw
-$firewallReadContractText = Get-Content -LiteralPath $firewallReadContractPath -Raw
 $baselineReadContractText = Get-Content -LiteralPath $baselineReadContractPath -Raw
-$middlewareReadContractText = Get-Content -LiteralPath $middlewareReadContractPath -Raw
 $checkAuditReadContractText = Get-Content -LiteralPath $checkAuditReadContractPath -Raw
 $logAnalysisReadContractText = Get-Content -LiteralPath $logAnalysisReadContractPath -Raw
 $kubernetesReadContractText = Get-Content -LiteralPath $kubernetesReadContractPath -Raw
@@ -769,29 +747,22 @@ $commandHistoryPanelText = Get-Content -LiteralPath $commandHistoryPanelPath -Ra
 $commandHistoryCssText = Get-Content -LiteralPath $commandHistoryCssPath -Raw
 $disposalReportOverlayText = Get-Content -LiteralPath $disposalReportOverlayPath -Raw
 $disposalReportCssText = Get-Content -LiteralPath $disposalReportCssPath -Raw
-$snapshotPageText = Get-Content -LiteralPath $snapshotPagePath -Raw
-$snapshotCssText = Get-Content -LiteralPath $snapshotCssPath -Raw
-$firewallPageText = Get-Content -LiteralPath $firewallPagePath -Raw
-$firewallCssText = Get-Content -LiteralPath $firewallCssPath -Raw
-$firewallHelpersText = Get-Content -LiteralPath $firewallHelpersPath -Raw
-$firewallStateText = Get-Content -LiteralPath $firewallStatePath -Raw
 $baselinePageText = Get-Content -LiteralPath $baselinePagePath -Raw
 $baselineCssText = Get-Content -LiteralPath $baselineCssPath -Raw
 $baselineHelpersText = Get-Content -LiteralPath $baselineHelpersPath -Raw
 $baselineStateText = Get-Content -LiteralPath $baselineStatePath -Raw
-$middlewarePageText = Get-Content -LiteralPath $middlewarePagePath -Raw
-$middlewareHelpersText = Get-Content -LiteralPath $middlewareHelpersPath -Raw
-$middlewareStateText = Get-Content -LiteralPath $middlewareStatePath -Raw
 $checkAuditPageText = Get-Content -LiteralPath $checkAuditPagePath -Raw
 $checkAuditHelpersText = Get-Content -LiteralPath $checkAuditHelpersPath -Raw
 $checkAuditStateText = Get-Content -LiteralPath $checkAuditStatePath -Raw
 $logAnalysisPageText = Get-Content -LiteralPath $logAnalysisPagePath -Raw
 $logAnalysisHelpersText = Get-Content -LiteralPath $logAnalysisHelpersPath -Raw
 $logAnalysisStateText = Get-Content -LiteralPath $logAnalysisStatePath -Raw
+$kubernetesActionDialogText = Get-Content -LiteralPath $kubernetesActionDialogPath -Raw
 $kubernetesPageText = Get-Content -LiteralPath $kubernetesPagePath -Raw
 $kubernetesHelpersText = Get-Content -LiteralPath $kubernetesHelpersPath -Raw
 $kubernetesStateText = Get-Content -LiteralPath $kubernetesStatePath -Raw
 $dockerPageText = Get-Content -LiteralPath $dockerPagePath -Raw
+$dockerActionDialogText = Get-Content -LiteralPath $dockerActionDialogPath -Raw
 $dockerHelpersText = Get-Content -LiteralPath $dockerHelpersPath -Raw
 $dockerStateText = Get-Content -LiteralPath $dockerStatePath -Raw
 $emergencyCommandPageText = Get-Content -LiteralPath $emergencyCommandPagePath -Raw
@@ -826,21 +797,18 @@ $settingsApiText = Get-Content -LiteralPath $settingsApiPath -Raw
 $aiHistoryApiText = Get-Content -LiteralPath $aiHistoryApiPath -Raw
 $commandHistoryApiText = Get-Content -LiteralPath $commandHistoryApiPath -Raw
 $disposalReportApiText = Get-Content -LiteralPath $disposalReportApiPath -Raw
-$snapshotReadApiText = Get-Content -LiteralPath $snapshotReadApiPath -Raw
-$firewallReadApiText = Get-Content -LiteralPath $firewallReadApiPath -Raw
 $baselineReadApiText = Get-Content -LiteralPath $baselineReadApiPath -Raw
-$middlewareReadApiText = Get-Content -LiteralPath $middlewareReadApiPath -Raw
 $checkAuditReadApiText = Get-Content -LiteralPath $checkAuditReadApiPath -Raw
 $logAnalysisReadApiText = Get-Content -LiteralPath $logAnalysisReadApiPath -Raw
 $kubernetesReadApiText = Get-Content -LiteralPath $kubernetesReadApiPath -Raw
+$kubernetesWriteApiText = Get-Content -LiteralPath $kubernetesWriteApiPath -Raw
 $dockerReadApiText = Get-Content -LiteralPath $dockerReadApiPath -Raw
+$dockerWriteApiText = Get-Content -LiteralPath $dockerWriteApiPath -Raw
 $emergencyCommandApiText = Get-Content -LiteralPath $emergencyCommandApiPath -Raw
 $packetCaptureLiveApiText = Get-Content -LiteralPath $packetCaptureLiveApiPath -Raw
 $diagnosticLogApiText = Get-Content -LiteralPath $diagnosticLogApiPath -Raw
 $integrityApiText = Get-Content -LiteralPath $integrityApiPath -Raw
 $backendMainText = Get-Content -LiteralPath $backendMainPath -Raw
-$coreSnapshotText = Get-Content -LiteralPath $coreSnapshotPath -Raw
-$coreFirewallText = Get-Content -LiteralPath $coreFirewallPath -Raw
 $coreBaselineText = Get-Content -LiteralPath $coreBaselinePath -Raw
 $coreIntegrityText = Get-Content -LiteralPath $coreIntegrityPath -Raw
 $terminalApiText = Get-Content -LiteralPath $terminalApiPath -Raw
@@ -965,38 +933,12 @@ foreach ($marker in @(
     }
 }
 foreach ($marker in @(
-    'list: "snapshot.list"',
-    'detail: "snapshot.detail.get"',
-    'diff: "snapshot.forensic.diff"'
-)) {
-    if ([regex]::Matches($backendClientText, [regex]::Escape($marker)).Count -ne 1) {
-        Add-GateViolation "electron/src/main/backend-client.ts must pin exactly one snapshot RPC marker '$marker'"
-    }
-}
-foreach ($marker in @(
-    'inspect: "firewall.inspect"',
-    'listHistory: "firewall.change-history.list"'
-)) {
-    if ([regex]::Matches($backendClientText, [regex]::Escape($marker)).Count -ne 1) {
-        Add-GateViolation "electron/src/main/backend-client.ts must pin exactly one Firewall RPC marker '$marker'"
-    }
-}
-foreach ($marker in @(
     'catalog: "baseline.catalog.get"',
     'scan: "baseline.scan"',
     'listHistory: "baseline.history.list"'
 )) {
     if ([regex]::Matches($backendClientText, [regex]::Escape($marker)).Count -ne 1) {
         Add-GateViolation "electron/src/main/backend-client.ts must pin exactly one Baseline RPC marker '$marker'"
-    }
-}
-foreach ($marker in @(
-    'discover: "middleware.discover"',
-    'loadConfiguration: "middleware.configuration.load"',
-    'listHistory: "middleware.history.list"'
-)) {
-    if ([regex]::Matches($backendClientText, [regex]::Escape($marker)).Count -ne 1) {
-        Add-GateViolation "electron/src/main/backend-client.ts must pin exactly one Middleware RPC marker '$marker'"
     }
 }
 foreach ($marker in @(
@@ -1086,7 +1028,10 @@ foreach ($marker in @(
     'else if (isTerminalRendererUrl(rawUrl)) relative = "terminal.html";',
     'terminal: path.resolve(projectRoot, "terminal.html")',
     'src="/src/renderer/terminal-main.tsx"',
-    'createRoot(root).render(<TerminalWindow />);',
+    # terminal.html serves the whole terminal family. Which member a window is
+    # comes from the URL main loaded and main validated, and the fallback is the
+    # terminal rather than a blank window.
+    'createRoot(root).render(kind === "file-editor" ? <FileEditorWindow /> : <TerminalWindow />);',
     '"Content-Security-Policy": [isTerminalRendererUrl(details.url) ? TERMINAL_CSP : CSP]'
 )) {
     if (-not ($rendererProtocolText.Contains($marker, [System.StringComparison]::Ordinal) -or
@@ -1149,13 +1094,20 @@ if ($mainText -match '(?i)\b(?:loadURL|loadFile)\s*\(\s*["'']https?://') {
     Add-GateViolation 'electron/src/main/index.ts loads a remote renderer URL'
 }
 $trustedLoadMarker = 'mainWindow.loadURL(`${RENDERER_SCHEME}://${RENDERER_HOST}/`)'
-$trustedTerminalLoadMarker = 'terminalWindow.loadURL(TERMINAL_WINDOW_URL)'
+# One call for the terminal family, choosing between two constants that are
+# both built from RENDERER_SCHEME and RENDERER_HOST. Still exactly two loadURL
+# calls in the file, and still no way to reach a URL from anywhere else.
+$trustedTerminalLoadMarker =
+    'terminalWindow.loadURL(editor === null ? TERMINAL_WINDOW_URL : FILE_EDITOR_WINDOW_URL)'
 $loadUrlCount = [regex]::Matches($mainText, '\.loadURL\s*\(').Count
 $trustedLoadCount = [regex]::Matches($mainText, [regex]::Escape($trustedLoadMarker)).Count +
     [regex]::Matches($mainText, [regex]::Escape($trustedTerminalLoadMarker)).Count
 if ($loadUrlCount -ne $trustedLoadCount -or
     [regex]::Matches($mainText, [regex]::Escape($trustedLoadMarker)).Count -ne 1 -or
-    [regex]::Matches($mainText, [regex]::Escape($trustedTerminalLoadMarker)).Count -ne 1) {
+    [regex]::Matches($mainText, [regex]::Escape($trustedTerminalLoadMarker)).Count -ne 1 -or
+    [regex]::Matches($mainText, [regex]::Escape(
+        'const FILE_EDITOR_WINDOW_URL = `${RENDERER_SCHEME}://${RENDERER_HOST}/?window=file-editor`;'
+    )).Count -ne 1) {
     Add-GateViolation 'electron/src/main/index.ts must load every renderer only through lovelyres://app/'
 }
 if ($mainText -match '\.loadFile\s*\(') {
@@ -1240,6 +1192,8 @@ $expectedTerminalBindings = [ordered]@{
     stageSftpUpload = 'lovelyres:terminal:sftp:upload:stage'
     openLocalBrowser = 'lovelyres:terminal:local:open'
     listLocalDirectory = 'lovelyres:terminal:local:list'
+    openFileEditor = 'lovelyres:terminal:file-editor:open'
+    fileEditorTarget = 'lovelyres:terminal:file-editor:target'
 }
 if (-not $terminalPreloadMatch.Success) {
     Add-GateViolation 'electron/src/preload/terminal.ts must expose one frozen, typed terminal API object'
@@ -1247,7 +1201,7 @@ if (-not $terminalPreloadMatch.Success) {
     $terminalPreloadBody = $terminalPreloadMatch.Groups['body'].Value
     $terminalNames = @([regex]::Matches($terminalPreloadBody, '(?m)^\s{2}(?<name>[A-Za-z_$][A-Za-z0-9_$]*)\s*:') | ForEach-Object { $_.Groups['name'].Value })
     if (($terminalNames -join "`n") -cne (@($expectedTerminalBindings.Keys) -join "`n")) {
-        Add-GateViolation 'electron/src/preload/terminal.ts API keys must be exactly [open, poll, input, resize, search, copySelection, close, openSftpBrowser, listSftpDirectory, readSftpText, downloadSftpEntry, the five operation methods, openLocalBrowser, listLocalDirectory]'
+        Add-GateViolation 'electron/src/preload/terminal.ts API keys must be exactly [open, poll, input, resize, search, copySelection, close, openSftpBrowser, listSftpDirectory, readSftpText, downloadSftpEntry, the five operation methods, openLocalBrowser, listLocalDirectory, openFileEditor, fileEditorTarget]'
     }
     foreach ($binding in $expectedTerminalBindings.GetEnumerator()) {
         $pattern = '(?s)\b{0}\s*:.{{0,400}}?=>.{{0,400}}?ipcRenderer\.invoke\s*\(\s*["'']{1}["'']' -f [regex]::Escape($binding.Key), [regex]::Escape($binding.Value)
@@ -1258,8 +1212,8 @@ if (-not $terminalPreloadMatch.Success) {
             Add-GateViolation "electron/src/main/index.ts must register dedicated terminal channel $($binding.Value)"
         }
     }
-    if ([regex]::Matches($terminalPreloadBody, '\bipcRenderer\.invoke\s*\(').Count -ne 18) {
-        Add-GateViolation 'electron/src/preload/terminal.ts contains an IPC call outside the exact eighteen-method allowlist'
+    if ([regex]::Matches($terminalPreloadBody, '\bipcRenderer\.invoke\s*\(').Count -ne 20) {
+        Add-GateViolation 'electron/src/preload/terminal.ts contains an IPC call outside the exact twenty-method allowlist'
     }
 }
 if ([regex]::Matches($terminalPreloadText, '\bcontextBridge\.exposeInMainWorld\s*\(').Count -ne 1 -or
@@ -1281,234 +1235,8 @@ if (-not $contractApiMatch.Success) {
         Add-GateViolation "electron/src/shared/contract.ts LovelyResApi keys must be exactly [$($expectedNames -join ', ')]"
     }
 }
-$snapshotApiMatch = [regex]::Match(
-    $snapshotReadContractText,
-    '(?ms)\bexport\s+interface\s+SnapshotReadApi\s*\{(?<body>.*?)^\s*\}'
-)
-if (-not $snapshotApiMatch.Success) {
-    Add-GateViolation 'electron/src/shared/snapshot-read-contract.ts is missing SnapshotReadApi'
-} else {
-    $snapshotNames = @([regex]::Matches($snapshotApiMatch.Groups['body'].Value, '(?m)^\s{2}(?<name>[A-Za-z_$][A-Za-z0-9_$]*)\s*\(') | ForEach-Object { $_.Groups['name'].Value })
-    if (($snapshotNames -join "`n") -cne (@('listSnapshots', 'getSnapshotDetail', 'diffForensicSnapshots') -join "`n")) {
-        Add-GateViolation 'electron/src/shared/snapshot-read-contract.ts must expose exactly listSnapshots/getSnapshotDetail/diffForensicSnapshots'
-    }
-    if ($snapshotApiMatch.Groups['body'].Value -notmatch 'listSnapshots\(bindingHandle:\s*string\):\s*Promise<SnapshotListResult>;' -or
-        $snapshotApiMatch.Groups['body'].Value -notmatch 'getSnapshotDetail\(bindingHandle:\s*string,\s*snapshotHandle:\s*string\):\s*Promise<SnapshotDetail>;' -or
-        $snapshotApiMatch.Groups['body'].Value -notmatch '(?s)diffForensicSnapshots\(\s*bindingHandle:\s*string,\s*input:\s*SnapshotDiffInput,?\s*\):\s*Promise<SnapshotDiffResult>;') {
-        Add-GateViolation 'electron/src/shared/snapshot-read-contract.ts must pin the three concrete read-only Promise signatures'
-    }
-}
-foreach ($marker in @(
-    'listSnapshots(bindingHandle: string): Promise<SnapshotListResult>;',
-    'getSnapshotDetail(bindingHandle: string, snapshotHandle: string): Promise<SnapshotDetail>;',
-    'diffForensicSnapshots(',
-    'input: SnapshotDiffInput,',
-    '): Promise<SnapshotDiffResult>;'
-)) {
-    if (-not $contractText.Contains($marker, [System.StringComparison]::Ordinal)) {
-        Add-GateViolation "electron/src/shared/contract.ts is missing exact Snapshot API marker '$marker'"
-    }
-}
-if ($snapshotReadContractText -match '(?im)^\s*(?:connectionId|sessionId|targetGuard|generation|host|port|username|dataRoot|filePath|command|password|apiKey|authorization|digest)\??\s*:') {
-    Add-GateViolation 'electron/src/shared/snapshot-read-contract.ts exposes target identity, path, command, secret, authorization, or digest internals'
-}
-foreach ($channel in @(
-    'lovelyres:snapshot:list',
-    'lovelyres:snapshot:detail:get',
-    'lovelyres:snapshot:forensic:diff'
-)) {
-    if ([regex]::Matches($mainText, [regex]::Escape($channel)).Count -ne 1) {
-        Add-GateViolation "electron/src/main/index.ts must register exactly one fixed Snapshot IPC '$channel'"
-    }
-    if ([regex]::Matches($preloadText, [regex]::Escape("ipcRenderer.invoke(`"$channel`"" )).Count -ne 1) {
-        Add-GateViolation "electron/src/preload/index.ts must invoke exactly one fixed Snapshot IPC '$channel'"
-    }
-}
-foreach ($marker in @(
-    'hasOnlyKeys(value, ["bindingHandle", "snapshotHandle"])',
-    'hasOnlyKeys(value, ["bindingHandle", "input"])',
-    'isSnapshotOpaqueHandle(values[0])',
-    'isSnapshotDiffInput(value.input)'
-)) {
-    if (-not $mainText.Contains($marker, [System.StringComparison]::Ordinal)) {
-        Add-GateViolation "electron/src/main/index.ts is missing exact Snapshot validation marker '$marker'"
-    }
-}
-foreach ($marker in @(
-    'mod snapshot_read_api;',
-    'SnapshotReadApi::new(services.clone(), Arc::clone(&ssh))',
-    'self.snapshot_read.close_binding(&params.binding_handle);',
-    'SnapshotBindingParams',
-    'SnapshotDetailParams',
-    'SnapshotDiffParams',
-    'fn snapshot_read_failure(error: SnapshotReadApiError)'
-)) {
-    if (-not $backendLibText.Contains($marker, [System.StringComparison]::Ordinal)) {
-        Add-GateViolation "crates/lovelyres-electron-backend/src/lib.rs is missing Snapshot boundary marker '$marker'"
-    }
-}
-foreach ($marker in @(
-    'BoundSshSession',
-    'TargetGuard',
-    'MAX_DIRECTORY_SNAPSHOTS: usize = 64',
-    'MAX_FORENSIC_SNAPSHOTS: usize = 10',
-    'SNAPSHOT_TTL: Duration',
-    'pub(crate) fn close_binding(&self, binding_handle: &str)'
-)) {
-    if (-not $snapshotReadApiText.Contains($marker, [System.StringComparison]::Ordinal)) {
-        Add-GateViolation "crates/lovelyres-electron-backend/src/snapshot_read_api.rs is missing bounded Snapshot marker '$marker'"
-    }
-}
-foreach ($marker in @(
-    'const REDACTED_LINE: &str = "[SENSITIVE SNAPSHOT TEXT REDACTED]";',
-    'const FAILED_COLLECTOR_LINE: &str = "[FORENSIC COLLECTOR FAILED]";',
-    'fn forensic_sensitive_values(snapshot: &ForensicSnapshot) -> Vec<String>',
-    '.any(|marker| lower.contains(marker.as_str()))'
-)) {
-    if (-not $snapshotReadApiText.Contains($marker, [System.StringComparison]::Ordinal)) {
-        Add-GateViolation "crates/lovelyres-electron-backend/src/snapshot_read_api.rs is missing collector-safe projection marker '$marker'"
-    }
-}
-# Every collector is bounded plain text. A projection that decides what to show
-# from the collector name would be the old fully-redacted policy coming back.
-if ($snapshotReadApiText -match 'CollectorProjection::FullyRedacted' -or
-    $snapshotReadApiText -match 'fn collector_policy_marker\(') {
-    Add-GateViolation 'crates/lovelyres-electron-backend/src/snapshot_read_api.rs must not reintroduce a per-collector redaction policy'
-}
-if ($snapshotReadContractText -match 'fullyRedactedForensicCollectors' -or
-    $snapshotReadContractText -match 'isCollectorPolicyMarker') {
-    Add-GateViolation 'electron/src/shared/snapshot-read-contract.ts must not reject a collector for what it collected'
-}
-foreach ($marker in @('mysql -uroot -pS3cr3t', 'PASSWORD = secret', 'BEGIN OPENSSH PRIVATE KEY', '/etc/shadow')) {
-    if (-not $snapshotReadApiText.Contains($marker, [System.StringComparison]::Ordinal) -or
-        -not (Get-Content -LiteralPath (Join-Path $electronRoot 'src/shared/snapshot-read-contract.test.ts') -Raw).Contains($marker, [System.StringComparison]::Ordinal)) {
-        Add-GateViolation "Snapshot Rust and TypeScript tests must cover hostile collector marker '$marker'"
-    }
-}
-foreach ($marker in @(
-    'MAX_SNAPSHOT_DOCUMENT_BYTES: usize = 128 * 1024 * 1024',
-    'deserialize_directory_snapshots',
-    'deserialize_forensic_snapshots',
-    'read_or_default_bounded::<SnapshotDocument>',
-    'MAX_FORENSIC_DIFF_INPUT_LINES_PER_FIELD: usize = 2_048',
-    'MAX_FORENSIC_DIFF_INPUT_LINES_TOTAL: usize = 8_192'
-)) {
-    if (-not $coreSnapshotText.Contains($marker, [System.StringComparison]::Ordinal)) {
-        Add-GateViolation "crates/lovelyres-core/src/snapshot.rs is missing pre-projection hardening marker '$marker'"
-    }
-}
-if ($appText -notmatch '(?s)activePage\.id\s*===\s*"snapshot".{0,220}<SnapshotPage\s+bindingHandle=\{activeTarget\?\.bindingHandle\s*\?\?\s*null\}\s+api=\{window\.lovelyres\}') {
-    Add-GateViolation 'electron/src/renderer/App.tsx must mount SnapshotPage with only the current opaque binding handle and fixed API'
-}
-if ($snapshotPageText -match '(?i)\b(?:ActiveSshTarget|SnapshotConnection|connectionId|sessionId|TargetGuard|host|port|username|dataRoot|filePath|snapshotId|command|password|apiKey)\b') {
-    Add-GateViolation 'electron/src/renderer/SnapshotPage.tsx retains forbidden target identity, path, raw snapshot, command, or secret state'
-}
-if ($snapshotPageText -match '(?i)\b(?:createSnapshot|deleteSnapshot|restoreSnapshot|exportSnapshot|executeSnapshot)\b' -or
-    $snapshotPageText -match '(?i)\b(?:innerHTML|dangerouslySetInnerHTML)\b') {
-    Add-GateViolation 'electron/src/renderer/SnapshotPage.tsx exceeds the read-only plain-text Phase 1 surface'
-}
-$firewallApiMatch = [regex]::Match(
-    $firewallReadContractText,
-    '(?ms)\bexport\s+interface\s+FirewallReadApi\s*\{(?<body>.*?)^\s*\}'
-)
-if (-not $firewallApiMatch.Success) {
-    Add-GateViolation 'electron/src/shared/firewall-read-contract.ts is missing FirewallReadApi'
-} else {
-    $firewallNames = @([regex]::Matches($firewallApiMatch.Groups['body'].Value, '(?m)^\s{2}(?<name>[A-Za-z_$][A-Za-z0-9_$]*)\s*\(') | ForEach-Object { $_.Groups['name'].Value })
-    if (($firewallNames -join "`n") -cne (@('inspectFirewall', 'listFirewallChangeHistory') -join "`n")) {
-        Add-GateViolation 'electron/src/shared/firewall-read-contract.ts must expose exactly inspectFirewall/listFirewallChangeHistory'
-    }
-    if ($firewallApiMatch.Groups['body'].Value -notmatch 'inspectFirewall\(bindingHandle:\s*string\):\s*Promise<FirewallInspection>;' -or
-        $firewallApiMatch.Groups['body'].Value -notmatch 'listFirewallChangeHistory\(bindingHandle:\s*string\):\s*Promise<FirewallHistory>;' -or
-        $firewallApiMatch.Groups['body'].Value -match '(?i)\b(?:path|command|terminal|export|plan|confirm|execute|mutation|session|guard|target)\b') {
-        Add-GateViolation 'electron/src/shared/firewall-read-contract.ts must pin two concrete opaque-binding read-only signatures'
-    }
-}
-foreach ($marker in @(
-    'inspectFirewall(bindingHandle: string): Promise<FirewallInspection>;',
-    'listFirewallChangeHistory(bindingHandle: string): Promise<FirewallHistory>;'
-)) {
-    if (-not $contractText.Contains($marker, [System.StringComparison]::Ordinal)) {
-        Add-GateViolation "electron/src/shared/contract.ts is missing exact Firewall API marker '$marker'"
-    }
-}
-foreach ($channel in @(
-    'lovelyres:firewall:inspect',
-    'lovelyres:firewall:change-history:list'
-)) {
-    if ([regex]::Matches($mainText, [regex]::Escape($channel)).Count -ne 1) {
-        Add-GateViolation "electron/src/main/index.ts must register exactly one fixed Firewall IPC '$channel'"
-    }
-    if ([regex]::Matches($preloadText, [regex]::Escape("ipcRenderer.invoke(`"$channel`"" )).Count -ne 1) {
-        Add-GateViolation "electron/src/preload/index.ts must invoke exactly one fixed Firewall IPC '$channel'"
-    }
-}
-if ([regex]::Matches($mainText, 'values\.length\s*!==\s*1\s*\|\|\s*!isFirewallOpaqueHandle\(values\[0\]\)').Count -ne 2) {
-    Add-GateViolation 'electron/src/main/index.ts must reject unknown Firewall IPC ingredients and accept only one canonical binding handle'
-}
-foreach ($marker in @(
-    'mod firewall_read_api;',
-    'FirewallReadApi::new(services.clone(), Arc::clone(&ssh))',
-    'self.firewall_read.close_binding(&params.binding_handle);',
-    'FirewallBindingParams',
-    '#[serde(rename_all = "camelCase", deny_unknown_fields)]',
-    'fn firewall_read_failure(error: FirewallReadApiError)',
-    'firewall.inspect',
-    'firewall.change-history.list'
-)) {
-    if (-not $backendLibText.Contains($marker, [System.StringComparison]::Ordinal)) {
-        Add-GateViolation "crates/lovelyres-electron-backend/src/lib.rs is missing Firewall boundary marker '$marker'"
-    }
-}
-if ($backendLibText -notmatch '(?s)self\.snapshot_read\.close_binding\(&params\.binding_handle\);\s*self\.firewall_read\.close_binding\(&params\.binding_handle\);\s*self\.baseline_read\.close_binding\(&params\.binding_handle\);\s*self\.middleware_read\.close_binding\(&params\.binding_handle\);\s*self\.check_audit_read\.close_binding\(&params\.binding_handle\);\s*self\.integrity\.close_binding\(&params\.binding_handle\);\s*self\.log_analysis_read\.close_binding\(&params\.binding_handle\);\s*self\.kubernetes_read\.close_binding\(&params\.binding_handle\);\s*self\.emergency_command\.close_binding\(&params\.binding_handle\);\s*self\.docker_read\.close_binding\(&params\.binding_handle\);\s*self\.sftp_browser\.close_binding\(&params\.binding_handle\);\s*self\.packet_capture_live\s*\.close_binding\(&params\.binding_handle\)\s*\.await;\s*self\.ssh\s*\.disconnect_binding') {
-    Add-GateViolation 'SSH disconnect must eagerly close Snapshot, Firewall, Baseline, Middleware, Check Audit, File Integrity, Log Analysis, Kubernetes, Emergency Commands, Docker, Quick Detection, SFTP browser, and Packet Capture capabilities before the real disconnect'
-}
-foreach ($marker in @(
-    'BoundSshSession',
-    'TargetGuard',
-    'MAX_HISTORY_ENTRIES: usize = 256',
-    'MAX_REGISTRY_BYTES: usize = 4 * 1024 * 1024',
-    'MAX_READS_PER_BINDING: usize = 2',
-    'pub(crate) fn close_binding(&self, binding_handle: &str)'
-)) {
-    if (-not $firewallReadApiText.Contains($marker, [System.StringComparison]::Ordinal)) {
-        Add-GateViolation "crates/lovelyres-electron-backend/src/firewall_read_api.rs is missing bounded Firewall marker '$marker'"
-    }
-}
-foreach ($marker in @(
-    'MAX_FIREWALL_DOCUMENT_BYTES: usize = 4 * 1024 * 1024',
-    'MAX_RECORDS: usize = 256',
-    '#[serde(deserialize_with = "deserialize_firewall_changes")]',
-    'fn deserialize_firewall_changes',
-    'read_or_default_bounded::<StoredFirewall>',
-    'fn load_stored_firewall(&self)',
-    'encoded_firewall_document_is_rejected_before_json_decode',
-    'stored_change_limit_rejects_257_on_every_load_path_without_echo',
-    'exactly_256_stored_changes_are_valid_on_every_load_path'
-)) {
-    if (-not $coreFirewallText.Contains($marker, [System.StringComparison]::Ordinal)) {
-        Add-GateViolation "crates/lovelyres-core/src/firewall.rs is missing pre-allocation Firewall hardening marker '$marker'"
-    }
-}
-if ($appText -notmatch '(?s)activePage\.id\s*===\s*"firewall".{0,260}<FirewallPage\s+bindingHandle=\{activeTarget\?\.bindingHandle\s*\?\?\s*null\}\s+api=\{window\.lovelyres\}\s+writeClipboard=\{window\.lovelyres\.writeClipboard\}') {
-    Add-GateViolation 'electron/src/renderer/App.tsx must mount FirewallPage with only the current opaque binding handle and fixed read/clipboard APIs'
-}
-if ($firewallPageText -match '(?i)\b(?:SshTargetSummary|FirewallReadConnection|connectionId|sessionId|targetGuard|generation|host|port|username|dataRoot|filePath|password|apiKey)\b' -or
-    $firewallPageText -match '(?i)\b(?:planFirewall|confirmFirewall|executeFirewall|mutateFirewall|exportFirewall|openFirewallTerminal|readFirewallFile|innerHTML|dangerouslySetInnerHTML)\b') {
-    Add-GateViolation 'electron/src/renderer/FirewallPage.tsx exceeds the opaque read-only plain-text Phase 1 surface'
-}
-foreach ($marker in @(
-    'MAX_FIREWALL_CLIPBOARD_BYTES = 128 * 1_024',
-    'boundFirewallText(inspection.rules, MAX_FIREWALL_CLIPBOARD_BYTES)',
-    'return { text, truncated: text !== inspection.rules };'
-)) {
-    if (-not $firewallHelpersText.Contains($marker, [System.StringComparison]::Ordinal)) {
-        Add-GateViolation "electron/src/renderer/firewall-read-helpers.ts is missing UTF-8-safe clipboard marker '$marker'"
-    }
-}
-if (-not $firewallStateText.Contains('128 KiB 限制安全截断并复制', [System.StringComparison]::Ordinal) -or
-    -not $firewallPageText.Contains('await writeClipboard(copy.text);', [System.StringComparison]::Ordinal)) {
-    Add-GateViolation 'Firewall copy must use the existing 128 KiB main clipboard boundary and explicitly report truncation'
+if ($backendLibText -notmatch '(?s)self\.baseline_read\.close_binding\(&params\.binding_handle\);\s*self\.check_audit_read\.close_binding\(&params\.binding_handle\);\s*self\.integrity\.close_binding\(&params\.binding_handle\);\s*self\.log_analysis_read\.close_binding\(&params\.binding_handle\);\s*self\.kubernetes_read\.close_binding\(&params\.binding_handle\);\s*self\.kubernetes_write\.close_binding\(&params\.binding_handle\);\s*self\.emergency_command\.close_binding\(&params\.binding_handle\);\s*self\.docker_read\.close_binding\(&params\.binding_handle\);\s*self\.docker_write\.close_binding\(&params\.binding_handle\);\s*self\.system_info\.close_binding\(&params\.binding_handle\);\s*self\.sftp_browser\.close_binding\(&params\.binding_handle\);\s*self\.packet_capture_live\s*\.close_binding\(&params\.binding_handle\)\s*\.await;\s*self\.ssh\s*\.disconnect_binding') {
+    Add-GateViolation 'SSH disconnect must eagerly close Baseline, Check Audit, File Integrity, Log Analysis, Kubernetes read and action, Emergency Commands, Docker read and action, System Info snapshots and row plans, SFTP browser, and Packet Capture capabilities before the real disconnect'
 }
 $baselineApiMatch = [regex]::Match(
     $baselineReadContractText,
@@ -1558,7 +1286,7 @@ if ($mainText -notmatch '(?s)ipcMain\.handle\("lovelyres:baseline:catalog:get".{
 # Opening the file behind a check names the check. A path is never a parameter.
 $baselineFileBoundary = $mainText.Substring(
     $mainText.IndexOf('ipcMain.handle("lovelyres:baseline:file:read"', [System.StringComparison]::Ordinal),
-    $mainText.IndexOf('ipcMain.handle("lovelyres:middleware:discover"', [System.StringComparison]::Ordinal) -
+    $mainText.IndexOf('ipcMain.handle("lovelyres:check-audit:catalog:get"', [System.StringComparison]::Ordinal) -
         $mainText.IndexOf('ipcMain.handle("lovelyres:baseline:file:read"', [System.StringComparison]::Ordinal)
 )
 if (-not $baselineFileBoundary.Contains('hasExactKeys(value, ["bindingHandle", "itemHandle"])', [System.StringComparison]::Ordinal) -or
@@ -1677,101 +1405,6 @@ if ($baselineFilePaneText -match 'readBaselineFile\([^)]*[''"`]/') {
 if (-not $baselineStateText.Contains('| { type: "deactivated"; scope: string | null }', [System.StringComparison]::Ordinal) -or
     -not $baselineHelpersText.Contains('export function baselineScope(bindingHandle: string): string', [System.StringComparison]::Ordinal)) {
     Add-GateViolation 'Baseline renderer lifecycle must scope and deactivate only by opaque binding handle'
-}
-$middlewareApiMatch = [regex]::Match(
-    $middlewareReadContractText,
-    '(?ms)\bexport\s+interface\s+MiddlewareReadApi\s*\{(?<body>.*?)^\s*\}'
-)
-if (-not $middlewareApiMatch.Success) {
-    Add-GateViolation 'electron/src/shared/middleware-read-contract.ts is missing MiddlewareReadApi'
-} else {
-    $middlewareNames = @([regex]::Matches($middlewareApiMatch.Groups['body'].Value, '(?m)^\s{2}(?<name>[A-Za-z_$][A-Za-z0-9_$]*)\s*\(') | ForEach-Object { $_.Groups['name'].Value })
-    if (($middlewareNames -join "`n") -cne (@('discoverMiddleware', 'loadMiddlewareConfiguration', 'listMiddlewareHistory') -join "`n")) {
-        Add-GateViolation 'electron/src/shared/middleware-read-contract.ts must expose exactly discoverMiddleware/loadMiddlewareConfiguration/listMiddlewareHistory'
-    }
-    if ($middlewareApiMatch.Groups['body'].Value -notmatch 'discoverMiddleware\(bindingHandle:\s*string\):\s*Promise<unknown>;' -or
-        $middlewareApiMatch.Groups['body'].Value -notmatch '(?s)loadMiddlewareConfiguration\(\s*bindingHandle:\s*string,\s*discoveryHandle:\s*string,\s*instanceHandle:\s*string,\s*\):\s*Promise<unknown>;' -or
-        $middlewareApiMatch.Groups['body'].Value -notmatch 'listMiddlewareHistory\(bindingHandle:\s*string\):\s*Promise<unknown>;' -or
-        $middlewareApiMatch.Groups['body'].Value -match '(?i)\b(?:path|command|terminal|export|plan|confirm|execute|mutation|session|guard|target|secret)\b') {
-        Add-GateViolation 'electron/src/shared/middleware-read-contract.ts must pin three raw-unknown responses behind strict validators and opaque handles'
-    }
-}
-foreach ($marker in @(
-    'discoverMiddleware(bindingHandle: string): Promise<MiddlewareDiscovery>;',
-    '): Promise<MiddlewareConfiguration>;',
-    'listMiddlewareHistory(bindingHandle: string): Promise<MiddlewareHistory>;'
-)) {
-    if (-not $contractText.Contains($marker, [System.StringComparison]::Ordinal)) {
-        Add-GateViolation "electron/src/shared/contract.ts is missing exact Middleware API marker '$marker'"
-    }
-}
-foreach ($channel in @(
-    'lovelyres:middleware:discover',
-    'lovelyres:middleware:configuration:load',
-    'lovelyres:middleware:history:list'
-)) {
-    if ([regex]::Matches($mainText, [regex]::Escape($channel)).Count -ne 1) {
-        Add-GateViolation "electron/src/main/index.ts must register exactly one fixed Middleware IPC '$channel'"
-    }
-    if ([regex]::Matches($preloadText, [regex]::Escape("ipcRenderer.invoke(`"$channel`"" )).Count -ne 1) {
-        Add-GateViolation "electron/src/preload/index.ts must invoke exactly one fixed Middleware IPC '$channel'"
-    }
-}
-if ([regex]::Matches($mainText, 'values\.length\s*!==\s*1\s*\|\|\s*!isMiddlewareOpaqueHandle\(values\[0\]\)').Count -ne 2 -or
-    $mainText -notmatch '(?s)ipcMain\.handle\(\s*"lovelyres:middleware:configuration:load".{0,900}?hasOnlyKeys\(value, \["bindingHandle", "discoveryHandle", "instanceHandle"\]\).{0,500}?isMiddlewareOpaqueHandle\(value\.instanceHandle\)') {
-    Add-GateViolation 'electron/src/main/index.ts must reject unknown Middleware IPC ingredients with exact one/object validators'
-}
-foreach ($marker in @(
-    'mod middleware_read_api;',
-    'MiddlewareReadApi::new(services.clone(), Arc::clone(&ssh))',
-    'self.middleware_read.close_binding(&params.binding_handle);',
-    'MiddlewareBindingParams',
-    'MiddlewareConfigurationParams',
-    'fn middleware_read_failure(error: MiddlewareReadApiError)',
-    'middleware.discover',
-    'middleware.configuration.load',
-    'middleware.history.list'
-)) {
-    if (-not $backendLibText.Contains($marker, [System.StringComparison]::Ordinal)) {
-        Add-GateViolation "crates/lovelyres-electron-backend/src/lib.rs is missing Middleware boundary marker '$marker'"
-    }
-}
-foreach ($marker in @(
-    'BoundSshSession',
-    'TargetGuard',
-    'MAX_DISCOVERY_INSTANCES: usize = 32',
-    'MAX_CONFIGURATION_RESPONSE_BYTES: usize = 1024 * 1024',
-    'MAX_GLOBAL_READS: usize = 4',
-    'MAX_READS_PER_BINDING: usize = 1',
-    'pub(crate) fn close_binding(&self, binding_handle: &str)',
-    'self.validate_binding(&scope)?;',
-    'self.verify_instance_access(&access)?;'
-)) {
-    if (-not $middlewareReadApiText.Contains($marker, [System.StringComparison]::Ordinal)) {
-        Add-GateViolation "crates/lovelyres-electron-backend/src/middleware_read_api.rs is missing bounded Middleware marker '$marker'"
-    }
-}
-if ($appText -notmatch '(?s)activePage\.id\s*===\s*"middleware".{0,300}<MiddlewarePage\s+bindingHandle=\{activeTarget\?\.bindingHandle\s*\?\?\s*null\}\s+api=\{window\.lovelyres\}') {
-    Add-GateViolation 'electron/src/renderer/App.tsx must mount MiddlewarePage with only the current opaque binding handle and fixed API'
-}
-if ($middlewarePageText -match '(?i)\b(?:SshTargetSummary|MiddlewareConnection|connectionId|sessionId|targetGuard|generation|host|port|username|dataRoot|filePath|remotePath|operationId|digest|apiKey)\b' -or
-    $middlewarePageText -match '(?i)\b(?:planMiddleware|confirmMiddleware|executeMiddleware|restoreMiddleware|exportMiddleware|openMiddlewareTerminal|readMiddlewareFile|innerHTML|dangerouslySetInnerHTML)\b') {
-    Add-GateViolation 'electron/src/renderer/MiddlewarePage.tsx exceeds the opaque read-only plain-text Phase 1 surface'
-}
-foreach ($marker in @(
-    'bindingHandle: string | null;',
-    'const scope = bindingHandle === null ? null : middlewareScope(bindingHandle);',
-    'discoverMiddleware(bindingHandle)',
-    'loadMiddlewareConfiguration(',
-    'listMiddlewareHistory(bindingHandle)'
-)) {
-    if (-not $middlewarePageText.Contains($marker, [System.StringComparison]::Ordinal)) {
-        Add-GateViolation "electron/src/renderer/MiddlewarePage.tsx is missing lifecycle marker '$marker'"
-    }
-}
-if (-not $middlewareHelpersText.Contains('export function middlewareScope(bindingHandle: string): string', [System.StringComparison]::Ordinal) -or
-    -not $middlewareStateText.Contains('| { type: "scope-changed"; scope: string | null }', [System.StringComparison]::Ordinal)) {
-    Add-GateViolation 'Middleware renderer lifecycle must scope only by opaque binding handle'
 }
 $checkAuditApiMatch = [regex]::Match(
     $checkAuditReadContractText,
@@ -2067,9 +1700,11 @@ foreach ($channel in @(
         Add-GateViolation "electron/src/preload/index.ts must invoke exactly one fixed Kubernetes IPC '$channel'"
     }
 }
+# Reading ends where the action routes begin. Those have their own rule below,
+# so the read counts here do not move every time an action is added.
 $kubernetesMainBoundary = $mainText.Substring(
     $mainText.IndexOf('ipcMain.handle("lovelyres:kubernetes:availability:get"', [System.StringComparison]::Ordinal),
-    $mainText.IndexOf('ipcMain.handle("lovelyres:docker:containers:refresh"', [System.StringComparison]::Ordinal) -
+    $mainText.IndexOf('ipcMain.handle("lovelyres:kubernetes:workload:action:plan"', [System.StringComparison]::Ordinal) -
         $mainText.IndexOf('ipcMain.handle("lovelyres:kubernetes:availability:get"', [System.StringComparison]::Ordinal)
 )
 if ([regex]::Matches($kubernetesMainBoundary, 'values\.length\s*!==\s*1').Count -ne 4 -or
@@ -2078,6 +1713,58 @@ if ([regex]::Matches($kubernetesMainBoundary, 'values\.length\s*!==\s*1').Count 
     [regex]::Matches($kubernetesMainBoundary, [regex]::Escape('hasOnlyKeys(value, ["bindingHandle", "snapshotHandle", "rowHandle"])')).Count -ne 2 -or
     [regex]::Matches($kubernetesMainBoundary, 'isKubernetesListInput\(value\.input\)').Count -ne 1) {
     Add-GateViolation 'electron/src/main/index.ts must reject unknown Kubernetes IPC ingredients with one exact handle and three exact object validators'
+}
+
+# Acting on a workload. The renderer names one by the handle its own snapshot
+# minted and an action by one of three closed shapes; a namespace, a name or a
+# UID arriving here would mean something other than the approved plan decides
+# what is patched. Approval and execution stay two calls, all the way down.
+$kubernetesActionBoundary = $mainText.Substring(
+    $mainText.IndexOf('ipcMain.handle("lovelyres:kubernetes:workload:action:plan"', [System.StringComparison]::Ordinal),
+    $mainText.IndexOf('ipcMain.handle("lovelyres:docker:containers:refresh"', [System.StringComparison]::Ordinal) -
+        $mainText.IndexOf('ipcMain.handle("lovelyres:kubernetes:workload:action:plan"', [System.StringComparison]::Ordinal)
+)
+if ([regex]::Matches($kubernetesActionBoundary, 'validateSender\(event\)').Count -ne 4 -or
+    [regex]::Matches($kubernetesActionBoundary, 'isKubernetesWriteAction').Count -ne 1 -or
+    [regex]::Matches($kubernetesActionBoundary, 'isKubernetesResourceName').Count -ne 1 -or
+    [regex]::Matches($kubernetesActionBoundary, 'isKubernetesOpaqueHandle').Count -ne 5 -or
+    -not $kubernetesActionBoundary.Contains('hasExactKeys(value, ["bindingHandle", "planHandle"])', [System.StringComparison]::Ordinal) -or
+    $kubernetesActionBoundary -match '(?i)\b(?:manifest|kubectl|resourceUid|commandText|shellText|targetIdentity|connectionId|sessionId|genericInvoke)\b') {
+    Add-GateViolation 'electron/src/main/index.ts must accept only exact Kubernetes action capability objects'
+}
+foreach ($marker in @(
+    'mod kubernetes_write_api;',
+    'KubernetesWriteApi::new(',
+    'self.kubernetes_write.close_binding(&params.binding_handle);',
+    'KubernetesActionPlanParams',
+    'KubernetesPlanParams',
+    'fn kubernetes_write_failure(error: KubernetesWriteApiError)',
+    'kubernetes.workload.action.plan',
+    'kubernetes.workload.action.confirm',
+    'kubernetes.workload.action.execute',
+    'kubernetes.workload.action.cancel'
+)) {
+    if (-not $backendLibText.Contains($marker, [System.StringComparison]::Ordinal)) {
+        Add-GateViolation "crates/lovelyres-electron-backend/src/lib.rs is missing Kubernetes action boundary marker '$marker'"
+    }
+}
+foreach ($marker in @(
+    'PLAN_TTL: Duration = Duration::from_secs(5 * 60)',
+    'fn take_confirmed(',
+    'KubernetesWriteApiError::PlanNotConfirmed',
+    'KubernetesWriteApiError::ActionKindMismatch',
+    'DangerousConfirmation::approve(',
+    'resolve_workload_for_mutation('
+)) {
+    if (-not $kubernetesWriteApiText.Contains($marker, [System.StringComparison]::Ordinal)) {
+        Add-GateViolation "crates/lovelyres-electron-backend/src/kubernetes_write_api.rs is missing plan-lifecycle marker '$marker'"
+    }
+}
+if ($kubernetesActionDialogText -notmatch '(?s)data-testid="kubernetes-action-execute"' -or
+    $kubernetesActionDialogText -notmatch 'plan\.summary' -or
+    $kubernetesActionDialogText -notmatch 'plan\.restoreDescription' -or
+    $kubernetesActionDialogText -notmatch 'receipt\.verified') {
+    Add-GateViolation 'electron/src/renderer/KubernetesActionDialog.tsx must show the plan, its restore path, and what the read-back found'
 }
 foreach ($marker in @(
     'mod kubernetes_read_api;',
@@ -2209,9 +1896,11 @@ foreach ($channel in @(
         Add-GateViolation "electron/src/preload/index.ts must invoke exactly one fixed Docker IPC '$channel'"
     }
 }
+# Reading ends where the action routes begin. Those have their own rule below,
+# so the read counts here do not move every time an action is added.
 $dockerMainBoundary = $mainText.Substring(
     $mainText.IndexOf('ipcMain.handle("lovelyres:docker:containers:refresh"', [System.StringComparison]::Ordinal),
-    $mainText.IndexOf('ipcMain.handle("lovelyres:emergency-command:catalog:load"', [System.StringComparison]::Ordinal) -
+    $mainText.IndexOf('ipcMain.handle("lovelyres:docker:container:action:plan"', [System.StringComparison]::Ordinal) -
         $mainText.IndexOf('ipcMain.handle("lovelyres:docker:containers:refresh"', [System.StringComparison]::Ordinal)
 )
 if ([regex]::Matches($dockerMainBoundary, 'validateSender\(event\)').Count -ne 5 -or
@@ -2223,6 +1912,51 @@ if ([regex]::Matches($dockerMainBoundary, 'validateSender\(event\)').Count -ne 5
     [regex]::Matches($dockerMainBoundary, 'isDockerLogTail').Count -ne 1 -or
     $dockerMainBoundary -match '(?i)\b(?:commandText|shellText|filePath|remotePath|targetIdentity|targetGeneration|connectionId|sessionId|mutationHandle|exportPath|terminalHandle|genericInvoke)\b') {
     Add-GateViolation 'electron/src/main/index.ts must accept only exact Docker binding/snapshot/kind/resource/tail capability objects'
+}
+
+# Acting on a container. The renderer names one by the handle its own snapshot
+# minted and an action by a closed word; a path, a command or a runtime verb
+# arriving here would mean something other than the approved plan decides what
+# runs. Approval and execution stay two calls, all the way down.
+$dockerActionBoundary = $mainText.Substring(
+    $mainText.IndexOf('ipcMain.handle("lovelyres:docker:container:action:plan"', [System.StringComparison]::Ordinal),
+    $mainText.IndexOf('ipcMain.handle("lovelyres:emergency-command:catalog:load"', [System.StringComparison]::Ordinal) -
+        $mainText.IndexOf('ipcMain.handle("lovelyres:docker:container:action:plan"', [System.StringComparison]::Ordinal)
+)
+if ([regex]::Matches($dockerActionBoundary, 'validateSender\(event\)').Count -ne 4 -or
+    [regex]::Matches($dockerActionBoundary, 'isDockerWriteAction').Count -ne 1 -or
+    [regex]::Matches($dockerActionBoundary, 'isDockerContainerName').Count -ne 1 -or
+    [regex]::Matches($dockerActionBoundary, 'isDockerOpaqueHandle').Count -ne 5 -or
+    -not $dockerActionBoundary.Contains('hasExactKeys(value, ["bindingHandle", "planHandle"])', [System.StringComparison]::Ordinal) -or
+    $dockerActionBoundary -match '(?i)\b(?:commandText|shellText|filePath|remotePath|containerId|runtimeVerb|targetIdentity|connectionId|sessionId|genericInvoke)\b') {
+    Add-GateViolation 'electron/src/main/index.ts must accept only exact Docker action capability objects'
+}
+foreach ($marker in @(
+    'mod docker_write_api;',
+    'DockerWriteApi::new(',
+    'self.docker_write.close_binding(&params.binding_handle);',
+    'DockerActionPlanParams',
+    'DockerPlanParams',
+    'fn docker_write_failure(error: DockerWriteApiError)',
+    'docker.container.action.plan',
+    'docker.container.action.confirm',
+    'docker.container.action.execute',
+    'docker.container.action.cancel'
+)) {
+    if (-not $backendLibText.Contains($marker, [System.StringComparison]::Ordinal)) {
+        Add-GateViolation "crates/lovelyres-electron-backend/src/lib.rs is missing Docker action boundary marker '$marker'"
+    }
+}
+foreach ($marker in @(
+    'PLAN_TTL: Duration = Duration::from_secs(5 * 60)',
+    'fn take_confirmed(',
+    'DockerWriteApiError::PlanNotConfirmed',
+    'DangerousConfirmation::approve(',
+    'resolve_container_for_mutation('
+)) {
+    if (-not $dockerWriteApiText.Contains($marker, [System.StringComparison]::Ordinal)) {
+        Add-GateViolation "crates/lovelyres-electron-backend/src/docker_write_api.rs is missing plan-lifecycle marker '$marker'"
+    }
 }
 foreach ($marker in @(
     'mod docker_read_api;',
@@ -2292,7 +2026,26 @@ if ($appText -notmatch '(?s)activePage\.id\s*===\s*"docker".{0,300}<DockerPage\s
 }
 if ($dockerPageText -match '(?i)\b(?:SshTargetSummary|DockerReadConnection|connectionId|sessionId|targetGuard|generation|host|port|username|dataRoot|filePath|remotePath|targetIdentity|targetGeneration|apiKey)\b' -or
     $dockerPageText -match '(?i)\b(?:startDocker|stopDocker|restartDocker|removeDocker|executeCommand|execDocker|openDockerFile|openDockerTerminal|exportDocker|genericInvoke|innerHTML|dangerouslySetInnerHTML)\b') {
-    Add-GateViolation 'electron/src/renderer/DockerPage.tsx exceeds the opaque read-only plain-text Phase 1 surface'
+    Add-GateViolation 'electron/src/renderer/DockerPage.tsx exceeds the opaque plain-text surface'
+}
+# The page can change a container now, but only by describing one plan, having
+# it approved, and running that. A direct call would be a change nobody saw.
+foreach ($marker in @(
+    'planDockerContainerAction(',
+    'confirmDockerContainerAction(',
+    'executeDockerContainerAction(',
+    'cancelDockerContainerAction(',
+    'const actionRef = useRef(false)'
+)) {
+    if (-not $dockerPageText.Contains($marker, [System.StringComparison]::Ordinal)) {
+        Add-GateViolation "electron/src/renderer/DockerPage.tsx is missing container-action marker '$marker'"
+    }
+}
+if ($dockerActionDialogText -notmatch '(?s)data-testid="docker-action-execute"' -or
+    $dockerActionDialogText -notmatch 'plan\.summary' -or
+    $dockerActionDialogText -notmatch 'plan\.restoreDescription' -or
+    $dockerActionDialogText -notmatch 'receipt\.verified') {
+    Add-GateViolation 'electron/src/renderer/DockerActionDialog.tsx must show the plan, its restore path, and what verification read back'
 }
 foreach ($marker in @(
     'bindingHandle: string | null;',
@@ -2320,6 +2073,15 @@ if (-not $emergencyCommandApiMatch.Success) {
     Add-GateViolation 'electron/src/shared/emergency-command-contract.ts is missing EmergencyCommandApi'
 } else {
     $emergencyCommandNames = @([regex]::Matches($emergencyCommandApiMatch.Groups['body'].Value, '(?m)^\s{2}(?<name>[A-Za-z_$][A-Za-z0-9_$]*)\s*\(') | ForEach-Object { $_.Groups['name'].Value })
+    # Declarations only. What must never appear is a method *carrying* one of
+    # the forbidden ingredients; a doc comment explaining that a check may run
+    # inside a container rather than on the target is not that, and scanning
+    # prose made this rule fire on its own documentation.
+    $emergencyCommandApiDeclarations = [regex]::Replace(
+        $emergencyCommandApiMatch.Groups['body'].Value,
+        '(?s)/\*.*?\*/|//[^\r\n]*',
+        ''
+    )
     if (($emergencyCommandNames -join "`n") -cne (@(
         'loadEmergencyCommandCatalog',
         'runEmergencyCommand',
@@ -2332,14 +2094,16 @@ if (-not $emergencyCommandApiMatch.Success) {
         Add-GateViolation 'electron/src/shared/emergency-command-contract.ts must expose exactly catalog-load, closed-run and the five path capabilities'
     }
     if ($emergencyCommandApiMatch.Groups['body'].Value -notmatch 'loadEmergencyCommandCatalog\(bindingHandle:\s*string\):\s*Promise<unknown>;' -or
-        $emergencyCommandApiMatch.Groups['body'].Value -notmatch '(?s)runEmergencyCommand\(\s*bindingHandle:\s*string,\s*snapshotHandle:\s*string,\s*commandHandle:\s*string,?\s*\):\s*Promise<unknown>;' -or
-        $emergencyCommandApiMatch.Groups['body'].Value -match '(?i)\b(?:commandText|shellText|filePath|remotePath|terminal|export|mutation|session|guard|target|connection|secret|genericInvoke)\b') {
+        $emergencyCommandApiMatch.Groups['body'].Value -notmatch '(?s)runEmergencyCommand\(\s*bindingHandle:\s*string,\s*snapshotHandle:\s*string,\s*commandHandle:\s*string,\s*containerHandle\?:\s*string,\s*\):\s*Promise<unknown>;' -or
+        $emergencyCommandApiDeclarations -match '(?i)\b(?:commandText|shellText|filePath|remotePath|terminal|export|mutation|session|guard|target|connection|secret|genericInvoke)\b') {
         Add-GateViolation 'electron/src/shared/emergency-command-contract.ts must pin two raw-unknown responses behind opaque handles without renderer-provided execution ingredients'
     }
 }
 foreach ($pattern in @(
     'loadEmergencyCommandCatalog\(bindingHandle:\s*string\):\s*Promise<EmergencyCommandCatalog>;',
-    '(?s)runEmergencyCommand\(\s*bindingHandle:\s*string,\s*snapshotHandle:\s*string,\s*commandHandle:\s*string,\s*\):\s*Promise<EmergencyCommandResult>;'
+    # The fourth argument is a handle from the same catalogue, or absent. It is
+    # never a container name and never an id.
+    '(?s)runEmergencyCommand\(\s*bindingHandle:\s*string,\s*snapshotHandle:\s*string,\s*commandHandle:\s*string,[^)]*?containerHandle\?:\s*string,\s*\):\s*Promise<EmergencyCommandResult>;'
 )) {
     if ($contractText -notmatch $pattern) {
         Add-GateViolation "electron/src/shared/contract.ts is missing an exact Emergency Commands API signature matching '$pattern'"
@@ -2363,10 +2127,15 @@ $emergencyCommandMainBoundary = $mainText.Substring(
 )
 if ([regex]::Matches($emergencyCommandMainBoundary, 'validateSender\(event\)').Count -ne 7 -or
     [regex]::Matches($emergencyCommandMainBoundary, 'values\.length\s*!==\s*1').Count -ne 7 -or
-    [regex]::Matches($emergencyCommandMainBoundary, 'isEmergencyCommandOpaqueHandle').Count -ne 14 -or
+    # Fifteen: running a check can now name a container, and that handle is
+    # checked exactly like the other fourteen.
+    [regex]::Matches($emergencyCommandMainBoundary, 'isEmergencyCommandOpaqueHandle').Count -ne 15 -or
     [regex]::Matches($emergencyCommandMainBoundary, 'isEmergencyPathAction\(value\.action\)').Count -ne 1 -or
     [regex]::Matches($emergencyCommandMainBoundary, [regex]::Escape('hasExactKeys(value, ["bindingHandle", "pathHandle", "action"])')).Count -ne 1 -or
-    [regex]::Matches($emergencyCommandMainBoundary, [regex]::Escape('hasOnlyKeys(value, ["bindingHandle", "snapshotHandle", "commandHandle"])')).Count -ne 1 -or
+    [regex]::Matches($emergencyCommandMainBoundary, [regex]::Escape('hasOnlyKeys(value, ["bindingHandle", "snapshotHandle", "commandHandle", "containerHandle"])')).Count -ne 1 -or
+    # Absent means the target itself, and absent is the only other thing that
+    # key may be — not an empty string, not a name.
+    [regex]::Matches($emergencyCommandMainBoundary, [regex]::Escape('!(value.containerHandle === undefined ||')).Count -ne 1 -or
     $emergencyCommandMainBoundary -match '(?i)\b(?:commandText|shellText|filePath|remotePath|targetIdentity|targetGeneration|connectionId|sessionId|mutationHandle|exportPath|terminalHandle|genericInvoke)\b') {
     Add-GateViolation 'electron/src/main/index.ts must reject unknown Emergency Commands IPC ingredients and accept only binding/catalog/command opaque handles'
 }
@@ -2473,7 +2242,9 @@ foreach ($marker in @(
     'bindingHandle: string | null;',
     'const scope = bindingHandle === null ? null : emergencyCommandScope(bindingHandle);',
     'api.loadEmergencyCommandCatalog(bindingHandle)',
-    'api.runEmergencyCommand(bindingHandle, request.snapshotHandle, request.commandHandle)',
+    # Handles only, plus where to run them — which is a handle from the same
+    # catalogue too, never a container name or id.
+    'containerHandle ?? undefined,',
     'onPathMenu={pathActions.openMenu}',
     'paths={result.paths}',
     'cancelled = true;'
@@ -3381,8 +3152,8 @@ if (-not $terminalApiMatch.Success) {
     $terminalApiNames = @([regex]::Matches($terminalApiMatch.Groups['body'].Value, '(?m)^\s{2}(?<name>[A-Za-z_$][A-Za-z0-9_$]*)\s*\(') | ForEach-Object { $_.Groups['name'].Value })
     if (($terminalApiNames -join "`n") -cne (@('open', 'poll', 'input', 'resize', 'search', 'copySelection', 'close', 'openSftpBrowser', 'listSftpDirectory', 'readSftpText', 'downloadSftpEntry', 'planSftpOperation', 'confirmSftpOperation',
         'executeSftpOperation', 'cancelSftpOperation', 'stageSftpUpload',
-        'openLocalBrowser', 'listLocalDirectory') -join "`n")) {
-        Add-GateViolation 'electron/src/shared/terminal-contract.ts TerminalApi must expose exactly eighteen methods'
+        'openLocalBrowser', 'listLocalDirectory', 'openFileEditor', 'fileEditorTarget') -join "`n")) {
+        Add-GateViolation 'electron/src/shared/terminal-contract.ts TerminalApi must expose exactly twenty methods'
     }
     # The browser capabilities are opaque, window-scoped handles; target
     # identity stays forbidden.
@@ -3398,7 +3169,10 @@ foreach ($marker in @(
     'const terminalWindowsByKey = new Map<string, TerminalWindowContext>();',
     'launchToken: randomUUID()',
     'context.launchToken = null;',
-    'terminalWindowKey(bindingHandle)',
+    # The key is still derived from the binding; a container terminal adds its
+    # own container handle so a shell in a container and the shell on the
+    # target itself get separate windows rather than fighting over one.
+    'terminalWindowKey(bindingHandle, container?.containerHandle)',
     'terminalWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }))',
     'contextIsolation: true', 'nodeIntegration: false', 'sandbox: true', 'webSecurity: true',
     'closeTerminalWindowsForBinding(bindingHandle)',

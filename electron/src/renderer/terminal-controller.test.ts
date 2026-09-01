@@ -40,6 +40,8 @@ function createApi(overrides: Partial<TerminalApi> = {}): TerminalApi {
     stageSftpUpload: vi.fn(async () => ({})),
   openLocalBrowser: vi.fn(async () => ({})),
   listLocalDirectory: vi.fn(async () => ({})),
+  openFileEditor: vi.fn(async () => ({ opened: true, reused: false })),
+  fileEditorTarget: vi.fn(async () => ({})),
     poll: vi.fn(async (): Promise<TerminalPoll> => ({
       events: [{ kind: "closed" as const, sequence: 1 }],
       rawBytes: 0,

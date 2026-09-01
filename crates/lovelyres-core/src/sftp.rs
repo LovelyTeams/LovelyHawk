@@ -1864,34 +1864,41 @@ pub(crate) fn content_sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
+/// What a mutation will do, and what putting it back would mean.
+///
+/// In Chinese, because this text is not a log line: it is the sentence in the
+/// confirmation dialog that an operator reads before agreeing to change a file
+/// on a machine they are trying to rescue. "atomically replace … only if its
+/// content still matches the captured SHA-256" describes the implementation
+/// accurately and tells them nothing they can act on.
 fn mutation_description(mutation: &SftpMutation) -> (String, Option<String>) {
     match mutation {
         SftpMutation::CreateFile { path, .. } => (
-            format!("create new file {}", path.as_str()),
-            Some("remove the newly created remote file".to_owned()),
+            format!("新建文件 {}", path.as_str()),
+            Some("把刚建出来的文件删掉".to_owned()),
         ),
         SftpMutation::CreateDirectory { path } => (
-            format!("create new directory {}", path.as_str()),
-            Some("remove the newly created empty remote directory".to_owned()),
+            format!("新建目录 {}", path.as_str()),
+            Some("把刚建出来的空目录删掉".to_owned()),
         ),
         SftpMutation::AtomicWrite { path, .. } => (
-            format!("atomically replace {}", path.as_str()),
-            Some("restore the original file from the remote backup namespace".to_owned()),
+            format!("整体覆盖写入 {}", path.as_str()),
+            Some("从备份把原文件恢复回去".to_owned()),
         ),
         SftpMutation::AtomicWriteIfMatch { path, .. } => (
             format!(
-                "atomically replace {} only if its content still matches the captured SHA-256",
+                "把改好的内容写回 {}；写之前先核对文件还是你打开时那一份，被别人改过就不写",
                 path.as_str()
             ),
-            Some("restore the original file from the remote backup namespace".to_owned()),
+            Some("从备份把原文件恢复回去".to_owned()),
         ),
         SftpMutation::Rename { from, to } => (
-            format!("rename {} to {}", from.as_str(), to.as_str()),
-            Some("rename the destination back to the original path".to_owned()),
+            format!("把 {} 改名为 {}", from.as_str(), to.as_str()),
+            Some("再改回原来的名字".to_owned()),
         ),
         SftpMutation::Chmod { path, mode } => (
-            format!("change {} permissions to {:o}", path.as_str(), mode),
-            Some("restore the previous permission bits".to_owned()),
+            format!("把 {} 的权限改成 {:04o}", path.as_str(), mode),
+            Some("恢复成原来的权限位".to_owned()),
         ),
         SftpMutation::ChmodIfMode {
             path,
@@ -1899,30 +1906,28 @@ fn mutation_description(mutation: &SftpMutation) -> (String, Option<String>) {
             mode,
         } => (
             format!(
-                "change {} permissions from {:04o} to {:04o} only if the captured mode still matches",
+                "把 {} 的权限从 {:04o} 改成 {:04o}；改之前先核对当前权限还是 {:04o}",
                 path.as_str(),
                 expected_mode,
-                mode
+                mode,
+                expected_mode
             ),
-            Some("restore the captured permission bits".to_owned()),
+            Some("恢复成读到的那组权限位".to_owned()),
         ),
         SftpMutation::Remove { path } => (
-            format!(
-                "remove {} into the recoverable backup namespace",
-                path.as_str()
-            ),
-            Some("move the remote backup back to its original path".to_owned()),
+            format!("把 {} 移进可恢复的备份区（不是直接抹掉）", path.as_str()),
+            Some("把备份移回原来的位置".to_owned()),
         ),
         SftpMutation::RemoveFileIfMatch { path, .. } => (
             format!(
-                "move {} into the recoverable backup namespace only if its content still matches the captured SHA-256",
+                "把 {} 移进可恢复的备份区；移之前先核对文件还是你看到的那一份",
                 path.as_str()
             ),
-            Some("move the remote backup back to its original path".to_owned()),
+            Some("把备份移回原来的位置".to_owned()),
         ),
         SftpMutation::CreateArchive { destination, .. } => (
-            format!("create archive {}", destination.as_str()),
-            Some("remove the newly created archive".to_owned()),
+            format!("打包成 {}", destination.as_str()),
+            Some("把刚打出来的包删掉".to_owned()),
         ),
     }
 }
@@ -1932,15 +1937,12 @@ fn operation_description(operation: &SftpOperation) -> (String, Option<String>) 
         SftpOperation::Mutation(mutation) => mutation_description(mutation),
         SftpOperation::ExtractArchive(plan) => (
             format!(
-                "extract {} validated entries from {} into new directory {}",
-                plan.entry_count,
+                "从 {} 解出 {} 个已校验的条目，放进新目录 {}",
                 plan.archive.as_str(),
+                plan.entry_count,
                 plan.destination.as_str()
             ),
-            Some(
-                "remove the extracted directory only while its receipt, manifest, and content digest remain unchanged"
-                    .to_owned(),
-            ),
+            Some("删掉解出来的目录（仅在回执、清单与内容摘要都没变过时）".to_owned()),
         ),
         SftpOperation::UploadStaged {
             remote_path,
@@ -1948,10 +1950,10 @@ fn operation_description(operation: &SftpOperation) -> (String, Option<String>) 
             ..
         } => (
             format!(
-                "upload {expected_bytes} staged bytes to new file {}",
+                "上传 {expected_bytes} 字节，写成新文件 {}",
                 remote_path.as_str()
             ),
-            Some("remove the newly uploaded remote file".to_owned()),
+            Some("把刚上传的文件删掉".to_owned()),
         ),
     }
 }
@@ -2650,6 +2652,90 @@ mod tests {
             .await
             .unwrap();
         (root, services, session, harness)
+    }
+
+    /// Every sentence an operator has to approve is in the same language as
+    /// the rest of the window.
+    ///
+    /// These are not log lines. They are the text in the confirmation dialog
+    /// that says what is about to happen to a file on a machine somebody is
+    /// trying to rescue, and they are generated here rather than translated in
+    /// the renderer so that what is shown and what runs stay the same
+    /// sentence. The command workbench's 去掉执行权限 and 隔离 both come
+    /// through here too — they are a `ChmodIfMode` and a `Remove` — so this
+    /// covers that surface as well.
+    #[test]
+    fn every_plan_sentence_is_written_in_the_language_of_the_window() {
+        let path = RemotePath::new("/usr/local/lib/.helper").unwrap();
+        let cases = [
+            SftpMutation::CreateFile {
+                path: path.clone(),
+                content: Vec::new(),
+                mode: None,
+            },
+            SftpMutation::CreateDirectory { path: path.clone() },
+            SftpMutation::AtomicWrite {
+                path: path.clone(),
+                content: Vec::new(),
+            },
+            SftpMutation::AtomicWriteIfMatch {
+                path: path.clone(),
+                expected_sha256: "a".repeat(64),
+                expected_canonical_path: None,
+                backup_directory: None,
+                content: Vec::new(),
+            },
+            SftpMutation::Rename {
+                from: path.clone(),
+                to: path.clone(),
+            },
+            SftpMutation::Chmod {
+                path: path.clone(),
+                mode: 0o644,
+            },
+            // What 去掉执行权限 builds.
+            SftpMutation::ChmodIfMode {
+                path: path.clone(),
+                expected_mode: 0o4755,
+                mode: 0o644,
+            },
+            // What 隔离 builds.
+            SftpMutation::Remove { path: path.clone() },
+            SftpMutation::RemoveFileIfMatch {
+                path: path.clone(),
+                expected_sha256: "a".repeat(64),
+            },
+            SftpMutation::CreateArchive {
+                sources: vec![path.clone()],
+                destination: path.clone(),
+                format: ArchiveFormat::Tar,
+            },
+        ];
+        for mutation in cases {
+            let (summary, restore) = mutation_description(&mutation);
+            let described = format!("{summary} {}", restore.clone().unwrap_or_default());
+            assert!(
+                described
+                    .chars()
+                    .any(|character| ('\u{4e00}'..='\u{9fff}').contains(&character)),
+                "{summary}",
+            );
+            // And none of the implementation words the old text leaked: an
+            // operator cannot act on "atomically replace ... captured SHA-256".
+            for leaked in [
+                "atomically",
+                "SHA-256",
+                "namespace",
+                "captured",
+                "remote backup",
+            ] {
+                assert!(!described.contains(leaked), "{summary} still says {leaked}");
+            }
+            assert!(
+                restore.is_some(),
+                "{summary} says nothing about putting it back"
+            );
+        }
     }
 
     #[test]

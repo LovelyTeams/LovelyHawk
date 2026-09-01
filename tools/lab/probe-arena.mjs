@@ -42,25 +42,6 @@ try {
   check("标出的是生效那行", lines[effective.line].trim(), "PermitRootLogin yes");
   check("注释那行单独标出来", file.mentions.some((entry) => entry.commented), true);
 
-  // --- middleware and databases on the same host
-  const middleware = await sidecar
-    .call("middleware.discover", { bindingHandle: binding }, 90_000)
-    .catch((error) => ({ failed: error.message }));
-  const found = middleware.failed === undefined
-    ? (middleware.items ?? middleware.discovered ?? []).length
-    : -1;
-  console.log(`\n中间件发现：${middleware.failed ?? `${found} 项`}`);
-  // Discovery enumerates systemd service units, and a container has none, so
-  // it cannot answer here. What it must not do is answer "none found": four
-  // services are running on this host, and that would be a false negative of
-  // exactly the kind the baseline scan used to make.
-  check(
-    "说清了是这台机器问不出来，而不是报「没找到」",
-    (middleware.failed ?? "").includes("middleware-unsupported-target"),
-    true,
-  );
-  check("没有把「问不出来」说成「一个都没有」", found, -1);
-
   // --- the command workbench, and what it can act on
   const commands = await sidecar.call("emergency-command.catalog.load", { bindingHandle: binding }, 90_000);
   const suid = commands.commands.find((entry) => entry.title.includes("SUID"));

@@ -10,7 +10,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { Sidecar } from "./rpc-harness.mjs";
-import { ARENA_PORT, LAB_PORTS, SERVICE_PORTS } from "./lab-target.mjs";
+import {
+  ARENA_PORT,
+  LAB_PORTS,
+  ORCHESTRATION_PORTS,
+  SERVICE_PORTS,
+} from "./lab-target.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repository = path.resolve(here, "..", "..");
@@ -35,6 +40,7 @@ const expected = [
   ["综合靶机", ARENA_PORT],
   ...Object.values(LAB_PORTS).map((port) => ["被入侵", port]),
   ...Object.values(SERVICE_PORTS).map((port) => ["配置不合规", port]),
+  ...Object.values(ORCHESTRATION_PORTS).map((port) => ["容器编排", port]),
 ];
 
 const address = wslAddress();

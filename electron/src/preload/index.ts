@@ -8,11 +8,13 @@ import type {
   CheckAuditLogInput,
   DockerCollectionKind,
   DockerResourceKind,
+  DockerWriteAction,
   EmergencyPathAction,
   LogCorrelationInput,
   LogIocSearchInput,
   LogSourceReadInput,
   KubernetesListInput,
+  KubernetesWriteAction,
   ConfigGenerateInput,
   ConnectionWriteInput,
   DisposalReportExportFormat,
@@ -23,7 +25,6 @@ import type {
   PacketCaptureStartInput,
   SettingsAiApiKeyReplacementInput,
   SettingsSaveInput,
-  SnapshotDiffInput,
   SystemInfoTabKey,
   WindowThemeInput,
 } from "../shared/contract.js";
@@ -78,16 +79,49 @@ const api: LovelyResApi = Object.freeze({
       snapshotHandle,
       rowId,
     }),
-  listSnapshots: (bindingHandle: string) =>
-    ipcRenderer.invoke("lovelyres:snapshot:list", bindingHandle),
-  getSnapshotDetail: (bindingHandle: string, snapshotHandle: string) =>
-    ipcRenderer.invoke("lovelyres:snapshot:detail:get", { bindingHandle, snapshotHandle }),
-  diffForensicSnapshots: (bindingHandle: string, input: SnapshotDiffInput) =>
-    ipcRenderer.invoke("lovelyres:snapshot:forensic:diff", { bindingHandle, input }),
-  inspectFirewall: (bindingHandle: string) =>
-    ipcRenderer.invoke("lovelyres:firewall:inspect", bindingHandle),
-  listFirewallChangeHistory: (bindingHandle: string) =>
-    ipcRenderer.invoke("lovelyres:firewall:change-history:list", bindingHandle),
+  listSystemInfoRowActions: (bindingHandle: string, snapshotHandle: string, rowId: string) =>
+    ipcRenderer.invoke("lovelyres:system-info:row:actions:list", {
+      bindingHandle,
+      snapshotHandle,
+      rowId,
+    }),
+  inspectSystemInfoRow: (
+    bindingHandle: string,
+    snapshotHandle: string,
+    rowId: string,
+    action: string,
+  ) => ipcRenderer.invoke("lovelyres:system-info:row:inspect", {
+    bindingHandle,
+    snapshotHandle,
+    rowId,
+    action,
+  }),
+  planSystemInfoRowAction: (
+    bindingHandle: string,
+    snapshotHandle: string,
+    rowId: string,
+    action: string,
+  ) => ipcRenderer.invoke("lovelyres:system-info:row:action:plan", {
+    bindingHandle,
+    snapshotHandle,
+    rowId,
+    action,
+  }),
+  confirmSystemInfoRowAction: (bindingHandle: string, planHandle: string) =>
+    ipcRenderer.invoke("lovelyres:system-info:row:action:confirm", {
+      bindingHandle,
+      planHandle,
+    }),
+  executeSystemInfoRowAction: (bindingHandle: string, planHandle: string) =>
+    ipcRenderer.invoke("lovelyres:system-info:row:action:execute", {
+      bindingHandle,
+      planHandle,
+    }),
+  cancelSystemInfoRowAction: (bindingHandle: string, planHandle: string) =>
+    ipcRenderer.invoke("lovelyres:system-info:row:action:cancel", {
+      bindingHandle,
+      planHandle,
+    }),
   getBaselineCatalog: () => ipcRenderer.invoke("lovelyres:baseline:catalog:get"),
   scanBaseline: (bindingHandle: string) =>
     ipcRenderer.invoke("lovelyres:baseline:scan", bindingHandle),
@@ -95,19 +129,6 @@ const api: LovelyResApi = Object.freeze({
     ipcRenderer.invoke("lovelyres:baseline:history:list", bindingHandle),
   readBaselineFile: (bindingHandle: string, itemHandle: string) =>
     ipcRenderer.invoke("lovelyres:baseline:file:read", { bindingHandle, itemHandle }),
-  discoverMiddleware: (bindingHandle: string) =>
-    ipcRenderer.invoke("lovelyres:middleware:discover", bindingHandle),
-  loadMiddlewareConfiguration: (
-    bindingHandle: string,
-    discoveryHandle: string,
-    instanceHandle: string,
-  ) => ipcRenderer.invoke("lovelyres:middleware:configuration:load", {
-    bindingHandle,
-    discoveryHandle,
-    instanceHandle,
-  }),
-  listMiddlewareHistory: (bindingHandle: string) =>
-    ipcRenderer.invoke("lovelyres:middleware:history:list", bindingHandle),
   getCheckAuditCatalog: (bindingHandle: string, input: CheckAuditCatalogInput) =>
     ipcRenderer.invoke("lovelyres:check-audit:catalog:get", { bindingHandle, input }),
   collectCheckAuditStatus: (bindingHandle: string, snapshotHandle: string) =>
@@ -177,6 +198,34 @@ const api: LovelyResApi = Object.freeze({
     snapshotHandle,
     rowHandle,
   }),
+  planKubernetesWorkloadAction: (
+    bindingHandle: string,
+    snapshotHandle: string,
+    rowHandle: string,
+    resourceName: string,
+    action: KubernetesWriteAction,
+  ) => ipcRenderer.invoke("lovelyres:kubernetes:workload:action:plan", {
+    bindingHandle,
+    snapshotHandle,
+    rowHandle,
+    resourceName,
+    action,
+  }),
+  confirmKubernetesWorkloadAction: (bindingHandle: string, planHandle: string) =>
+    ipcRenderer.invoke("lovelyres:kubernetes:workload:action:confirm", {
+      bindingHandle,
+      planHandle,
+    }),
+  executeKubernetesWorkloadAction: (bindingHandle: string, planHandle: string) =>
+    ipcRenderer.invoke("lovelyres:kubernetes:workload:action:execute", {
+      bindingHandle,
+      planHandle,
+    }),
+  cancelKubernetesWorkloadAction: (bindingHandle: string, planHandle: string) =>
+    ipcRenderer.invoke("lovelyres:kubernetes:workload:action:cancel", {
+      bindingHandle,
+      planHandle,
+    }),
   refreshDockerContainers: (bindingHandle: string) =>
     ipcRenderer.invoke("lovelyres:docker:containers:refresh", { bindingHandle }),
   getDockerCollection: (
@@ -215,16 +264,55 @@ const api: LovelyResApi = Object.freeze({
     containerHandle,
     tail,
   }),
+  planDockerContainerAction: (
+    bindingHandle: string,
+    snapshotHandle: string,
+    containerHandle: string,
+    containerName: string,
+    action: DockerWriteAction,
+  ) => ipcRenderer.invoke("lovelyres:docker:container:action:plan", {
+    bindingHandle,
+    snapshotHandle,
+    containerHandle,
+    containerName,
+    action,
+  }),
+  confirmDockerContainerAction: (bindingHandle: string, planHandle: string) =>
+    ipcRenderer.invoke("lovelyres:docker:container:action:confirm", {
+      bindingHandle,
+      planHandle,
+    }),
+  executeDockerContainerAction: (bindingHandle: string, planHandle: string) =>
+    ipcRenderer.invoke("lovelyres:docker:container:action:execute", {
+      bindingHandle,
+      planHandle,
+    }),
+  cancelDockerContainerAction: (bindingHandle: string, planHandle: string) =>
+    ipcRenderer.invoke("lovelyres:docker:container:action:cancel", {
+      bindingHandle,
+      planHandle,
+    }),
+  openDockerContainerTerminal: (
+    snapshotHandle: string,
+    containerHandle: string,
+    containerName: string,
+  ) => ipcRenderer.invoke("lovelyres:docker:container:terminal:open", {
+    snapshotHandle,
+    containerHandle,
+    containerName,
+  }),
   loadEmergencyCommandCatalog: (bindingHandle: string) =>
     ipcRenderer.invoke("lovelyres:emergency-command:catalog:load", bindingHandle),
   runEmergencyCommand: (
     bindingHandle: string,
     snapshotHandle: string,
     commandHandle: string,
+    containerHandle: string | undefined,
   ) => ipcRenderer.invoke("lovelyres:emergency-command:run", {
     bindingHandle,
     snapshotHandle,
     commandHandle,
+    containerHandle,
   }),
   inspectEmergencyPath: (bindingHandle: string, pathHandle: string) =>
     ipcRenderer.invoke("lovelyres:emergency-command:path:inspect", {

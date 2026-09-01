@@ -14,6 +14,10 @@ import type {
 } from "./ssh-contract.js";
 import type {
   SystemInfoDetail,
+  SystemInfoRowActions,
+  SystemInfoRowInspection,
+  SystemInfoRowPlan,
+  SystemInfoRowReceipt,
   SystemInfoSummary,
   SystemInfoTabCatalogEntry,
   SystemInfoTabKey,
@@ -55,26 +59,11 @@ import type {
 } from "./disposal-report-contract.js";
 import type { TerminalWindowLaunchResult } from "./terminal-contract.js";
 import type {
-  SnapshotDetail,
-  SnapshotDiffInput,
-  SnapshotDiffResult,
-  SnapshotListResult,
-} from "./snapshot-read-contract.js";
-import type {
-  FirewallHistory,
-  FirewallInspection,
-} from "./firewall-read-contract.js";
-import type {
   BaselineCatalog,
   BaselineFile,
   BaselineHistory,
   BaselineScan,
 } from "./baseline-read-contract.js";
-import type {
-  MiddlewareConfiguration,
-  MiddlewareDiscovery,
-  MiddlewareHistory,
-} from "./middleware-read-contract.js";
 import type {
   CheckAuditCatalog,
   CheckAuditCatalogInput,
@@ -98,6 +87,12 @@ import type {
   KubernetesTextResult,
 } from "./kubernetes-read-contract.js";
 import type {
+  KubernetesActionCancellation,
+  KubernetesActionPlan,
+  KubernetesActionReceipt,
+  KubernetesWriteAction,
+} from "./kubernetes-write-contract.js";
+import type {
   DockerCollectionKind,
   DockerContainerSnapshot,
   DockerLogs,
@@ -106,6 +101,12 @@ import type {
   DockerResourceKind,
   DockerSecurityAudit,
 } from "./docker-read-contract.js";
+import type {
+  DockerActionCancellation,
+  DockerActionPlan,
+  DockerActionReceipt,
+  DockerWriteAction,
+} from "./docker-write-contract.js";
 import type {
   EmergencyCommandCatalog,
   EmergencyCommandResult,
@@ -153,14 +154,13 @@ export * from "./ai-history-contract.js";
 export * from "./command-history-contract.js";
 export * from "./disposal-report-contract.js";
 export * from "./terminal-contract.js";
-export * from "./snapshot-read-contract.js";
-export * from "./firewall-read-contract.js";
 export * from "./baseline-read-contract.js";
-export * from "./middleware-read-contract.js";
 export * from "./check-audit-read-contract.js";
 export * from "./log-analysis-read-contract.js";
 export * from "./kubernetes-read-contract.js";
+export * from "./kubernetes-write-contract.js";
 export * from "./docker-read-contract.js";
+export * from "./docker-write-contract.js";
 export * from "./emergency-command-contract.js";
 export * from "./sftp-browser-contract.js";
 export * from "./local-browser-contract.js";
@@ -174,7 +174,6 @@ export const pageGroups = [
   "target",
   "triage",
   "investigation",
-  "response",
   "operations",
   "intelligence",
 ] as const;
@@ -459,25 +458,37 @@ export interface LovelyResApi {
     snapshotHandle: string,
     rowId: string,
   ): Promise<SystemInfoDetail>;
-  listSnapshots(bindingHandle: string): Promise<SnapshotListResult>;
-  getSnapshotDetail(bindingHandle: string, snapshotHandle: string): Promise<SnapshotDetail>;
-  diffForensicSnapshots(
+  /**
+   * The right-click menu for one row. The sidecar decides which of its fixed
+   * actions apply from the row it kept; the window only ever names a row.
+   */
+  listSystemInfoRowActions(
     bindingHandle: string,
-    input: SnapshotDiffInput,
-  ): Promise<SnapshotDiffResult>;
-  inspectFirewall(bindingHandle: string): Promise<FirewallInspection>;
-  listFirewallChangeHistory(bindingHandle: string): Promise<FirewallHistory>;
+    snapshotHandle: string,
+    rowId: string,
+  ): Promise<SystemInfoRowActions>;
+  inspectSystemInfoRow(
+    bindingHandle: string,
+    snapshotHandle: string,
+    rowId: string,
+    action: string,
+  ): Promise<SystemInfoRowInspection>;
+  planSystemInfoRowAction(
+    bindingHandle: string,
+    snapshotHandle: string,
+    rowId: string,
+    action: string,
+  ): Promise<SystemInfoRowPlan>;
+  confirmSystemInfoRowAction(bindingHandle: string, planHandle: string): Promise<SystemInfoRowPlan>;
+  executeSystemInfoRowAction(
+    bindingHandle: string,
+    planHandle: string,
+  ): Promise<SystemInfoRowReceipt>;
+  cancelSystemInfoRowAction(bindingHandle: string, planHandle: string): Promise<void>;
   getBaselineCatalog(): Promise<BaselineCatalog>;
   scanBaseline(bindingHandle: string): Promise<BaselineScan>;
   listBaselineHistory(bindingHandle: string): Promise<BaselineHistory>;
   readBaselineFile(bindingHandle: string, itemHandle: string): Promise<BaselineFile>;
-  discoverMiddleware(bindingHandle: string): Promise<MiddlewareDiscovery>;
-  loadMiddlewareConfiguration(
-    bindingHandle: string,
-    discoveryHandle: string,
-    instanceHandle: string,
-  ): Promise<MiddlewareConfiguration>;
-  listMiddlewareHistory(bindingHandle: string): Promise<MiddlewareHistory>;
   getCheckAuditCatalog(
     bindingHandle: string,
     input: CheckAuditCatalogInput,
@@ -523,6 +534,25 @@ export interface LovelyResApi {
     snapshotHandle: string,
     rowHandle: string,
   ): Promise<KubernetesTextResult>;
+  planKubernetesWorkloadAction(
+    bindingHandle: string,
+    snapshotHandle: string,
+    rowHandle: string,
+    resourceName: string,
+    action: KubernetesWriteAction,
+  ): Promise<KubernetesActionPlan>;
+  confirmKubernetesWorkloadAction(
+    bindingHandle: string,
+    planHandle: string,
+  ): Promise<KubernetesActionPlan>;
+  executeKubernetesWorkloadAction(
+    bindingHandle: string,
+    planHandle: string,
+  ): Promise<KubernetesActionReceipt>;
+  cancelKubernetesWorkloadAction(
+    bindingHandle: string,
+    planHandle: string,
+  ): Promise<KubernetesActionCancellation>;
   refreshDockerContainers(bindingHandle: string): Promise<DockerContainerSnapshot>;
   getDockerCollection(
     bindingHandle: string,
@@ -545,11 +575,44 @@ export interface LovelyResApi {
     containerHandle: string,
     tail: number,
   ): Promise<DockerLogs>;
+  planDockerContainerAction(
+    bindingHandle: string,
+    snapshotHandle: string,
+    containerHandle: string,
+    containerName: string,
+    action: DockerWriteAction,
+  ): Promise<DockerActionPlan>;
+  confirmDockerContainerAction(
+    bindingHandle: string,
+    planHandle: string,
+  ): Promise<DockerActionPlan>;
+  executeDockerContainerAction(
+    bindingHandle: string,
+    planHandle: string,
+  ): Promise<DockerActionReceipt>;
+  cancelDockerContainerAction(
+    bindingHandle: string,
+    planHandle: string,
+  ): Promise<DockerActionCancellation>;
+  /**
+   * Open a terminal window with a shell inside a listed container.
+   *
+   * No binding handle: the window is opened against whatever target is current,
+   * the same way the host terminal is. The name is display only — the window's
+   * own title bar is the only thing that reads it.
+   */
+  openDockerContainerTerminal(
+    snapshotHandle: string,
+    containerHandle: string,
+    containerName: string,
+  ): Promise<TerminalWindowLaunchResult>;
   loadEmergencyCommandCatalog(bindingHandle: string): Promise<EmergencyCommandCatalog>;
   runEmergencyCommand(
     bindingHandle: string,
     snapshotHandle: string,
     commandHandle: string,
+    /** Absent runs it on the target; present runs it inside that container. */
+    containerHandle?: string,
   ): Promise<EmergencyCommandResult>;
   inspectEmergencyPath(bindingHandle: string, pathHandle: string): Promise<EmergencyPathDetail>;
   planEmergencyPathAction(
@@ -801,7 +864,7 @@ export function isBootstrapResult(value: unknown): value is BootstrapResult {
     typeof value.appVersion === "string" &&
     value.protocolVersion === BACKEND_PROTOCOL &&
     Array.isArray(value.pages) &&
-    value.pages.length === 18 &&
+    value.pages.length === 14 &&
     value.pages.every(isPageDescriptor) &&
     new Set(value.pages.map((page) => page.id)).size === value.pages.length &&
     isStringArray(value.securityReferenceFavoriteIds, 512)

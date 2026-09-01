@@ -16,6 +16,12 @@ const api: SystemInfoApi = {
   getSystemInfoSummary: vi.fn(async () => ({})),
   collectSystemInfo: vi.fn(async () => ({})),
   getSystemInfoDetail: vi.fn(async () => ({})),
+  listSystemInfoRowActions: vi.fn(async () => ({})),
+  inspectSystemInfoRow: vi.fn(async () => ({})),
+  planSystemInfoRowAction: vi.fn(async () => ({})),
+  confirmSystemInfoRowAction: vi.fn(async () => ({})),
+  executeSystemInfoRowAction: vi.fn(async () => ({})),
+  cancelSystemInfoRowAction: vi.fn(async () => undefined),
 };
 
 describe("standalone SystemInfo page", () => {

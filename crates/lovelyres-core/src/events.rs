@@ -58,9 +58,16 @@ pub enum PacketCaptureEventKind {
     Failed { message: String },
 }
 
-/// Terminal control surface implemented by the russh-backed transport.
+/// Terminal control surface implemented by the russh-backed transports.
+///
+/// `events` is on the trait rather than left as an inherent accessor so a
+/// caller can hold a transport behind `dyn` and still drain it: a host login
+/// shell and a shell inside a container differ only in how they were launched,
+/// and the code that pumps bytes to a terminal model should not have to know
+/// which of the two it was handed.
 #[async_trait]
 pub trait TerminalTransport: Send + Sync + std::fmt::Debug {
+    fn events(&self) -> &TerminalEventReceiver;
     async fn write_input(&self, bytes: Vec<u8>) -> CoreResult<()>;
     async fn resize(&self, columns: u16, rows: u16) -> CoreResult<()>;
     async fn close(&self) -> CoreResult<()>;

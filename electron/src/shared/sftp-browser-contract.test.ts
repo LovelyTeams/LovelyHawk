@@ -39,6 +39,8 @@ const preview: SftpTextPreview = {
   observedLineCount: 4,
   displayedLineCount: 2,
   truncated: true,
+  sha256: "a".repeat(64),
+  exact: false,
 };
 
 describe("sftp browser standalone contract", () => {
@@ -98,7 +100,45 @@ describe("sftp browser standalone contract", () => {
 
   it("handles empty text without inventing content", () => {
     expect(isSftpTextPreview({ ...preview, text: "", observedLineCount: 0, displayedLineCount: 0, truncated: false })).toBe(true);
-    expect(isSftpTextPreview({ ...preview, text: "", observedLineCount: 1, displayedLineCount: 1, truncated: false })).toBe(true);
+    // A file that is a single empty line is "\n", not "": the projection keeps
+    // the newline, so the text and the count describe the same thing.
+    expect(isSftpTextPreview({ ...preview, text: "\n", observedLineCount: 1, displayedLineCount: 1, truncated: false })).toBe(true);
+    expect(isSftpTextPreview({ ...preview, text: "", observedLineCount: 1, displayedLineCount: 1, truncated: false })).toBe(false);
+  });
+
+  /**
+   * The shape almost every real file has.
+   *
+   * Every fixture above stops without a final newline, and text files do not:
+   * the projection keeps the trailing newline so that opening a file and
+   * saving it back does not silently remove one. Splitting the raw text on
+   * "\n" counts a line that is not there, which rejected every ordinary file
+   * the moment the projection started being faithful — and no fixture noticed,
+   * because none of them ended the way files end.
+   */
+  it("accepts text that ends the way text files end", () => {
+    const cases: readonly (readonly [string, number])[] = [
+      ["one\ntwo\nthree\n", 3],
+      ["one\ntwo\nthree", 3],
+      ["only\n", 1],
+      ["only", 1],
+      ["\n", 1],
+      ["a\n\n", 2],
+    ];
+    for (const [text, displayedLineCount] of cases) {
+      expect(
+        isSftpTextPreview({ ...preview, text, displayedLineCount, observedLineCount: displayedLineCount, truncated: false }),
+        text,
+      ).toBe(true);
+    }
+    // The count still has to be the truth: one line too many or too few is
+    // rejected exactly as before.
+    for (const [text, displayedLineCount] of [["one\ntwo\n", 3], ["one\ntwo\n", 1]] as const) {
+      expect(
+        isSftpTextPreview({ ...preview, text, displayedLineCount, observedLineCount: displayedLineCount, truncated: false }),
+        text,
+      ).toBe(false);
+    }
   });
 
   it("restricts opaque handles to bounded inert tokens", () => {
@@ -118,13 +158,13 @@ describe("sftp browser standalone contract", () => {
    * method that changes a target directly: every change is planned, confirmed
    * and executed as three separate steps.
    */
-  it("keeps the public surface at exactly nine finite methods", () => {
+  it("keeps the public surface at exactly ten finite methods", () => {
     const source = readFileSync(new URL("./sftp-browser-contract.ts", import.meta.url), "utf8");
     const api = source.split("export interface SftpBrowserApi")[1]!.split("}")[0]!;
     expect([...api.matchAll(/^\s{2}([A-Za-z0-9]+)\(/gmu)].map((match) => match[1])).toEqual([
       "openSftpBrowser", "listSftpDirectory", "readSftpText", "downloadSftpEntry",
       "planSftpOperation", "confirmSftpOperation", "executeSftpOperation",
-      "cancelSftpOperation", "stageSftpUpload",
+      "cancelSftpOperation", "stageSftpUpload", "openFileEditor",
     ]);
     // Transfers and operations name capabilities, never paths: main owns both
     // dialogs and the sidecar owns the staging area.

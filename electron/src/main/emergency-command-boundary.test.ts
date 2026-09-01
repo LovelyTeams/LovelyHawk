@@ -36,11 +36,11 @@ function expectLiteralErrorsOnly(source: string, expectedCount: number): void {
 }
 
 describe("central Emergency Commands Electron boundary", () => {
-  it("keeps the exact seven closed methods in the frozen exact 117 preload", () => {
+  it("keeps the exact seven closed methods in the frozen exact 124 preload", () => {
     const body = frozenApiBody();
     const names = [...body.matchAll(/^  (?<name>[A-Za-z_$][A-Za-z0-9_$]*):/gmu)]
       .map((match) => match.groups?.name);
-    expect(names).toHaveLength(117);
+    expect(names).toHaveLength(124);
     for (const name of [
       "loadEmergencyCommandCatalog",
       "runEmergencyCommand",
@@ -84,10 +84,15 @@ describe("central Emergency Commands Electron boundary", () => {
     );
     expect((boundary.match(/validateSender\(event\)/gu) ?? [])).toHaveLength(7);
     expect((boundary.match(/values\.length !== 1/gu) ?? [])).toHaveLength(7);
-    expect((boundary.match(/isEmergencyCommandOpaqueHandle/gu) ?? [])).toHaveLength(14);
+    // Fifteen, not fourteen: running a check can now name a container, and
+    // that handle is checked exactly like every other one.
+    expect((boundary.match(/isEmergencyCommandOpaqueHandle/gu) ?? [])).toHaveLength(15);
     expect(boundary).toContain(
-      'hasOnlyKeys(value, ["bindingHandle", "snapshotHandle", "commandHandle"])',
+      'hasOnlyKeys(value, ["bindingHandle", "snapshotHandle", "commandHandle", "containerHandle"])',
     );
+    // Absent means the target itself, and absent is the only other thing it
+    // may be — not an empty string, not a name.
+    expect(boundary).toContain("!(value.containerHandle === undefined ||");
     // The only thing an action carries beyond two handles is which action it
     // is, and that is checked against the closed set.
     expect((boundary.match(/isEmergencyPathAction\(value\.action\)/gu) ?? [])).toHaveLength(1);
@@ -126,7 +131,8 @@ describe("central Emergency Commands Electron boundary", () => {
       backendClientSource.indexOf("async loadEmergencyCommandCatalog"),
       backendClientSource.indexOf("async listPacketCaptureInterfaces"),
     );
-    expect((boundary.match(/isEmergencyCommandOpaqueHandle/gu) ?? [])).toHaveLength(7);
+    // Eight: the run method now also checks an optional container handle.
+    expect((boundary.match(/isEmergencyCommandOpaqueHandle/gu) ?? [])).toHaveLength(8);
     expect((boundary.match(/isEmergencyCommandCatalog/gu) ?? [])).toHaveLength(1);
     expect((boundary.match(/isEmergencyCommandResult/gu) ?? [])).toHaveLength(1);
     expect(boundary).toContain("value.snapshotHandle !== snapshotHandle");
@@ -153,7 +159,7 @@ describe("central Emergency Commands Electron boundary", () => {
       "loadEmergencyCommandCatalog(bindingHandle: string): Promise<EmergencyCommandCatalog>;",
     );
     expect(api).toMatch(
-      /runEmergencyCommand\(\s*bindingHandle: string,\s*snapshotHandle: string,\s*commandHandle: string,\s*\): Promise<EmergencyCommandResult>;/u,
+      /runEmergencyCommand\(\s*bindingHandle: string,\s*snapshotHandle: string,\s*commandHandle: string,[\s\S]*?containerHandle\?: string,\s*\): Promise<EmergencyCommandResult>;/u,
     );
     expect(api).not.toMatch(
       /\b(?:targetIdentity|targetGeneration|connectionId|sessionId|commandText|remotePath|shellText|mutationHandle|exportPath|terminalHandle|genericInvoke)\b/u,

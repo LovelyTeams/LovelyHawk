@@ -6486,10 +6486,16 @@ fn network_snapshot_sha256(snapshot: &NetworkConnectionSnapshot) -> String {
     format!("{:x}", digest.finalize())
 }
 
+/// The identity a signal is checked against, before and after it is sent.
+///
+/// A zombie counts as absent. It has already died — no code runs, no file is
+/// open, no socket is held — and only its parent's `wait()` keeps the PID on
+/// the list. Reading it as "still there" made a kill that had worked report
+/// that it had not, whenever the parent was something that never reaps.
 fn process_identity_command(pid: u32) -> String {
     let pid = shq(&pid.to_string());
     format!(
-        "p={pid}; if [ ! -r \"/proc/$p/stat\" ]; then printf 'ABSENT\\n'; exit 0; fi; stat=$(cat \"/proc/$p/stat\") || exit 44; rest=${{stat##*) }}; start=$(printf '%s\\n' \"$rest\" | awk '{{print $20}}'); name=${{stat%)*}}; name=${{name#*(}}; case \"$start\" in ''|*[!0-9]*) exit 45;; esac; printf '%s\\t%s\\t%s\\n' \"$p\" \"$start\" \"$name\""
+        "p={pid}; if [ ! -r \"/proc/$p/stat\" ]; then printf 'ABSENT\\n'; exit 0; fi; stat=$(cat \"/proc/$p/stat\") || exit 44; rest=${{stat##*) }}; case \"${{rest%% *}}\" in Z) printf 'ABSENT\\n'; exit 0;; esac; start=$(printf '%s\\n' \"$rest\" | awk '{{print $20}}'); name=${{stat%)*}}; name=${{name#*(}}; case \"$start\" in ''|*[!0-9]*) exit 45;; esac; printf '%s\\t%s\\t%s\\n' \"$p\" \"$start\" \"$name\""
     )
 }
 
@@ -8106,6 +8112,21 @@ mod tests {
                 .iter()
                 .all(|entry| entry.source == "system-info-process")
         );
+    }
+
+    #[test]
+    fn process_identity_treats_a_zombie_as_already_gone() {
+        let command = process_identity_command(4242);
+        // The state is the first field after the closing parenthesis of the
+        // command name; it is checked before the start time is read, so a
+        // dead process is reported absent rather than as a live identity.
+        let state_check = command.find("case \"${rest%% *}\" in Z) printf 'ABSENT\\n'; exit 0;;").unwrap();
+        let start_read = command.find("start=$(printf").unwrap();
+        assert!(state_check < start_read);
+        assert!(command.starts_with("p='4242';"));
+        // A snapshot that does come back still has to be three exact fields.
+        assert!(parse_process_identity("4242\t42\tsleep\n").is_ok());
+        assert!(parse_process_identity("4242\t\tsleep\n").is_err());
     }
 
     fn service_snapshot(

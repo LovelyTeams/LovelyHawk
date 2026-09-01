@@ -50,6 +50,45 @@ export interface TerminalApi {
   /** The operator's own machine, addressed by opaque directory handles. */
   openLocalBrowser(): Promise<unknown>;
   listLocalDirectory(directoryHandle: string): Promise<unknown>;
+  /**
+   * Open one file in a window of its own.
+   *
+   * `editable` is what separates 预览 from 编辑: the same window either way,
+   * but a preview has no way to write. Reading and writing go through the SFTP
+   * methods above — this only opens the window.
+   */
+  openFileEditor(
+    browserHandle: string,
+    entryHandle: string,
+    name: string,
+    editable: boolean,
+  ): Promise<unknown>;
+  /**
+   * What this window was opened for, asked by the editor itself.
+   *
+   * It cannot ask for anything else: the answer is the scope main recorded
+   * when it created the window.
+   */
+  fileEditorTarget(): Promise<unknown>;
+}
+
+/** What an editor window is looking at. */
+export interface FileEditorTarget {
+  browserHandle: string;
+  entryHandle: string;
+  name: string;
+  editable: boolean;
+}
+
+export function isFileEditorTarget(value: unknown): value is FileEditorTarget {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, ["browserHandle", "entryHandle", "name", "editable"]) &&
+    typeof value.browserHandle === "string" && value.browserHandle.length > 0 &&
+    typeof value.entryHandle === "string" && value.entryHandle.length > 0 &&
+    typeof value.name === "string" && value.name.length > 0 && value.name.length <= 255 &&
+    typeof value.editable === "boolean"
+  );
 }
 
 export interface TerminalWindowLaunchResult {
@@ -71,6 +110,27 @@ export interface TerminalOpened {
   handle: string;
   columns: number;
   rows: number;
+}
+
+/**
+ * The shells a container terminal can land in.
+ *
+ * Closed, and chosen by the host rather than by the window: a thin image has
+ * no bash, and asking for one that is not there opens a terminal that dies on
+ * the first keystroke.
+ */
+export const CONTAINER_TERMINAL_SHELLS = ["sh", "bash", "ash"] as const;
+export type ContainerTerminalShell = (typeof CONTAINER_TERMINAL_SHELLS)[number];
+
+/**
+ * A terminal opened inside a container.
+ *
+ * Same handle and size as any other terminal — everything downstream treats it
+ * identically — plus which shell was actually found, so the window can say so
+ * instead of leaving the operator to wonder why there is no history.
+ */
+export interface ContainerTerminalOpened extends TerminalOpened {
+  shell: ContainerTerminalShell;
 }
 
 export type TerminalPollEvent =
@@ -275,6 +335,19 @@ export function isTerminalOpened(value: unknown): value is TerminalOpened {
     hasExactKeys(value, ["handle", "columns", "rows"]) &&
     isTerminalHandle(value.handle) &&
     isTerminalSize(value.columns, value.rows)
+  );
+}
+
+export function isContainerTerminalOpened(
+  value: unknown,
+): value is ContainerTerminalOpened {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, ["handle", "columns", "rows", "shell"]) &&
+    isTerminalHandle(value.handle) &&
+    isTerminalSize(value.columns, value.rows) &&
+    typeof value.shell === "string" &&
+    (CONTAINER_TERMINAL_SHELLS as readonly string[]).includes(value.shell)
   );
 }
 

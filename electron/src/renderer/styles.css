@@ -85,6 +85,13 @@ button:disabled { cursor: not-allowed; opacity: .48; }
    A centred 1240px column reads well for prose and wastes a third of a wide
    screen on the tables and lists this tool is actually made of. */
 .page { width: 100%; margin: 0; padding: 18px 20px 32px; }
+/* Every page keeps its own title and primary actions in view while its content
+   scrolls under them. The negative inset pulls the band out to the page edges
+   so what slides beneath it is covered, and the opaque background is what makes
+   that true — a transparent sticky header shows the rows passing through it.
+   Panes that pin a taller band of their own (Docker, Kubernetes) wrap it in
+   their own sticky element, so this rule does not apply to them. */
+.page > .page-heading { position: sticky; top: 0; z-index: 20; margin: -18px -20px 12px; padding: 18px 20px 12px; background: var(--bg); }
 .page-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 20px; }
 .page-heading h1 { margin: 2px 0 5px; color: var(--text); font-size: 22px; font-weight: 600; letter-spacing: -.02em; }
 .page-heading p { max-width: 720px; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }

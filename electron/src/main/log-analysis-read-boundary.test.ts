@@ -21,11 +21,11 @@ function frozenApiBody(): string {
 }
 
 describe("central Log Analysis Electron boundary", () => {
-  it("keeps the exact four read methods in the frozen exact 117 preload", () => {
+  it("keeps the exact four read methods in the frozen exact 124 preload", () => {
     const body = frozenApiBody();
     const names = [...body.matchAll(/^  (?<name>[A-Za-z_$][A-Za-z0-9_$]*):/gmu)]
       .map((match) => match.groups?.name);
-    expect(names).toHaveLength(117);
+    expect(names).toHaveLength(124);
     for (const name of [
       "discoverLogSources",
       "readLogSource",

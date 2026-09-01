@@ -111,7 +111,7 @@ describe("sftp browser helpers and state", () => {
     const request: SftpPreviewRequest = { id: 2, browserHandle: "browser-one", fileHandle: "file-handle" };
     state = sftpBrowserReducer(state, { type: "preview-started", scope, request });
     const preview: SftpTextPreview = { browserHandle: "browser-one", fileHandle: "file-handle", text: "plain",
-      observedLineCount: 1, displayedLineCount: 1, truncated: false };
+      observedLineCount: 1, displayedLineCount: 1, truncated: false, sha256: "a".repeat(64), exact: true };
     state = sftpBrowserReducer(state, { type: "preview-loaded", scope, request, preview });
     expect(state.preview).toEqual(preview);
     expect(state.previewStatus).toBe("ready");
@@ -131,7 +131,7 @@ describe("sftp browser helpers and state", () => {
     state = sftpBrowserReducer(state, { type: "preview-started", scope, request: previewRequest });
     state = sftpBrowserReducer(state, { type: "entry-selected", entryHandle: "dir-handle" });
     const preview: SftpTextPreview = { browserHandle: "browser-one", fileHandle: "file-handle", text: "late",
-      observedLineCount: 1, displayedLineCount: 1, truncated: false };
+      observedLineCount: 1, displayedLineCount: 1, truncated: false, sha256: "a".repeat(64), exact: true };
     expect(sftpBrowserReducer(state, { type: "preview-loaded", scope, request: previewRequest, preview }).preview)
       .toBeNull();
   });

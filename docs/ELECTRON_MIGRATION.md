@@ -21,20 +21,44 @@ LovelyRes 的受支持桌面前端将从 GPUI 完整迁移到 Electron。最终�
 | 项目 | 当前状态 | 已观察证据 |
 | --- | --- | --- |
 | Electron secure shell | Completed | sandbox、context isolation、自定义 lovelyres://app origin、严格 main CSP、导航/新窗口/权限拒绝、单实例和便携 Electron 路径已经实现；独立 terminal entry 只为 xterm 动态 CSS 保留 style-only 例外，script CSP 不放宽；Electron check 与 CDP smoke 通过 |
-| Electron ↔ Rust backend boundary | Completed | 版本化、换行分帧、有大小上限、main frozen preload 当前精确 112 方法、terminal frozen preload 独立精确 7 方法、typed params、无通用 shell.execute；当前代码面的边界测试、typecheck、source gate 与 exact112 Electron-native CDP smoke 均通过 |
+| Electron ↔ Rust backend boundary | Completed | 版本化、换行分帧、有大小上限、main frozen preload 当前精确 117 方法、terminal frozen preload 独立精确 7 方法、typed params、无通用 shell.execute；当前代码面的边界测试、typecheck、source gate 与 exact117 Electron-native CDP smoke 均通过 |
 | security-reference 页面 | Completed | 107 条/13 语言离线目录、搜索/筛选/收藏/复制、纯文本边界、可访问性和 CDP smoke 已验证 |
-| 已中央接线但仍待最终实机验收的切片 | Pending | 连接、Notes、配置快速生成、System Info、AI History、Command History、Disposal Report、Settings secret lifecycle、Snapshot、Firewall、Baseline、Middleware、Check Audit、Log Analysis、Kubernetes 只读、Docker 只读、Packet Capture live phase 1、Emergency Commands 固定目录 phase 1、Application Log exact5，以及 SSH terminal 已进入中央 main/preload/App、overlay host 或 keyed window；缺少的真实 SSH/PTY/Linux/OpenSSH/systemd/auditd/journal/Kubernetes/Docker/tcpdump、remediation/恢复/导出、rolling writer、packaged native dialog、完整 parity 或最终候选证据仍按各 ledger 条目保持 Pending |
+| 已中央接线但仍待最终实机验收的切片 | Pending | 连接、Notes、配置快速生成、System Info、AI History、Command History、Disposal Report、Settings secret lifecycle、Baseline、Check Audit、Log Analysis、Kubernetes 只读、Docker 只读、Packet Capture live phase 1、Emergency Commands 固定目录 phase 1、Application Log exact5，以及 SSH terminal 已进入中央 main/preload/App、overlay host 或 keyed window；缺少的真实 SSH/PTY/Linux/OpenSSH/auditd/journal/Kubernetes/Docker/tcpdump、remediation/恢复/导出、rolling writer、packaged native dialog、完整 parity 或最终候选证据仍按各 ledger 条目保持 Pending |
 | 已实现但尚未中央暴露的切片 | Pending | File Integrity、Dialog 与 Notification 仍记录在 UNWIRED/ledger 中；Application Log exact5 已不属于此行；快速检测已整体移除 |
 | 其余页面、连接完整工作流、四类窗口、全局 overlays、最终资产/打包与发布 gates | Pending | 文件或脚手架存在不等于完成；没有最终候选构建的通过证据就不得改为 Completed |
 
-已实际运行：
+已实际运行（下列四条是 2026-08-25 那一轮的记录，其中 Middleware、preload 111/117 与
+`19adbfae` 那份 CDP 证据都已被 2026-08-27 的移除作废；当前数字见本节末尾）：
 
-- 最新 TypeScript 与定向 main/preload/contract/renderer 边界验证通过；Middleware 与 Check Audit 均固定为 exact3 方法，Log Analysis、Kubernetes 与 Packet Capture live 均固定为 exact4，Emergency Commands 固定为 exact2，Docker 只读与 Application Log 均固定为 exact5。各远端切片使用严格 DTO、opaque binding-only `App` composition、deactivation/scope cleanup 与 late-result 拒绝；Application Log 是 process-local overlay，不接收 target/binding/session。最近一次完整 Electron check 为 102 files / 594 tests，并完成 typecheck 与 production build；最终候选仍须重新记录。
+- 当时的 TypeScript 与定向 main/preload/contract/renderer 边界验证通过；Middleware 与 Check Audit 均固定为 exact3 方法，Log Analysis、Kubernetes 与 Packet Capture live 均固定为 exact4，Emergency Commands 固定为 exact2，Docker 只读与 Application Log 均固定为 exact5。各远端切片使用严格 DTO、opaque binding-only `App` composition、deactivation/scope cleanup 与 late-result 拒绝；Application Log 是 process-local overlay，不接收 target/binding/session。最近一次完整 Electron check 为 102 files / 594 tests，并完成 typecheck 与 production build；最终候选仍须重新记录。
 - Rust sidecar 当前 all-target 结果为 backend library 248/248，加 16 个 standalone targets 共 451/451，总计 699 tests、0 failed、0 ignored。Application Log exact5 的唯一 subscriber、独立 per-layer stderr filter、500-record ring、严格参数/响应、volatile clear 和 main-only export 均有通过测试；这些自动化结果不替代真实 Linux/OpenSSH 扫描或 rolling-file/packaged native-dialog 验收。
 - `pwsh -NoProfile -File ./scripts/electron-source-gate.ps1 -RepositoryRoot .` 及 fixture self-test 已接受 main 精确 111-method preload、terminal 独立精确 18-method preload 与 Application Log exact5 的固定 RPC/IPC/preload/main validators、单 subscriber、bounded/redacted DTO、opaque-only 页面/overlay 接线、lifecycle cleanup，以及禁止 remediation/shell/path/target/session/mutation/generic/file/terminal/internal-export-payload 越过 renderer 边界的约束。
-- 最新 PASS CDP 证据为 `target/electron-debug/19adbfae-598c-4eee-b7f1-cc2a666e3ac7/evidence`：真实 Electron 进程通过 `webContents.debugger`/CDP 验证 main exact111。快速检测切片此后已整体移除，该段中与它有关的验收不再适用。Application Log 的 list/level/preview/export unknown-field 请求均拒绝且不回显，stderr/file/path/internal-payload/generic surface 为 `undefined`；overlay 只有 bounded empty ring，内部 payload 不可见，focus/inert/Escape restore 与重挂载清理通过，并生成 `application-log-overlay.png`；console error 为 0。真实 Linux/OpenSSH connected scan、remediation parity、rolling writer 与 packaged native save dialog 均为 `NOT_RUN`/Pending，因此两项仍不得标为 Completed。
+- 当时的 PASS CDP 证据为 `target/electron-debug/19adbfae-598c-4eee-b7f1-cc2a666e3ac7/evidence`：真实 Electron 进程通过 `webContents.debugger`/CDP 验证 main exact111。快速检测切片此后已整体移除，该段中与它有关的验收不再适用。Application Log 的 list/level/preview/export unknown-field 请求均拒绝且不回显，stderr/file/path/internal-payload/generic surface 为 `undefined`；overlay 只有 bounded empty ring，内部 payload 不可见，focus/inert/Escape restore 与重挂载清理通过，并生成 `application-log-overlay.png`；console error 为 0。真实 Linux/OpenSSH connected scan、remediation parity、rolling writer 与 packaged native save dialog 均为 `NOT_RUN`/Pending，因此两项仍不得标为 Completed。
 
-这些结果只证明 ledger 引用的当前代码面，以及 Baseline、Middleware、Check Audit、Log Analysis、Kubernetes、Docker 等只读 Phase 1 的中央接线；不证明真实 Linux/SSH、中间件、auditd、journal、Kubernetes 或 Docker 行为、任何 mutation/恢复/导出、原生保存或跨平台打包已经完成。
+2026-08-27 两轮改动之后重跑（先移除边界隔离/取证快照/中间件/多机批量，preload 117→109；
+再接入 Docker 容器动作，109→113）：`cargo fmt --check`、`cargo clippy --workspace --all-targets`
+无 warning；`cargo test --workspace` 全过。Electron `npm run typecheck`、`npm test`
+105 files / 650 tests、`npm run build` 全过；`electron-source-gate.ps1` 接受 113-method preload
+与新增的容器动作规则，`electron-ui-ledger-gate.ps1` 接受 15 条 pages；`npm run test:debug` 的真实
+Electron CDP 冒烟通过，导航为 14 项、preload 表面精确 113，四个动作方法的伪造句柄与闭集外动作
+全部失败关闭且不回显。
+
+2026-08-27 第三轮（Kubernetes 工作负载动作 113→117，容器运行时改为探测而非假设）之后再跑：
+`cargo fmt --check`、`cargo clippy --workspace --all-targets` 无 warning，
+`cargo test --workspace` 全过；Electron `npm run typecheck`、`npm test` 106 files / 656 tests、
+两个门禁与 `npm run test:debug` 全过；五个真机探针
+（`lab:docker`、`lab:kubernetes`、`lab:podman` 与两个动作探针）全绿。
+
+真机验收（新增，见 `tools/lab/orchestration/README.md`）：Docker 页与 Kubernetes 页此前
+**从未对着真的 daemon 或真的集群跑过**——留档证据全是断开连接时的截图。现在
+`pnpm lab:orchestration` 起 `svc-docker`（自带 Docker daemon，16 个容器覆盖安全审计每一条分支）、
+`lab-k3s` 与 `svc-kubernetes`（kubectl 指向真集群，5 个工作负载含故意的
+`ImagePullBackOff` 与 `CrashLoopBackOff`）；`pnpm lab:docker`、`pnpm lab:kubernetes` 与
+`node tools/lab/probe-docker-action.mjs` 三个探针全绿。这一轮由此查出并修掉三个只有对着真机
+才会暴露的问题：Kubernetes 的 `podIP` 解析（地址列一直是空的）、Docker 状态探测的 `\t`
+转义（任何容器动作都过不了这一步）、以及操作员要读的英文计划文案与 64 位全长容器 id。
+
+这些结果只证明 ledger 引用的当前代码面，以及 Baseline、Check Audit、Log Analysis、Kubernetes、Docker 等只读 Phase 1 的中央接线；不证明真实 Linux/SSH、auditd、journal、Kubernetes 或 Docker 行为、任何 mutation/恢复/导出、原生保存或跨平台打包已经完成。
 
 ## 不可丢失的 dirty config-generator 基线
 
@@ -97,17 +121,21 @@ Apache quick configuration 已记录 typed stack/remove/dependency cascade/reset
 | check-audit | check_audit.rs | CheckAuditPage + exact3 catalog/status/log 只读方法；phase 2 mutation/restore/export 待迁移 | Pending |
 | integrity | integrity.rs | IntegrityPage + typed methods | Pending |
 | notes | notes.rs | NotesPage + finite notes methods | Pending |
-| firewall | firewall.rs | FirewallPage + exact2 read-only methods；phase 2 plan/confirm/verify/restore 待迁移 | Pending |
-| snapshot | snapshot.rs | SnapshotPage + typed methods | Pending |
 | baseline-quick-edit | baseline.rs | BaselinePage + exact3 read-only methods；phase 2 plan/confirm/verify/restore 待迁移 | Pending |
 | database | database.rs | DatabasePage + typed query/config methods | Pending |
-| middleware | middleware.rs | MiddlewarePage + exact3 discover/configuration/history 只读方法；phase 2 plan/confirm/verify/restore 待迁移 | Pending |
 | java-hot-update | java.rs | JavaHotUpdatePage + typed plan methods | Pending |
-| batch-servers | batch_servers.rs | BatchServersPage + bounded multi-target methods | Pending |
 | ai-history | ai_history.rs | AiHistoryPage + typed history/stream methods | Pending |
 | config-generator | dirty config_generator.rs | ConfigGeneratorPage + core rules + typed methods | Pending |
 
 每页只有在完整交互、loading/empty/error、hostile plain text、bounds、cancellation、page lifecycle、TargetGuard、accessibility 和 Electron CDP smoke 都有通过证据后才能变为 Completed。
+
+### 2026-08-27 移除的四个页面
+
+边界隔离（firewall）、取证快照（snapshot）、中间件（middleware）、多机批量（batch-servers）
+四个页面按需求整体移除：页面、契约、preload 方法、主进程 IPC、后端 RPC 与
+`lovelyres-core` 里只被它们用到的 `firewall.rs`/`snapshot.rs`/`batch.rs` 都已删除，
+preload 表面从 117 个方法收到 109 个，导航从 18 项收到 14 项，"处置" 分组随之清空并删掉。
+`middleware.rs` 与 `middleware_document.rs` 保留——配置生成器依赖它们，与那个页面无关。
 
 ## 连接映射
 
@@ -129,7 +157,7 @@ Apache quick configuration 已记录 typed stack/remove/dependency cascade/reset
 | Window kind | 键/生命周期要求 | Electron 替代 | 状态 |
 | --- | --- | --- | --- |
 | Main | 单实例、main lifecycle、backend shutdown | 已有 secure BrowserWindow shell，仍需完整页面/overlay/发布 parity | Pending |
-| SSH terminal | 每目标会话窗口、tabs、resize/input/search/backpressure/cancel | 中央 keyed BrowserWindow + main-owned binding/token/handle + bundled offline xterm + main exact118/terminal exact18 typed API 已接线；真实 SSH/PTY、tabs/IME/CJK/package 矩阵仍 NOT_RUN | Pending |
+| SSH terminal | 每目标会话窗口、tabs、resize/input/search/backpressure/cancel | 中央 keyed BrowserWindow + main-owned binding/token/handle + bundled offline xterm + main exact124/terminal exact18 typed API 已接线；真实 SSH/PTY、tabs/IME/CJK/package 矩阵仍 NOT_RUN | Pending |
 | SFTP | 每目标唯一窗口、transfer cancel、remote path safety | 并入 SSH 窗口的文件面板：terminal exact18 内的九个方法、main 拥有保存/打开对话框、写操作一律 plan/confirm/execute/verify/restore；真实 OpenSSH/Dropbear 传输与回滚矩阵仍 NOT_RUN | Pending |
 | Container terminal | target identity + generation + container identity | 精确 key 的 BrowserWindow + typed container stream API | Pending |
 

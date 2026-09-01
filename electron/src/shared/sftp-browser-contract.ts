@@ -39,6 +39,25 @@ export interface SftpTextPreview {
   observedLineCount: number;
   displayedLineCount: number;
   truncated: boolean;
+  /**
+   * The hash of the file as read, not of the text above.
+   *
+   * The editor sends it back when it saves, and the write lands only if the
+   * file still hashes to it — so an edit begun before somebody else changed
+   * the file is refused rather than quietly overwriting their change. When
+   * `truncated` is true this still covers the whole file while the text does
+   * not, which is exactly why a truncated read may not be saved at all.
+   */
+  sha256: string;
+  /**
+   * Whether the text above is the file byte for byte.
+   *
+   * False means the projection changed something — a CRLF line ending, a
+   * control character, a dropped tail. Saving then would write the
+   * projection's change rather than the operator's, so the editor does not
+   * offer to save at all.
+   */
+  exact: boolean;
 }
 
 /**
@@ -55,7 +74,7 @@ export interface SftpTransferResult {
 }
 
 export const sftpOperationKinds = [
-  "create-directory", "rename", "chmod", "remove", "archive", "upload",
+  "create-directory", "rename", "chmod", "remove", "archive", "upload", "write-text",
 ] as const;
 export const sftpArchiveFormats = ["tar", "tar-gzip", "tar-zstd"] as const;
 
@@ -99,6 +118,9 @@ export interface SftpOperationInput {
   mode?: number;
   format?: SftpArchiveFormat;
   stagedHandle?: string;
+  /** `write-text` only: the edited content, and the hash it was read at. */
+  text?: string;
+  expectedSha256?: string;
 }
 
 export interface SftpBrowserApi {
@@ -118,6 +140,19 @@ export interface SftpBrowserApi {
    * a file. Either way the renderer never sees a local path.
    */
   stageSftpUpload(localFileHandle?: string): Promise<unknown>;
+  /**
+   * Opens one file in a window of its own, for reading or for editing.
+   *
+   * The pane passes only the two opaque handles it already holds. Whether the
+   * window may write is decided here and recorded by main; the window itself
+   * cannot change it.
+   */
+  openFileEditor(
+    browserHandle: string,
+    entryHandle: string,
+    name: string,
+    editable: boolean,
+  ): Promise<unknown>;
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -231,9 +266,20 @@ function outputLine(value: string): boolean {
     !/[\r\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value);
 }
 
+/**
+ * The lines of a preview, or null when the count does not match what was
+ * declared.
+ *
+ * The final newline is dropped before splitting. The projection keeps a file's
+ * trailing newline — an editor that silently removed it would change every
+ * file it opened — and `"a\nb\n".split("\n")` is three entries for two lines,
+ * so splitting the raw text made this reject every text file that ends the way
+ * text files normally end.
+ */
 function textLines(value: string, displayedLineCount: number): string[] | null {
-  if (value.length === 0) return displayedLineCount === 0 ? [] : displayedLineCount === 1 ? [""] : null;
-  const lines = value.split("\n");
+  if (value.length === 0) return displayedLineCount === 0 ? [] : null;
+  const body = value.endsWith("\n") ? value.slice(0, -1) : value;
+  const lines = body.split("\n");
   return lines.length === displayedLineCount ? lines : null;
 }
 
@@ -280,6 +326,14 @@ export function isSftpOperationInput(value: unknown): value is SftpOperationInpu
         archiveFormatSet.has(value.format);
     case "upload":
       return single && named !== null && isSftpBrowserOpaqueHandle(value.stagedHandle);
+    case "write-text":
+      // The same ceiling the read side works to. Content is passed through
+      // exactly as typed — a file being repaired may legitimately contain
+      // anything, and this is not the layer that decides what a file may say.
+      return single && named === null &&
+        typeof value.text === "string" &&
+        encoder.encode(value.text).byteLength <= 2 * 1_024 * 1_024 &&
+        isSftpContentDigest(value.expectedSha256);
     default:
       return false;
   }
@@ -314,12 +368,19 @@ export function isSftpStagedUpload(value: unknown): value is SftpStagedUpload {
     safeName(value.name, false, 256) && u64String(value.bytes);
 }
 
+/** Exactly 64 lowercase hex characters, the form the core writes and expects. */
+export function isSftpContentDigest(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{64}$/u.test(value);
+}
+
 export function isSftpTextPreview(value: unknown): value is SftpTextPreview {
   if (!record(value) || !exact(value, [
     "browserHandle", "fileHandle", "text", "observedLineCount", "displayedLineCount", "truncated",
+    "sha256", "exact",
   ]) || !isSftpBrowserOpaqueHandle(value.browserHandle) || !isSftpBrowserOpaqueHandle(value.fileHandle) ||
     !text(value.text, 256 * 1_024) || !unsigned(value.observedLineCount, 2 * 1_024 * 1_024) ||
-    !unsigned(value.displayedLineCount, 2_000) ||
+    !unsigned(value.displayedLineCount, 2_000) || !isSftpContentDigest(value.sha256) ||
+    typeof value.exact !== "boolean" ||
     typeof value.truncated !== "boolean" || !serializedWithin(value, 384 * 1_024)) return false;
   const lines = textLines(value.text, value.displayedLineCount);
   return lines !== null && value.displayedLineCount <= value.observedLineCount &&

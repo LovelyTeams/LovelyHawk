@@ -64,6 +64,40 @@
   align-items: center;
 }
 
+/* Where the checks run. Only drawn when the target has containers, so this is
+   absent rather than empty on the ordinary machine. */
+.emergency-commands-scope {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  padding: 0 10px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.emergency-commands-scope > span::after {
+  content: "：";
+}
+
+.emergency-commands-scope select {
+  max-width: 260px;
+  border: 0;
+  padding: 7px 2px;
+  color: var(--text);
+  background: transparent;
+  font: inherit;
+}
+
+.emergency-commands-scope select:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .emergency-commands-search > svg {
   position: absolute;
   left: 11px;
@@ -741,6 +775,10 @@
   border-radius: 9px;
   background: var(--surface);
   box-shadow: var(--shadow-md);
+  /* Placement pins a too-tall menu to the margin; this is what turns the
+     remainder into a scroll instead of a clip. See menu-placement.ts. */
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .emergency-path-menu-title {
@@ -756,6 +794,9 @@
 }
 
 .emergency-path-menu button {
+  /* Same reason as the SFTP menu: the column scrolls, so the rows must not
+     be squeezed to make room. */
+  flex: none;
   display: flex;
   align-items: flex-start;
   gap: 8px;

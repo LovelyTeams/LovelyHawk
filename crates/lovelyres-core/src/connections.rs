@@ -846,47 +846,6 @@ impl ConnectionRepository {
         resolve_stored(&self.crypto, stored)
     }
 
-    /// Returns an execution token that covers the endpoint, authentication
-    /// configuration, host-key pins and encrypted credentials, but excludes
-    /// observational metadata such as `last_connected_at`.
-    pub(crate) fn execution_snapshot_digest(&self, id: &str) -> CoreResult<String> {
-        let _guard = self.lock.lock();
-        let stored = self
-            .load_locked()?
-            .connections
-            .into_iter()
-            .find(|connection| connection.config.id == id)
-            .ok_or_else(|| CoreError::NotFound {
-                entity: "connection",
-                id: id.to_owned(),
-            })?;
-        connection_execution_digest(&stored)
-    }
-
-    pub(crate) fn resolve_for_backend_if_snapshot(
-        &self,
-        id: &str,
-        expected_digest: &str,
-    ) -> CoreResult<ResolvedConnection> {
-        let _guard = self.lock.lock();
-        let stored = self
-            .load_locked()?
-            .connections
-            .into_iter()
-            .find(|connection| connection.config.id == id)
-            .ok_or_else(|| CoreError::NotFound {
-                entity: "connection",
-                id: id.to_owned(),
-            })?;
-        if connection_execution_digest(&stored)? != expected_digest {
-            return Err(CoreError::validation(
-                "SSH connection execution snapshot",
-                "connection endpoint, host-key pin, authentication, or credential changed after planning",
-            ));
-        }
-        resolve_stored(&self.crypto, stored)
-    }
-
     fn load_locked(&self) -> CoreResult<StoredConnections> {
         let stored = self
             .store

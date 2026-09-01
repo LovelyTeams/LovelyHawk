@@ -17,6 +17,8 @@ use lovelyres_core::{
         CommandCatalogEntry, CommandCategory, CommandExecutionReceipt, CommandResultKind,
         SystemFamily,
     },
+    docker::{ContainerIdentity, ContainerSummary},
+    kubernetes::{KubernetesExecTarget, KubernetesPod, KubernetesScope},
     ssh::BoundSshSession,
     target::TargetGuard,
 };
@@ -31,6 +33,9 @@ use crate::{
 
 const MAX_HANDLE_BYTES: usize = 128;
 const MAX_CATALOG_COMMANDS: usize = 256;
+/// A ceiling on how many containers one catalogue offers. A machine with more
+/// than this is a container host, and the Docker pane is where it is read.
+const MAX_CATALOG_CONTAINERS: usize = 64;
 const MAX_TITLE_BYTES: usize = 128;
 const MAX_DESCRIPTION_BYTES: usize = 512;
 const MAX_REASON_BYTES: usize = 512;
@@ -148,8 +153,56 @@ impl EmergencyCommandApi {
         };
         self.validate_binding(&scope)?;
 
+        // Containers are an offer, never a requirement. A target with no
+        // runtime, or one whose runtime will not answer, still gets its
+        // catalogue — it simply has nothing to point it at.
+        let containers = match timeout(
+            DETECTION_DEADLINE,
+            self.list_containers_for_catalog(&session),
+        )
+        .await
+        {
+            Ok(Ok(containers)) => containers,
+            Ok(Err(error)) => {
+                tracing::info!(
+                    operation = "list containers for the command workbench",
+                    error = %error,
+                    "no containers will be offered"
+                );
+                Vec::new()
+            }
+            Err(_) => {
+                tracing::info!(
+                    operation = "list containers for the command workbench",
+                    "probe exceeded its deadline; no containers will be offered"
+                );
+                Vec::new()
+            }
+        };
+        // Pods, on the same terms: an offer when the target is a Kubernetes
+        // client, and silence when it is not.
+        let pods = match timeout(DETECTION_DEADLINE, self.list_pods_for_catalog(&session)).await {
+            Ok(Ok(pods)) => pods,
+            Ok(Err(error)) => {
+                tracing::info!(
+                    operation = "list pods for the command workbench",
+                    error = %error,
+                    "no pods will be offered"
+                );
+                Vec::new()
+            }
+            Err(_) => {
+                tracing::info!(
+                    operation = "list pods for the command workbench",
+                    "probe exceeded its deadline; no pods will be offered"
+                );
+                Vec::new()
+            }
+        };
+        self.validate_binding(&scope)?;
+
         let now = Instant::now();
-        let (catalog, dto) = build_catalog(scope.clone(), family, entries, now)?;
+        let (catalog, dto) = build_catalog(scope.clone(), family, entries, containers, pods, now)?;
         ensure_serialized_bound(&dto, MAX_CATALOG_RESPONSE_BYTES)?;
         let snapshot_handle = catalog.snapshot_handle.clone();
         let token = catalog.token;
@@ -168,20 +221,62 @@ impl EmergencyCommandApi {
         binding_handle: &str,
         snapshot_handle: &str,
         command_handle: &str,
+        container_handle: Option<&str>,
     ) -> Result<EmergencyCommandResultDto, EmergencyCommandApiError> {
         validate_handle(snapshot_handle)?;
         validate_handle(command_handle)?;
+        if let Some(handle) = container_handle {
+            validate_handle(handle)?;
+        }
         let (session, scope) = self.capture_binding(binding_handle)?;
         let (access, command, family, _permit) =
             self.begin_run(&scope, snapshot_handle, command_handle)?;
-        let receipt = timeout(
-            EXECUTION_DEADLINE,
-            self.services
-                .commands()
-                .execute(&session, &command.raw_id, family),
-        )
-        .await
-        .map_err(|_| EmergencyCommandApiError::Deadline)??;
+        // Resolved from the same snapshot the command came from, so a handle
+        // from a refreshed catalogue or another target names nothing.
+        let container = match container_handle {
+            None => None,
+            Some(handle) => Some(self.resolve_container(snapshot_handle, handle)?),
+        };
+        let receipt = match &container {
+            None => timeout(
+                EXECUTION_DEADLINE,
+                self.services
+                    .commands()
+                    .execute(&session, &command.raw_id, family),
+            )
+            .await
+            .map_err(|_| EmergencyCommandApiError::Deadline)??,
+            Some(place) => {
+                // The place's own family, never the target's. An Alpine
+                // container on an Ubuntu host — or a distroless pod on any
+                // node — is ordinary, and the Debian form of a command on a
+                // busybox userland prints nothing and exits zero, which reads
+                // as a clean container.
+                let inner = self
+                    .container_family(&session, snapshot_handle, container_handle.unwrap(), place)
+                    .await?;
+                self.validate_binding(&scope)?;
+                let run = async {
+                    match place {
+                        ExecPlace::Container(identity) => {
+                            self.services
+                                .commands()
+                                .execute_in_container(&session, &command.raw_id, inner, identity)
+                                .await
+                        }
+                        ExecPlace::Pod(pod) => {
+                            self.services
+                                .commands()
+                                .execute_in_pod(&session, &command.raw_id, inner, pod)
+                                .await
+                        }
+                    }
+                };
+                timeout(EXECUTION_DEADLINE, run)
+                    .await
+                    .map_err(|_| EmergencyCommandApiError::Deadline)??
+            }
+        };
 
         self.validate_binding(&scope)?;
         self.verify_run(&access, &command)?;
@@ -196,6 +291,139 @@ impl EmergencyCommandApi {
         self.validate_binding(&scope)?;
         self.verify_run(&access, &command)?;
         Ok(dto)
+    }
+
+    /// The running pods this target can reach, or none at all.
+    ///
+    /// Availability is checked first so a machine without kubectl, or with one
+    /// that cannot reach an API server, costs a single fast probe instead of a
+    /// listing that will time out.
+    async fn list_pods_for_catalog(
+        &self,
+        session: &BoundSshSession,
+    ) -> Result<Vec<KubernetesPod>, CoreError> {
+        let availability = self.services.kubernetes().availability(session).await?;
+        if !availability.kubectl_installed || !availability.api_reachable {
+            return Ok(Vec::new());
+        }
+        Ok(self
+            .services
+            .kubernetes()
+            .pods(
+                session,
+                &KubernetesScope::AllNamespaces,
+                MAX_CATALOG_CONTAINERS,
+            )
+            .await?
+            .items)
+    }
+
+    /// Turns a container handle back into an identity, under this snapshot.
+    fn resolve_container(
+        &self,
+        snapshot_handle: &str,
+        container_handle: &str,
+    ) -> Result<ExecPlace, EmergencyCommandApiError> {
+        let registry = self.lock_registry()?;
+        registry
+            .catalogs
+            .get(snapshot_handle)
+            .and_then(|catalog| {
+                catalog
+                    .containers
+                    .iter()
+                    .find(|container| container.container_handle == container_handle)
+            })
+            .map(|container| match &container.place {
+                ExecPlace::Container(identity) => ExecPlace::Container(identity.clone()),
+                ExecPlace::Pod(pod) => ExecPlace::Pod(pod.clone()),
+            })
+            .ok_or(EmergencyCommandApiError::CatalogStale)
+    }
+
+    /// Which family the container is, detected once and then remembered.
+    ///
+    /// Detecting per command would put a round trip in front of every check on
+    /// a container, and the answer cannot change while it is running.
+    async fn container_family(
+        &self,
+        session: &BoundSshSession,
+        snapshot_handle: &str,
+        container_handle: &str,
+        place: &ExecPlace,
+    ) -> Result<SystemFamily, EmergencyCommandApiError> {
+        if let Some(known) = self.cached_container_family(snapshot_handle, container_handle)? {
+            return Ok(known);
+        }
+        let probe = async {
+            match place {
+                ExecPlace::Container(identity) => {
+                    self.services
+                        .commands()
+                        .detect_container_system(session, identity)
+                        .await
+                }
+                ExecPlace::Pod(pod) => {
+                    self.services
+                        .commands()
+                        .detect_pod_system(session, pod)
+                        .await
+                }
+            }
+        };
+        let detected = match timeout(DETECTION_DEADLINE, probe).await {
+            Ok(Ok(family)) => family,
+            // Same rule the host detection follows: a probe that will not
+            // answer falls back to the portable command set rather than
+            // refusing to run anything.
+            _ => SystemFamily::Other,
+        };
+        // Best effort: a catalogue that expired while the probe ran simply
+        // does not get the answer cached, and the next run asks again.
+        if let Ok(mut registry) = self.registry.lock()
+            && let Some(catalog) = registry.catalogs.get_mut(snapshot_handle)
+            && let Some(container) = catalog
+                .containers
+                .iter_mut()
+                .find(|container| container.container_handle == container_handle)
+        {
+            container.family = Some(detected);
+        }
+        Ok(detected)
+    }
+
+    fn cached_container_family(
+        &self,
+        snapshot_handle: &str,
+        container_handle: &str,
+    ) -> Result<Option<SystemFamily>, EmergencyCommandApiError> {
+        let registry = self.lock_registry()?;
+        Ok(registry
+            .catalogs
+            .get(snapshot_handle)
+            .and_then(|catalog| {
+                catalog
+                    .containers
+                    .iter()
+                    .find(|container| container.container_handle == container_handle)
+            })
+            .and_then(|container| container.family))
+    }
+
+    /// The running containers on this target, or none at all.
+    ///
+    /// The runtime is detected rather than assumed: most RHEL-family and
+    /// domestic distributions ship Podman and no `docker`, and assuming
+    /// otherwise reports an empty machine on every one of them.
+    async fn list_containers_for_catalog(
+        &self,
+        session: &BoundSshSession,
+    ) -> Result<Vec<ContainerSummary>, CoreError> {
+        let probe = self.services.docker().detect_runtime(session).await?;
+        let Some(runtime) = probe.usable else {
+            return Ok(Vec::new());
+        };
+        Ok(self.services.docker().list(session, runtime).await?.items)
     }
 
     fn capture_binding(
@@ -407,6 +635,26 @@ pub(crate) struct EmergencyCommandCatalogDto {
     pub(crate) snapshot_handle: String,
     pub(crate) expires_in_seconds: u64,
     pub(crate) commands: Vec<EmergencyCommandCatalogItemDto>,
+    /// The containers on this target a command may be pointed at.
+    ///
+    /// Empty when there is no container runtime, which is the ordinary case.
+    pub(crate) containers: Vec<EmergencyCommandContainerDto>,
+}
+
+/// One container the toolbar can offer.
+///
+/// Name and image so a person can pick the right one; a handle so the run can
+/// name it. No container id: the same rule the Docker pane follows.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct EmergencyCommandContainerDto {
+    pub(crate) container_handle: String,
+    /// `container` or `pod`. Carried rather than guessed from the name: the
+    /// pane says which one it is offering, and a pod named like a container
+    /// must not read as one.
+    pub(crate) kind: &'static str,
+    pub(crate) name: String,
+    pub(crate) image: String,
 }
 
 #[derive(Serialize)]
@@ -467,12 +715,52 @@ impl StoredCommand {
     }
 }
 
+/// Where a check can run, when that is not the target itself.
+///
+/// One handle space for both kinds, so the pane offers one list and the run
+/// call takes one handle. Which kind a handle is was decided when the
+/// catalogue was built and cannot be changed by the caller.
+enum ExecPlace {
+    Container(ContainerIdentity),
+    Pod(KubernetesExecTarget),
+}
+
+/// A place the catalog can be pointed at, and what was learned about it.
+///
+/// The family is filled in on the first run against this place and kept for
+/// the rest of the snapshot: it costs a round trip, it does not change while
+/// the container is running, and detecting it per command would make every
+/// check pay for it again.
+struct StoredContainer {
+    container_handle: String,
+    place: ExecPlace,
+    name: String,
+    image: String,
+    family: Option<SystemFamily>,
+}
+
+impl StoredContainer {
+    fn estimated_bytes(&self) -> usize {
+        std::mem::size_of::<Self>()
+            .saturating_add(self.container_handle.len())
+            .saturating_add(match &self.place {
+                ExecPlace::Container(identity) => identity.id().len(),
+                ExecPlace::Pod(pod) => pod.namespace().len() + pod.pod().len(),
+            })
+            .saturating_add(self.name.len())
+            .saturating_add(self.image.len())
+    }
+}
+
 struct CatalogSnapshot {
     snapshot_handle: String,
     token: Uuid,
     scope: BindingScope,
     family: SystemFamily,
     commands: Vec<StoredCommand>,
+    /// Empty when the target has no container runtime, which is the ordinary
+    /// case and not an error.
+    containers: Vec<StoredContainer>,
     stored_bytes: usize,
     created_at: Instant,
     expires_at: Instant,
@@ -711,6 +999,8 @@ fn build_catalog(
     scope: BindingScope,
     family: SystemFamily,
     entries: Vec<CommandCatalogEntry>,
+    containers: Vec<ContainerSummary>,
+    pods: Vec<KubernetesPod>,
     now: Instant,
 ) -> Result<(CatalogSnapshot, EmergencyCommandCatalogDto), EmergencyCommandApiError> {
     if entries.len() > MAX_CATALOG_COMMANDS {
@@ -736,10 +1026,46 @@ fn build_catalog(
             timeout_seconds: entry.timeout_seconds,
         });
     }
+    // Only containers that are running: a stopped one has no process namespace
+    // to enter, so offering it would produce a refusal per command rather than
+    // an answer.
+    let mut stored_containers = containers
+        .into_iter()
+        .filter(ContainerSummary::is_running)
+        .map(|container| StoredContainer {
+            container_handle: Uuid::new_v4().to_string(),
+            name: bounded_text(&container.name, MAX_TITLE_BYTES),
+            image: bounded_text(&container.image, MAX_TITLE_BYTES),
+            place: ExecPlace::Container(container.identity),
+            family: None,
+        })
+        .collect::<Vec<_>>();
+    // Pods join the same list. Only running ones, for the same reason: a pod
+    // that is not running has no container to enter.
+    stored_containers.extend(pods.into_iter().filter_map(|pod| {
+        if !pod.phase.eq_ignore_ascii_case("running") {
+            return None;
+        }
+        let target = KubernetesExecTarget::new(&pod.namespace, &pod.name).ok()?;
+        Some(StoredContainer {
+            container_handle: Uuid::new_v4().to_string(),
+            name: bounded_text(&format!("{}/{}", pod.namespace, pod.name), MAX_TITLE_BYTES),
+            image: bounded_text(
+                pod.images.first().map(String::as_str).unwrap_or_default(),
+                MAX_TITLE_BYTES,
+            ),
+            place: ExecPlace::Pod(target),
+            family: None,
+        })
+    }));
+    stored_containers.truncate(MAX_CATALOG_CONTAINERS);
     let snapshot_handle = Uuid::new_v4().to_string();
+    let stored_bytes = stored_containers.iter().fold(0usize, |total, container| {
+        total.saturating_add(container.estimated_bytes())
+    });
     let stored_bytes = commands.iter().fold(
-        scope
-            .estimated_bytes()
+        stored_bytes
+            .saturating_add(scope.estimated_bytes())
             .saturating_add(snapshot_handle.len())
             .saturating_add(std::mem::size_of::<CatalogSnapshot>()),
         |total, command| total.saturating_add(command.estimated_bytes()),
@@ -751,6 +1077,18 @@ fn build_catalog(
         snapshot_handle: snapshot_handle.clone(),
         expires_in_seconds: CATALOG_TTL.as_secs(),
         commands: commands.iter().map(StoredCommand::dto).collect(),
+        containers: stored_containers
+            .iter()
+            .map(|container| EmergencyCommandContainerDto {
+                container_handle: container.container_handle.clone(),
+                kind: match container.place {
+                    ExecPlace::Container(_) => "container",
+                    ExecPlace::Pod(_) => "pod",
+                },
+                name: container.name.clone(),
+                image: container.image.clone(),
+            })
+            .collect(),
     };
     let catalog = CatalogSnapshot {
         snapshot_handle,
@@ -758,6 +1096,7 @@ fn build_catalog(
         scope,
         family,
         commands,
+        containers: stored_containers,
         stored_bytes,
         created_at: now,
         expires_at: now + CATALOG_TTL,
@@ -943,6 +1282,24 @@ fn valid_raw_id(value: &str) -> bool {
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
 }
 
+/// A container's own name and image, cut to fit and stripped of anything that
+/// would not draw as one line.
+///
+/// These come from the target, so they are shown as they are — only control
+/// characters and the size ceiling are applied, the same rule the rest of this
+/// tool follows for text a machine under investigation produced.
+fn bounded_text(value: &str, maximum_bytes: usize) -> String {
+    let cleaned = value
+        .chars()
+        .filter(|character| !character.is_control())
+        .collect::<String>();
+    let mut end = cleaned.len().min(maximum_bytes);
+    while end > 0 && !cleaned.is_char_boundary(end) {
+        end -= 1;
+    }
+    cleaned[..end].to_owned()
+}
+
 fn valid_catalog_text(value: &str, maximum_bytes: usize, allow_empty: bool) -> bool {
     value.len() <= maximum_bytes
         && (allow_empty || !value.is_empty())
@@ -1089,9 +1446,14 @@ mod tests {
         let production = source.split("#[cfg(test)]").next().unwrap();
         assert!(production.contains("Ok(Err(error)) => {"));
         assert!(production.contains("Err(_) => {"));
-        // Both arms land on the portable set rather than an error.
-        assert_eq!(production.matches("SystemFamily::Other").count(), 2);
+        // Three fallbacks, all landing on the portable set rather than an
+        // error: the host probe's two arms, and the container probe, which is
+        // asked the same question inside a container and can be just as slow.
+        assert_eq!(production.matches("SystemFamily::Other").count(), 3);
         assert!(production.contains("falling back to the portable command set"));
+        // A target with no container runtime, or one whose runtime will not
+        // answer, still gets its catalogue — it just has nothing to point it at.
+        assert!(production.contains("no containers will be offered"));
         // Every family, including the portable one, still builds a catalogue
         // that fits the boundary.
         let entries = lovelyres_core::command_workbench::shipped_catalog();
@@ -1099,6 +1461,8 @@ mod tests {
             scope("binding", "identity", 0),
             SystemFamily::Other,
             entries,
+            Vec::new(),
+            Vec::new(),
             Instant::now(),
         )
         .unwrap();
@@ -1119,6 +1483,8 @@ mod tests {
                 scope("binding", "identity", 0),
                 family,
                 entries,
+                Vec::new(),
+                Vec::new(),
                 Instant::now(),
             )
             .expect("the shipped catalog must cross the boundary");
@@ -1151,6 +1517,8 @@ mod tests {
                 entry("network-listen", CommandCategory::Network),
                 entry("system-kernel", CommandCategory::System),
             ],
+            Vec::new(),
+            Vec::new(),
             Instant::now(),
         )
         .unwrap();
@@ -1195,6 +1563,8 @@ mod tests {
             first_scope.clone(),
             SystemFamily::Other,
             vec![entry("network-listen", CommandCategory::Network)],
+            Vec::new(),
+            Vec::new(),
             now,
         )
         .unwrap();
@@ -1222,6 +1592,8 @@ mod tests {
             first_scope.clone(),
             SystemFamily::Other,
             vec![entry("network-listen", CommandCategory::Network)],
+            Vec::new(),
+            Vec::new(),
             now + Duration::from_millis(1),
         )
         .unwrap();
@@ -1245,6 +1617,8 @@ mod tests {
                 scope(&binding, &identity, 0),
                 SystemFamily::Other,
                 vec![entry("network-listen", CommandCategory::Network)],
+                Vec::new(),
+                Vec::new(),
                 now + Duration::from_millis(index as u64),
             )
             .unwrap();
@@ -1288,6 +1662,8 @@ mod tests {
                 run_scope.clone(),
                 SystemFamily::Other,
                 vec![entry("network-listen", CommandCategory::Network)],
+                Vec::new(),
+                Vec::new(),
                 now,
             )
             .unwrap();
@@ -1333,6 +1709,8 @@ mod tests {
             closed.clone(),
             SystemFamily::Other,
             vec![entry("network-listen", CommandCategory::Network)],
+            Vec::new(),
+            Vec::new(),
             now,
         )
         .unwrap();
@@ -1343,6 +1721,8 @@ mod tests {
             stale,
             SystemFamily::Other,
             vec![entry("system-kernel", CommandCategory::System)],
+            Vec::new(),
+            Vec::new(),
             now,
         )
         .unwrap();
@@ -1351,6 +1731,8 @@ mod tests {
             kept.clone(),
             SystemFamily::Other,
             vec![entry("network-listen", CommandCategory::Network)],
+            Vec::new(),
+            Vec::new(),
             now,
         )
         .unwrap();
@@ -1403,6 +1785,8 @@ mod tests {
             original.clone(),
             SystemFamily::RedHat,
             vec![entry("network-listen", CommandCategory::Network)],
+            Vec::new(),
+            Vec::new(),
             now,
         )
         .unwrap();
@@ -1448,6 +1832,8 @@ mod tests {
             private_scope.clone(),
             SystemFamily::Alpine,
             vec![entry("network-listen", CommandCategory::Network)],
+            Vec::new(),
+            Vec::new(),
             Instant::now(),
         )
         .unwrap();
@@ -1587,6 +1973,8 @@ mod tests {
                 scope("binding-one", "target-one", 0),
                 SystemFamily::Other,
                 vec![entry("network-listen", CommandCategory::Network); MAX_CATALOG_COMMANDS + 1],
+                Vec::new(),
+                Vec::new(),
                 Instant::now(),
             ),
             Err(EmergencyCommandApiError::Capacity)
@@ -1599,6 +1987,8 @@ mod tests {
                     entry("network-listen", CommandCategory::Network),
                     entry("network-listen", CommandCategory::Network),
                 ],
+                Vec::new(),
+                Vec::new(),
                 Instant::now(),
             )
             .is_err()
@@ -1608,6 +1998,8 @@ mod tests {
                 scope("binding-one", "target-one", 0),
                 SystemFamily::Other,
                 vec![entry("network-listen;id", CommandCategory::Network)],
+                Vec::new(),
+                Vec::new(),
                 Instant::now(),
             )
             .is_err()
@@ -1619,6 +2011,8 @@ mod tests {
                 scope("binding-one", "target-one", 0),
                 SystemFamily::Other,
                 vec![oversized_title],
+                Vec::new(),
+                Vec::new(),
                 Instant::now(),
             ),
             Err(EmergencyCommandApiError::InvalidCatalog)
@@ -1631,6 +2025,8 @@ mod tests {
                 scope("binding-one", "target-one", 0),
                 SystemFamily::Other,
                 vec![oversized_description],
+                Vec::new(),
+                Vec::new(),
                 Instant::now(),
             ),
             Err(EmergencyCommandApiError::InvalidCatalog)
@@ -1640,6 +2036,8 @@ mod tests {
             scope("binding-one", "target-one", 0),
             SystemFamily::Other,
             vec![entry("network-listen", CommandCategory::Network)],
+            Vec::new(),
+            Vec::new(),
             Instant::now(),
         )
         .unwrap();
@@ -1652,6 +2050,8 @@ mod tests {
         let (_, catalog_dto) = build_catalog(
             scope("binding-one", "target-one", 0),
             SystemFamily::Other,
+            Vec::new(),
+            Vec::new(),
             Vec::new(),
             Instant::now(),
         )
@@ -1695,12 +2095,39 @@ mod tests {
     }
 
     #[test]
-    fn production_source_calls_only_the_three_closed_core_methods() {
+    fn production_source_calls_only_the_closed_core_methods() {
         let source = include_str!("emergency_command_api.rs");
         let production = source.split("#[cfg(test)]").next().unwrap();
         assert!(production.contains("commands().catalog()"));
         assert!(production.contains("commands().detect_system(&session)"));
         assert!(production.contains(".execute(&session, &command.raw_id, family)"));
+        // Running a check inside a container adds two, and only two: ask the
+        // container which family it is, and run one catalogue command in it.
+        // Neither takes a command string from anywhere but the catalogue.
+        assert!(production.contains("detect_container_system(session, identity)"));
+        assert!(production.contains("execute_in_container("));
+        // And two more for a pod, which is the same two questions asked
+        // through kubectl instead of through the container runtime.
+        assert!(production.contains("detect_pod_system(session, pod)"));
+        assert!(production.contains("execute_in_pod("));
+        // Listing what may be pointed at is a read, and it detects the runtime
+        // rather than assuming Docker.
+        assert!(production.contains("docker().detect_runtime(session)"));
+        assert!(production.contains("docker().list(session, runtime)"));
+        // Kubernetes is checked before it is listed, so a machine without
+        // kubectl costs one fast probe rather than a listing that times out.
+        assert!(production.contains("kubernetes().availability(session)"));
+        assert!(production.contains("kubernetes()"));
+        // Still no way to run a command of the caller's choosing anywhere.
+        for forbidden in [
+            ["kubectl_", "exec"].concat(),
+            ["run_", "in_pod_command"].concat(),
+        ] {
+            assert!(
+                !production.contains(&forbidden),
+                "production contains {forbidden}"
+            );
+        }
         for forbidden in [
             ["execute_", "bound"].concat(),
             ["execute_", "raw"].concat(),

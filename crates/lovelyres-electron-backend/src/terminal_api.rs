@@ -13,11 +13,12 @@ use std::{
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use lovelyres_core::{
     BackendServices, CoreError,
+    docker::{ContainerIdentity, ContainerShell},
     events::{
         TerminalEvent as CoreTerminalEvent, TerminalEventKind,
         TerminalTransport as CoreTerminalTransport,
     },
-    ssh::{BoundSshSession, SshTerminalSession},
+    ssh::BoundSshSession,
     target::TargetGuard,
 };
 use lovelyres_terminal::{
@@ -82,9 +83,43 @@ impl TerminalApi {
         }
     }
 
+    /// Open a login shell on the bound host.
     pub(crate) async fn open(
         &self,
         binding_handle: &str,
+        columns: u16,
+        rows: u16,
+    ) -> Result<TerminalOpenedDto, TerminalApiError> {
+        self.open_launch(binding_handle, TerminalLaunch::HostShell, columns, rows)
+            .await
+    }
+
+    /// Open a shell inside a running container on the bound host.
+    ///
+    /// The container identity is resolved from an opaque handle by the Docker
+    /// read boundary before this is called, so nothing here ever sees a caller
+    /// supplied container id.
+    pub(crate) async fn open_container(
+        &self,
+        binding_handle: &str,
+        container: ContainerIdentity,
+        shell: ContainerShell,
+        columns: u16,
+        rows: u16,
+    ) -> Result<TerminalOpenedDto, TerminalApiError> {
+        self.open_launch(
+            binding_handle,
+            TerminalLaunch::Container { container, shell },
+            columns,
+            rows,
+        )
+        .await
+    }
+
+    async fn open_launch(
+        &self,
+        binding_handle: &str,
+        launch: TerminalLaunch,
         columns: u16,
         rows: u16,
     ) -> Result<TerminalOpenedDto, TerminalApiError> {
@@ -107,20 +142,42 @@ impl TerminalApi {
             return Err(error);
         }
 
-        let opened = tokio::time::timeout(
-            OPEN_TIMEOUT,
-            self.services.run_guarded(&guard, || {
-                self.services.ssh().open_terminal_bound(
-                    &binding,
-                    terminal_id.clone(),
-                    columns,
-                    rows,
-                )
-            }),
-        )
-        .await;
+        // The only step that differs between a host shell and a container
+        // shell. Both arrive as the same `dyn` transport, so everything below
+        // — the guard re-checks, the registry activation, the cleanup on every
+        // failure path — is one implementation rather than two that can drift.
+        let opened = match &launch {
+            TerminalLaunch::HostShell => tokio::time::timeout(
+                OPEN_TIMEOUT,
+                self.services.run_guarded(&guard, || {
+                    self.services.ssh().open_terminal_bound(
+                        &binding,
+                        terminal_id.clone(),
+                        columns,
+                        rows,
+                    )
+                }),
+            )
+            .await
+            .map(|result| result.map(transport_of)),
+            TerminalLaunch::Container { container, shell } => tokio::time::timeout(
+                OPEN_TIMEOUT,
+                self.services.run_guarded(&guard, || {
+                    self.services.docker().open_terminal(
+                        &binding,
+                        container,
+                        *shell,
+                        terminal_id.clone(),
+                        columns,
+                        rows,
+                    )
+                }),
+            )
+            .await
+            .map(|result| result.map(transport_of)),
+        };
         let terminal = match opened {
-            Ok(Ok(terminal)) => Arc::new(terminal),
+            Ok(Ok(terminal)) => terminal,
             Ok(Err(error)) => {
                 self.remove_slot(&handle);
                 return Err(TerminalApiError::Core(error));
@@ -422,11 +479,27 @@ impl TerminalApi {
     }
 }
 
-async fn close_transport(terminal: &SshTerminalSession) {
+/// What a terminal slot was asked to launch. Kept internal: the wire never
+/// names a shell program or a container id, only an already-resolved identity.
+enum TerminalLaunch {
+    HostShell,
+    Container {
+        container: ContainerIdentity,
+        shell: ContainerShell,
+    },
+}
+
+fn transport_of<T: CoreTerminalTransport + 'static>(terminal: T) -> Arc<dyn CoreTerminalTransport> {
+    Arc::new(terminal)
+}
+
+async fn close_transport(terminal: &Arc<dyn CoreTerminalTransport>) {
     let _ = tokio::time::timeout(CONTROL_TIMEOUT, terminal.close()).await;
 }
 
-fn read_terminal_event(terminal: &SshTerminalSession) -> Result<EventRead, TerminalApiError> {
+fn read_terminal_event(
+    terminal: &Arc<dyn CoreTerminalTransport>,
+) -> Result<EventRead, TerminalApiError> {
     match terminal.events().try_recv() {
         Ok(Some(event)) => Ok(EventRead::Event(event)),
         Ok(None) => Ok(EventRead::Empty),
@@ -440,7 +513,12 @@ struct ActiveTerminal {
     binding: BoundSshSession,
     guard: TargetGuard,
     terminal_id: String,
-    transport: Arc<SshTerminalSession>,
+    // Behind `dyn` because a terminal here is either a login shell on the host
+    // or a shell inside one of its containers. Everything past the open call —
+    // polling, input, resize, close, the bounded model, the per-target caps —
+    // is identical for both, and the only thing that differs is which core call
+    // minted the session.
+    transport: Arc<dyn CoreTerminalTransport>,
     state: Mutex<TerminalState>,
 }
 
@@ -946,9 +1024,9 @@ impl std::error::Error for TerminalApiError {}
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TerminalOpenedDto {
-    handle: String,
-    columns: u16,
-    rows: u16,
+    pub(crate) handle: String,
+    pub(crate) columns: u16,
+    pub(crate) rows: u16,
 }
 
 #[derive(Debug, Serialize)]

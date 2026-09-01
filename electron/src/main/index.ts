@@ -13,6 +13,7 @@ import {
   Menu,
   net,
   protocol,
+  screen,
   session,
   type IpcMainInvokeEvent,
 } from "electron";
@@ -68,9 +69,13 @@ import {
   isLogSourceReadInput,
   isKubernetesListInput,
   isKubernetesOpaqueHandle,
+  isKubernetesResourceName,
+  isKubernetesWriteAction,
   isDockerCollectionKind,
   isDockerLogTail,
+  isDockerContainerName,
   isDockerOpaqueHandle,
+  isDockerWriteAction,
   isDockerResourceKind,
   isEmergencyCommandOpaqueHandle,
   isEmergencyPathAction,
@@ -85,7 +90,6 @@ import {
   isApplicationLogLevel,
   isIntegrityOpaqueHandle,
   isIntegrityPollRequest,
-  isMiddlewareOpaqueHandle,
   isAiHistoryExportFormat,
   isAiHistoryId,
   isAiHistoryOpaqueHandle,
@@ -98,7 +102,6 @@ import {
   isDisposalReportExportFormat,
   isDisposalReportOpaqueHandle,
   isDisposalReportPreviewFormat,
-  isFirewallOpaqueHandle,
   isConnectionDeleteHandle,
   isConnectionId,
   isConnectionWriteInput,
@@ -108,10 +111,9 @@ import {
   isSettingsMutationHandle,
   isSettingsProviderId,
   isSettingsSaveInput,
-  isSnapshotDiffInput,
-  isSnapshotOpaqueHandle,
   isSystemInfoMaximumRows,
   isSystemInfoOpaqueHandle,
+  isSystemInfoRowActionKey,
   isSystemInfoTabKey,
   isTerminalPollBounds,
   isTerminalSearchRequest,
@@ -154,6 +156,8 @@ const DISPOSAL_REPORT_MARKDOWN_FILTER = [{ name: "Markdown", extensions: ["md"] 
 const DISPOSAL_REPORT_HTML_FILTER = [{ name: "HTML", extensions: ["html"] }];
 const APPLICATION_LOG_FILTER = [{ name: "Application log", extensions: ["log"] }];
 const TERMINAL_WINDOW_KIND = "ssh-terminal";
+const FILE_EDITOR_WINDOW_KIND = "file-editor";
+const FILE_EDITOR_WINDOW_URL = `${RENDERER_SCHEME}://${RENDERER_HOST}/?window=file-editor`;
 const TERMINAL_WINDOW_URL = `${RENDERER_SCHEME}://${RENDERER_HOST}/?window=terminal`;
 const CSP = [
   "default-src 'none'",
@@ -202,6 +206,14 @@ const debugProbeDirectory = !app.isPackaged
 const debugMode = isDebugModeEnabled(app.isPackaged, process.env);
 const TITLE_BAR_HEIGHT = 40;
 /**
+ * The floor every window shares, and the floor the stylesheet assumes.
+ *
+ * `styles.css` sets the same numbers on `body`, so a window below these does
+ * not shrink the layout, it just hides part of it behind a scrollbar.
+ */
+const MIN_WINDOW_WIDTH = 1_080;
+const MIN_WINDOW_HEIGHT = 700;
+/**
  * Last theme the renderer applied. Main uses it for native colors that must be
  * correct before a window paints, so a light theme never flashes a dark frame.
  */
@@ -227,9 +239,43 @@ const terminalBindingState = new TerminalBindingLaunchState();
 // Reads the operator's own machine for the SSH window's local pane.
 const localBrowser = new LocalBrowser();
 
+/**
+ * Which container a terminal window was opened against.
+ *
+ * Held here rather than passed in from the window: the window renderer asks to
+ * open a terminal of whatever kind its window already is, so it never names a
+ * container and cannot be talked into naming a different one.
+ */
+interface TerminalContainerScope {
+  readonly snapshotHandle: string;
+  readonly containerHandle: string;
+  /** Display only, for the window's own title bar. */
+  readonly containerName: string;
+}
+
+/**
+ * Which file an editor window was opened on.
+ *
+ * The handles are the same opaque ones the browser pane was given, and they
+ * resolve under the same scope and expiry rules — the editor cannot name a
+ * file the browser was not already showing.
+ */
+interface FileEditorScope {
+  readonly browserHandle: string;
+  readonly entryHandle: string;
+  /** Display only, for the window's own title bar. */
+  readonly name: string;
+  /** False for 预览: the same window, with no way to write. */
+  readonly editable: boolean;
+}
+
 interface TerminalWindowContext {
   readonly key: string;
   readonly bindingHandle: string;
+  /** Absent for a login shell on the host itself. */
+  readonly container: TerminalContainerScope | null;
+  /** Present only for an editor window; absent for a terminal. */
+  readonly editor: FileEditorScope | null;
   readonly window: BrowserWindow;
   readonly webContentsId: number;
   launchToken: string | null;
@@ -278,8 +324,25 @@ function validateSender(event: IpcMainInvokeEvent): void {
   }
 }
 
-function terminalWindowKey(bindingHandle: string): string {
-  return `${TERMINAL_WINDOW_KIND}:${bindingHandle}`;
+/**
+ * One window per binding for the host shell, and one more per container.
+ *
+ * Keying containers separately is what lets an operator keep the host shell
+ * and a shell inside a container open side by side, which is the whole point
+ * of having both.
+ */
+function terminalWindowKey(bindingHandle: string, containerHandle?: string): string {
+  const scope = containerHandle === undefined ? "" : `:container:${containerHandle}`;
+  return `${TERMINAL_WINDOW_KIND}:${bindingHandle}${scope}`;
+}
+
+/**
+ * One editor window per file, so two files can be open side by side and a
+ * second right-click on the same file raises the window already showing it
+ * rather than opening a rival copy of the same text.
+ */
+function fileEditorWindowKey(bindingHandle: string, entryHandle: string): string {
+  return `${FILE_EDITOR_WINDOW_KIND}:${bindingHandle}:${entryHandle}`;
 }
 
 function terminalContextFor(event: IpcMainInvokeEvent): TerminalWindowContext {
@@ -366,8 +429,23 @@ async function observeSshAttemptStatus(
   return status;
 }
 
-function createTerminalWindow(bindingHandle: string): TerminalWindowLaunchResult {
-  const key = terminalWindowKey(bindingHandle);
+/**
+ * Opens one of the windows that share the terminal preload.
+ *
+ * Three kinds now: a login shell on the target, a shell inside one of its
+ * containers, and a file editor. They differ in the URL they load and the
+ * scope main remembers for them, and in nothing else — every one is bound to
+ * the same target, closes with it, and reaches only the handlers that check
+ * this context.
+ */
+function createTerminalWindow(
+  bindingHandle: string,
+  container: TerminalContainerScope | null = null,
+  editor: FileEditorScope | null = null,
+): TerminalWindowLaunchResult {
+  const key = editor === null
+    ? terminalWindowKey(bindingHandle, container?.containerHandle)
+    : fileEditorWindowKey(bindingHandle, editor.entryHandle);
   const existing = terminalWindowsByKey.get(key);
   if (existing !== undefined && terminalContextIsCurrent(existing)) {
     if (existing.window.isMinimized()) existing.window.restore();
@@ -377,6 +455,20 @@ function createTerminalWindow(bindingHandle: string): TerminalWindowLaunchResult
   }
 
   const theme = themeDefinition(activeTheme);
+  // Built before the window options rather than inside them: the options block
+  // is required to stay free of nested braces so the boundary gate can read it
+  // as one literal, and a template string would put braces right in it.
+  const targetLabel = terminalBindingState.currentTargetLabel();
+  const windowLabel = editor !== null
+    // The file's name, because several editors on one target are told apart
+    // by the file and by nothing else.
+    ? [targetLabel ?? "", " · ", editor.name].join("")
+    : container === null
+      ? targetLabel
+      // A container window says which container it is in, because a window
+      // labelled only with the target is indistinguishable from the host shell
+      // sitting next to it.
+      : [targetLabel ?? "", " · 容器 ", container.containerName].join("");
   const terminalWindow = new BrowserWindow({
     width: 1_120,
     height: 760,
@@ -384,7 +476,9 @@ function createTerminalWindow(bindingHandle: string): TerminalWindowLaunchResult
     minHeight: 700,
     show: false,
     backgroundColor: theme.terminalBackground,
-    title: "LovelyRes SSH Terminal",
+    title: editor !== null
+      ? "LovelyRes 文件"
+      : container === null ? "LovelyRes SSH Terminal" : "LovelyRes 容器终端",
     ...applicationIcon(),
     // The window draws its own title bar; only the system buttons stay native.
     titleBarStyle: "hidden",
@@ -404,7 +498,7 @@ function createTerminalWindow(bindingHandle: string): TerminalWindowLaunchResult
       // switch the preload stamps before first paint.
       additionalArguments: [
         THEME_ARGUMENT_PREFIX + theme.id,
-        TARGET_LABEL_ARGUMENT_PREFIX + sanitizeTargetLabel(terminalBindingState.currentTargetLabel()),
+        TARGET_LABEL_ARGUMENT_PREFIX + sanitizeTargetLabel(windowLabel),
       ],
     },
   });
@@ -412,6 +506,8 @@ function createTerminalWindow(bindingHandle: string): TerminalWindowLaunchResult
   const context: TerminalWindowContext = {
     key,
     bindingHandle,
+    container,
+    editor,
     window: terminalWindow,
     webContentsId: terminalWindow.webContents.id,
     launchToken: randomUUID(),
@@ -441,7 +537,7 @@ function createTerminalWindow(bindingHandle: string): TerminalWindowLaunchResult
   terminalWindow.on("closed", () => {
     void closeTerminalContext(context, false);
   });
-  void terminalWindow.loadURL(TERMINAL_WINDOW_URL).catch(() => {
+  void terminalWindow.loadURL(editor === null ? TERMINAL_WINDOW_URL : FILE_EDITOR_WINDOW_URL).catch(() => {
     void closeTerminalContext(context, true);
   });
   return { opened: true, reused: false };
@@ -774,6 +870,27 @@ function registerIpc(): void {
     if (bindingHandle === null) throw new Error("No current SSH binding is available.");
     return createTerminalWindow(bindingHandle);
   });
+  ipcMain.handle("lovelyres:docker:container:terminal:open", (event, ...values: unknown[]) => {
+    validateSender(event);
+    const value = values[0];
+    if (
+      values.length !== 1 ||
+      !isRecord(value) ||
+      !hasOnlyKeys(value, ["snapshotHandle", "containerHandle", "containerName"]) ||
+      !isDockerOpaqueHandle(value.snapshotHandle) ||
+      !isDockerOpaqueHandle(value.containerHandle) ||
+      !isDockerContainerName(value.containerName)
+    ) {
+      throw new Error("Invalid container terminal launch request.");
+    }
+    const bindingHandle = terminalBindingState.currentBindingHandle();
+    if (bindingHandle === null) throw new Error("No current SSH binding is available.");
+    return createTerminalWindow(bindingHandle, {
+      snapshotHandle: value.snapshotHandle,
+      containerHandle: value.containerHandle,
+      containerName: value.containerName,
+    });
+  });
   ipcMain.handle("lovelyres:terminal:open", async (event, ...values: unknown[]) => {
     const context = terminalContextFor(event);
     const value = values[0];
@@ -794,12 +911,20 @@ function registerIpc(): void {
     const rows = value.rows;
     context.launchToken = null;
     if (launchToken.length === 0) throw new Error("Invalid terminal launch authorization.");
+    // Which kind of terminal this is was settled when the window was created,
+    // so the window renderer asks for "a terminal" and gets the one its window
+    // is for. It never sends a container handle and cannot swap it.
+    const container = context.container;
     const opened = await openTerminalWithFailureCleanup(
-      () => backend.openTerminal(
-        context.bindingHandle,
-        columns,
-        rows,
-      ),
+      () => (container === null
+        ? backend.openTerminal(context.bindingHandle, columns, rows)
+        : backend.openDockerContainerTerminal(
+          context.bindingHandle,
+          container.snapshotHandle,
+          container.containerHandle,
+          columns,
+          rows,
+        )),
       () => closeTerminalContext(context, true),
     );
     if (!terminalContextIsCurrent(context) || context.terminalHandle !== null) {
@@ -958,58 +1083,105 @@ function registerIpc(): void {
     }
     return backend.getSystemInfoDetail(value.bindingHandle, value.snapshotHandle, value.rowId);
   });
-  ipcMain.handle("lovelyres:snapshot:list", async (event, ...values: unknown[]) => {
-    validateSender(event);
-    if (values.length !== 1 || !isSnapshotOpaqueHandle(values[0])) {
-      throw new Error("Invalid snapshot list request.");
-    }
-    return backend.listSnapshots(values[0]);
-  });
-  ipcMain.handle("lovelyres:snapshot:detail:get", async (event, ...values: unknown[]) => {
+  ipcMain.handle("lovelyres:system-info:row:actions:list", async (event, ...values: unknown[]) => {
     validateSender(event);
     const value = values[0];
     if (
       values.length !== 1 ||
       !isRecord(value) ||
-      !hasOnlyKeys(value, ["bindingHandle", "snapshotHandle"]) ||
-      !isSnapshotOpaqueHandle(value.bindingHandle) ||
-      !isSnapshotOpaqueHandle(value.snapshotHandle)
+      !hasExactKeys(value, ["bindingHandle", "snapshotHandle", "rowId"]) ||
+      !isSshOpaqueHandle(value.bindingHandle) ||
+      !isSystemInfoOpaqueHandle(value.snapshotHandle) ||
+      !isBoundedString(value.rowId, 256, false)
     ) {
-      throw new Error("Invalid snapshot detail request.");
+      throw new Error("Invalid system-information row actions request.");
     }
-    return backend.getSnapshotDetail(value.bindingHandle, value.snapshotHandle);
+    return backend.listSystemInfoRowActions(value.bindingHandle, value.snapshotHandle, value.rowId);
   });
-  ipcMain.handle("lovelyres:snapshot:forensic:diff", async (event, ...values: unknown[]) => {
+  ipcMain.handle("lovelyres:system-info:row:inspect", async (event, ...values: unknown[]) => {
     validateSender(event);
     const value = values[0];
     if (
       values.length !== 1 ||
       !isRecord(value) ||
-      !hasOnlyKeys(value, ["bindingHandle", "input"]) ||
-      !isSnapshotOpaqueHandle(value.bindingHandle) ||
-      !isSnapshotDiffInput(value.input)
+      !hasExactKeys(value, ["bindingHandle", "snapshotHandle", "rowId", "action"]) ||
+      !isSshOpaqueHandle(value.bindingHandle) ||
+      !isSystemInfoOpaqueHandle(value.snapshotHandle) ||
+      !isBoundedString(value.rowId, 256, false) ||
+      !isSystemInfoRowActionKey(value.action)
     ) {
-      throw new Error("Invalid forensic snapshot diff request.");
+      throw new Error("Invalid system-information row inspection request.");
     }
-    return backend.diffForensicSnapshots(value.bindingHandle, value.input);
+    return backend.inspectSystemInfoRow(
+      value.bindingHandle,
+      value.snapshotHandle,
+      value.rowId,
+      value.action,
+    );
   });
-  ipcMain.handle("lovelyres:firewall:inspect", async (event, ...values: unknown[]) => {
+  ipcMain.handle("lovelyres:system-info:row:action:plan", async (event, ...values: unknown[]) => {
     validateSender(event);
-    if (values.length !== 1 || !isFirewallOpaqueHandle(values[0])) {
-      throw new Error("Invalid firewall inspection request.");
+    const value = values[0];
+    if (
+      values.length !== 1 ||
+      !isRecord(value) ||
+      !hasExactKeys(value, ["bindingHandle", "snapshotHandle", "rowId", "action"]) ||
+      !isSshOpaqueHandle(value.bindingHandle) ||
+      !isSystemInfoOpaqueHandle(value.snapshotHandle) ||
+      !isBoundedString(value.rowId, 256, false) ||
+      !isSystemInfoRowActionKey(value.action)
+    ) {
+      throw new Error("Invalid system-information row plan request.");
     }
-    return backend.inspectFirewall(values[0]);
+    return backend.planSystemInfoRowAction(
+      value.bindingHandle,
+      value.snapshotHandle,
+      value.rowId,
+      value.action,
+    );
   });
-  ipcMain.handle(
-    "lovelyres:firewall:change-history:list",
-    async (event, ...values: unknown[]) => {
-      validateSender(event);
-      if (values.length !== 1 || !isFirewallOpaqueHandle(values[0])) {
-        throw new Error("Invalid firewall change-history request.");
-      }
-      return backend.listFirewallChangeHistory(values[0]);
-    },
-  );
+  ipcMain.handle("lovelyres:system-info:row:action:confirm", async (event, ...values: unknown[]) => {
+    validateSender(event);
+    const value = values[0];
+    if (
+      values.length !== 1 ||
+      !isRecord(value) ||
+      !hasExactKeys(value, ["bindingHandle", "planHandle"]) ||
+      !isSshOpaqueHandle(value.bindingHandle) ||
+      !isSystemInfoOpaqueHandle(value.planHandle)
+    ) {
+      throw new Error("Invalid system-information row confirmation.");
+    }
+    return backend.confirmSystemInfoRowAction(value.bindingHandle, value.planHandle);
+  });
+  ipcMain.handle("lovelyres:system-info:row:action:execute", async (event, ...values: unknown[]) => {
+    validateSender(event);
+    const value = values[0];
+    if (
+      values.length !== 1 ||
+      !isRecord(value) ||
+      !hasExactKeys(value, ["bindingHandle", "planHandle"]) ||
+      !isSshOpaqueHandle(value.bindingHandle) ||
+      !isSystemInfoOpaqueHandle(value.planHandle)
+    ) {
+      throw new Error("Invalid system-information row execution request.");
+    }
+    return backend.executeSystemInfoRowAction(value.bindingHandle, value.planHandle);
+  });
+  ipcMain.handle("lovelyres:system-info:row:action:cancel", async (event, ...values: unknown[]) => {
+    validateSender(event);
+    const value = values[0];
+    if (
+      values.length !== 1 ||
+      !isRecord(value) ||
+      !hasExactKeys(value, ["bindingHandle", "planHandle"]) ||
+      !isSshOpaqueHandle(value.bindingHandle) ||
+      !isSystemInfoOpaqueHandle(value.planHandle)
+    ) {
+      throw new Error("Invalid system-information row cancellation.");
+    }
+    return backend.cancelSystemInfoRowAction(value.bindingHandle, value.planHandle);
+  });
   ipcMain.handle("lovelyres:baseline:catalog:get", async (event, ...values: unknown[]) => {
     validateSender(event);
     if (values.length !== 0) throw new Error("Invalid baseline catalog request.");
@@ -1042,42 +1214,6 @@ function registerIpc(): void {
       throw new Error("Invalid baseline file request.");
     }
     return backend.readBaselineFile(value.bindingHandle, value.itemHandle);
-  });
-  ipcMain.handle("lovelyres:middleware:discover", async (event, ...values: unknown[]) => {
-    validateSender(event);
-    if (values.length !== 1 || !isMiddlewareOpaqueHandle(values[0])) {
-      throw new Error("Invalid middleware discovery request.");
-    }
-    return backend.discoverMiddleware(values[0]);
-  });
-  ipcMain.handle(
-    "lovelyres:middleware:configuration:load",
-    async (event, ...values: unknown[]) => {
-      validateSender(event);
-      const value = values[0];
-      if (
-        values.length !== 1 ||
-        !isRecord(value) ||
-        !hasOnlyKeys(value, ["bindingHandle", "discoveryHandle", "instanceHandle"]) ||
-        !isMiddlewareOpaqueHandle(value.bindingHandle) ||
-        !isMiddlewareOpaqueHandle(value.discoveryHandle) ||
-        !isMiddlewareOpaqueHandle(value.instanceHandle)
-      ) {
-        throw new Error("Invalid middleware configuration request.");
-      }
-      return backend.loadMiddlewareConfiguration(
-        value.bindingHandle,
-        value.discoveryHandle,
-        value.instanceHandle,
-      );
-    },
-  );
-  ipcMain.handle("lovelyres:middleware:history:list", async (event, ...values: unknown[]) => {
-    validateSender(event);
-    if (values.length !== 1 || !isMiddlewareOpaqueHandle(values[0])) {
-      throw new Error("Invalid middleware history request.");
-    }
-    return backend.listMiddlewareHistory(values[0]);
   });
   ipcMain.handle("lovelyres:check-audit:catalog:get", async (event, ...values: unknown[]) => {
     validateSender(event);
@@ -1242,6 +1378,66 @@ function registerIpc(): void {
       value.rowHandle,
     );
   });
+  ipcMain.handle("lovelyres:kubernetes:workload:action:plan", async (event, ...values: unknown[]) => {
+    validateSender(event);
+    const value = values[0];
+    if (
+      values.length !== 1 ||
+      !isRecord(value) ||
+      !hasExactKeys(value, [
+        "bindingHandle",
+        "snapshotHandle",
+        "rowHandle",
+        "resourceName",
+        "action",
+      ]) ||
+      !isKubernetesOpaqueHandle(value.bindingHandle) ||
+      !isKubernetesOpaqueHandle(value.snapshotHandle) ||
+      !isKubernetesOpaqueHandle(value.rowHandle) ||
+      !isKubernetesResourceName(value.resourceName) ||
+      !isKubernetesWriteAction(value.action)
+    ) {
+      throw new Error("Invalid Kubernetes workload action plan request.");
+    }
+    return backend.planKubernetesWorkloadAction(
+      value.bindingHandle,
+      value.snapshotHandle,
+      value.rowHandle,
+      value.resourceName,
+      value.action,
+    );
+  });
+  // Confirm, execute and cancel carry the same two handles. They share one
+  // validator rather than three copies that could drift apart, but each
+  // channel is still registered in its own readable statement.
+  const kubernetesActionPlanHandles = (values: unknown[]): { binding: string; plan: string } => {
+    const value = values[0];
+    if (
+      values.length !== 1 ||
+      !isRecord(value) ||
+      !hasExactKeys(value, ["bindingHandle", "planHandle"]) ||
+      !isKubernetesOpaqueHandle(value.bindingHandle) ||
+      !isKubernetesOpaqueHandle(value.planHandle)
+    ) {
+      throw new Error("Invalid Kubernetes workload action request.");
+    }
+    return { binding: value.bindingHandle, plan: value.planHandle };
+  };
+  ipcMain.handle("lovelyres:kubernetes:workload:action:confirm", async (event, ...values: unknown[]) => {
+    validateSender(event);
+    const { binding, plan } = kubernetesActionPlanHandles(values);
+    return backend.confirmKubernetesWorkloadAction(binding, plan);
+  });
+  ipcMain.handle("lovelyres:kubernetes:workload:action:execute", async (event, ...values: unknown[]) => {
+    validateSender(event);
+    const { binding, plan } = kubernetesActionPlanHandles(values);
+    return backend.executeKubernetesWorkloadAction(binding, plan);
+  });
+  ipcMain.handle("lovelyres:kubernetes:workload:action:cancel", async (event, ...values: unknown[]) => {
+    validateSender(event);
+    const { binding, plan } = kubernetesActionPlanHandles(values);
+    return backend.cancelKubernetesWorkloadAction(binding, plan);
+  });
   ipcMain.handle("lovelyres:docker:containers:refresh", async (event, ...values: unknown[]) => {
     validateSender(event);
     const value = values[0];
@@ -1326,6 +1522,66 @@ function registerIpc(): void {
       value.tail,
     );
   });
+  ipcMain.handle("lovelyres:docker:container:action:plan", async (event, ...values: unknown[]) => {
+    validateSender(event);
+    const value = values[0];
+    if (
+      values.length !== 1 ||
+      !isRecord(value) ||
+      !hasExactKeys(value, [
+        "bindingHandle",
+        "snapshotHandle",
+        "containerHandle",
+        "containerName",
+        "action",
+      ]) ||
+      !isDockerOpaqueHandle(value.bindingHandle) ||
+      !isDockerOpaqueHandle(value.snapshotHandle) ||
+      !isDockerOpaqueHandle(value.containerHandle) ||
+      !isDockerContainerName(value.containerName) ||
+      !isDockerWriteAction(value.action)
+    ) {
+      throw new Error("Invalid Docker container action plan request.");
+    }
+    return backend.planDockerContainerAction(
+      value.bindingHandle,
+      value.snapshotHandle,
+      value.containerHandle,
+      value.containerName,
+      value.action,
+    );
+  });
+  // Confirm, execute and cancel carry the same two handles. They share one
+  // validator rather than three copies that could drift apart, but each
+  // channel is still registered in its own readable statement.
+  const dockerActionPlanHandles = (values: unknown[]): { binding: string; plan: string } => {
+    const value = values[0];
+    if (
+      values.length !== 1 ||
+      !isRecord(value) ||
+      !hasExactKeys(value, ["bindingHandle", "planHandle"]) ||
+      !isDockerOpaqueHandle(value.bindingHandle) ||
+      !isDockerOpaqueHandle(value.planHandle)
+    ) {
+      throw new Error("Invalid Docker container action request.");
+    }
+    return { binding: value.bindingHandle, plan: value.planHandle };
+  };
+  ipcMain.handle("lovelyres:docker:container:action:confirm", async (event, ...values: unknown[]) => {
+    validateSender(event);
+    const { binding, plan } = dockerActionPlanHandles(values);
+    return backend.confirmDockerContainerAction(binding, plan);
+  });
+  ipcMain.handle("lovelyres:docker:container:action:execute", async (event, ...values: unknown[]) => {
+    validateSender(event);
+    const { binding, plan } = dockerActionPlanHandles(values);
+    return backend.executeDockerContainerAction(binding, plan);
+  });
+  ipcMain.handle("lovelyres:docker:container:action:cancel", async (event, ...values: unknown[]) => {
+    validateSender(event);
+    const { binding, plan } = dockerActionPlanHandles(values);
+    return backend.cancelDockerContainerAction(binding, plan);
+  });
   ipcMain.handle("lovelyres:emergency-command:catalog:load", async (event, ...values: unknown[]) => {
     validateSender(event);
     if (values.length !== 1 || !isEmergencyCommandOpaqueHandle(values[0])) {
@@ -1339,10 +1595,12 @@ function registerIpc(): void {
     if (
       values.length !== 1 ||
       !isRecord(value) ||
-      !hasOnlyKeys(value, ["bindingHandle", "snapshotHandle", "commandHandle"]) ||
+      !hasOnlyKeys(value, ["bindingHandle", "snapshotHandle", "commandHandle", "containerHandle"]) ||
       !isEmergencyCommandOpaqueHandle(value.bindingHandle) ||
       !isEmergencyCommandOpaqueHandle(value.snapshotHandle) ||
-      !isEmergencyCommandOpaqueHandle(value.commandHandle)
+      !isEmergencyCommandOpaqueHandle(value.commandHandle) ||
+      !(value.containerHandle === undefined ||
+        isEmergencyCommandOpaqueHandle(value.containerHandle))
     ) {
       throw new Error("Invalid emergency command run request.");
     }
@@ -1350,6 +1608,7 @@ function registerIpc(): void {
       value.bindingHandle,
       value.snapshotHandle,
       value.commandHandle,
+      value.containerHandle,
     );
   });
   ipcMain.handle("lovelyres:emergency-command:path:inspect", async (event, ...values: unknown[]) => {
@@ -2212,6 +2471,46 @@ function registerIpc(): void {
     }
     return backend.listSftpDirectory(context.bindingHandle, value.browserHandle, value.directoryHandle);
   });
+  ipcMain.handle("lovelyres:terminal:file-editor:open", (event, ...values: unknown[]) => {
+    // Asked by the browser pane, which already holds both handles. The window
+    // it opens gets them from main, not from its own renderer.
+    const context = terminalContextFor(event);
+    const value = values[0];
+    if (
+      values.length !== 1 ||
+      !isRecord(value) ||
+      !hasOnlyKeys(value, ["browserHandle", "entryHandle", "name", "editable"]) ||
+      !isSftpBrowserOpaqueHandle(value.browserHandle) ||
+      !isSftpBrowserOpaqueHandle(value.entryHandle) ||
+      typeof value.name !== "string" ||
+      value.name.length === 0 ||
+      value.name.length > 255 ||
+      typeof value.editable !== "boolean"
+    ) {
+      throw new Error("Invalid file editor launch request.");
+    }
+    return createTerminalWindow(context.bindingHandle, null, {
+      browserHandle: value.browserHandle,
+      entryHandle: value.entryHandle,
+      name: value.name,
+      editable: value.editable,
+    });
+  });
+  ipcMain.handle("lovelyres:terminal:file-editor:target", (event, ...values: unknown[]) => {
+    // The editor window asking what it was opened for. It cannot ask for a
+    // different file: the answer comes from the context main stored when it
+    // created this window.
+    const context = terminalContextFor(event);
+    if (values.length !== 0) throw new Error("Invalid file editor target request.");
+    const editor = context.editor;
+    if (editor === null) throw new Error("This window is not a file editor.");
+    return {
+      browserHandle: editor.browserHandle,
+      entryHandle: editor.entryHandle,
+      name: editor.name,
+      editable: editor.editable,
+    };
+  });
   ipcMain.handle("lovelyres:terminal:sftp:text:read", async (event, ...values: unknown[]) => {
     const context = terminalContextFor(event);
     const value = values[0];
@@ -2273,14 +2572,35 @@ async function registerRendererProtocol(): Promise<void> {
   });
 }
 
+/**
+ * The window this app wants to open at, and what the display will actually
+ * allow.
+ *
+ * 1920×1080 is the size the pages are laid out for: nine columns of container
+ * table plus the detail rail beside it. Asking for it flat would put the
+ * bottom edge under the taskbar on a 1080p screen — and the bottom edge is
+ * where the status bar lives, so it is the worst part to lose. The work area
+ * is the screen minus whatever the desktop has reserved, so clamping to it
+ * gives the full window on a larger display and a maximised-height one on a
+ * 1080p display, rather than a window hanging off the bottom.
+ */
+function preferredWindowSize(): { width: number; height: number } {
+  const work = screen.getPrimaryDisplay().workAreaSize;
+  return {
+    width: Math.max(MIN_WINDOW_WIDTH, Math.min(1_920, work.width)),
+    height: Math.max(MIN_WINDOW_HEIGHT, Math.min(1_080, work.height)),
+  };
+}
+
 function createWindow(): void {
   Menu.setApplicationMenu(null);
   const theme = themeDefinition(activeTheme);
+  const preferred = preferredWindowSize();
   mainWindow = new BrowserWindow({
-    width: 1_440,
-    height: 920,
-    minWidth: 1_080,
-    minHeight: 700,
+    width: preferred.width,
+    height: preferred.height,
+    minWidth: MIN_WINDOW_WIDTH,
+    minHeight: MIN_WINDOW_HEIGHT,
     show: false,
     backgroundColor: theme.windowBackground,
     title: "LovelyRes",

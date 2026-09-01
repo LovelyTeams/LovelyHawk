@@ -10,6 +10,7 @@ import {
   isDockerSecurityAudit,
   type DockerCollectionKind,
   type DockerContainerInspection,
+  type DockerImageInspection,
   type DockerLogs,
   type DockerNetworkInspection,
   type DockerReadApi,
@@ -25,6 +26,16 @@ import {
   dockerReadScope,
   dockerSecuritySeverityLabel,
   dockerSnapshotMinutes,
+  dockerStateTone,
+  DOCKER_PAGE_SIZES,
+  dockerDistinctImages,
+  dockerDistinctStates,
+  dockerMemoryUsed,
+  dockerPercentValue,
+  dockerStatCards,
+  dockerTabCount,
+  containerRuntimeLabel,
+  containerRuntimeMessage,
   dockerTabLabel,
   filterDockerContainers,
 } from "./docker-read-helpers";
@@ -34,11 +45,38 @@ import {
   type DockerReadStatus,
   type DockerTab,
 } from "./docker-read-state";
+import {
+  isDockerActionPlan,
+  isDockerActionReceipt,
+  type DockerWriteAction,
+  type DockerWriteApi,
+} from "../shared/docker-write-contract";
+import {
+  createDockerActionState,
+  dockerActionReducer,
+} from "./docker-action-state";
+import { DockerActionDialog } from "./DockerActionDialog";
+import {
+  availableDockerActions,
+  canOpenContainerShell,
+  dockerActionLabel,
+  dockerActionTone,
+} from "./docker-action-helpers";
+import { DockerIcon } from "./docker-icons";
+import { useModalScrim } from "./modal-scrim";
 import "./docker-page.css";
 
 export interface DockerPageProps {
   bindingHandle: string | null;
-  api: DockerReadApi;
+  api: DockerReadApi & DockerWriteApi;
+  /**
+   * Deterministic standalone/SSR fixture; production leaves this unset.
+   *
+   * The Kubernetes page has carried one of these for a while, and without it
+   * this page could only ever be rendered empty in a test — so every assertion
+   * about how it looks with data had to be made by reading the JSX.
+   */
+  initialState?: ReturnType<typeof createDockerReadState>;
 }
 
 const tabs: readonly DockerTab[] = [
@@ -46,11 +84,29 @@ const tabs: readonly DockerTab[] = [
 ];
 const LOG_TAIL = 200;
 
-export function DockerPage({ bindingHandle, api }: DockerPageProps) {
-  const [state, dispatch] = useReducer(dockerReadReducer, undefined, createDockerReadState);
+export function DockerPage({ bindingHandle, api, initialState }: DockerPageProps) {
+  const [state, dispatch] = useReducer(
+    dockerReadReducer,
+    initialState ?? createDockerReadState(),
+  );
+  const [actionState, actionDispatch] = useReducer(
+    dockerActionReducer,
+    undefined,
+    createDockerActionState,
+  );
   const [snapshotVersion, setSnapshotVersion] = useState(0);
   const [collectionVersion, setCollectionVersion] = useState(0);
   const [auditVersion, setAuditVersion] = useState(0);
+  // A failed window launch has nowhere else to be seen: the window that would
+  // have carried the message is the one that did not open.
+  const [terminalError, setTerminalError] = useState<string | null>(null);
+  // Narrowing and paging are the operator's view of the list, not part of it,
+  // so they live here rather than in the snapshot reducer: a refresh should
+  // not throw away the filter someone just set.
+  const [stateFilter, setStateFilter] = useState("");
+  const [imageFilter, setImageFilter] = useState("");
+  const [pageIndex, setPageIndex] = useState(0);
+  const [pageSize, setPageSize] = useState<number>(DOCKER_PAGE_SIZES[0]);
   const requestRef = useRef(0);
   const scope = bindingHandle === null ? null : dockerReadScope(bindingHandle);
   const stateIsCurrent = state.scope === scope;
@@ -74,7 +130,7 @@ export function DockerPage({ bindingHandle, api }: DockerPageProps) {
           type: "snapshot-failed",
           scope,
           request,
-          error: "无法读取当前 SSH 绑定的 Docker 容器清单。",
+          error: containerRuntimeMessage(reason),
         });
       }
     });
@@ -184,13 +240,104 @@ export function DockerPage({ bindingHandle, api }: DockerPageProps) {
     };
   }, [api, bindingHandle, scope, selectedResource?.handle, selectedResource?.kind, snapshotHandle, state.scope]);
 
+  // A destructive action must not fire twice from a fast double click, and a
+  // `busy` flag in state is set a render too late to stop the second one.
+  const actionRef = useRef(false);
+  async function openAction(
+    containerHandle: string,
+    containerName: string,
+    action: DockerWriteAction,
+  ) {
+    if (actionRef.current || bindingHandle === null || snapshotHandle === null) return;
+    actionRef.current = true;
+    const request = actionState.requestId + 1;
+    actionDispatch({
+      type: "opened",
+      containerHandle,
+      containerName,
+      action,
+      actionLabel: dockerActionLabel(action),
+    });
+    try {
+      const plan = await api.planDockerContainerAction(
+        bindingHandle, snapshotHandle, containerHandle, containerName, action,
+      );
+      if (!isDockerActionPlan(plan)) throw new Error();
+      actionDispatch({ type: "planned", requestId: request, plan });
+    } catch (reason: unknown) {
+      actionDispatch({
+        type: "failed",
+        requestId: request,
+        message: targetFailureMessage(reason, "这个容器已经不在当前列表里，或者当前状态做不了这个动作。"),
+      });
+    } finally {
+      actionRef.current = false;
+    }
+  }
+
+  async function runAction() {
+    const plan = actionState.plan;
+    if (actionRef.current || bindingHandle === null || plan === null) return;
+    actionRef.current = true;
+    const request = actionState.requestId;
+    actionDispatch({ type: "executing", requestId: request });
+    try {
+      // Approval and execution stay two calls. Nothing runs until the sidecar
+      // has recorded that the operator pressed this button.
+      await api.confirmDockerContainerAction(bindingHandle, plan.planHandle);
+      const receipt = await api.executeDockerContainerAction(bindingHandle, plan.planHandle);
+      if (!isDockerActionReceipt(receipt)) throw new Error();
+      actionDispatch({ type: "executed", requestId: request, receipt });
+      // Whatever the verification said, the list is now out of date.
+      setSnapshotVersion((version) => version + 1);
+    } catch (reason: unknown) {
+      actionDispatch({
+        type: "failed",
+        requestId: request,
+        message: targetFailureMessage(reason, "操作没有完成，主机上的状态请再确认一次。"),
+      });
+    } finally {
+      actionRef.current = false;
+    }
+  }
+
+  // Opening a window is not a mutation, so it does not go through plan and
+  // confirm — but it is still a remote call that a double click would run
+  // twice, and two windows for one container is exactly what the key on the
+  // main-process side exists to prevent.
+  const terminalRef = useRef(false);
+  async function openContainerTerminal(containerHandle: string, containerName: string) {
+    if (terminalRef.current || snapshotHandle === null) return;
+    terminalRef.current = true;
+    try {
+      await api.openDockerContainerTerminal(snapshotHandle, containerHandle, containerName);
+    } catch (reason: unknown) {
+      setTerminalError(targetFailureMessage(
+        reason,
+        `打不开 ${containerName} 的终端，这个容器里可能没有可用的 shell。`,
+      ));
+    } finally {
+      terminalRef.current = false;
+    }
+  }
+
+  function closeAction() {
+    const plan = actionState.plan;
+    // A plan that was never executed is dropped on the sidecar too, rather
+    // than left to expire holding the binding's one dialog slot.
+    if (plan !== null && actionState.receipt === null && bindingHandle !== null) {
+      void api.cancelDockerContainerAction(bindingHandle, plan.planHandle).catch(() => {});
+    }
+    actionDispatch({ type: "closed" });
+  }
+
   if (bindingHandle === null) {
     return (
       <section className="page docker-page">
         <div className="docker-connect-prompt">
           <span aria-hidden="true">◇</span>
           <h1>连接目标后调查 Docker</h1>
-          <p>该页面只读取资源快照，不会修改容器。</p>
+          <p>连上之后可以看容器、镜像、网络、存储卷与安全审计；启停容器这类操作要先确认再执行。</p>
         </div>
       </section>
     );
@@ -233,47 +380,80 @@ export function DockerPage({ bindingHandle, api }: DockerPageProps) {
   }
 
   return (
-    <section className="page docker-page" aria-label="Docker 只读调查">
+    <section className="page docker-page" aria-label="Docker 调查与处置">
+      {/* One line of identity, one line of fact. The old header stacked an
+          all-caps kicker, a generic title and a subtitle, then a coloured
+          banner under it — four bands before the first row of data, and the
+          banner's text ("操作均未开放") had stopped being true. */}
+      {/* Pinned: the operator scrolls a long container list constantly, and
+          losing the runtime name, the counts and the tabs on the way down
+          means scrolling back up to find out where they are. */}
+      <div className="docker-page-top">
       <header className="docker-page-header">
-        <div>
-          <p className="docker-page-kicker">只读调查 · Docker</p>
-          <h1>资源盘点</h1>
-          <p className="docker-page-target">当前目标的只读 Docker 快照</p>
-        </div>
-        <div className="docker-header-actions">
+        <div className="docker-page-identity">
+          {/* Names what actually answered. A Podman machine used to read as
+              an empty Docker one, which looks like an answer and is not. */}
+          <h1>{visibleState.snapshot === null
+            ? "容器"
+            : containerRuntimeLabel(visibleState.snapshot.runtime)}</h1>
           {visibleState.snapshot !== null && (
-            <span className="docker-snapshot-note">
-              快照约 {dockerSnapshotMinutes(visibleState.snapshot.expiresInSeconds)} 后失效
+            <span className="docker-runtime-tag">
+              {visibleState.snapshot.containers.length} 个容器
+              {" · "}
+              快照 {dockerSnapshotMinutes(visibleState.snapshot.expiresInSeconds)}后失效
             </span>
           )}
-          <button
-            className="docker-primary-button"
-            type="button"
-            disabled={visibleState.snapshotStatus === "loading"}
-            onClick={() => setSnapshotVersion((version) => version + 1)}
-          >
-            {visibleState.snapshotStatus === "loading" ? "读取中…" : "刷新全部快照"}
-          </button>
         </div>
+        <button
+          className="docker-primary-button"
+          type="button"
+          disabled={visibleState.snapshotStatus === "loading"}
+          onClick={() => setSnapshotVersion((version) => version + 1)}
+        >
+          {visibleState.snapshotStatus === "loading" ? "读取中…" : "刷新"}
+        </button>
       </header>
 
-      <p className="docker-readonly-banner">
-        当前阶段仅提供调查与资源盘点；容器操作、资源变更、文件访问和终端入口均未开放。
-      </p>
+      {/* The six numbers an operator wants before deciding where to look.
+          Only counts that are actually loaded show a number; a card whose
+          collection has not been read yet says so rather than showing a
+          zero, because a zero here reads as "there are none". */}
+      {visibleState.snapshot !== null && (
+        <div className="docker-stat-row">
+          {dockerStatCards(visibleState).map((card) => (
+            <article key={card.id} className={`docker-stat-card is-${card.tone}`}>
+              <span className="docker-stat-icon"><DockerIcon name={card.icon} size={19} /></span>
+              <div>
+                <p className="docker-stat-label">{card.label}</p>
+                <p className="docker-stat-value">{card.value ?? "—"}</p>
+                <p className="docker-stat-detail">{card.detail}</p>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
 
+      {/* Counts on the tabs, because "how many networks are there" is a
+          question the operator is asking anyway and the tab strip was empty
+          space that could answer it without a click. */}
       <nav className="docker-tabs" aria-label="Docker 资源视图">
-        {tabs.map((tab) => (
-          <button
-            key={tab}
-            type="button"
-            aria-current={visibleState.tab === tab ? "page" : undefined}
-            className={visibleState.tab === tab ? "docker-tab is-active" : "docker-tab"}
-            onClick={() => dispatch({ type: "tab-selected", tab })}
-          >
-            {dockerTabLabel(tab)}
-          </button>
-        ))}
+        {tabs.map((tab) => {
+          const count = dockerTabCount(visibleState, tab);
+          return (
+            <button
+              key={tab}
+              type="button"
+              aria-current={visibleState.tab === tab ? "page" : undefined}
+              className={visibleState.tab === tab ? "docker-tab is-active" : "docker-tab"}
+              onClick={() => dispatch({ type: "tab-selected", tab })}
+            >
+              {dockerTabLabel(tab)}
+              {count === null ? null : <em>{count}</em>}
+            </button>
+          );
+        })}
       </nav>
+      </div>
 
       {visibleState.error !== null && <p className="docker-error" role="alert">{visibleState.error}</p>}
       {visibleState.snapshotStatus === "loading" && visibleState.snapshot === null && (
@@ -288,16 +468,29 @@ export function DockerPage({ bindingHandle, api }: DockerPageProps) {
             <ContainersView
               state={visibleState}
               collection={visibleCollection?.kind === "stats" ? visibleCollection : null}
-              onFilter={(filter) => dispatch({ type: "filter-changed", filter })}
+              onFilter={(filter) => { dispatch({ type: "filter-changed", filter }); setPageIndex(0); }}
               onSelect={(handle) => dispatch({ type: "container-selected", handle })}
               onRefresh={() => setCollectionVersion((version) => version + 1)}
               onLoadLogs={() => void loadLogs()}
+              onAction={(handle, name, action) => void openAction(handle, name, action)}
+              onOpenTerminal={(handle, name) => void openContainerTerminal(handle, name)}
+              terminalError={terminalError}
+              stateFilter={stateFilter}
+              imageFilter={imageFilter}
+              onStateFilter={(value) => { setStateFilter(value); setPageIndex(0); }}
+              onImageFilter={(value) => { setImageFilter(value); setPageIndex(0); }}
+              pageIndex={pageIndex}
+              pageSize={pageSize}
+              onPage={setPageIndex}
+              onPageSize={(size) => { setPageSize(size); setPageIndex(0); }}
             />
           )}
           {visibleState.tab === "images" && (
             <ImagesView
+              state={visibleState}
               status={visibleState.collectionStatus.images ?? "idle"}
               collection={visibleCollection?.kind === "images" ? visibleCollection : null}
+              onSelect={(handle) => dispatch({ type: "image-selected", handle })}
               onRefresh={() => setCollectionVersion((version) => version + 1)}
             />
           )}
@@ -333,6 +526,28 @@ export function DockerPage({ bindingHandle, api }: DockerPageProps) {
           )}
         </main>
       )}
+      {/* A dialog, not a column beside the table. Details are read in bursts —
+          click a row, look, close — and a permanent rail charged the table a
+          third of its width for the rest of the session to pay for that. */}
+      {selectedResource !== null && (
+        <InspectionDialog
+          status={visibleState.inspectionStatus}
+          inspection={visibleState.inspection}
+          onClose={() => dispatch({ type: "selection-cleared" })}
+        />
+      )}
+      {actionState.request !== null && (
+        <DockerActionDialog
+          containerName={actionState.request.containerName}
+          actionLabel={actionState.request.actionLabel}
+          plan={actionState.plan}
+          receipt={actionState.receipt}
+          busy={actionState.busy}
+          error={actionState.error}
+          onConfirm={() => void runAction()}
+          onClose={closeAction}
+        />
+      )}
     </section>
   );
 }
@@ -343,6 +558,9 @@ function selectedInspectionResource(state: ReturnType<typeof createDockerReadSta
 } | null {
   if (state.tab === "containers" && state.selectedContainerHandle !== null) {
     return { kind: "container", handle: state.selectedContainerHandle };
+  }
+  if (state.tab === "images" && state.selectedImageHandle !== null) {
+    return { kind: "image", handle: state.selectedImageHandle };
   }
   if (state.tab === "networks" && state.selectedNetworkHandle !== null) {
     return { kind: "network", handle: state.selectedNetworkHandle };
@@ -360,11 +578,49 @@ interface ContainersViewProps {
   onSelect(handle: string): void;
   onRefresh(): void;
   onLoadLogs(): void;
+  onAction(containerHandle: string, containerName: string, action: DockerWriteAction): void;
+  onOpenTerminal(containerHandle: string, containerName: string): void;
+  terminalError: string | null;
+  stateFilter: string;
+  imageFilter: string;
+  onStateFilter(value: string): void;
+  onImageFilter(value: string): void;
+  pageIndex: number;
+  pageSize: number;
+  onPage(index: number): void;
+  onPageSize(size: number): void;
 }
 
-function ContainersView({ state, collection, onFilter, onSelect, onRefresh, onLoadLogs }: ContainersViewProps) {
-  const containers = filterDockerContainers(state.snapshot?.containers ?? [], state.filter);
+function ContainersView({
+  state,
+  collection,
+  onFilter,
+  onSelect,
+  onRefresh,
+  onLoadLogs,
+  onAction,
+  onOpenTerminal,
+  terminalError,
+  stateFilter,
+  imageFilter,
+  onStateFilter,
+  onImageFilter,
+  pageIndex,
+  pageSize,
+  onPage,
+  onPageSize,
+}: ContainersViewProps) {
+  const all = state.snapshot?.containers ?? [];
+  const containers = filterDockerContainers(all, state.filter)
+    .filter((item) => stateFilter === "" || item.state === stateFilter)
+    .filter((item) => imageFilter === "" || item.image === imageFilter);
   const statsByHandle = new Map(collection?.items.map((item) => [item.containerHandle, item]) ?? []);
+  const pageCount = Math.max(1, Math.ceil(containers.length / pageSize));
+  // Clamped rather than trusted: a filter that shrinks the list while the
+  // operator is on page four would otherwise leave them staring at an empty
+  // table that looks like "no results".
+  const safeIndex = Math.min(pageIndex, pageCount - 1);
+  const page = containers.slice(safeIndex * pageSize, safeIndex * pageSize + pageSize);
   return (
     <>
       <ViewHeader
@@ -372,15 +628,41 @@ function ContainersView({ state, collection, onFilter, onSelect, onRefresh, onLo
         status={state.collectionStatus.stats ?? "idle"}
         onRefresh={onRefresh}
       />
-      <label className="docker-filter">
-        <span>筛选容器</span>
-        <input
-          type="search"
-          value={state.filter}
-          placeholder="名称、镜像、状态或端口"
-          onChange={(event) => onFilter(event.currentTarget.value)}
-        />
-      </label>
+      {terminalError !== null && <p className="docker-error" role="alert">{terminalError}</p>}
+      {/* Free text plus the two things worth narrowing by that the snapshot
+          actually knows. Labels and nodes are not offered: the runtime gives
+          neither on this page, and an empty dropdown is worse than no
+          dropdown. */}
+      <div className="docker-filter-row">
+        <label className="docker-search">
+          <span className="docker-search-glyph"><DockerIcon name="search" /></span>
+          <input
+            type="search"
+            value={state.filter}
+            placeholder="搜索容器名称、镜像或端口…"
+            aria-label="搜索容器"
+            onChange={(event) => onFilter(event.currentTarget.value)}
+          />
+        </label>
+        <label className="docker-select">
+          <span>状态</span>
+          <select value={stateFilter} onChange={(event) => onStateFilter(event.currentTarget.value)}>
+            <option value="">全部</option>
+            {dockerDistinctStates(all).map((value) => (
+              <option key={value} value={value}>{value}</option>
+            ))}
+          </select>
+        </label>
+        <label className="docker-select">
+          <span>镜像</span>
+          <select value={imageFilter} onChange={(event) => onImageFilter(event.currentTarget.value)}>
+            <option value="">全部</option>
+            {dockerDistinctImages(all).map((value) => (
+              <option key={value} value={value}>{value}</option>
+            ))}
+          </select>
+        </label>
+      </div>
       {containers.length === 0 ? (
         <EmptyPanel
           title={(state.snapshot?.containers.length ?? 0) === 0 ? "当前目标没有 Docker 容器" : "没有匹配的容器"}
@@ -389,20 +671,68 @@ function ContainersView({ state, collection, onFilter, onSelect, onRefresh, onLo
       ) : (
         <div className="docker-table-wrap">
           <table className="docker-table">
-            <thead><tr><th>容器</th><th>镜像</th><th>状态</th><th>CPU</th><th>内存</th><th>网络 I/O</th></tr></thead>
+            <thead>
+              <tr>
+                <th>容器</th><th>镜像</th><th>状态</th><th>CPU</th><th>内存</th>
+                <th>网络 I/O</th><th>端口</th><th>运行时长</th><th>操作</th>
+              </tr>
+            </thead>
             <tbody>
-              {containers.map((container) => {
+              {page.map((container) => {
                 const stats = statsByHandle.get(container.containerHandle);
+                const actions = availableDockerActions(container.state);
+                const selected = state.selectedContainerHandle === container.containerHandle;
                 return (
-                  <tr key={container.containerHandle} className={state.selectedContainerHandle === container.containerHandle ? "is-selected" : undefined}>
+                  <tr key={container.containerHandle} className={selected ? "is-selected" : undefined}>
                     <td>
-                      <button className="docker-row-button" type="button" onClick={() => onSelect(container.containerHandle)}>
-                        {container.name || "（未命名）"}
-                      </button>
-                      <small>{container.ports || "无端口信息"}</small>
+                      <div className="docker-name-cell">
+                        <span className="docker-row-glyph"><DockerIcon name="container" size={13} /></span>
+                        <div>
+                          <button className="docker-row-button" type="button" onClick={() => onSelect(container.containerHandle)}>
+                            {container.name || "（未命名）"}
+                          </button>
+                          {/* The runtime's own short id, so what is on screen
+                              matches what `docker ps` on the machine prints.
+                              Display only — every call still goes by handle. */}
+                          <small className="docker-short-id">{container.shortId}</small>
+                        </div>
+                      </div>
                     </td>
-                    <td>{container.image || "—"}</td><td>{container.status || container.state || "—"}</td>
-                    <td>{stats?.cpuPercent || "—"}</td><td>{stats?.memoryUsage || "—"}</td><td>{stats?.networkIo || "—"}</td>
+                    <td className="docker-cell-image">{container.image || "—"}</td>
+                    <td>
+                      {/* The state is the first thing an operator scans for,
+                          and it was a sentence in the same weight as every
+                          other cell. The word is what matters; the rest of the
+                          status line is detail beside it. */}
+                      <span className={`docker-state is-${dockerStateTone(container.state)}`}>
+                        {container.state || "—"}
+                      </span>
+                    </td>
+                    <td className="docker-cell-metric">
+                      <span>{stats?.cpuPercent || "—"}</span>
+                      <DockerMeter percent={stats?.cpuPercent} />
+                    </td>
+                    <td className="docker-cell-metric">
+                      <span>{dockerMemoryUsed(stats?.memoryUsage) || "—"}</span>
+                      <DockerMeter percent={stats?.memoryPercent} />
+                    </td>
+                    <td className="docker-cell-metric"><span>{stats?.networkIo || "—"}</span></td>
+                    <td className="docker-cell-ports">{container.ports || "—"}</td>
+                    {/* The runtime's own words for how long it has been up.
+                        Not computed from the creation time: the two disagree
+                        for anything that has been restarted. */}
+                    <td className="docker-cell-uptime">{container.status || "—"}</td>
+                    <td>
+                      {/* Only what this container can do from where it is.
+                          Anything offered here is still re-checked remotely
+                          before a plan exists. */}
+                      <RowActions
+                        container={container}
+                        actions={actions}
+                        onAction={onAction}
+                        onOpenTerminal={onOpenTerminal}
+                      />
+                    </td>
                   </tr>
                 );
               })}
@@ -410,8 +740,44 @@ function ContainersView({ state, collection, onFilter, onSelect, onRefresh, onLo
           </table>
         </div>
       )}
+      {containers.length > 0 && (
+        <div className="docker-table-footer">
+          <span className="docker-muted">共 {containers.length} 条</span>
+          <div className="docker-pager">
+            <label className="docker-select is-compact">
+              <select
+                aria-label="每页条数"
+                value={String(pageSize)}
+                onChange={(event) => onPageSize(Number(event.currentTarget.value))}
+              >
+                {DOCKER_PAGE_SIZES.map((size) => (
+                  <option key={size} value={String(size)}>{size} 条/页</option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="docker-page-step"
+              aria-label="上一页"
+              disabled={safeIndex === 0}
+              onClick={() => onPage(safeIndex - 1)}
+            >
+              ‹
+            </button>
+            <span className="docker-page-current">{safeIndex + 1} / {pageCount}</span>
+            <button
+              type="button"
+              className="docker-page-step"
+              aria-label="下一页"
+              disabled={safeIndex + 1 >= pageCount}
+              onClick={() => onPage(safeIndex + 1)}
+            >
+              ›
+            </button>
+          </div>
+        </div>
+      )}
       <TruncatedNotice value={(state.snapshot?.truncated ?? false) || (collection?.truncated ?? false)} />
-      <InspectionPanel status={state.inspectionStatus} inspection={state.inspection} />
       {state.selectedContainerHandle !== null && (
         <section className="docker-card docker-logs-card">
           <div className="docker-section-heading">
@@ -429,9 +795,11 @@ function ContainersView({ state, collection, onFilter, onSelect, onRefresh, onLo
   );
 }
 
-function ImagesView({ status, collection, onRefresh }: {
+function ImagesView({ state, status, collection, onSelect, onRefresh }: {
+  state: ReturnType<typeof createDockerReadState>;
   status: DockerReadStatus;
   collection: Extract<DockerReadCollection, { kind: "images" }> | null;
+  onSelect(handle: string): void;
   onRefresh(): void;
 }) {
   return (
@@ -440,11 +808,22 @@ function ImagesView({ status, collection, onRefresh }: {
       {status === "loading" && collection === null ? <StatusPanel label="正在读取镜像…" /> :
         collection === null || collection.items.length === 0 ? <EmptyPanel title="没有镜像记录" detail="刷新当前资源以再次调查。" /> : (
           <div className="docker-card-grid">
-            {collection.items.map((item, index) => (
-              <article className="docker-card" key={`${item.repository}\0${item.tag}\0${index}`}>
-                <h3>{item.repository || "（无仓库名）"}:{item.tag || "（无标签）"}</h3>
-                <dl><dt>摘要</dt><dd>{item.digest || "—"}</dd><dt>大小</dt><dd>{item.size || "—"}</dd><dt>创建时间</dt><dd>{item.createdAt || "—"}</dd></dl>
-              </article>
+            {/* A button, not an article: an image is worth opening — what it
+                runs as, what it starts, what got baked into it. */}
+            {collection.items.map((item) => (
+              <button
+                type="button"
+                className={`docker-card${state.selectedImageHandle === item.imageHandle ? " is-selected" : ""}`}
+                key={item.imageHandle}
+                onClick={() => onSelect(item.imageHandle)}
+              >
+                <h3>{imageDisplayName(item.repository, item.tag, item.shortId)}</h3>
+                <dl>
+                  <dt>短 id</dt><dd>{item.shortId || "—"}</dd>
+                  <dt>大小</dt><dd>{item.size || "—"}</dd>
+                  <dt>创建时间</dt><dd>{item.createdAt || "—"}</dd>
+                </dl>
+              </button>
             ))}
           </div>
         )}
@@ -473,7 +852,6 @@ function NetworksView({ state, collection, onSelect, onRefresh }: {
         </div>
       )}
       <TruncatedNotice value={collection?.truncated ?? false} />
-      <InspectionPanel status={state.inspectionStatus} inspection={state.inspection} />
     </>
   );
 }
@@ -498,7 +876,6 @@ function VolumesView({ state, collection, onSelect, onRefresh }: {
         </div>
       )}
       <TruncatedNotice value={collection?.truncated ?? false} />
-      <InspectionPanel status={state.inspectionStatus} inspection={state.inspection} />
     </>
   );
 }
@@ -563,36 +940,183 @@ export function DockerSecurityView({ status, audit, onRefresh }: {
   );
 }
 
+/**
+ * One line above a view: what it is, and how to reload it.
+ *
+ * It used to be a second header band with its own title and the sentence
+ * "数据严格绑定到当前短期快照" under every view — a fact that never changes,
+ * repeated six times, directly beneath a header that had just said the same
+ * thing. The tab strip already names the view; the only thing worth keeping
+ * here is the button and a word for when it is working.
+ */
 function ViewHeader({ title, status, onRefresh }: { title: string; status: DockerReadStatus; onRefresh(): void }) {
   return (
     <div className="docker-view-header">
-      <div><h2>{title}</h2><p>{status === "loading" ? "正在刷新当前资源…" : "数据严格绑定到当前短期快照。"}</p></div>
-      <button type="button" disabled={status === "loading"} onClick={onRefresh}>{status === "loading" ? "刷新中…" : "刷新当前资源"}</button>
+      <h2>{title}</h2>
+      {status === "loading" ? <span className="docker-muted" role="status">刷新中…</span> : null}
+      <button type="button" disabled={status === "loading"} onClick={onRefresh}>刷新</button>
     </div>
   );
 }
 
-function InspectionPanel({ status, inspection }: { status: DockerReadStatus; inspection: DockerReadInspection | null }) {
-  if (status === "idle") return null;
-  if (status === "loading") return <StatusPanel label="正在读取所选资源详情…" />;
-  if (status === "error" || inspection === null) return <EmptyPanel title="资源详情不可用" detail="选择其他资源或刷新清单。" />;
-  if (inspection.kind === "container") return <ContainerInspectionView inspection={inspection} />;
-  if (inspection.kind === "network") return <NetworkInspectionView inspection={inspection} />;
-  return <VolumeInspectionView inspection={inspection} />;
+/**
+ * The details of one container, network or volume, over the table.
+ *
+ * A dialog rather than a docked column: this is read in bursts — click a row,
+ * look, close — and a rail that is only wanted for those few seconds was
+ * charging the table a third of its width for the whole session.
+ *
+ * Being a dialog brings obligations a rail did not have, and they are all
+ * here: it dims what is behind it, Escape closes it, a click on the backdrop
+ * closes it, and focus lands inside it so the keyboard is not left behind on
+ * the table.
+ */
+export function InspectionDialog({ status, inspection, onClose }: {
+  status: DockerReadStatus;
+  inspection: DockerReadInspection | null;
+  onClose(): void;
+}) {
+  useModalScrim();
+  const closeRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    closeRef.current?.focus();
+    function dismissOnEscape(event: KeyboardEvent): void {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", dismissOnEscape, true);
+    return () => window.removeEventListener("keydown", dismissOnEscape, true);
+  }, [onClose]);
+
+  const body = status === "loading" ? <StatusPanel label="正在读取所选资源详情…" />
+    : status === "error" || inspection === null
+      ? <EmptyPanel title="资源详情不可用" detail="选择其他资源或刷新清单。" />
+      : inspection.kind === "container" ? <ContainerInspectionView inspection={inspection} />
+        : inspection.kind === "image" ? <ImageInspectionView inspection={inspection} />
+          : inspection.kind === "network" ? <NetworkInspectionView inspection={inspection} />
+            : <VolumeInspectionView inspection={inspection} />;
+  return (
+    <div
+      className="docker-detail-backdrop"
+      role="presentation"
+      // Only a click that both starts and ends on the backdrop closes it, so a
+      // drag that began on the text inside does not dismiss what was being read.
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section
+        className="docker-detail-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="所选资源详情"
+        data-testid="docker-detail-dialog"
+      >
+        <header className="docker-detail-head">
+          <h2>{inspection === null ? "资源详情" : inspectionTitle(inspection)}</h2>
+          <button
+            ref={closeRef}
+            type="button"
+            className="docker-detail-close"
+            aria-label="关闭详情"
+            onClick={onClose}
+          >
+            <DockerIcon name="close" size={13} />
+          </button>
+        </header>
+        <div className="docker-detail-body">{body}</div>
+      </section>
+    </div>
+  );
+}
+
+/**
+ * What to call the thing on screen. An image has no single name — it is a
+ * repository and a tag, and an untagged one has neither — so it falls back to
+ * the short id the runtime itself prints rather than to「未命名」.
+ */
+export function inspectionTitle(inspection: DockerReadInspection): string {
+  if (inspection.kind !== "image") return inspection.name || "（未命名）";
+  return imageDisplayName(inspection.repository, inspection.tag, inspection.shortId);
+}
+
+export function imageDisplayName(repository: string, tag: string, shortId: string): string {
+  const named = repository && repository !== "<none>";
+  const tagged = tag && tag !== "<none>";
+  if (named && tagged) return `${repository}:${tag}`;
+  if (named) return repository;
+  return shortId ? `未命名镜像 ${shortId}` : "未命名镜像";
+}
+
+function ImageInspectionView({ inspection }: { inspection: DockerImageInspection }) {
+  // Entrypoint and command are one thing to a reader — what the container will
+  // run — so they are shown as the one line the runtime would actually run.
+  const startup = [...inspection.entrypoint, ...inspection.command].join(" ");
+  return (
+    <section className="docker-inspection">
+      <h3>镜像信息</h3>
+      <dl className="docker-detail-grid">
+        <dt>短 id</dt><dd>{inspection.shortId || "—"}</dd>
+        <dt>标签</dt><dd>{inspection.repoTags.length === 0 ? "没有标签" : inspection.repoTags.join("、")}</dd>
+        <dt>大小</dt><dd>{inspection.size || "—"}</dd>
+        <dt>构建时间</dt><dd>{inspection.createdAt || "—"}</dd>
+        <dt>平台</dt><dd>{[inspection.os, inspection.architecture].filter(Boolean).join("/") || "—"}</dd>
+        <dt>运行身份</dt><dd>{inspection.user || "—"}</dd>
+        <dt>启动命令</dt><dd>{startup || "没有记录"}</dd>
+        <dt>工作目录</dt><dd>{inspection.workingDir || "—"}</dd>
+        <dt>作者</dt><dd>{inspection.author || "—"}</dd>
+      </dl>
+      <h4>内置环境变量</h4>
+      {/* Read as-is: a credential baked into an image is the finding, not
+          something to hide from the person looking for it. */}
+      {inspection.environment.length === 0 ? <p className="docker-muted">没有内置环境变量。</p>
+        : <ul className="docker-plain-list">{inspection.environment.map((item, index) => <li key={index}>{item}</li>)}</ul>}
+      <h4>暴露端口</h4>
+      {inspection.exposedPorts.length === 0 ? <p className="docker-muted">没有暴露端口。</p>
+        : <p className="docker-plain-row">{inspection.exposedPorts.join("、")}</p>}
+      <h4>声明的数据卷</h4>
+      {inspection.declaredVolumes.length === 0 ? <p className="docker-muted">没有声明数据卷。</p>
+        : <p className="docker-plain-row">{inspection.declaredVolumes.join("、")}</p>}
+      <h4>构建步骤</h4>
+      {inspection.history.length === 0 ? <p className="docker-muted">读不到构建步骤（拉下来的镜像通常没有本地记录）。</p>
+        : <ol className="docker-history">{inspection.history.map((step, index) => (
+          <li key={index}>
+            <code>{step.createdBy || "—"}</code>
+            <em>{[step.size, step.createdAt, step.comment].filter(Boolean).join(" · ") || "—"}</em>
+          </li>
+        ))}</ol>}
+      <h4>标签</h4><MetadataList items={inspection.labels} empty="没有标签。" />
+      <h4>层</h4>
+      {inspection.layers.length === 0 ? <p className="docker-muted">没有层记录。</p>
+        : <p className="docker-muted">{inspection.layers.length} 层</p>}
+      <TruncatedNotice value={inspection.truncated} />
+    </section>
+  );
 }
 
 function ContainerInspectionView({ inspection }: { inspection: DockerContainerInspection }) {
   return (
-    <section className="docker-card docker-inspection">
-      <h3>容器详情 · {inspection.name || "（未命名）"}</h3>
+    <section className="docker-inspection">
+      {/* Grouped rather than listed: fifteen equal rows made the two that
+          matter — privileged, and the network mode — sit at the same weight
+          as the working directory. */}
+      <h3>容器信息</h3>
       <MetadataList items={inspection.fields.map((item) => ({ key: item.label, value: item.value }))} empty="没有详情字段。" />
-      <h4>挂载</h4>
+      <h3>挂载卷</h3>
       {inspection.mounts.length === 0 ? <p className="docker-muted">没有挂载记录。</p> : inspection.mounts.map((mount, index) => (
-        <p className="docker-plain-row" key={index}>{mount.kind || "—"} · {mount.source || "—"} → {mount.destination || "—"} · {mount.readWrite ? "可写" : "只读"} · {mount.mode || "—"}</p>
+        <p className="docker-plain-row" key={index}>
+          <span className="docker-mount-path">{mount.source || "—"}</span>
+          <span aria-hidden="true"> → </span>
+          <span className="docker-mount-path">{mount.destination || "—"}</span>
+          <em>{mount.readWrite ? "可写" : "只读"}{mount.kind ? ` · ${mount.kind}` : ""}</em>
+        </p>
       ))}
-      <h4>网络连接</h4>
+      <h3>网络连接</h3>
       {inspection.networks.length === 0 ? <p className="docker-muted">没有网络连接记录。</p> : inspection.networks.map((network, index) => (
-        <p className="docker-plain-row" key={index}>{network.name || "—"} · {network.ipv4Address || network.ipv6Address || "无地址"} · {network.macAddress || "无 MAC"}</p>
+        <p className="docker-plain-row" key={index}>
+          <span className="docker-mount-path">{network.name || "—"}</span>
+          <em>{network.ipv4Address || network.ipv6Address || "无地址"}</em>
+        </p>
       ))}
       <TruncatedNotice value={inspection.truncated} />
     </section>
@@ -601,7 +1125,7 @@ function ContainerInspectionView({ inspection }: { inspection: DockerContainerIn
 
 function NetworkInspectionView({ inspection }: { inspection: DockerNetworkInspection }) {
   return (
-    <section className="docker-card docker-inspection">
+    <section className="docker-inspection">
       <h3>网络详情 · {inspection.name || "（未命名）"}</h3>
       <dl className="docker-detail-grid"><dt>驱动</dt><dd>{inspection.driver || "—"}</dd><dt>范围</dt><dd>{inspection.scope || "—"}</dd><dt>内部网络</dt><dd>{dockerBooleanLabel(inspection.internal)}</dd><dt>IPv6</dt><dd>{dockerBooleanLabel(inspection.ipv6)}</dd><dt>可附加</dt><dd>{dockerBooleanLabel(inspection.attachable)}</dd><dt>Ingress</dt><dd>{dockerBooleanLabel(inspection.ingress)}</dd><dt>IPAM 驱动</dt><dd>{inspection.ipamDriver || "—"}</dd></dl>
       <h4>IPAM</h4>{inspection.ipam.length === 0 ? <p className="docker-muted">没有 IPAM 记录。</p> : inspection.ipam.map((item, index) => <p className="docker-plain-row" key={index}>{item.subnet || "—"} · 网关 {item.gateway || "—"} · 范围 {item.ipRange || "—"}</p>)}
@@ -615,7 +1139,7 @@ function NetworkInspectionView({ inspection }: { inspection: DockerNetworkInspec
 
 function VolumeInspectionView({ inspection }: { inspection: DockerVolumeInspection }) {
   return (
-    <section className="docker-card docker-inspection">
+    <section className="docker-inspection">
       <h3>存储卷详情 · {inspection.name || "（未命名）"}</h3>
       <dl className="docker-detail-grid"><dt>驱动</dt><dd>{inspection.driver || "—"}</dd><dt>范围</dt><dd>{inspection.scope || "—"}</dd><dt>挂载点</dt><dd>{inspection.mountpoint || "—"}</dd><dt>创建时间</dt><dd>{inspection.createdAt || "—"}</dd></dl>
       <h4>选项</h4><MetadataList items={inspection.options} empty="没有选项。" />
@@ -641,6 +1165,99 @@ export function DockerLogsText({ logs }: { logs: DockerLogs }) {
 
 function StatusPanel({ label }: { label: string }) {
   return <div className="docker-status-panel" aria-live="polite"><span aria-hidden="true" />{label}</div>;
+}
+
+/**
+ * The buttons on one row.
+ *
+ * Everything a container can do fits, but not all of it fits in a line — and
+ * a wrapped second line made every row twice as tall for the sake of the two
+ * actions nobody wants to click by accident. So the reversible ones stay in
+ * the row and the ones that cannot be taken back go behind 更多. Both still
+ * open the same confirmation before anything runs; this is about which button
+ * the mouse lands on, not about safety.
+ */
+function RowActions({ container, actions, onAction, onOpenTerminal }: {
+  container: { containerHandle: string; name: string; state: string };
+  actions: readonly DockerWriteAction[];
+  onAction(containerHandle: string, containerName: string, action: DockerWriteAction): void;
+  onOpenTerminal(containerHandle: string, containerName: string): void;
+}) {
+  const [open, setOpen] = useState(false);
+  const name = container.name || "（未命名）";
+  const inline = actions.filter((action) => dockerActionTone(action) !== "danger");
+  const overflow = actions.filter((action) => dockerActionTone(action) === "danger");
+  const button = (action: DockerWriteAction, extra: string) => (
+    <button
+      key={action}
+      type="button"
+      className={`docker-action-button is-${dockerActionTone(action)}${extra}`}
+      data-testid={`docker-action-${action}`}
+      title={`${dockerActionLabel(action)} ${name}`}
+      onClick={() => { setOpen(false); onAction(container.containerHandle, name, action); }}
+    >
+      <DockerIcon name={action} />
+      {dockerActionLabel(action)}
+    </button>
+  );
+  return (
+    <div className="docker-row-actions">
+      {/* A shell is offered only where one can exist. The backend re-checks
+          that the container is running before it opens anything, so this is a
+          courtesy, not the guard. */}
+      {canOpenContainerShell(container.state) && (
+        <button
+          type="button"
+          className="docker-action-button is-terminal"
+          data-testid="docker-open-terminal"
+          title={`进入 ${name} 的终端`}
+          onClick={() => onOpenTerminal(container.containerHandle, name)}
+        >
+          <DockerIcon name="terminal" />终端
+        </button>
+      )}
+      {inline.map((action) => button(action, ""))}
+      {overflow.length > 0 && (
+        <div className="docker-overflow">
+          <button
+            type="button"
+            className="docker-action-button"
+            aria-expanded={open}
+            aria-label={`${name} 的更多操作`}
+            onClick={() => setOpen((value) => !value)}
+          >
+            <DockerIcon name="more" />更多
+          </button>
+          {open && (
+            <div className="docker-overflow-menu" role="group" aria-label={`${name} 的不可撤销操作`}>
+              {overflow.map((action) => button(action, " is-menu-item"))}
+            </div>
+          )}
+        </div>
+      )}
+      {actions.length === 0 && !canOpenContainerShell(container.state) && (
+        <span className="docker-muted">—</span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A bar for a percentage the runtime actually reported.
+ *
+ * The design this follows shows a sparkline here. A sparkline needs a series
+ * and the runtime gives one sample per refresh, so drawing one would be
+ * inventing the shape between the points. A bar says exactly what was
+ * measured, and nothing more.
+ */
+function DockerMeter({ percent }: { percent: string | undefined }) {
+  const value = dockerPercentValue(percent);
+  if (value === null) return null;
+  return (
+    <span className="docker-meter" role="img" aria-label={`占用 ${value}%`}>
+      <span className="docker-meter-fill" style={{ width: `${value}%` }} />
+    </span>
+  );
 }
 
 function EmptyPanel({ title, detail }: { title: string; detail: string }) {

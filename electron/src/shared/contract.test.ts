@@ -25,9 +25,6 @@ import {
   type BaselineCatalog,
   type BaselineHistory,
   type BaselineScan,
-  type MiddlewareConfiguration,
-  type MiddlewareDiscovery,
-  type MiddlewareHistory,
   type PacketCaptureInterfaceList,
   type PacketCapturePoll,
   type PacketCaptureStarted,
@@ -60,8 +57,6 @@ import {
   type DockerReadInspection,
   type DockerResourceKind,
   type DockerSecurityAudit,
-  type FirewallHistory,
-  type FirewallInspection,
   type KubernetesAvailability,
   type KubernetesListInput,
   type KubernetesSnapshot,
@@ -72,9 +67,6 @@ import {
   type SettingsMutationProposal,
   type SettingsMutationResult,
   type SettingsSnapshot,
-  type SnapshotDetail,
-  type SnapshotDiffResult,
-  type SnapshotListResult,
   type SystemInfoDetail,
   type SystemInfoSummary,
   type SystemInfoTable,
@@ -142,29 +134,6 @@ describe("backend response validation", () => {
     expect(api.cancelIntegrityComparison).toHaveLength(2);
   });
 
-  it("re-exports exactly three target-scoped Middleware read methods with concrete bounded results", () => {
-    const api: Pick<
-      LovelyResApi,
-      "discoverMiddleware" | "loadMiddlewareConfiguration" | "listMiddlewareHistory"
-    > = {
-      discoverMiddleware: async (_bindingHandle: string) => ({}) as MiddlewareDiscovery,
-      loadMiddlewareConfiguration: async (
-        _bindingHandle: string,
-        _discoveryHandle: string,
-        _instanceHandle: string,
-      ) => ({}) as MiddlewareConfiguration,
-      listMiddlewareHistory: async (_bindingHandle: string) => ({}) as MiddlewareHistory,
-    };
-    expect(Object.keys(api)).toEqual([
-      "discoverMiddleware",
-      "loadMiddlewareConfiguration",
-      "listMiddlewareHistory",
-    ]);
-    expect(api.discoverMiddleware).toHaveLength(1);
-    expect(api.loadMiddlewareConfiguration).toHaveLength(3);
-    expect(api.listMiddlewareHistory).toHaveLength(1);
-  });
-
   it("re-exports exactly three Baseline read methods with concrete bounded results", () => {
     const api: Pick<
       LovelyResApi,
@@ -182,38 +151,6 @@ describe("backend response validation", () => {
     expect(api.getBaselineCatalog).toHaveLength(0);
     expect(api.scanBaseline).toHaveLength(1);
     expect(api.listBaselineHistory).toHaveLength(1);
-  });
-
-  it("re-exports exactly two target-scoped Firewall read methods with concrete results", () => {
-    const api: Pick<
-      LovelyResApi,
-      "inspectFirewall" | "listFirewallChangeHistory"
-    > = {
-      inspectFirewall: async (_bindingHandle: string) => ({}) as FirewallInspection,
-      listFirewallChangeHistory: async (_bindingHandle: string) => ({}) as FirewallHistory,
-    };
-    expect(Object.keys(api)).toEqual([
-      "inspectFirewall",
-      "listFirewallChangeHistory",
-    ]);
-    expect(api.inspectFirewall).toHaveLength(1);
-    expect(api.listFirewallChangeHistory).toHaveLength(1);
-  });
-
-  it("re-exports exactly three target-scoped Snapshot read methods with concrete results", () => {
-    const api: Pick<
-      LovelyResApi,
-      "listSnapshots" | "getSnapshotDetail" | "diffForensicSnapshots"
-    > = {
-      listSnapshots: async () => ({}) as SnapshotListResult,
-      getSnapshotDetail: async () => ({}) as SnapshotDetail,
-      diffForensicSnapshots: async () => ({}) as SnapshotDiffResult,
-    };
-    expect(Object.keys(api)).toEqual([
-      "listSnapshots",
-      "getSnapshotDetail",
-      "diffForensicSnapshots",
-    ]);
   });
 
   it("re-exports exactly four target-opaque Kubernetes read methods", () => {

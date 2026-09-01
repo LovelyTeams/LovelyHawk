@@ -1,7 +1,36 @@
 .docker-page {
   min-height: 100%;
+  /* The page draws its own bands edge to edge, so the shell's page inset is
+     dropped here rather than fought with per band. */
+  padding: 0;
   color: var(--text);
   background: var(--bg);
+}
+
+/*
+ * Identity, the summary numbers and the tab strip stay put while the table
+ * scrolls under them.
+ *
+ * All three together rather than the header alone: they are one block of
+ * orientation — which machine, how much of what, which view — and scrolling any
+ * part of it away leaves the rest looking like a fragment. The whole band is
+ * about 150px, which is affordable on the 700px minimum window this app
+ * enforces.
+ */
+.docker-page-top {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: var(--surface);
+}
+
+/* The rule under the band lives here rather than on the tab strip.
+   On the strip it forced the active tab's underline to sit at `bottom: -1px`
+   to cover it — one pixel of vertical overflow, and since `overflow-x: auto`
+   computes `overflow-y` to `auto` as well, Chromium answered that pixel with a
+   full 15px vertical scrollbar parked at the right of the tab row. */
+.docker-page-top {
+  border-bottom: 1px solid var(--border-strong);
 }
 
 .docker-page button,
@@ -25,9 +54,24 @@
 }
 
 .docker-page-header {
-  padding: 24px 28px 18px;
+  padding: 16px 28px 14px;
   border-bottom: 1px solid var(--border-strong);
   background: var(--surface);
+}
+
+/* Name and headline fact on one baseline. The old header spent three stacked
+   lines and 24px of padding saying less than this does. */
+.docker-page-identity {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.docker-runtime-tag {
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
 }
 
 .docker-page-header h1,
@@ -39,36 +83,16 @@
 }
 
 .docker-page-header h1 {
-  font-size: 27px;
-  letter-spacing: -0.02em;
+  font-size: 19px;
+  letter-spacing: -0.01em;
 }
 
-.docker-page-kicker,
 .docker-page-target,
 .docker-view-header p,
 .docker-section-heading p,
 .docker-muted {
   margin: 4px 0 0;
   color: var(--muted);
-}
-
-.docker-page-kicker {
-  color: var(--accent-text);
-  font-size: 13px;
-  font-weight: 750;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.docker-header-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.docker-snapshot-note {
-  color: var(--muted);
-  font-size: 13px;
 }
 
 .docker-page button {
@@ -100,63 +124,298 @@
   background: var(--accent-strong);
 }
 
-.docker-readonly-banner {
-  margin: 16px 28px 0;
-  border: 1px solid var(--console-accent);
-  border-radius: 10px;
-  padding: 10px 13px;
-  color: var(--info-text);
-  background: var(--info-soft);
-  line-height: 1.5;
-}
-
+/* An underlined strip rather than a row of pill buttons: the tabs sit against
+   the header they belong to, and the active one is marked by the rule beneath
+   it instead of a filled block that competed with the primary action. */
 .docker-tabs {
   display: flex;
-  gap: 6px;
+  gap: 2px;
   overflow-x: auto;
-  margin: 18px 28px 0;
-  padding-bottom: 2px;
-}
-
-.docker-page .docker-tab {
-  white-space: nowrap;
+  /* Stated, not left to compute. Setting only `overflow-x` makes `overflow-y`
+     compute to `auto` too, so anything that pokes a single pixel below the box
+     buys a scrollbar the width of a finger. */
+  overflow-y: hidden;
+  padding: 0 28px;
   background: var(--surface);
 }
 
-.docker-page .docker-tab.is-active {
-  border-color: var(--accent);
-  color: var(--on-accent);
-  background: var(--accent);
+.docker-page .docker-tab {
+  position: relative;
+  border: 0;
+  border-radius: 0;
+  padding: 9px 13px 8px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
+.docker-page .docker-tab:hover:not(:disabled) {
+  border: 0;
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.docker-page .docker-tab.is-active {
+  border: 0;
+  color: var(--accent-text);
+  background: transparent;
+}
+
+/* Sits on the band's own rule rather than one pixel below the strip, so the
+   active tab still joins the panel without overflowing its box. */
+.docker-page .docker-tab.is-active::after {
+  position: absolute;
+  right: 8px;
+  bottom: 0;
+  left: 8px;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--accent);
+  content: "";
+}
+
+/* The count rides with the label rather than in a badge: a badge on six tabs
+   is six pieces of chrome, and the number is not a notification. */
+.docker-page .docker-tab em {
+  margin-left: 6px;
+  color: var(--faint);
+  font-size: 12px;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+.docker-page .docker-tab.is-active em {
+  color: var(--accent-text);
+}
+
+/* The six summary numbers. Fixed-width cards in a scrolling row rather than a
+   wrapping grid: they read as one band, and a card that drops to a second line
+   stops looking like part of it. */
+.docker-stat-row {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+  padding: 16px 28px 0;
+}
+
+.docker-stat-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: var(--surface);
+}
+
+.docker-stat-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: var(--surface-inset);
+  color: var(--muted);
+  font-size: 17px;
+}
+
+.docker-stat-card.is-total .docker-stat-icon,
+.docker-stat-card.is-images .docker-stat-icon {
+  color: var(--accent-text);
+  background: var(--info-soft);
+}
+
+.docker-stat-card.is-running .docker-stat-icon {
+  color: var(--success-text);
+  background: var(--success-soft);
+}
+
+.docker-stat-card.is-stopped .docker-stat-icon {
+  color: var(--muted);
+  background: var(--surface-inset);
+}
+
+.docker-stat-card.is-networks .docker-stat-icon {
+  color: var(--warning-text);
+  background: var(--warning-soft);
+}
+
+.docker-stat-card.is-volumes .docker-stat-icon {
+  color: var(--accent-text);
+  background: var(--info-soft);
+}
+
+.docker-stat-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.docker-stat-value {
+  margin: 2px 0 0;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.docker-stat-detail {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* The table gets the whole width. Details open over it and then go away. */
 .docker-page-content {
   padding: 20px 28px 32px;
 }
 
+.docker-detail-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--backdrop);
+}
+
+/* Wider than the 320px rail it replaces, because it no longer has to be paid
+   for out of the table's width: a mount line or a container id can sit on one
+   line now instead of wrapping three times. */
+.docker-detail-dialog {
+  display: flex;
+  width: min(560px, 100%);
+  max-height: 100%;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.docker-detail-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 15px 18px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.docker-detail-head h2 {
+  margin: 0;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+/* Only the fields scroll, so the name and the close button stay put however
+   long the list of mounts is. */
+.docker-detail-body {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 4px 18px 18px;
+}
+
+.docker-page .docker-detail-close {
+  flex: none;
+  border: 0;
+  border-radius: 7px;
+  width: 26px;
+  height: 26px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 13px;
+}
+
+.docker-page .docker-detail-close:hover:not(:disabled) {
+  border: 0;
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+/* A row, not a band: title, an optional working word, and the button pushed
+   to the end. */
 .docker-view-header {
-  margin-bottom: 16px;
+  align-items: baseline;
+  justify-content: flex-start;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.docker-view-header button {
+  margin-left: auto;
 }
 
 .docker-view-header h2 {
-  font-size: 20px;
+  font-size: 15px;
 }
 
-.docker-filter {
-  display: grid;
-  gap: 6px;
-  margin-bottom: 14px;
+.docker-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.docker-search {
+  position: relative;
+  flex: 1 1 260px;
+  max-width: 380px;
+}
+
+.docker-search-glyph {
+  position: absolute;
+  top: 50%;
+  left: 11px;
+  transform: translateY(-50%);
   color: var(--muted);
-  font-size: 13px;
-  font-weight: 650;
+  font-size: 14px;
+  pointer-events: none;
 }
 
-.docker-filter input {
-  max-width: 520px;
+.docker-search input {
+  width: 100%;
   border: 1px solid var(--border-strong);
   border-radius: 9px;
-  padding: 9px 11px;
+  padding: 9px 11px 9px 31px;
   color: var(--text);
   background: var(--surface);
+}
+
+.docker-select {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  padding: 0 10px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.docker-select > span::after {
+  content: "：";
+}
+
+.docker-select select {
+  max-width: 190px;
+  border: 0;
+  padding: 8px 2px;
+  color: var(--text);
+  background: transparent;
+  font: inherit;
+}
+
+.docker-select.is-compact > select {
+  padding: 6px 2px;
 }
 
 .docker-table-wrap {
@@ -174,12 +433,31 @@
 
 .docker-table th,
 .docker-table td {
-  min-width: 110px;
+  min-width: 60px;
   border-bottom: 1px solid var(--border);
-  padding: 10px 12px;
+  padding: 9px 10px;
   text-align: left;
   vertical-align: top;
   overflow-wrap: anywhere;
+}
+
+/* Nine columns share the width, and left to itself the browser gave the name
+   121px — enough for "web-frontend" to wrap onto two lines and the short id
+   under it onto two more, which made every row twice the height it needed.
+   The name and the buttons get a floor; the rest can give. */
+.docker-table th:first-child,
+.docker-table td:first-child {
+  min-width: 178px;
+}
+
+.docker-table th:last-child,
+.docker-table td:last-child {
+  min-width: 196px;
+}
+
+.docker-table th:nth-child(3),
+.docker-table td:nth-child(3) {
+  min-width: 88px;
 }
 
 .docker-table th {
@@ -192,8 +470,85 @@
   border-bottom: 0;
 }
 
+.docker-table td {
+  vertical-align: middle;
+}
+
+/* The selected row is marked on its leading edge as well as tinted: on the
+   sakura theme the tint alone is nearly the same value as the row beside it. */
 .docker-table tr.is-selected td {
   background: var(--info-soft);
+}
+
+.docker-table tr.is-selected td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent-strong);
+}
+
+.docker-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.docker-row-glyph {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: var(--surface-inset);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.docker-short-id {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  /* Twelve characters is one token, and half of it on a second line is not a
+     shorter id, it is an unreadable one. */
+  white-space: nowrap;
+}
+
+.docker-name-cell .docker-row-button {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.docker-cell-image,
+.docker-cell-ports,
+.docker-cell-uptime {
+  color: var(--muted);
+}
+
+.docker-cell-metric {
+  white-space: nowrap;
+}
+
+.docker-cell-metric > span {
+  display: block;
+}
+
+/* A bar for a single reading, not a sparkline: the runtime gives one sample
+   per refresh, and a line between two of them would be drawn, not measured. */
+.docker-meter {
+  display: block;
+  overflow: hidden;
+  width: 56px;
+  height: 4px;
+  margin-top: 5px;
+  border-radius: 999px;
+  background: var(--surface-inset);
+}
+
+.docker-meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent-strong);
 }
 
 .docker-page .docker-row-button {
@@ -232,6 +587,22 @@
   color: var(--text);
   background: var(--surface);
   overflow-wrap: anywhere;
+}
+
+/* An image card is a button now, so it has to stop looking like the page's
+   other buttons and go back to reading as a card: full width, left-aligned,
+   its own padding rather than the compact one every toolbar button gets. */
+.docker-page button.docker-card {
+  display: block;
+  width: 100%;
+  padding: 15px;
+  text-align: left;
+  font: inherit;
+}
+
+.docker-page button.docker-card.is-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus-ring) 30%, transparent);
 }
 
 .docker-card h3 {
@@ -313,6 +684,47 @@
   margin: 5px 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* Baked-in environment variables, one per line: a token that ended up in an
+   image is the sort of line that gets copied out, so it stays selectable and
+   never truncated by ellipsis. */
+.docker-plain-list {
+  margin: 5px 0;
+  padding-left: 18px;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.docker-plain-list li {
+  margin: 3px 0;
+}
+
+/* Build steps in the order they ran. The instruction gets its own line at
+   full width — that is the line someone is scanning for. */
+.docker-history {
+  margin: 5px 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 9px;
+}
+
+.docker-history code {
+  display: block;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.docker-history em {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
 }
 
 .docker-security-summary {
@@ -471,19 +883,21 @@
     flex-direction: column;
   }
 
-  .docker-header-actions {
+  /* The identity line wraps rather than squeezing the count onto one row. */
+  .docker-page-identity {
     align-items: flex-start;
     flex-direction: column;
+    gap: 2px;
   }
 
   .docker-page-header,
-  .docker-page-content {
+  .docker-page-content,
+  .docker-tabs {
     padding-right: 16px;
     padding-left: 16px;
   }
 
   .docker-tabs,
-  .docker-readonly-banner,
   .docker-error {
     margin-right: 16px;
     margin-left: 16px;
@@ -498,4 +912,307 @@
 
 @media (prefers-reduced-motion: reduce) {
   .docker-status-panel span { animation: none; }
+}
+
+/* --- 容器操作：行内按钮与确认弹窗 ------------------------------------- */
+
+/* One line, never two: a wrapped row of buttons doubled the height of every
+   row in the table for the sake of the two actions that now live behind 更多. */
+.docker-row-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  margin: 0 -7px;
+  gap: 0 1px;
+  white-space: nowrap;
+}
+
+.docker-overflow {
+  position: relative;
+}
+
+.docker-overflow-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 116px;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  padding: 4px;
+  background: var(--surface);
+  box-shadow: 0 10px 24px var(--backdrop);
+}
+
+.docker-page .docker-action-button.is-menu-item {
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: 7px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+/* Text controls, not four bordered buttons per row. Eight rows of four made
+   thirty-two boxes competing with the data they sit beside; every one of them
+   opens a confirmation dialog first, so weight here buys no safety. */
+.docker-page .docker-action-button {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  border: 0;
+  border-radius: 6px;
+  padding: 3px 7px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.docker-page .docker-action-button > span {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.docker-page .docker-action-button:hover:not(:disabled) {
+  border: 0;
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+/* Only the two that cannot be taken back are coloured. Marking all four spends
+   the row's one warning signal on things that do not need it. */
+.docker-page .docker-action-button.is-danger {
+  color: var(--danger-text);
+}
+
+.docker-page .docker-action-button.is-danger:hover:not(:disabled) {
+  color: var(--danger-text);
+  background: var(--danger-soft);
+}
+
+.docker-page .docker-action-button.is-terminal {
+  color: var(--accent-text);
+}
+
+.docker-page .docker-action-button.is-terminal:hover:not(:disabled) {
+  color: var(--accent-text);
+  background: var(--info-soft);
+}
+
+.docker-table-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+.docker-pager {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.docker-page .docker-page-step {
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  width: 28px;
+  height: 28px;
+  color: var(--text);
+  background: var(--surface);
+  line-height: 1;
+}
+
+.docker-page .docker-page-step:disabled {
+  color: var(--muted);
+  opacity: 0.5;
+}
+
+.docker-page-current {
+  min-width: 52px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.docker-mount-path {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.docker-plain-row em {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.docker-action-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--backdrop);
+}
+
+.docker-action-dialog {
+  display: flex;
+  width: min(480px, 100%);
+  max-height: 100%;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+  padding: 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+/* A scrolling column shrinks its children by default, which would squeeze the
+   plan summary against the footer as soon as it ran past one line. */
+.docker-action-dialog > * {
+  flex: none;
+}
+
+.docker-action-dialog h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.docker-action-dialog header p {
+  margin: 4px 0 0;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.docker-action-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.docker-action-panel {
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface-alt);
+}
+
+.docker-action-panel.is-dangerous {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+}
+
+.docker-action-summary {
+  margin: 0 0 10px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.docker-action-panel dl {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+}
+
+.docker-action-panel dt {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.docker-action-panel dd {
+  margin: 2px 0 0;
+  color: var(--text);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.docker-action-error {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--danger-border);
+  border-radius: 8px;
+  color: var(--danger-text);
+  background: var(--danger-soft);
+  font-size: 12px;
+}
+
+.docker-action-dialog footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.docker-action-dialog footer button {
+  min-height: 32px;
+  padding: 6px 15px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.docker-action-dialog footer button.is-primary {
+  border-color: var(--accent);
+  color: var(--on-accent);
+  background: var(--accent);
+  font-weight: 650;
+}
+
+.docker-action-dialog footer button.is-dangerous {
+  border-color: var(--danger);
+  color: var(--on-accent);
+  background: var(--danger);
+  font-weight: 650;
+}
+
+.docker-action-dialog footer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* --- 状态标记 ---------------------------------------------------------- */
+
+/* Three tones and no more. One colour per state would make the table
+   decorative; three make the two questions an operator actually asks — is it
+   up, did it stop — answerable without reading. */
+.docker-state {
+  display: inline-block;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--surface-inset);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.6;
+}
+
+.docker-state.is-up {
+  border-color: var(--success-border);
+  color: var(--success-text);
+  background: var(--success-soft);
+}
+
+.docker-state.is-down {
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+  background: var(--danger-soft);
 }

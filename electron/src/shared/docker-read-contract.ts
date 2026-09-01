@@ -4,7 +4,7 @@ export type DockerCollectionKind =
   | "networks"
   | "volumes"
   | "compose-projects";
-export type DockerResourceKind = "container" | "network" | "volume";
+export type DockerResourceKind = "container" | "image" | "network" | "volume";
 export type DockerSecuritySeverity = "critical" | "high" | "medium" | "low" | "info";
 export type DockerSecurityCategory =
   | "privileged"
@@ -19,6 +19,14 @@ export const DOCKER_REDACTED_TEXT = "[SENSITIVE DOCKER TEXT REDACTED]" as const;
 
 export interface DockerContainerItem {
   containerHandle: string;
+  /**
+   * The runtime's own twelve-character short id, for display only.
+   *
+   * Shown beside the name so what the pane says matches what an operator sees
+   * in `docker ps` on the machine. Every call still addresses a container by
+   * `containerHandle`; nothing resolves through this.
+   */
+  shortId: string;
   name: string;
   image: string;
   state: string;
@@ -27,11 +35,25 @@ export interface DockerContainerItem {
   createdAt: string;
 }
 
+/** The two runtimes the sidecar knows how to ask. */
+export const CONTAINER_RUNTIMES = ["docker", "podman"] as const;
+export type ContainerRuntime = (typeof CONTAINER_RUNTIMES)[number];
+
 export interface DockerContainerSnapshot {
   snapshotHandle: string;
   expiresInSeconds: number;
   containers: DockerContainerItem[];
   truncated: boolean;
+  /**
+   * Which runtime this snapshot was actually taken from.
+   *
+   * Assuming Docker was wrong on every openEuler, Anolis or RHEL-family host,
+   * where Podman is the default and `docker` often does not exist at all. The
+   * pane says what it is looking at rather than what it hoped for.
+   */
+  runtime: ContainerRuntime;
+  /** Every runtime whose binary the host has, answering or not. */
+  installedRuntimes: ContainerRuntime[];
 }
 
 export interface DockerStatsItem {
@@ -46,6 +68,10 @@ export interface DockerStatsItem {
 }
 
 export interface DockerImageItem {
+  imageHandle: string;
+  /** The 12 characters the runtime prints. Display only — nothing is looked
+   * up by it, because a short id is not unique by construction. */
+  shortId: string;
   repository: string;
   tag: string;
   digest: string;
@@ -199,8 +225,47 @@ export interface DockerVolumeInspection {
   truncated: boolean;
 }
 
+/** One step of the image's build history — the instruction that made a layer. */
+export interface DockerImageHistoryStep {
+  createdAt: string;
+  createdBy: string;
+  size: string;
+  comment: string;
+}
+
+export interface DockerImageInspection {
+  kind: "image";
+  snapshotHandle: string;
+  resourceHandle: string;
+  shortId: string;
+  repository: string;
+  tag: string;
+  digest: string;
+  size: string;
+  createdAt: string;
+  architecture: string;
+  os: string;
+  author: string;
+  /** Already a sentence: an image that set no user runs as root, and this
+   * says so rather than arriving empty. */
+  user: string;
+  entrypoint: string[];
+  command: string[];
+  workingDir: string;
+  environment: string[];
+  exposedPorts: string[];
+  declaredVolumes: string[];
+  labels: DockerMetadata[];
+  layers: string[];
+  repoTags: string[];
+  repoDigests: string[];
+  history: DockerImageHistoryStep[];
+  truncated: boolean;
+}
+
 export type DockerReadInspection =
   | DockerContainerInspection
+  | DockerImageInspection
   | DockerNetworkInspection
   | DockerVolumeInspection;
 
@@ -268,7 +333,7 @@ const encoder = new TextEncoder();
 const collectionKinds = new Set<DockerCollectionKind>([
   "stats", "images", "networks", "volumes", "compose-projects",
 ]);
-const resourceKinds = new Set<DockerResourceKind>(["container", "network", "volume"]);
+const resourceKinds = new Set<DockerResourceKind>(["container", "image", "network", "volume"]);
 const securitySeverities = new Set<DockerSecuritySeverity>([
   "critical", "high", "medium", "low", "info",
 ]);
@@ -352,19 +417,45 @@ export function isDockerLogTail(value: unknown): value is number {
 
 function container(value: unknown): value is DockerContainerItem {
   return record(value) && exact(value, [
-    "containerHandle", "name", "image", "state", "status", "ports", "createdAt",
-  ]) && isDockerOpaqueHandle(value.containerHandle) && text(value.name, 512) &&
+    "containerHandle", "shortId", "name", "image", "state", "status", "ports", "createdAt",
+  ]) && isDockerOpaqueHandle(value.containerHandle) && isDockerShortId(value.shortId) &&
+    text(value.name, 512) &&
     text(value.image, 2_048) && text(value.state, 128) && text(value.status, 1_024) &&
     text(value.ports, 4_096) && text(value.createdAt, 1_024);
+}
+
+/**
+ * A short id and nothing longer.
+ *
+ * Bounded at twelve hexadecimal characters on purpose: it is the display form,
+ * and a field that would accept a full-length id is a field someone could
+ * later be tempted to address a container with.
+ */
+export function isDockerShortId(value: unknown): value is string {
+  return typeof value === "string" &&
+    value.length > 0 && value.length <= 12 &&
+    /^[0-9a-f]+$/u.test(value);
+}
+
+export function isContainerRuntime(value: unknown): value is ContainerRuntime {
+  return typeof value === "string" &&
+    (CONTAINER_RUNTIMES as readonly string[]).includes(value);
 }
 
 export function isDockerContainerSnapshot(value: unknown): value is DockerContainerSnapshot {
   if (!record(value) || !exact(value, [
     "snapshotHandle", "expiresInSeconds", "containers", "truncated",
+    "runtime", "installedRuntimes",
   ]) || !isDockerOpaqueHandle(value.snapshotHandle) ||
     !unsigned(value.expiresInSeconds, 300) || value.expiresInSeconds === 0 ||
     !Array.isArray(value.containers) || value.containers.length > 500 ||
-    typeof value.truncated !== "boolean") return false;
+    typeof value.truncated !== "boolean" ||
+    !isContainerRuntime(value.runtime) ||
+    !Array.isArray(value.installedRuntimes) ||
+    value.installedRuntimes.length > CONTAINER_RUNTIMES.length ||
+    !value.installedRuntimes.every(isContainerRuntime) ||
+    // The runtime that answered has to be one the host was found to have.
+    !value.installedRuntimes.includes(value.runtime)) return false;
   return value.containers.every(container) &&
     uniqueHandles(value.containers as DockerContainerItem[], (item) => item.containerHandle) &&
     withinTextBudget((value.containers as DockerContainerItem[]).flatMap((item) => [
@@ -383,7 +474,9 @@ function stats(value: unknown): value is DockerStatsItem {
 }
 
 function image(value: unknown): value is DockerImageItem {
-  return record(value) && exact(value, ["repository", "tag", "digest", "createdAt", "size"]) &&
+  return record(value) && exact(value, [
+    "imageHandle", "shortId", "repository", "tag", "digest", "createdAt", "size",
+  ]) && isDockerOpaqueHandle(value.imageHandle) && isDockerShortId(value.shortId) &&
     text(value.repository, 2_048) && text(value.tag, 1_024) && text(value.digest, 512) &&
     text(value.createdAt, 1_024) && text(value.size, 256);
 }
@@ -426,6 +519,7 @@ export function isDockerReadCollection(value: unknown): value is DockerReadColle
         markerRequiresProjectionFlag(value.items, value.truncated);
     case "images":
       return value.items.length <= 500 && value.items.every(image) &&
+        uniqueHandles(value.items as DockerImageItem[], (item) => item.imageHandle) &&
         collectionTextWithinBudget(value.items as DockerImageItem[], "images") &&
         markerRequiresProjectionFlag(value.items, value.truncated);
     case "networks":
@@ -530,6 +624,27 @@ export function isDockerReadInspection(value: unknown): value is DockerReadInspe
       inspectionTextWithinBudget(value as unknown as DockerContainerInspection) &&
       markerRequiresProjectionFlag(value, value.truncated);
   }
+  if (value.kind === "image") {
+    return exact(value, [
+      "kind", "snapshotHandle", "resourceHandle", "shortId", "repository", "tag", "digest",
+      "size", "createdAt", "architecture", "os", "author", "user", "entrypoint", "command",
+      "workingDir", "environment", "exposedPorts", "declaredVolumes", "labels", "layers",
+      "repoTags", "repoDigests", "history", "truncated",
+    ]) && inspectionBase(value, "image") && isDockerShortId(value.shortId) &&
+      text(value.repository, 2_048) && text(value.tag, 1_024) && text(value.digest, 512) &&
+      text(value.size, 256) && text(value.createdAt, 512) && text(value.architecture, 128) &&
+      text(value.os, 128) && text(value.author, 512) && text(value.user, 256) &&
+      text(value.workingDir, 1_024) &&
+      textList(value.entrypoint, 4_096) && textList(value.command, 4_096) &&
+      textList(value.environment, 4_096) && textList(value.exposedPorts, 256) &&
+      textList(value.declaredVolumes, 4_096) && textList(value.layers, 256) &&
+      textList(value.repoTags, 2_048) && textList(value.repoDigests, 512) &&
+      Array.isArray(value.labels) && value.labels.length <= 128 && value.labels.every(metadata) &&
+      Array.isArray(value.history) && value.history.length <= 128 &&
+      value.history.every(historyStep) &&
+      inspectionTextWithinBudget(value as unknown as DockerImageInspection) &&
+      markerRequiresProjectionFlag(value, value.truncated);
+  }
   if (value.kind === "network") {
     return exact(value, [
       "kind", "snapshotHandle", "resourceHandle", "name", "driver", "scope", "internal", "ipv6",
@@ -555,9 +670,36 @@ export function isDockerReadInspection(value: unknown): value is DockerReadInspe
     markerRequiresProjectionFlag(value, value.truncated);
 }
 
+/** A bounded array of bounded strings — the shape every image list field has. */
+function textList(value: unknown, maximum: number): value is string[] {
+  return Array.isArray(value) && value.length <= 128 &&
+    value.every((item) => text(item, maximum));
+}
+
+function historyStep(value: unknown): value is DockerImageHistoryStep {
+  return record(value) && exact(value, ["createdAt", "createdBy", "size", "comment"]) &&
+    text(value.createdAt, 512) && text(value.createdBy, 8_192) &&
+    text(value.size, 128) && text(value.comment, 1_024);
+}
+
 function inspectionTextWithinBudget(inspection: DockerReadInspection): boolean {
-  const values: string[] = [inspection.name];
-  if (inspection.kind === "container") {
+  // An image has no single name: it is a repository and a tag, and either can
+  // be absent. Every other kind carries one.
+  const values: string[] = inspection.kind === "image" ? [] : [inspection.name];
+  if (inspection.kind === "image") {
+    values.push(
+      inspection.repository, inspection.tag, inspection.digest, inspection.size,
+      inspection.createdAt, inspection.architecture, inspection.os, inspection.author,
+      inspection.user, inspection.workingDir,
+      ...inspection.entrypoint, ...inspection.command, ...inspection.environment,
+      ...inspection.exposedPorts, ...inspection.declaredVolumes, ...inspection.layers,
+      ...inspection.repoTags, ...inspection.repoDigests,
+    );
+    for (const item of inspection.labels) values.push(item.key, item.value);
+    for (const item of inspection.history) values.push(
+      item.createdAt, item.createdBy, item.size, item.comment,
+    );
+  } else if (inspection.kind === "container") {
     for (const item of inspection.fields) values.push(item.label, item.value);
     for (const item of inspection.mounts) values.push(item.kind, item.source, item.destination, item.mode);
     for (const item of inspection.networks) values.push(

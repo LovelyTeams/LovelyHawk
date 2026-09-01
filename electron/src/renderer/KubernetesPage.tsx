@@ -1,5 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 
+import { targetFailureMessage } from "./target-lost";
+
 import {
   KUBERNETES_READ_TABS,
   isKubernetesAvailability,
@@ -18,6 +20,10 @@ import {
   kubernetesNamespaceCapability,
   kubernetesReadScope,
   kubernetesRowName,
+  kubernetesColumns,
+  kubernetesRowNeedsAttention,
+  kubernetesRowState,
+  kubernetesStatCards,
   kubernetesRowSubtitle,
   kubernetesTabLabel,
   windowedKubernetesRows,
@@ -28,11 +34,28 @@ import {
   kubernetesReadReducer,
   type KubernetesReadState,
 } from "./kubernetes-read-state";
+import {
+  isKubernetesActionPlan,
+  isKubernetesActionReceipt,
+  MAX_KUBERNETES_REPLICAS,
+  type KubernetesWriteAction,
+  type KubernetesWriteApi,
+} from "../shared/kubernetes-write-contract";
+import {
+  createKubernetesActionState,
+  kubernetesActionReducer,
+} from "./kubernetes-action-state";
+import { KubernetesActionDialog } from "./KubernetesActionDialog";
+import { useModalScrim } from "./modal-scrim";
+import {
+  availableKubernetesActions,
+  kubernetesActionLabel,
+} from "./kubernetes-action-helpers";
 import "./kubernetes-page.css";
 
 interface KubernetesPageProps {
   bindingHandle: string | null;
-  api: KubernetesReadApi;
+  api: KubernetesReadApi & KubernetesWriteApi;
   /** Deterministic standalone/SSR fixture; production leaves this unset. */
   initialState?: KubernetesReadState;
 }
@@ -42,7 +65,21 @@ export function KubernetesPage({ bindingHandle, api, initialState }: KubernetesP
     kubernetesReadReducer,
     initialState ?? createKubernetesReadState(),
   );
+  const [actionState, actionDispatch] = useReducer(
+    kubernetesActionReducer,
+    undefined,
+    createKubernetesActionState,
+  );
   const [refreshVersion, setRefreshVersion] = useState(0);
+  // Which row the replica input is open for, and what it holds. Kept as a
+  // string so a half-typed value is not silently coerced to a number.
+  const [scaleRow, setScaleRow] = useState<string | null>(null);
+  const [scaleReplicas, setScaleReplicas] = useState("1");
+  // Narrowing to what is broken is the operator's view of the list, not part
+  // of it, so a refresh does not throw it away.
+  const [attentionOnly, setAttentionOnly] = useState(false);
+  // The details dim what is behind them, like every other modal in the app.
+  useModalScrim(state.selectedRowHandle !== null);
   const requestRef = useRef(0);
   const scope = bindingHandle === null ? null : kubernetesReadScope(bindingHandle);
   const visibleState = state.scope === scope ? state : createKubernetesReadState(scope);
@@ -54,7 +91,14 @@ export function KubernetesPage({ bindingHandle, api, initialState }: KubernetesP
   const activeStatus = visibleState.activeTab === "namespaces"
     ? visibleState.namespacesStatus
     : visibleState.listStatus;
-  const filteredRows = filteredKubernetesRows(activeSnapshot, visibleState.query);
+  const searched = filteredKubernetesRows(activeSnapshot, visibleState.query);
+  // Counted before the toggle is applied, so the badge says how many there are
+  // rather than how many are showing.
+  const attentionCount = searched.filter(kubernetesRowNeedsAttention).length;
+  const filteredRows = attentionOnly
+    ? searched.filter(kubernetesRowNeedsAttention)
+    : searched;
+  const columns = kubernetesColumns(visibleState.activeTab);
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / KUBERNETES_ROW_WINDOW));
   const safePage = Math.min(visibleState.page, pageCount - 1);
   const shownRows = windowedKubernetesRows(filteredRows, safePage);
@@ -69,6 +113,18 @@ export function KubernetesPage({ bindingHandle, api, initialState }: KubernetesP
   useEffect(() => {
     dispatch({ type: "scope-changed", scope });
   }, [scope]);
+
+  // The details are a dialog now, so they owe the operator a way out that is
+  // not hunting for a close button.
+  const detailOpen = visibleState.selectedRowHandle !== null;
+  useEffect(() => {
+    if (!detailOpen) return;
+    function dismissOnEscape(event: KeyboardEvent): void {
+      if (event.key === "Escape") closeDetail();
+    }
+    window.addEventListener("keydown", dismissOnEscape, true);
+    return () => window.removeEventListener("keydown", dismissOnEscape, true);
+  }, [detailOpen, scope]);
 
   useEffect(() => {
     if (scope === null || bindingHandle === null) return;
@@ -182,7 +238,7 @@ export function KubernetesPage({ bindingHandle, api, initialState }: KubernetesP
         <div className="kubernetes-connect-state">
           <span aria-hidden="true">⎈</span>
           <h1>连接目标后调查 Kubernetes</h1>
-          <p>只读取资源快照、详情与 Pod 日志，不会修改集群。</p>
+          <p>连上之后可以看命名空间、Pod、Deployment 与节点；调整副本数、隔离节点这类操作要先确认再执行。</p>
         </div>
       </section>
     );
@@ -225,6 +281,11 @@ export function KubernetesPage({ bindingHandle, api, initialState }: KubernetesP
     }
   }
 
+  function closeDetail() {
+    if (scope === null) return;
+    dispatch({ type: "row-cleared", scope });
+  }
+
   function selectRow(row: KubernetesReadRow) {
     if (scope === null || activeSnapshot === null) return;
     dispatch({
@@ -235,32 +296,119 @@ export function KubernetesPage({ bindingHandle, api, initialState }: KubernetesP
     });
   }
 
+  // A destructive action must not fire twice from a fast double click, and a
+  // `busy` flag in state is set a render too late to stop the second one.
+  const actionRef = useRef(false);
+  async function openAction(row: KubernetesReadRow, action: KubernetesWriteAction) {
+    if (actionRef.current || bindingHandle === null || activeSnapshot === null) return;
+    actionRef.current = true;
+    const request = actionState.requestId + 1;
+    actionDispatch({
+      type: "opened",
+      rowHandle: row.rowHandle,
+      resourceName: row.name,
+      action,
+      actionLabel: kubernetesActionLabel(action.kind),
+    });
+    try {
+      const plan = await api.planKubernetesWorkloadAction(
+        bindingHandle, activeSnapshot.snapshotHandle, row.rowHandle, row.name, action,
+      );
+      if (!isKubernetesActionPlan(plan)) throw new Error();
+      actionDispatch({ type: "planned", requestId: request, plan });
+    } catch (reason: unknown) {
+      actionDispatch({
+        type: "failed",
+        requestId: request,
+        message: kubernetesActionFailure(reason),
+      });
+    } finally {
+      actionRef.current = false;
+    }
+  }
+
+  async function runAction() {
+    const plan = actionState.plan;
+    if (actionRef.current || bindingHandle === null || plan === null) return;
+    actionRef.current = true;
+    const request = actionState.requestId;
+    actionDispatch({ type: "executing", requestId: request });
+    try {
+      // Approval and execution stay two calls. Nothing runs until the sidecar
+      // has recorded that the operator pressed this button.
+      await api.confirmKubernetesWorkloadAction(bindingHandle, plan.planHandle);
+      const receipt = await api.executeKubernetesWorkloadAction(bindingHandle, plan.planHandle);
+      if (!isKubernetesActionReceipt(receipt)) throw new Error();
+      actionDispatch({ type: "executed", requestId: request, receipt });
+      // Whatever the read-back said, the list is now out of date.
+      setRefreshVersion((version) => version + 1);
+    } catch (reason: unknown) {
+      actionDispatch({
+        type: "failed",
+        requestId: request,
+        message: kubernetesActionFailure(reason),
+      });
+    } finally {
+      actionRef.current = false;
+    }
+  }
+
+  function closeAction() {
+    const plan = actionState.plan;
+    // A plan that was never executed is dropped on the sidecar too, rather
+    // than left to expire holding the binding's one dialog slot.
+    if (plan !== null && actionState.receipt === null && bindingHandle !== null) {
+      void api.cancelKubernetesWorkloadAction(bindingHandle, plan.planHandle).catch(() => {});
+    }
+    actionDispatch({ type: "closed" });
+  }
+
+  /**
+   * The two refusals worth telling apart from a generic failure: an action
+   * that does not apply to the kind of thing clicked, and a row that is no
+   * longer in a live snapshot. Both are things the operator can act on.
+   */
+  function kubernetesActionFailure(reason: unknown): string {
+    const message = reason instanceof Error ? reason.message : String(reason ?? "");
+    if (message.includes("kubernetes-action-kind-mismatch")) {
+      return "这个动作不适用于所选资源。";
+    }
+    if (message.includes("kubernetes-resource-unavailable")) {
+      return "这个资源已经不在当前列表里，刷新后再试。";
+    }
+    return targetFailureMessage(reason, "操作没有完成，集群里的状态请再确认一次。");
+  }
+
   const available = visibleState.availability?.apiReachable === true;
   return (
     <section className="page kubernetes-page">
+      {/* Pinned, the same way the Docker pane pins its own: identity, cluster
+          scope and the resource tabs are what tell you where you are, and a
+          long pod list scrolled all of it away. */}
+      <div className="kubernetes-page-top">
+      {/* Name, cluster, reachability on one baseline. The old header stacked
+          an eyebrow reading "只读" — which had stopped being true — over a
+          title, over a subtitle, with the availability pill floated opposite;
+          four things saying what two can. */}
       <header className="page-heading kubernetes-heading">
-        <div>
-          <p className="eyebrow">只读</p>
-          <h1>Kubernetes 调查</h1>
-          <p>
-            当前目标
-            {visibleState.availability?.currentContext
-              ? ` · Context ${visibleState.availability.currentContext}`
-              : " · 正在确认 context"}
-          </p>
-        </div>
-        <div className="kubernetes-heading-actions">
+        <div className="kubernetes-identity">
+          <h1>Kubernetes</h1>
           <span className={`kubernetes-availability ${available ? "ready" : "pending"}`}>
             {available ? "API 可达" : "API 未就绪"}
           </span>
-          <button
-            type="button"
-            disabled={visibleState.availabilityStatus === "loading"}
-            onClick={() => setRefreshVersion((version) => version + 1)}
-          >
-            {visibleState.availabilityStatus === "loading" ? "刷新中…" : "刷新调查"}
-          </button>
+          {visibleState.availability?.currentContext ? (
+            <span className="kubernetes-context">
+              context {visibleState.availability.currentContext}
+            </span>
+          ) : null}
         </div>
+        <button
+          type="button"
+          disabled={visibleState.availabilityStatus === "loading"}
+          onClick={() => setRefreshVersion((version) => version + 1)}
+        >
+          {visibleState.availabilityStatus === "loading" ? "刷新中…" : "刷新"}
+        </button>
       </header>
 
       {visibleState.notice !== null ? (
@@ -329,6 +477,28 @@ export function KubernetesPage({ bindingHandle, api, initialState }: KubernetesP
         ))}
       </nav>
 
+      {/* What is broken, before any scrolling. On this page that is the first
+          question, and it used to require reading every row to answer. Only
+          tabs that have been read contribute a number — a tab nobody opened
+          shows no count rather than a zero that would read as "none". */}
+      {available && (
+        <div className="kubernetes-stat-row">
+          {kubernetesStatCards({
+            ...(visibleState.namespaces === null ? {} : { namespaces: visibleState.namespaces.rows }),
+            ...(visibleState.activeTab === "pods" && activeSnapshot !== null ? { pods: activeSnapshot.rows } : {}),
+            ...(visibleState.activeTab === "deployments" && activeSnapshot !== null ? { deployments: activeSnapshot.rows } : {}),
+            ...(visibleState.activeTab === "nodes" && activeSnapshot !== null ? { nodes: activeSnapshot.rows } : {}),
+          }).map((card) => (
+            <article key={card.id} className={`kubernetes-stat-card is-${card.tone}`}>
+              <p className="kubernetes-stat-label">{card.label}</p>
+              <p className="kubernetes-stat-value">{card.value ?? "—"}</p>
+              <p className="kubernetes-stat-detail">{card.detail}</p>
+            </article>
+          ))}
+        </div>
+      )}
+      </div>
+
       <div className="kubernetes-workbench">
         <section className="kubernetes-resources" aria-labelledby="kubernetes-resources-title">
           <header>
@@ -336,19 +506,36 @@ export function KubernetesPage({ bindingHandle, api, initialState }: KubernetesP
               <p>资源快照</p>
               <h2 id="kubernetes-resources-title">{kubernetesTabLabel(visibleState.activeTab)}</h2>
             </div>
-            <label className="kubernetes-search">
-              <span>搜索当前快照</span>
-              <input
-                type="search"
-                value={visibleState.query}
-                maxLength={256}
-                onChange={(event) => dispatch({
-                  type: "query-changed",
-                  query: event.currentTarget.value,
-                })}
-                placeholder="名称、状态、节点或镜像"
-              />
-            </label>
+            <div className="kubernetes-filters">
+              <label className="kubernetes-search">
+                <span>搜索当前快照</span>
+                <input
+                  type="search"
+                  value={visibleState.query}
+                  maxLength={256}
+                  onChange={(event) => dispatch({
+                    type: "query-changed",
+                    query: event.currentTarget.value,
+                  })}
+                  placeholder="名称、状态、节点或镜像"
+                />
+              </label>
+              {/* The one filter this page actually needs. A cluster with two
+                  hundred pods puts the three that matter somewhere in the
+                  middle, and scrolling for them is how they get missed. */}
+              <label className="kubernetes-attention-toggle">
+                <input
+                  type="checkbox"
+                  checked={attentionOnly}
+                  onChange={(event) => {
+                    setAttentionOnly(event.currentTarget.checked);
+                    dispatch({ type: "page-selected", page: 0 });
+                  }}
+                />
+                只看要处理的
+                {attentionCount > 0 && <em>{attentionCount}</em>}
+              </label>
+            </div>
           </header>
 
           {!available && visibleState.availabilityStatus !== "loading" ? (
@@ -368,24 +555,60 @@ export function KubernetesPage({ bindingHandle, api, initialState }: KubernetesP
             <div className="kubernetes-state">当前快照没有匹配搜索条件的资源。</div>
           ) : null}
 
-          <div className="kubernetes-resource-list" role="list">
-            {shownRows.map((row) => (
-              <button
-                type="button"
-                role="listitem"
-                key={row.rowHandle}
-                className={row.rowHandle === visibleState.selectedRowHandle ? "active" : undefined}
-                aria-pressed={row.rowHandle === visibleState.selectedRowHandle}
-                onClick={() => selectRow(row)}
-              >
-                <span>
-                  <strong>{kubernetesRowName(row)}</strong>
-                  <small>{kubernetesRowSubtitle(row)}</small>
-                </span>
-                <span className={`kubernetes-kind ${row.kind}`}>{row.kind}</span>
-                {row.textTruncated ? <em>字段已截断</em> : null}
-              </button>
-            ))}
+          {/* A table, not a list of run-on lines. Restart counts and ready
+              ratios are exactly the things you want to run your eye down a
+              column of, and they used to be buried mid-sentence in each row. */}
+          <div className="kubernetes-table-wrap">
+            <table className="kubernetes-table">
+              <thead>
+                <tr>
+                  {columns.map((column) => (
+                    <th key={column.key} className={column.numeric === true ? "is-numeric" : undefined}>
+                      {column.label}
+                    </th>
+                  ))}
+                  <th>状态</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shownRows.map((row) => {
+                  const state = kubernetesRowState(row);
+                  const attention = kubernetesRowNeedsAttention(row);
+                  const selected = row.rowHandle === visibleState.selectedRowHandle;
+                  return (
+                    <tr
+                      key={row.rowHandle}
+                      className={[
+                        selected ? "is-selected" : "",
+                        attention ? "needs-attention" : "",
+                      ].filter(Boolean).join(" ") || undefined}
+                    >
+                      {columns.map((column, index) => (
+                        <td
+                          key={column.key}
+                          className={column.numeric === true ? "is-numeric" : undefined}
+                        >
+                          {index === 0 ? (
+                            <button
+                              type="button"
+                              className="kubernetes-row-button"
+                              aria-pressed={selected}
+                              onClick={() => selectRow(row)}
+                            >
+                              {column.read(row)}
+                            </button>
+                          ) : column.read(row)}
+                        </td>
+                      ))}
+                      <td>
+                        <span className={`kubernetes-state is-${state.tone}`}>{state.label}</span>
+                        {row.textTruncated ? <em>字段已截断</em> : null}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
 
           {activeSnapshot?.truncated ? (
@@ -410,9 +633,34 @@ export function KubernetesPage({ bindingHandle, api, initialState }: KubernetesP
           ) : null}
         </section>
 
-        <aside className="kubernetes-detail" aria-label="资源详情与 Pod 日志">
+        {/* A dialog over the table rather than a column beside it. Details are
+            read in bursts — pick a row, look, close — and a permanent column
+            was charging the table 40% of its width for the whole session, on a
+            page whose rows have eight columns to show. */}
+        {selectedRow !== null && (
+        <div
+          className="kubernetes-detail-backdrop"
+          role="presentation"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) closeDetail();
+          }}
+        >
+        <aside className="kubernetes-detail" role="dialog" aria-modal="true" aria-label="资源详情与 Pod 日志">
           <header>
-            <div><p>详情</p><h2>详情</h2></div>
+            {/* It used to say 详情 twice, one under the other. The second line
+                now names what is selected, which is the thing worth knowing. */}
+            <div>
+              <h2>详情</h2>
+              {selectedRow === null ? null : <p>{selectedRow.name}</p>}
+            </div>
+            <button
+              type="button"
+              className="kubernetes-detail-close"
+              aria-label="关闭详情"
+              onClick={closeDetail}
+            >
+              ✕
+            </button>
             {selectedRow !== null && activeSnapshot !== null ? (
               <div className="kubernetes-detail-actions">
                 <button
@@ -435,9 +683,58 @@ export function KubernetesPage({ bindingHandle, api, initialState }: KubernetesP
                     )}
                   >读取最近 Pod 日志</button>
                 ) : null}
+                {/* Only what this kind of resource can do, and for a node only
+                    the direction it is not already in. Anything offered here
+                    is still re-checked against the cluster before a plan
+                    exists. */}
+                {availableKubernetesActions(selectedRow).map((kind) => (
+                  <button
+                    key={kind}
+                    type="button"
+                    className="kubernetes-action-button"
+                    data-testid={`kubernetes-action-${kind}`}
+                    onClick={() => {
+                      if (kind === "scale-deployment") {
+                        setScaleRow(selectedRow.rowHandle);
+                        return;
+                      }
+                      void openAction(selectedRow, { kind });
+                    }}
+                  >
+                    {kubernetesActionLabel(kind)}
+                  </button>
+                ))}
               </div>
             ) : null}
           </header>
+          {scaleRow !== null && selectedRow !== null && scaleRow === selectedRow.rowHandle ? (
+            <form
+              className="kubernetes-scale-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const replicas = Number(scaleReplicas);
+                if (!Number.isInteger(replicas) || replicas < 0 ||
+                  replicas > MAX_KUBERNETES_REPLICAS) return;
+                setScaleRow(null);
+                void openAction(selectedRow, { kind: "scale-deployment", replicas });
+              }}
+            >
+              <label>
+                <span>目标副本数</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={MAX_KUBERNETES_REPLICAS}
+                  step={1}
+                  value={scaleReplicas}
+                  data-testid="kubernetes-scale-replicas"
+                  onChange={(event) => setScaleReplicas(event.currentTarget.value)}
+                />
+              </label>
+              <button type="submit" data-testid="kubernetes-scale-submit">下一步</button>
+              <button type="button" onClick={() => setScaleRow(null)}>取消</button>
+            </form>
+          ) : null}
           {selectedRow === null ? (
             <div className="kubernetes-state">选择资源后查看纯文本详情。</div>
           ) : null}
@@ -463,11 +760,26 @@ export function KubernetesPage({ bindingHandle, api, initialState }: KubernetesP
             </div>
           ) : null}
         </aside>
+        </div>
+        )}
       </div>
 
       <footer className="kubernetes-boundary-note">
-        只读取固定的资源类型；远端文本一律按纯文本展示，不会被当作链接、路径或操作执行。
+        只认固定的几类资源；集群返回的文本一律按纯文本展示，不会被当作链接、路径或操作执行。
+        改动集群的操作先出计划、再确认、执行后回读核对。
       </footer>
+      {actionState.request !== null && (
+        <KubernetesActionDialog
+          resourceName={actionState.request.resourceName}
+          actionLabel={actionState.request.actionLabel}
+          plan={actionState.plan}
+          receipt={actionState.receipt}
+          busy={actionState.busy}
+          error={actionState.error}
+          onConfirm={() => void runAction()}
+          onClose={closeAction}
+        />
+      )}
     </section>
   );
 }

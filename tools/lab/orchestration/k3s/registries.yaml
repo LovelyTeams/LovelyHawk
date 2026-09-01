@@ -1,0 +1,8 @@
+# k3s does not use the Docker daemon; it has its own containerd, with its own
+# registry configuration. Without this file every pod — including k3s's own
+# coredns and the pause image behind every sandbox — sits in ContainerCreating
+# until it times out against an unreachable Docker Hub.
+mirrors:
+  docker.io:
+    endpoint:
+      - "https://docker.m.daocloud.io"

@@ -1,4 +1,6 @@
-import { useEffect, useRef, type ReactElement } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactElement } from "react";
+
+import { menuMaxHeight, placeMenu } from "./menu-placement";
 
 import type { SftpBrowserEntry } from "../shared/sftp-browser-contract";
 import {
@@ -16,6 +18,7 @@ import {
 export type SftpMenuAction =
   | "open"
   | "preview"
+  | "edit"
   | "download"
   | "rename"
   | "chmod"
@@ -53,6 +56,19 @@ export function SftpContextMenu({
   onDismiss,
 }: SftpContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
+  // Measured, then placed, before the browser paints — so the menu is never
+  // seen at the raw cursor position and then jumping.
+  const [placed, setPlaced] = useState<{ x: number; y: number } | null>(null);
+  const [ceiling, setCeiling] = useState<number | null>(null);
+
+  useLayoutEffect(() => {
+    const node = ref.current;
+    if (node === null) return;
+    const box = node.getBoundingClientRect();
+    const viewport = { width: window.innerWidth, height: window.innerHeight };
+    setPlaced(placeMenu(position, { width: box.width, height: box.height }, viewport));
+    setCeiling(menuMaxHeight(viewport.height));
+  }, [position, entry]);
 
   useEffect(() => {
     ref.current?.querySelector("button")?.focus();
@@ -79,7 +95,14 @@ export function SftpContextMenu({
       className="sftp-context-menu"
       role="menu"
       data-testid="sftp-context-menu"
-      style={{ left: `${position.x}px`, top: `${position.y}px` }}
+      style={{
+        left: `${(placed ?? position).x}px`,
+        top: `${(placed ?? position).y}px`,
+        maxHeight: ceiling === null ? undefined : `${ceiling}px`,
+        // Hidden for the one frame between mounting and being measured. It is
+        // laid out either way, so the measurement is real.
+        visibility: placed === null ? "hidden" : undefined,
+      }}
     >
       {entry === null ? null : <p className="sftp-context-menu-title">{entry.name}</p>}
       {items.map((item) => (
@@ -107,7 +130,10 @@ export function menuItems(entry: SftpBrowserEntry | null): MenuItem[] {
     items.push({ action: "open", label: "打开", icon: <FolderIcon /> });
   }
   if (entry.action === "preview") {
+    // Both open the same window on the same file. 预览 opens it without the
+    // ability to write, which is what "just let me look" should mean.
     items.push({ action: "preview", label: "预览文本", icon: <PreviewIcon /> });
+    items.push({ action: "edit", label: "编辑文本", icon: <RenameIcon /> });
   }
   if (entry.kind === "file") {
     items.push({ action: "download", label: "下载", icon: <DownloadIcon /> });

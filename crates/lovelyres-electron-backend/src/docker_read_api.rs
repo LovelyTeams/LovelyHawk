@@ -15,9 +15,10 @@ use lovelyres_core::{
     BackendServices, CoreError,
     docker::{
         ContainerIdentity, ContainerImage, ContainerInspection, ContainerLogsRequest,
-        ContainerRuntime, ContainerStats, ContainerSummary, DockerCollection, DockerComposeProject,
-        DockerNetwork, DockerNetworkInspection, DockerSecurityAudit, DockerSecurityCategory,
-        DockerSecurityFinding, DockerSecuritySeverity, DockerVolume, DockerVolumeInspection,
+        ContainerRuntime, ContainerRuntimeProbe, ContainerStats, ContainerSummary,
+        DockerCollection, DockerComposeProject, DockerImageInspection, DockerNetwork,
+        DockerNetworkInspection, DockerSecurityAudit, DockerSecurityCategory, DockerSecurityFinding,
+        DockerSecuritySeverity, DockerVolume, DockerVolumeInspection,
     },
     ssh::BoundSshSession,
     target::TargetGuard,
@@ -114,13 +115,27 @@ impl DockerReadApi {
     ) -> Result<DockerContainerSnapshotDto, DockerReadApiError> {
         let (session, scope) = self.capture_binding(binding_handle)?;
         let permit = self.begin_refresh(&scope)?;
-        let collection = self
-            .services
-            .docker()
-            .list(&session, ContainerRuntime::Docker)
-            .await?;
+        // Asked once, here, and then carried by the snapshot. Every later call
+        // runs the runtime this refresh found rather than assuming Docker: a
+        // Podman host answered "no containers" to every question before this,
+        // which looks like an answer and is not one.
+        let probe = self.services.docker().detect_runtime(&session).await?;
         self.validate_binding(&scope)?;
-        let (snapshot, dto) = build_container_snapshot(scope.clone(), collection)?;
+        // No snapshot is minted when nothing answered: a handle would promise
+        // capabilities there is nothing behind, and every later call for it
+        // would fail somewhere less legible than here. The two cases stay
+        // apart because they ask different things of the operator — start the
+        // daemon, or stop looking for containers on this host.
+        let Some(runtime) = probe.usable else {
+            return Err(if probe.installed.is_empty() {
+                DockerReadApiError::RuntimeAbsent
+            } else {
+                DockerReadApiError::RuntimeNotRunning
+            });
+        };
+        let collection = self.services.docker().list(&session, runtime).await?;
+        self.validate_binding(&scope)?;
+        let (snapshot, dto) = build_container_snapshot(scope.clone(), runtime, &probe, collection)?;
         let mut registry = self.lock_registry()?;
         registry.prune(Instant::now());
         registry.insert_refreshed(&scope, permit.token, snapshot)?;
@@ -143,7 +158,7 @@ impl DockerReadApi {
                 let collection = self
                     .services
                     .docker()
-                    .stats(&session, ContainerRuntime::Docker)
+                    .stats(&session, access.runtime)
                     .await?;
                 self.validate_binding(&scope)?;
                 let registry = self.lock_registry()?;
@@ -158,17 +173,21 @@ impl DockerReadApi {
                 let collection = self
                     .services
                     .docker()
-                    .images(&session, ContainerRuntime::Docker)
+                    .images(&session, access.runtime)
                     .await?;
                 self.validate_binding(&scope)?;
-                self.verify_access(&access)?;
-                DockerReadCollectionDto::Images(project_images(snapshot_handle, collection))
+                let mut registry = self.lock_registry()?;
+                DockerReadCollectionDto::Images(registry.replace_images(
+                    &access,
+                    snapshot_handle,
+                    collection,
+                )?)
             }
             CollectionKind::Networks => {
                 let collection = self
                     .services
                     .docker()
-                    .networks(&session, ContainerRuntime::Docker)
+                    .networks(&session, access.runtime)
                     .await?;
                 self.validate_binding(&scope)?;
                 let mut registry = self.lock_registry()?;
@@ -182,7 +201,7 @@ impl DockerReadApi {
                 let collection = self
                     .services
                     .docker()
-                    .volumes(&session, ContainerRuntime::Docker)
+                    .volumes(&session, access.runtime)
                     .await?;
                 self.validate_binding(&scope)?;
                 let mut registry = self.lock_registry()?;
@@ -196,12 +215,13 @@ impl DockerReadApi {
                 let collection = self
                     .services
                     .docker()
-                    .compose_projects(&session, ContainerRuntime::Docker)
+                    .compose_projects(&session, access.runtime)
                     .await?;
                 self.validate_binding(&scope)?;
                 self.verify_access(&access)?;
                 DockerReadCollectionDto::ComposeProjects(project_compose_projects(
                     snapshot_handle,
+                    access.runtime,
                     collection,
                 )?)
             }
@@ -231,6 +251,21 @@ impl DockerReadApi {
                 }
                 self.verify_resource(&access, kind, resource_handle, &identity.stable_key())?;
                 DockerReadInspectionDto::Container(project_container_inspection(
+                    snapshot_handle,
+                    resource_handle,
+                    inspection,
+                    &scope.sensitive_literals(),
+                ))
+            }
+            StoredResource::Image(image) => {
+                let expected = image.stable_key();
+                let inspection = self.services.docker().inspect_image(&session, &image).await?;
+                self.validate_binding(&scope)?;
+                if inspection.image.stable_key() != expected {
+                    return Err(DockerReadApiError::SnapshotStale);
+                }
+                self.verify_resource(&access, kind, resource_handle, &expected)?;
+                DockerReadInspectionDto::Image(project_image_inspection(
                     snapshot_handle,
                     resource_handle,
                     inspection,
@@ -290,11 +325,11 @@ impl DockerReadApi {
         let audit = self
             .services
             .docker()
-            .security_audit(&session, ContainerRuntime::Docker)
+            .security_audit(&session, access.runtime)
             .await?;
         self.validate_binding(&scope)?;
         self.verify_access(&access)?;
-        project_security_audit(snapshot_handle, audit)
+        project_security_audit(snapshot_handle, access.runtime, audit)
     }
 
     pub(crate) async fn logs(
@@ -423,6 +458,40 @@ impl DockerReadApi {
         Ok((access, permit))
     }
 
+    /// Turns a container handle back into the container it was minted for.
+    ///
+    /// The mutation side needs exactly this and nothing else: it never sees a
+    /// container id, so it cannot act on one the snapshot did not offer. The
+    /// scope, the snapshot token and the expiry are all checked here, so a
+    /// handle from a previous target, a previous session, or a snapshot that
+    /// has since been refreshed resolves to nothing.
+    ///
+    /// No read permit is taken. Permits bound how many *reads* one snapshot
+    /// may have in flight; a mutation is bounded by its own plan registry, and
+    /// borrowing a read slot here would let a pending confirmation dialog
+    /// starve the pane behind it.
+    pub(crate) fn resolve_container_for_mutation(
+        &self,
+        binding_handle: &str,
+        snapshot_handle: &str,
+        container_handle: &str,
+    ) -> Result<(BoundSshSession, ContainerIdentity), DockerReadApiError> {
+        validate_handle(snapshot_handle)?;
+        validate_handle(container_handle)?;
+        let (session, scope) = self.capture_binding(binding_handle)?;
+        let mut registry = self.lock_registry()?;
+        registry.prune(Instant::now());
+        let access = registry.begin_read(&scope, snapshot_handle)?;
+        let resource = registry.resource(&access, ResourceKind::Container, container_handle)?;
+        // `begin_read` counted a read in; nothing above awaits, so releasing it
+        // here rather than through a permit keeps the count honest.
+        registry.release_read(snapshot_handle, access.token);
+        let StoredResource::Container(identity) = resource else {
+            return Err(DockerReadApiError::InvalidResource);
+        };
+        Ok((session, identity))
+    }
+
     fn begin_resource_read(
         &self,
         scope: &BindingScope,
@@ -473,6 +542,11 @@ pub(crate) enum DockerReadApiError {
     InvalidSnapshot,
     InvalidResource,
     SnapshotStale,
+    /// The host has no docker and no podman binary at all.
+    RuntimeAbsent,
+    /// A runtime is installed but would not answer — a stopped daemon, or a
+    /// socket this user cannot reach.
+    RuntimeNotRunning,
     Capacity,
     RegistryUnavailable,
 }
@@ -488,6 +562,8 @@ impl fmt::Debug for DockerReadApiError {
             Self::InvalidSnapshot => "InvalidSnapshot",
             Self::InvalidResource => "InvalidResource",
             Self::SnapshotStale => "SnapshotStale",
+            Self::RuntimeAbsent => "RuntimeAbsent",
+            Self::RuntimeNotRunning => "RuntimeNotRunning",
             Self::Capacity => "Capacity",
             Self::RegistryUnavailable => "RegistryUnavailable",
         })
@@ -505,6 +581,8 @@ impl fmt::Display for DockerReadApiError {
             Self::InvalidSnapshot => "the Docker snapshot is missing or stale",
             Self::InvalidResource => "the Docker resource is missing or stale",
             Self::SnapshotStale => "the Docker result no longer matches its snapshot",
+            Self::RuntimeAbsent => "this host has no container runtime",
+            Self::RuntimeNotRunning => "the container runtime is installed but not answering",
             Self::Capacity => "the Docker read registry is full",
             Self::RegistryUnavailable => "the Docker read registry is unavailable",
         })
@@ -587,6 +665,7 @@ impl CollectionKind {
 #[derive(Clone, Copy)]
 enum ResourceKind {
     Container,
+    Image,
     Network,
     Volume,
 }
@@ -595,6 +674,7 @@ impl ResourceKind {
     fn parse(value: &str) -> Result<Self, DockerReadApiError> {
         match value {
             "container" => Ok(Self::Container),
+            "image" => Ok(Self::Image),
             "network" => Ok(Self::Network),
             "volume" => Ok(Self::Volume),
             _ => Err(DockerReadApiError::InvalidKind),
@@ -609,12 +689,26 @@ pub(crate) struct DockerContainerSnapshotDto {
     expires_in_seconds: u64,
     containers: Vec<DockerContainerDto>,
     truncated: bool,
+    /// Which runtime answered, so the pane can say what it is looking at
+    /// rather than always saying Docker. Empty when nothing answered.
+    runtime: String,
+    /// Every runtime whose binary is present. A name here with an empty
+    /// `runtime` is an installed runtime that would not talk — a different
+    /// problem from a host that has none, and one the operator can fix.
+    installed_runtimes: Vec<String>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DockerContainerDto {
     container_handle: String,
+    /// The runtime's own short id, for display beside the name.
+    ///
+    /// Twelve characters, the same form the runtime prints and the same form
+    /// the action plan summaries already carry. It is shown, never resolved
+    /// through: every call still takes `container_handle`, so this cannot be
+    /// used to name a container the pane was not given.
+    short_id: String,
     name: String,
     image: String,
     state: String,
@@ -665,6 +759,8 @@ pub(crate) struct DockerImagesCollectionDto {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DockerImageDto {
+    image_handle: String,
+    short_id: String,
     repository: String,
     tag: String,
     digest: String,
@@ -733,6 +829,7 @@ struct DockerComposeProjectDto {
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub(crate) enum DockerReadInspectionDto {
     Container(DockerContainerInspectionDto),
+    Image(DockerImageInspectionDto),
     Network(DockerNetworkInspectionDto),
     Volume(DockerVolumeInspectionDto),
 }
@@ -836,6 +933,46 @@ pub(crate) struct DockerVolumeInspectionDto {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct DockerImageInspectionDto {
+    snapshot_handle: String,
+    resource_handle: String,
+    short_id: String,
+    repository: String,
+    tag: String,
+    digest: String,
+    size: String,
+    created_at: String,
+    architecture: String,
+    os: String,
+    author: String,
+    /// The user the image runs as, already turned into a sentence: an empty
+    /// `User` means root, and saying so is the whole reason to show the field.
+    user: String,
+    entrypoint: Vec<String>,
+    command: Vec<String>,
+    working_dir: String,
+    environment: Vec<String>,
+    exposed_ports: Vec<String>,
+    declared_volumes: Vec<String>,
+    labels: Vec<DockerMetadataDto>,
+    layers: Vec<String>,
+    repo_tags: Vec<String>,
+    repo_digests: Vec<String>,
+    history: Vec<DockerImageHistoryDto>,
+    truncated: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DockerImageHistoryDto {
+    created_at: String,
+    created_by: String,
+    size: String,
+    comment: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct DockerSecurityAuditDto {
     snapshot_handle: String,
     containers_scanned: usize,
@@ -904,10 +1041,16 @@ struct SnapshotEntry {
     expires_at: Instant,
     active_reads: usize,
     stored_bytes: usize,
+    /// The runtime this snapshot was taken from. Every later call for it runs
+    /// the same binary, so a refresh that found Podman cannot have a Docker
+    /// command issued against its handles.
+    runtime: ContainerRuntime,
     containers: HashMap<String, ContainerIdentity>,
     container_index: HashMap<String, String>,
+    images: HashMap<String, ContainerImage>,
     networks: HashMap<String, DockerNetwork>,
     volumes: HashMap<String, DockerVolume>,
+    image_revision: u64,
     network_revision: u64,
     volume_revision: u64,
 }
@@ -918,6 +1061,9 @@ struct SnapshotAccess {
     token: Uuid,
     scope: BindingScope,
     collection_revision: Option<(CollectionKind, u64)>,
+    /// The runtime the snapshot was taken from, carried so every read for it
+    /// runs the same binary the list came out of.
+    runtime: ContainerRuntime,
 }
 
 impl SnapshotAccess {
@@ -929,6 +1075,7 @@ impl SnapshotAccess {
             return false;
         }
         match self.collection_revision {
+            Some((CollectionKind::Images, revision)) => snapshot.image_revision == revision,
             Some((CollectionKind::Networks, revision)) => snapshot.network_revision == revision,
             Some((CollectionKind::Volumes, revision)) => snapshot.volume_revision == revision,
             Some(_) | None => true,
@@ -939,6 +1086,7 @@ impl SnapshotAccess {
 #[derive(Clone)]
 enum StoredResource {
     Container(ContainerIdentity),
+    Image(ContainerImage),
     Network(DockerNetwork),
     Volume(DockerVolume),
 }
@@ -947,6 +1095,7 @@ impl StoredResource {
     fn stable_key(&self) -> String {
         match self {
             Self::Container(value) => value.stable_key(),
+            Self::Image(value) => value.stable_key(),
             Self::Network(value) => value.stable_key(),
             Self::Volume(value) => value.stable_key(),
         }
@@ -1074,6 +1223,7 @@ impl SnapshotRegistry {
             token: snapshot.token,
             scope: scope.clone(),
             collection_revision: None,
+            runtime: snapshot.runtime,
         })
     }
 
@@ -1100,6 +1250,13 @@ impl SnapshotRegistry {
             .filter(|snapshot| &snapshot.scope == scope && snapshot.expires_at > Instant::now())
             .ok_or(DockerReadApiError::InvalidSnapshot)?;
         let collection_revision = match kind {
+            CollectionKind::Images => {
+                snapshot.image_revision = snapshot
+                    .image_revision
+                    .checked_add(1)
+                    .ok_or(DockerReadApiError::Capacity)?;
+                Some((kind, snapshot.image_revision))
+            }
             CollectionKind::Networks => {
                 snapshot.network_revision = snapshot
                     .network_revision
@@ -1122,6 +1279,7 @@ impl SnapshotRegistry {
             token: snapshot.token,
             scope: scope.clone(),
             collection_revision,
+            runtime: snapshot.runtime,
         })
     }
 
@@ -1155,6 +1313,11 @@ impl SnapshotRegistry {
                 .get(resource_handle)
                 .cloned()
                 .map(StoredResource::Container),
+            ResourceKind::Image => snapshot
+                .images
+                .get(resource_handle)
+                .cloned()
+                .map(StoredResource::Image),
             ResourceKind::Network => snapshot
                 .networks
                 .get(resource_handle)
@@ -1167,6 +1330,40 @@ impl SnapshotRegistry {
                 .map(StoredResource::Volume),
         }
         .ok_or(DockerReadApiError::InvalidResource)
+    }
+
+    fn replace_images(
+        &mut self,
+        access: &SnapshotAccess,
+        snapshot_handle: &str,
+        collection: DockerCollection<ContainerImage>,
+    ) -> Result<DockerImagesCollectionDto, DockerReadApiError> {
+        let snapshot = self
+            .snapshots
+            .get_mut(&access.handle)
+            .filter(|snapshot| access.matches(snapshot, Instant::now()))
+            .ok_or(DockerReadApiError::SnapshotStale)?;
+        let old_bytes = snapshot
+            .images
+            .iter()
+            .map(|(handle, image)| handle.len().saturating_add(estimated_image_bytes(image)))
+            .sum::<usize>();
+        let (images, items, projected_truncated, bytes) =
+            project_images(access.runtime, collection)?;
+        let candidate = snapshot
+            .stored_bytes
+            .saturating_sub(old_bytes)
+            .saturating_add(bytes);
+        if candidate > MAX_SNAPSHOT_BYTES {
+            return Err(DockerReadApiError::Capacity);
+        }
+        snapshot.images = images;
+        snapshot.stored_bytes = candidate;
+        Ok(DockerImagesCollectionDto {
+            snapshot_handle: snapshot_handle.to_owned(),
+            items,
+            truncated: projected_truncated,
+        })
     }
 
     fn replace_networks(
@@ -1189,7 +1386,8 @@ impl SnapshotRegistry {
                     .saturating_add(estimated_network_bytes(network))
             })
             .sum::<usize>();
-        let (networks, items, projected_truncated, bytes) = project_networks(collection)?;
+        let (networks, items, projected_truncated, bytes) =
+            project_networks(access.runtime, collection)?;
         let candidate = snapshot
             .stored_bytes
             .saturating_sub(old_bytes)
@@ -1222,7 +1420,8 @@ impl SnapshotRegistry {
             .iter()
             .map(|(handle, volume)| handle.len().saturating_add(estimated_volume_bytes(volume)))
             .sum::<usize>();
-        let (volumes, items, projected_truncated, bytes) = project_volumes(collection)?;
+        let (volumes, items, projected_truncated, bytes) =
+            project_volumes(access.runtime, collection)?;
         let candidate = snapshot
             .stored_bytes
             .saturating_sub(old_bytes)
@@ -1268,8 +1467,18 @@ impl Drop for SnapshotPermit {
     }
 }
 
+/// The name a runtime goes by on the wire and in the pane.
+fn runtime_id(runtime: ContainerRuntime) -> String {
+    match runtime {
+        ContainerRuntime::Docker => "docker".to_owned(),
+        ContainerRuntime::Podman => "podman".to_owned(),
+    }
+}
+
 fn build_container_snapshot(
     scope: BindingScope,
+    runtime: ContainerRuntime,
+    probe: &ContainerRuntimeProbe,
     collection: DockerCollection<ContainerSummary>,
 ) -> Result<(SnapshotEntry, DockerContainerSnapshotDto), DockerReadApiError> {
     let snapshot_handle = unique_handle()?;
@@ -1283,7 +1492,10 @@ fn build_container_snapshot(
         if budget.remaining() < MIN_ITEM_TEXT_BYTES {
             break;
         }
-        if container.identity.runtime() != ContainerRuntime::Docker {
+        // Every row has to belong to the runtime this snapshot was taken from.
+        // A mixed collection would mean handles resolving against the wrong
+        // binary later.
+        if container.identity.runtime() != runtime {
             return Err(DockerReadApiError::SnapshotStale);
         }
         let handle = unique_map_handle(&containers)?;
@@ -1293,6 +1505,7 @@ fn build_container_snapshot(
         }
         let dto = DockerContainerDto {
             container_handle: handle.clone(),
+            short_id: container.identity.short_id().to_owned(),
             name: budget.take(&container.name, 512).0,
             image: budget.take(&container.image, 2 * 1024).0,
             state: budget.take(&container.state, 128).0,
@@ -1320,10 +1533,13 @@ fn build_container_snapshot(
         expires_at: Instant::now() + SNAPSHOT_TTL,
         active_reads: 0,
         stored_bytes,
+        runtime,
         containers,
         container_index,
+        images: HashMap::new(),
         networks: HashMap::new(),
         volumes: HashMap::new(),
+        image_revision: 0,
         network_revision: 0,
         volume_revision: 0,
     };
@@ -1332,6 +1548,8 @@ fn build_container_snapshot(
         expires_in_seconds: SNAPSHOT_TTL.as_secs(),
         containers: items,
         truncated,
+        runtime: runtime_id(runtime),
+        installed_runtimes: probe.installed.iter().copied().map(runtime_id).collect(),
     };
     Ok((snapshot, dto))
 }
@@ -1374,30 +1592,54 @@ fn project_stats(
     })
 }
 
+type ProjectedImages = (
+    HashMap<String, ContainerImage>,
+    Vec<DockerImageDto>,
+    bool,
+    usize,
+);
+
 fn project_images(
-    snapshot_handle: &str,
+    runtime: ContainerRuntime,
     collection: DockerCollection<ContainerImage>,
-) -> DockerImagesCollectionDto {
+) -> Result<ProjectedImages, DockerReadApiError> {
     let mut budget = TextBudget::new(MAX_COLLECTION_TEXT_BYTES);
     let source_len = collection.items.len();
+    let mut stored = HashMap::new();
     let mut items = Vec::new();
+    let mut bytes = 0_usize;
     for image in collection.items.into_iter().take(MAX_IMAGES) {
         if budget.remaining() < MIN_ITEM_TEXT_BYTES {
             break;
         }
+        // No uniqueness check on the identity here, unlike networks and
+        // volumes: the runtime lists one row per repository and tag, so one
+        // image that carries two tags is two rows with the same id — a
+        // registry mirror alongside the short name is the ordinary case, not a
+        // stale snapshot. The handle is per row and stays unique.
+        if image.runtime != runtime {
+            return Err(DockerReadApiError::SnapshotStale);
+        }
+        let handle = unique_map_handle(&stored)?;
+        bytes = bytes
+            .saturating_add(handle.len())
+            .saturating_add(estimated_image_bytes(&image));
         items.push(DockerImageDto {
+            image_handle: handle.clone(),
+            // The 12 characters the runtime itself prints, so an untagged
+            // image is still something a reader can name out loud. The full
+            // id stays behind the handle.
+            short_id: image.short_id().to_owned(),
             repository: budget.take(&image.repository, 2 * 1024).0,
             tag: budget.take(&image.tag, 1024).0,
             digest: budget.take(&image.digest, 512).0,
             created_at: budget.take(&image.created_at, 1024).0,
             size: budget.take(&image.size, 256).0,
         });
+        stored.insert(handle, image);
     }
-    DockerImagesCollectionDto {
-        snapshot_handle: snapshot_handle.to_owned(),
-        truncated: collection.truncated || items.len() < source_len || budget.projected(),
-        items,
-    }
+    let truncated = collection.truncated || items.len() < source_len || budget.projected();
+    Ok((stored, items, truncated, bytes))
 }
 
 type ProjectedNetworks = (
@@ -1408,6 +1650,7 @@ type ProjectedNetworks = (
 );
 
 fn project_networks(
+    runtime: ContainerRuntime,
     collection: DockerCollection<DockerNetwork>,
 ) -> Result<ProjectedNetworks, DockerReadApiError> {
     let mut budget = TextBudget::new(MAX_COLLECTION_TEXT_BYTES);
@@ -1420,8 +1663,7 @@ fn project_networks(
         if budget.remaining() < MIN_ITEM_TEXT_BYTES {
             break;
         }
-        if network.runtime != ContainerRuntime::Docker || !stable_keys.insert(network.stable_key())
-        {
+        if network.runtime != runtime || !stable_keys.insert(network.stable_key()) {
             return Err(DockerReadApiError::SnapshotStale);
         }
         let handle = unique_map_handle(&stored)?;
@@ -1450,6 +1692,7 @@ type ProjectedVolumes = (
 );
 
 fn project_volumes(
+    runtime: ContainerRuntime,
     collection: DockerCollection<DockerVolume>,
 ) -> Result<ProjectedVolumes, DockerReadApiError> {
     let mut budget = TextBudget::new(MAX_COLLECTION_TEXT_BYTES);
@@ -1462,7 +1705,7 @@ fn project_volumes(
         if budget.remaining() < MIN_ITEM_TEXT_BYTES {
             break;
         }
-        if volume.runtime != ContainerRuntime::Docker || !stable_keys.insert(volume.stable_key()) {
+        if volume.runtime != runtime || !stable_keys.insert(volume.stable_key()) {
             return Err(DockerReadApiError::SnapshotStale);
         }
         let handle = unique_map_handle(&stored)?;
@@ -1485,6 +1728,7 @@ fn project_volumes(
 
 fn project_compose_projects(
     snapshot_handle: &str,
+    runtime: ContainerRuntime,
     collection: DockerCollection<DockerComposeProject>,
 ) -> Result<DockerComposeCollectionDto, DockerReadApiError> {
     let mut budget = TextBudget::new(MAX_COLLECTION_TEXT_BYTES);
@@ -1494,7 +1738,7 @@ fn project_compose_projects(
         if budget.remaining() < MIN_ITEM_TEXT_BYTES {
             break;
         }
-        if project.runtime != ContainerRuntime::Docker
+        if project.runtime != runtime
             || project.services > MAX_PUBLIC_U64
             || project.running > MAX_PUBLIC_U64
             || project.stopped > MAX_PUBLIC_U64
@@ -1743,6 +1987,128 @@ fn project_volume_inspection(
     }
 }
 
+fn project_image_inspection(
+    snapshot_handle: &str,
+    resource_handle: &str,
+    inspection: DockerImageInspection,
+    sensitive_literals: &[&str],
+) -> DockerImageInspectionDto {
+    let mut budget = TextBudget::new(MAX_INSPECTION_TEXT_BYTES);
+    let labels_len = inspection.labels.len();
+    let (labels, labels_projected) =
+        project_metadata(inspection.labels, &mut budget, sensitive_literals);
+    let mut projected = labels_projected || labels.len() < labels_len;
+    let mut take = |value: &str, maximum: usize, projected: &mut bool| {
+        let (text, was_projected) = budget.take_public(value, maximum, sensitive_literals);
+        *projected |= was_projected;
+        text
+    };
+
+    let short_id = take(inspection.image.short_id(), 64, &mut projected);
+    let repository = take(&inspection.image.repository, 2 * 1024, &mut projected);
+    let tag = take(&inspection.image.tag, 1024, &mut projected);
+    let digest = take(&inspection.image.digest, 512, &mut projected);
+    let size = take(&inspection.image.size, 256, &mut projected);
+    let created_at = take(&inspection.image.created_at, 512, &mut projected);
+    let architecture = take(&inspection.architecture, 128, &mut projected);
+    let os = take(&inspection.os, 128, &mut projected);
+    let author = take(&inspection.author, 512, &mut projected);
+    // An image that never set a user runs as root. The runtime says that by
+    // leaving the field empty, which reads as "unknown" unless it is spelled
+    // out — and "runs as root" is exactly what the reader is looking for.
+    let user = if inspection.user.is_empty() {
+        "root（镜像没有指定用户）".to_owned()
+    } else {
+        take(&inspection.user, 256, &mut projected)
+    };
+    let working_dir = take(&inspection.working_dir, 1024, &mut projected);
+
+    let mut take_list = |values: Vec<String>, maximum: usize, projected: &mut bool| {
+        let source_len = values.len();
+        let mut items = Vec::new();
+        for value in values.into_iter().take(MAX_METADATA_ENTRIES) {
+            if budget.remaining() < MIN_ITEM_TEXT_BYTES {
+                break;
+            }
+            let (text, was_projected) = budget.take_public(&value, maximum, sensitive_literals);
+            *projected |= was_projected;
+            items.push(text);
+        }
+        *projected |= items.len() < source_len;
+        items
+    };
+
+    let entrypoint = take_list(inspection.entrypoint, 4 * 1024, &mut projected);
+    let command = take_list(inspection.command, 4 * 1024, &mut projected);
+    let environment = take_list(inspection.environment, 4 * 1024, &mut projected);
+    let exposed_ports = take_list(inspection.exposed_ports, 256, &mut projected);
+    let declared_volumes = take_list(inspection.declared_volumes, 4 * 1024, &mut projected);
+    let layers = take_list(inspection.layers, 256, &mut projected);
+    let repo_tags = take_list(inspection.repo_tags, 2 * 1024, &mut projected);
+    let repo_digests = take_list(inspection.repo_digests, 512, &mut projected);
+
+    let history_len = inspection.history.len();
+    let mut history = Vec::new();
+    for step in inspection.history.into_iter().take(MAX_METADATA_ENTRIES) {
+        if budget.remaining() < MIN_ITEM_TEXT_BYTES {
+            break;
+        }
+        let (created_at, created_projected) =
+            budget.take_public(&step.created_at, 512, sensitive_literals);
+        // The build instruction is the reason to read history at all, so it
+        // gets the widest allowance of anything here.
+        let (created_by, by_projected) =
+            budget.take_public(&step.created_by, 8 * 1024, sensitive_literals);
+        let (size, size_projected) = budget.take_public(&step.size, 128, sensitive_literals);
+        let (comment, comment_projected) =
+            budget.take_public(&step.comment, 1024, sensitive_literals);
+        projected |= created_projected || by_projected || size_projected || comment_projected;
+        history.push(DockerImageHistoryDto {
+            created_at,
+            created_by,
+            size,
+            comment,
+        });
+    }
+    projected |= history.len() < history_len;
+
+    DockerImageInspectionDto {
+        snapshot_handle: snapshot_handle.to_owned(),
+        resource_handle: resource_handle.to_owned(),
+        short_id,
+        repository,
+        tag,
+        digest,
+        size,
+        created_at,
+        architecture,
+        os,
+        author,
+        user,
+        entrypoint,
+        command,
+        working_dir,
+        environment,
+        exposed_ports,
+        declared_volumes,
+        labels,
+        layers,
+        repo_tags,
+        repo_digests,
+        history,
+        truncated: projected || budget.projected(),
+    }
+}
+
+fn estimated_image_bytes(value: &ContainerImage) -> usize {
+    128_usize
+        .saturating_add(value.id.len())
+        .saturating_add(value.repository.len())
+        .saturating_add(value.tag.len())
+        .saturating_add(value.digest.len())
+        .saturating_add(value.size.len())
+}
+
 fn project_metadata(
     metadata: BTreeMap<String, String>,
     budget: &mut TextBudget,
@@ -1769,6 +2135,7 @@ fn project_metadata(
 
 fn project_security_audit(
     snapshot_handle: &str,
+    runtime: ContainerRuntime,
     audit: DockerSecurityAudit,
 ) -> Result<DockerSecurityAuditDto, DockerReadApiError> {
     let total = audit
@@ -1792,7 +2159,7 @@ fn project_security_audit(
             .checked_add(1)
             .ok_or(DockerReadApiError::InvalidBounds)?;
     }
-    if audit.runtime != ContainerRuntime::Docker
+    if audit.runtime != runtime
         || audit.containers_scanned > MAX_SECURITY_CONTAINERS
         || audit.summary.total > 10_000
         || total != audit.summary.total
@@ -1806,7 +2173,7 @@ fn project_security_audit(
         || audit
             .findings
             .iter()
-            .any(|finding| finding.container.runtime() != ContainerRuntime::Docker)
+            .any(|finding| finding.container.runtime() != runtime)
     {
         return Err(DockerReadApiError::SnapshotStale);
     }
@@ -2060,7 +2427,8 @@ const fn security_category_key(category: DockerSecurityCategory) -> &'static str
 #[cfg(test)]
 mod tests {
     use lovelyres_core::docker::{
-        ContainerInspectionField, ContainerMount, ContainerNetwork, DockerSecuritySummary,
+        ContainerInspectionField, ContainerMount, ContainerNetwork, DockerImageHistoryStep,
+        DockerSecuritySummary,
     };
     use lovelyres_core::target::TargetIdentity;
 
@@ -2109,6 +2477,11 @@ mod tests {
     fn snapshot(now: Instant, scope: BindingScope) -> SnapshotEntry {
         let (mut snapshot, _) = build_container_snapshot(
             scope,
+            ContainerRuntime::Docker,
+            &ContainerRuntimeProbe {
+                usable: Some(ContainerRuntime::Docker),
+                installed: vec![ContainerRuntime::Docker],
+            },
             DockerCollection {
                 items: vec![container("alpha")],
                 truncated: false,
@@ -2124,6 +2497,11 @@ mod tests {
         let hostile = "</script><img src=x onerror=steal()>";
         let (_, dto) = build_container_snapshot(
             scope("server-one", 1),
+            ContainerRuntime::Docker,
+            &ContainerRuntimeProbe {
+                usable: Some(ContainerRuntime::Docker),
+                installed: vec![ContainerRuntime::Docker],
+            },
             DockerCollection {
                 items: vec![container(hostile)],
                 truncated: false,
@@ -2142,6 +2520,11 @@ mod tests {
     fn collection_projection_keeps_names_and_sets_projection_flags() {
         let (_, containers) = build_container_snapshot(
             scope("server-one", 1),
+            ContainerRuntime::Docker,
+            &ContainerRuntimeProbe {
+                usable: Some(ContainerRuntime::Docker),
+                installed: vec![ContainerRuntime::Docker],
+            },
             DockerCollection {
                 items: vec![container("PASSWORD=container-secret")],
                 truncated: false,
@@ -2155,11 +2538,12 @@ mod tests {
                 .contains("PASSWORD=container-secret")
         );
 
-        let images = project_images(
-            "snapshot",
+        let (_, images, _, _) = project_images(
+            ContainerRuntime::Docker,
             DockerCollection {
                 items: vec![ContainerImage {
-                    id: "must-not-cross".to_owned(),
+                    runtime: ContainerRuntime::Docker,
+                    id: format!("sha256:{}", "a".repeat(64)),
                     repository: "https://user:pass@registry.example/image".to_owned(),
                     tag: "latest".to_owned(),
                     digest: "sha256:safe".to_owned(),
@@ -2168,29 +2552,75 @@ mod tests {
                 }],
                 truncated: false,
             },
-        );
+        )
+        .unwrap();
         assert_eq!(
-            images.items[0].repository,
+            images[0].repository,
             "https://user:pass@registry.example/image"
         );
+        // The short id crosses as text the reader can say out loud; the full
+        // id stays on this side, reachable only through the handle.
+        assert_eq!(images[0].short_id, "a".repeat(12));
+        assert!(!images[0].image_handle.is_empty());
 
-        let (_, volumes, volume_truncated, _) = project_volumes(DockerCollection {
-            items: vec![DockerVolume {
-                runtime: ContainerRuntime::Docker,
-                name: "volume-one".to_owned(),
-                driver: "local".to_owned(),
-                mountpoint: "/safe".to_owned(),
-                scope: "local".to_owned(),
-                labels: "token=volume-secret".to_owned(),
-            }],
-            truncated: false,
-        })
+        // One image with two tags is two listing rows carrying one id. Every
+        // ordinary host has this — a registry mirror beside the short name —
+        // and refusing it would empty the whole tab.
+        let one_id = format!("sha256:{}", "c".repeat(64));
+        let tagged = |repository: &str| ContainerImage {
+            runtime: ContainerRuntime::Docker,
+            id: one_id.clone(),
+            repository: repository.to_owned(),
+            tag: "3.20".to_owned(),
+            digest: "<none>".to_owned(),
+            created_at: "now".to_owned(),
+            size: "12MB".to_owned(),
+        };
+        let (stored, rows, _, _) = project_images(
+            ContainerRuntime::Docker,
+            DockerCollection {
+                items: vec![tagged("alpine"), tagged("mirror.example/library/alpine")],
+                truncated: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_ne!(rows[0].image_handle, rows[1].image_handle);
+        assert_eq!(stored.len(), 2);
+        // A row from the other runtime is still refused: the snapshot names
+        // one binary, and every read for it runs that one.
+        assert!(
+            project_images(
+                ContainerRuntime::Podman,
+                DockerCollection {
+                    items: vec![tagged("alpine")],
+                    truncated: false,
+                },
+            )
+            .is_err()
+        );
+
+        let (_, volumes, volume_truncated, _) = project_volumes(
+            ContainerRuntime::Docker,
+            DockerCollection {
+                items: vec![DockerVolume {
+                    runtime: ContainerRuntime::Docker,
+                    name: "volume-one".to_owned(),
+                    driver: "local".to_owned(),
+                    mountpoint: "/safe".to_owned(),
+                    scope: "local".to_owned(),
+                    labels: "token=volume-secret".to_owned(),
+                }],
+                truncated: false,
+            },
+        )
         .unwrap();
         assert_eq!(volumes[0].labels, "token=volume-secret");
         assert!(!volume_truncated);
 
         let compose = project_compose_projects(
             "snapshot",
+            ContainerRuntime::Docker,
             DockerCollection {
                 items: vec![DockerComposeProject {
                     runtime: ContainerRuntime::Docker,
@@ -2530,6 +2960,11 @@ mod tests {
         let current = scope("server-one", 1);
         let (snapshot, _) = build_container_snapshot(
             current,
+            ContainerRuntime::Docker,
+            &ContainerRuntimeProbe {
+                usable: Some(ContainerRuntime::Docker),
+                installed: vec![ContainerRuntime::Docker],
+            },
             DockerCollection {
                 items: vec![container("alpha")],
                 truncated: false,
@@ -2644,8 +3079,10 @@ mod tests {
             },
             truncated: false,
         };
-        let json =
-            serde_json::to_string(&project_security_audit("snapshot", audit).unwrap()).unwrap();
+        let json = serde_json::to_string(
+            &project_security_audit("snapshot", ContainerRuntime::Docker, audit).unwrap(),
+        )
+        .unwrap();
         assert!(json.contains(hostile));
         assert!(!json.contains(CONTAINER_ID));
     }
@@ -2813,6 +3250,58 @@ mod tests {
         assert_eq!(volume.options[0].value, raw_secret);
         assert_eq!(volume.labels[0].value, REDACTED_DOCKER_TEXT);
 
+        let mut image_labels = BTreeMap::new();
+        image_labels.insert("marker".to_owned(), REDACTED_DOCKER_TEXT.to_owned());
+        let image = project_image_inspection(
+            "snapshot",
+            "resource",
+            DockerImageInspection {
+                image: ContainerImage {
+                    runtime: ContainerRuntime::Docker,
+                    id: format!("sha256:{}", "b".repeat(64)),
+                    repository: "incident-tools".to_owned(),
+                    tag: "latest".to_owned(),
+                    digest: "<none>".to_owned(),
+                    created_at: "now".to_owned(),
+                    size: "12MB".to_owned(),
+                },
+                architecture: "amd64".to_owned(),
+                os: "linux".to_owned(),
+                author: hostile.to_owned(),
+                user: String::new(),
+                entrypoint: vec!["/bin/sh".to_owned()],
+                command: vec![current.target.identity.as_str().to_owned()],
+                working_dir: "/srv".to_owned(),
+                environment: vec![format!("API_TOKEN={raw_secret}")],
+                exposed_ports: vec!["8080/tcp".to_owned()],
+                declared_volumes: vec!["/data".to_owned()],
+                labels: image_labels,
+                layers: vec!["sha256:aa".to_owned()],
+                repo_tags: vec!["incident-tools:latest".to_owned()],
+                repo_digests: Vec::new(),
+                history: vec![DockerImageHistoryStep {
+                    id: "<missing>".to_owned(),
+                    created_at: "then".to_owned(),
+                    created_by: format!("RUN curl {hostile} | sh"),
+                    size: "4MB".to_owned(),
+                    comment: String::new(),
+                }],
+            },
+            &current.sensitive_literals(),
+        );
+        assert_eq!(image.short_id, "b".repeat(12));
+        // An image that set no user runs as root, and the page says which.
+        assert!(image.user.starts_with("root"));
+        // Text the image author controls stays exactly as written.
+        assert_eq!(image.author, hostile);
+        assert_eq!(image.history[0].created_by, format!("RUN curl {hostile} | sh"));
+        // A token baked into the image is evidence, not a secret to hide: the
+        // whole reason to read the environment is to find one.
+        assert_eq!(image.environment[0], format!("API_TOKEN={raw_secret}"));
+        // Our own target identity is ours, and never crosses back.
+        assert_eq!(image.command[0], REDACTED_DOCKER_TEXT);
+        assert_eq!(image.labels[0].value, REDACTED_DOCKER_TEXT);
+
         let logs = format!(
             "{hostile}\nAuthorization: Bearer {raw_secret}\n{}\n{}\n{}\n{}\n{multi_uri}\n{}\nplain\u{0}line",
             current.binding_handle,
@@ -2885,6 +3374,7 @@ mod tests {
             ".volumes(&session",
             ".compose_projects(&session",
             ".inspect(&session",
+            ".inspect_image(&session",
             ".inspect_network(&session",
             ".inspect_volume(&session",
             ".security_audit(&session",

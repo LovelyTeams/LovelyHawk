@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import type { KubernetesSnapshot } from "../shared/kubernetes-read-contract";
+import type { KubernetesPodRow, KubernetesSnapshot } from "../shared/kubernetes-read-contract";
 import {
   KUBERNETES_ROW_WINDOW,
   boundKubernetesQuery,
   filteredKubernetesRows,
   kubernetesListContext,
   kubernetesNamespaceCapability,
+  kubernetesColumns,
   kubernetesReadScope,
+  kubernetesRowAge,
+  kubernetesRowNeedsAttention,
+  kubernetesStatCards,
   windowedKubernetesRows,
 } from "./kubernetes-read-helpers";
 
@@ -108,5 +112,87 @@ describe("Kubernetes read helpers", () => {
     expect(windowedKubernetesRows(rows, 0)).toHaveLength(60);
     expect(windowedKubernetesRows(rows, 1)).toHaveLength(5);
     expect(windowedKubernetesRows(rows, -10)[0]?.rowHandle).toBe("row-0");
+  });
+});
+
+/**
+ * The page's first question is "what is broken", not "what is running".
+ *
+ * A cluster with two hundred pods puts the three that matter somewhere in the
+ * middle of the list, and scrolling for them is how they get missed.
+ */
+describe("what needs attention", () => {
+  const pod = (over: Partial<KubernetesPodRow>): KubernetesPodRow => ({
+    kind: "pod",
+    rowHandle: "r",
+    namespace: "default",
+    name: "app",
+    phase: "Running",
+    readyContainers: 1,
+    totalContainers: 1,
+    restarts: 0,
+    node: "node-a",
+    podIp: "10.0.0.1",
+    images: ["app:1"],
+    createdAt: "2026-08-28T00:00:00Z",
+    supportsLogs: true,
+    textTruncated: false,
+    ...over,
+  });
+
+  it("counts a pod that is up but not whole", () => {
+    expect(kubernetesRowNeedsAttention(pod({}))).toBe(false);
+    // Running, but one of its containers is not ready. The phase alone says
+    // this pod is fine; it is not.
+    expect(kubernetesRowNeedsAttention(pod({ readyContainers: 1, totalContainers: 2 }))).toBe(true);
+    // Running now, but it has been restarting. Worth a look even though the
+    // state reads green.
+    expect(kubernetesRowNeedsAttention(pod({ restarts: 4 }))).toBe(true);
+    // And the obvious ones.
+    expect(kubernetesRowNeedsAttention(pod({ phase: "CrashLoopBackOff" }))).toBe(true);
+    expect(kubernetesRowNeedsAttention(pod({ phase: "ImagePullBackOff" }))).toBe(true);
+  });
+
+  it("never invents a count for a tab nobody opened", () => {
+    // A tab with nothing loaded behind it has no number. Showing `0` there
+    // would say "there are no nodes" when the truth is "nobody looked".
+    const cards = kubernetesStatCards({ pods: [pod({}), pod({ restarts: 2 })] });
+    const byId = new Map(cards.map((card) => [card.id, card]));
+    expect(byId.get("pods")?.value).toBe("2");
+    expect(byId.get("healthy")?.value).toBe("1");
+    expect(byId.get("attention")?.value).toBe("1");
+    expect(byId.get("attention")?.tone).toBe("bad");
+    expect(byId.get("nodes")?.value).toBeNull();
+    expect(byId.get("deployments")?.value).toBeNull();
+    // With nothing wrong the card stops shouting.
+    const calm = kubernetesStatCards({ pods: [pod({})] });
+    expect(calm.find((card) => card.id === "attention")?.tone).toBe("plain");
+  });
+
+  it("gives every tab its own columns, with counts right-aligned", () => {
+    const pods = kubernetesColumns("pods").map((column) => column.key);
+    expect(pods).toEqual(["name", "namespace", "ready", "restarts", "node", "ip", "age"]);
+    // Restarts is the column an operator runs their eye down, so it lines up.
+    expect(kubernetesColumns("pods").find((c) => c.key === "restarts")?.numeric).toBe(true);
+    expect(kubernetesColumns("nodes").map((c) => c.key)).toContain("roles");
+    // Every column reads something from a real row rather than throwing on a
+    // row of another kind.
+    for (const tab of ["namespaces", "pods", "deployments", "nodes"] as const) {
+      for (const column of kubernetesColumns(tab)) {
+        expect(typeof column.read(pod({}))).toBe("string");
+      }
+    }
+  });
+
+  it("reads an age a person can act on, and says so when it cannot", () => {
+    const now = Date.parse("2026-08-28T12:00:00Z");
+    expect(kubernetesRowAge("2026-08-28T11:59:30Z", now)).toBe("30 秒");
+    expect(kubernetesRowAge("2026-08-28T11:30:00Z", now)).toBe("30 分钟");
+    expect(kubernetesRowAge("2026-08-28T00:00:00Z", now)).toBe("12 小时");
+    expect(kubernetesRowAge("2026-08-20T12:00:00Z", now)).toBe("8 天");
+    // The cluster does not always give a parseable time, and a wrong age is
+    // worse than none.
+    expect(kubernetesRowAge("now", now)).toBe("—");
+    expect(kubernetesRowAge("", now)).toBe("—");
   });
 });

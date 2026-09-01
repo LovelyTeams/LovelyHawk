@@ -22,6 +22,7 @@ export interface DockerReadState {
   collectionStatus: Partial<Record<DockerCollectionKind, DockerReadStatus>>;
   collectionRequests: Partial<Record<DockerCollectionKind, number>>;
   selectedContainerHandle: string | null;
+  selectedImageHandle: string | null;
   selectedNetworkHandle: string | null;
   selectedVolumeHandle: string | null;
   inspectionStatus: DockerReadStatus;
@@ -51,6 +52,7 @@ export function createDockerReadState(): DockerReadState {
     collectionStatus: {},
     collectionRequests: {},
     selectedContainerHandle: null,
+    selectedImageHandle: null,
     selectedNetworkHandle: null,
     selectedVolumeHandle: null,
     inspectionStatus: "idle",
@@ -79,7 +81,9 @@ export type DockerReadAction =
   | { type: "collection-started"; scope: string; snapshotHandle: string; kind: DockerCollectionKind; request: number }
   | { type: "collection-loaded"; scope: string; snapshotHandle: string; kind: DockerCollectionKind; request: number; collection: DockerReadCollection }
   | { type: "collection-failed"; scope: string; snapshotHandle: string; kind: DockerCollectionKind; request: number; error: string }
+  | { type: "selection-cleared" }
   | { type: "container-selected"; handle: string }
+  | { type: "image-selected"; handle: string }
   | { type: "network-selected"; handle: string }
   | { type: "volume-selected"; handle: string }
   | { type: "inspection-started"; scope: string; snapshotHandle: string; kind: DockerResourceKind; handle: string; request: number }
@@ -111,6 +115,7 @@ export function dockerReadReducer(state: DockerReadState, action: DockerReadActi
         collectionStatus: {},
         collectionRequests: {},
         selectedContainerHandle: null,
+        selectedImageHandle: null,
         selectedNetworkHandle: null,
         selectedVolumeHandle: null,
         inspectionStatus: "idle",
@@ -134,7 +139,10 @@ export function dockerReadReducer(state: DockerReadState, action: DockerReadActi
         snapshotStatus: "ready",
         snapshotRequest: null,
         snapshot: action.snapshot,
-        selectedContainerHandle: action.snapshot.containers[0]?.containerHandle ?? null,
+        // No selection. Loading a list is not choosing something from it, and
+        // the details are a dialog now — auto-selecting the first row meant
+        // arriving at the page with a modal already covering the table.
+        selectedContainerHandle: null,
         error: null,
       };
     case "snapshot-failed":
@@ -158,15 +166,14 @@ export function dockerReadReducer(state: DockerReadState, action: DockerReadActi
         collectionRequests: { ...state.collectionRequests, [action.kind]: undefined },
         error: null,
       };
-      if (action.collection.kind === "networks") {
-        next.selectedNetworkHandle = action.collection.items[0]?.networkHandle ?? null;
-        next.inspectionStatus = "idle";
-        next.inspectionRequest = null;
-        next.inspectionKind = null;
-        next.inspectionHandle = null;
-        next.inspection = null;
-      } else if (action.collection.kind === "volumes") {
-        next.selectedVolumeHandle = action.collection.items[0]?.volumeHandle ?? null;
+      // A freshly loaded list selects nothing. Details open as a dialog now,
+      // so selecting the first row on arrival threw a modal in front of the
+      // list the operator came to read, over a resource they never picked.
+      if (action.collection.kind === "images" || action.collection.kind === "networks" ||
+        action.collection.kind === "volumes") {
+        next.selectedImageHandle = null;
+        next.selectedNetworkHandle = null;
+        next.selectedVolumeHandle = null;
         next.inspectionStatus = "idle";
         next.inspectionRequest = null;
         next.inspectionKind = null;
@@ -183,9 +190,34 @@ export function dockerReadReducer(state: DockerReadState, action: DockerReadActi
         collectionRequests: { ...state.collectionRequests, [action.kind]: undefined },
         error: action.error,
       };
+    case "selection-cleared":
+      // Clears whichever kind the current tab had selected, and the in-flight
+      // inspection with it, so a late reply cannot repopulate a panel the
+      // operator has just closed.
+      return {
+        ...state,
+        selectedContainerHandle: null,
+        selectedImageHandle: null,
+        selectedNetworkHandle: null,
+        selectedVolumeHandle: null,
+        inspectionStatus: "idle",
+        inspectionRequest: null,
+        inspectionKind: null,
+        inspectionHandle: null,
+        inspection: null,
+        logsStatus: "idle",
+        logsRequest: null,
+        logsContainerHandle: null,
+        logs: null,
+      };
     case "container-selected":
       if (!state.snapshot?.containers.some((item) => item.containerHandle === action.handle)) return state;
       return selectionChanged(state, "container", action.handle);
+    case "image-selected": {
+      const collection = state.collections.images;
+      if (collection?.kind !== "images" || !collection.items.some((item) => item.imageHandle === action.handle)) return state;
+      return selectionChanged(state, "image", action.handle);
+    }
     case "network-selected": {
       const collection = state.collections.networks;
       if (collection?.kind !== "networks" || !collection.items.some((item) => item.networkHandle === action.handle)) return state;
@@ -280,6 +312,7 @@ function sameLogsRequest(
 
 function selectedHandle(state: DockerReadState, kind: DockerResourceKind): string | null {
   if (kind === "container") return state.selectedContainerHandle;
+  if (kind === "image") return state.selectedImageHandle;
   if (kind === "network") return state.selectedNetworkHandle;
   return state.selectedVolumeHandle;
 }
@@ -288,6 +321,7 @@ function selectionChanged(state: DockerReadState, kind: DockerResourceKind, hand
   return {
     ...state,
     selectedContainerHandle: kind === "container" ? handle : state.selectedContainerHandle,
+    selectedImageHandle: kind === "image" ? handle : state.selectedImageHandle,
     selectedNetworkHandle: kind === "network" ? handle : state.selectedNetworkHandle,
     selectedVolumeHandle: kind === "volume" ? handle : state.selectedVolumeHandle,
     inspectionStatus: "idle",

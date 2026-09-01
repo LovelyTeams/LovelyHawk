@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type {
   DockerContainerSnapshot,
+  DockerImagesCollection,
   DockerLogs,
   DockerNetworksCollection,
   DockerReadInspection,
@@ -12,7 +13,7 @@ const snapshot: DockerContainerSnapshot = {
   snapshotHandle: "snapshot-a",
   expiresInSeconds: 300,
   containers: [{
-    containerHandle: "container-a",
+    containerHandle: "container-a", shortId: "aaaaaaaaaaaa",
     name: "app",
     image: "app:1",
     state: "running",
@@ -20,7 +21,7 @@ const snapshot: DockerContainerSnapshot = {
     ports: "",
     createdAt: "now",
   }, {
-    containerHandle: "container-b",
+    containerHandle: "container-b", shortId: "aaaaaaaaaaaa",
     name: "worker",
     image: "worker:1",
     state: "running",
@@ -29,6 +30,8 @@ const snapshot: DockerContainerSnapshot = {
     createdAt: "now",
   }],
   truncated: false,
+  runtime: "docker",
+  installedRuntimes: ["docker"],
 };
 
 function loadedState() {
@@ -45,6 +48,28 @@ describe("Docker read reducer", () => {
     state = dockerReadReducer(state, { type: "snapshot-loaded", scope: "scope-a", request: 1, snapshot });
     expect(state.scope).toBe("scope-b");
     expect(state.snapshot).toBeNull();
+  });
+
+  /**
+   * Loading a list is not choosing something from it.
+   *
+   * This used to select the first container, which was invisible while the
+   * details were a column parked beside the table. Once they became a dialog
+   * it meant arriving at the page with a modal already covering the very list
+   * you came to read.
+   */
+  it("selects nothing when a snapshot arrives", () => {
+    const state = loadedState();
+    expect(state.snapshot?.containers.length).toBeGreaterThan(0);
+    expect(state.selectedContainerHandle).toBeNull();
+    expect(state.selectedNetworkHandle).toBeNull();
+    expect(state.selectedVolumeHandle).toBeNull();
+    // And a refresh does not quietly select one either.
+    const refreshed = dockerReadReducer(
+      dockerReadReducer(state, { type: "snapshot-started", scope: "scope-a", request: 9 }),
+      { type: "snapshot-loaded", scope: "scope-a", request: 9, snapshot },
+    );
+    expect(refreshed.selectedContainerHandle).toBeNull();
   });
 
   it("refresh invalidates every prior resource, inspection, log and collection handle", () => {
@@ -81,7 +106,38 @@ describe("Docker read reducer", () => {
     state = dockerReadReducer(state, {
       type: "collection-loaded", scope: "scope-a", snapshotHandle: "snapshot-a", kind: "networks", request: 2, collection: networks,
     });
+    expect(state.collections.networks).toBe(networks);
+    // A loaded list selects nothing. Details are a dialog, so selecting the
+    // first row on arrival threw a modal over the list the operator came to
+    // read, about a resource they never picked.
+    expect(state.selectedNetworkHandle).toBeNull();
+    state = dockerReadReducer(state, { type: "network-selected", handle: "network-a" });
     expect(state.selectedNetworkHandle).toBe("network-a");
+  });
+
+  it("opens no image detail until an image is picked", () => {
+    let state = loadedState();
+    const images: DockerImagesCollection = {
+      kind: "images",
+      snapshotHandle: "snapshot-a",
+      items: [{
+        imageHandle: "image-a", shortId: "abc123abc123", repository: "incident-tools",
+        tag: "latest", digest: "<none>", createdAt: "now", size: "12MB",
+      }],
+      truncated: false,
+    };
+    state = dockerReadReducer(state, {
+      type: "collection-started", scope: "scope-a", snapshotHandle: "snapshot-a", kind: "images", request: 2,
+    });
+    state = dockerReadReducer(state, {
+      type: "collection-loaded", scope: "scope-a", snapshotHandle: "snapshot-a", kind: "images", request: 2, collection: images,
+    });
+    expect(state.selectedImageHandle).toBeNull();
+    // A handle the listing never carried names nothing.
+    state = dockerReadReducer(state, { type: "image-selected", handle: "image-b" });
+    expect(state.selectedImageHandle).toBeNull();
+    state = dockerReadReducer(state, { type: "image-selected", handle: "image-a" });
+    expect(state.selectedImageHandle).toBe("image-a");
   });
 
   it("rejects late inspection after resource selection changes", () => {

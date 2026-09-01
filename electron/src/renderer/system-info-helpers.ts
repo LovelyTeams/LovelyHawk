@@ -1,5 +1,6 @@
 import type {
   SystemInfoRisk,
+  SystemInfoRow,
   SystemInfoSummary,
   SystemInfoTabCatalogEntry,
   SystemInfoTable,
@@ -88,6 +89,8 @@ export function formatEpochSeconds(value: string): string {
 }
 
 export interface ShellConfigLine {
+  /** The table row this line came from, so it can be right-clicked like one. */
+  rowId: string;
   number: string;
   text: string;
   risk: SystemInfoRisk;
@@ -121,9 +124,14 @@ export function groupShellConfigRows(table: SystemInfoTable): ShellConfigFile[] 
       byPath.set(path, file);
       files.push(file);
     }
-    file.lines.push({ number, text, risk: row.risk });
+    file.lines.push({ rowId: row.id, number, text, risk: row.risk });
   }
   return files;
+}
+
+/** One row as tab-separated plain text, the same shape the table copy uses. */
+export function buildSystemInfoRowCopy(row: SystemInfoRow): string {
+  return boundedClipboardText(row.cells.map(plainCell).join("\t"));
 }
 
 export function buildSystemInfoSummaryCopy(summary: SystemInfoSummary): string {

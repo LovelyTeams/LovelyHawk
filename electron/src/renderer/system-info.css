@@ -37,6 +37,46 @@
 .system-info-table-scroll th { position: sticky; z-index: 1; top: 0; padding: 8px 10px; color: var(--muted); text-align: left; background: var(--surface-inset); border-bottom: 1px solid var(--border); white-space: nowrap; }
 .system-info-table-scroll td { max-width: 320px; padding: 7px 10px; overflow-wrap: anywhere; border-bottom: 1px solid var(--border-subtle); vertical-align: top; white-space: pre-wrap; }
 .system-info-table-scroll tbody tr:hover { background: var(--surface-alt); }
+/* The row a menu is open for stays marked, so the operator can see which line
+   the menu is about even after the cursor has moved onto the menu. */
+.system-info-table-scroll tbody tr.is-selected,
+.system-info-table-scroll tbody tr.is-selected:hover { background: var(--accent-soft); }
+.system-info-table-scroll tbody tr,
+.system-info-file-line { cursor: context-menu; }
+.system-info-file-line.is-selected { outline: 1px solid var(--accent); outline-offset: -1px; }
+
+/* Right-click menu on a row --------------------------------------------- */
+.system-info-row-menu { position: fixed; z-index: 40; display: flex; min-width: 208px; max-width: 320px; flex-direction: column; padding: 4px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--surface); box-shadow: var(--shadow-md); overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.system-info-row-menu-title { margin: 2px 8px 4px; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; font: 11px "Cascadia Mono", monospace; }
+.system-info-row-menu-note { margin: 4px 8px 5px; color: var(--muted); font-size: 11px; }
+.system-info-row-menu-note.is-error { color: var(--danger-text); }
+.system-info-row-menu button { flex: none; display: flex; align-items: center; gap: 8px; padding: 5px 9px; border: 0; border-radius: 6px; color: var(--text); background: transparent; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.system-info-row-menu button:hover:not(:disabled) { background: var(--surface-hover); }
+.system-info-row-menu button.is-change { color: var(--warning-text); }
+.system-info-row-menu button.is-dangerous { color: var(--danger-text); }
+.system-info-row-menu button:disabled { cursor: not-allowed; opacity: .5; }
+.system-info-row-menu-group { display: flex; flex: none; flex-direction: column; margin-top: 3px; padding-top: 3px; border-top: 1px solid var(--border); }
+.system-info-row-menu-group h3 { margin: 3px 8px 2px; color: var(--faint); font-size: 10.5px; font-weight: 600; letter-spacing: .08em; }
+
+/* Result and plan dialog ------------------------------------------------- */
+.system-info-action-dialog { width: min(880px, 100%); }
+.system-info-action-subject { display: block; margin-top: 3px; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; font: 12px "Cascadia Mono", monospace; }
+.system-info-action-body { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 12px; padding: 14px 18px 18px; overflow: auto; scrollbar-width: thin; }
+.system-info-action-body > * { flex: none; }
+.system-info-action-body .system-info-detail-state { margin: 0; }
+.system-info-action-output { min-height: 0; flex: 1; margin: 0; padding: 10px 12px; overflow: auto; color: var(--text); background: var(--surface-inset); border: 1px solid var(--border); border-radius: 10px; font: 12px/1.55 "Cascadia Mono", monospace; white-space: pre-wrap; overflow-wrap: anywhere; scrollbar-width: thin; }
+.system-info-action-panel { padding: 12px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface-alt); }
+.system-info-action-panel.is-dangerous { border-color: var(--danger-border); background: var(--danger-soft); }
+.system-info-action-summary { margin: 0 0 10px; color: var(--text); font-size: 13px; line-height: 1.6; }
+.system-info-action-panel dl { display: grid; gap: 7px; margin: 0; }
+.system-info-action-panel dt { color: var(--muted); font-size: 11px; }
+.system-info-action-panel dd { margin: 2px 0 0; color: var(--text); font-size: 12.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.system-info-action-body footer { display: flex; justify-content: flex-end; gap: 8px; }
+.system-info-action-body footer button { min-height: 32px; padding: 6px 15px; border: 1px solid var(--border-strong); border-radius: 8px; color: var(--text); background: var(--surface); font: inherit; font-size: 13px; cursor: pointer; }
+.system-info-action-body footer button:hover:not(:disabled) { background: var(--surface-hover); }
+.system-info-action-body footer button:disabled { cursor: not-allowed; opacity: .55; }
+.system-info-action-body footer button.is-primary { border-color: var(--accent); color: var(--on-accent); background: var(--accent); font-weight: 650; }
+.system-info-action-body footer button.is-dangerous { border-color: var(--danger-border); color: var(--danger-text); background: var(--danger-soft); font-weight: 650; }
 .system-info-table-scroll td button { padding: 3px 7px; color: var(--accent-text); background: var(--accent-soft); border: 1px solid var(--border); border-radius: 5px; font: 12px Inter, sans-serif; }
 .system-info-risk { display: inline-block; padding: 3px 6px; border-radius: 999px; font: 12px Inter, sans-serif; white-space: nowrap; }
 .system-info-risk.normal { color: var(--success-text); background: var(--success-soft); }

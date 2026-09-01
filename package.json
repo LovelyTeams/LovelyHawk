@@ -32,6 +32,16 @@
     "lab:arena": "pwsh -NoProfile -Command \"wsl.exe -d Ubuntu -u root -e bash -lc 'rm -rf /opt/lab-arena && mkdir -p /opt/lab-arena && cp /mnt/d/LovelyRes/tools/lab/arena/* /opt/lab-arena/ && sed -i \\\"s/\r$//\\\" /opt/lab-arena/* && chmod +x /opt/lab-arena/*.sh && bash /opt/lab-arena/up.sh'\" ; node ./tools/lab/import-labs.mjs",
     "lab:verify-import": "node ./tools/lab/verify-import.mjs",
     "lab:versions": "node ./tools/lab/verify-versions.mjs",
-    "lab:write": "node ./tools/lab/probe-baseline-write.mjs"
+    "lab:orchestration": "node ./tools/lab/orchestration/up.mjs && node ./tools/lab/import-labs.mjs",
+    "lab:docker": "node ./tools/lab/probe-docker.mjs",
+    "lab:kubernetes": "node ./tools/lab/probe-kubernetes.mjs",
+    "lab:podman": "node ./tools/lab/probe-podman.mjs",
+    "lab:container-arena": "node ./tools/lab/probe-container-arena.mjs",
+    "lab:docker-terminal": "node ./tools/lab/probe-docker-terminal.mjs",
+    "lab:docker-image": "node ./tools/lab/probe-docker-image.mjs",
+    "lab:write": "node ./tools/lab/probe-baseline-write.mjs",
+    "lab:sftp-edit": "node ./tools/lab/probe-sftp-edit.mjs",
+    "lab:workbench-container": "node ./tools/lab/probe-workbench-container.mjs",
+    "lab:workbench-pod": "node ./tools/lab/probe-workbench-pod.mjs"
   }
 }
