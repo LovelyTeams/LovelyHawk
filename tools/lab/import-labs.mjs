@@ -1,4 +1,4 @@
-// Writes every lab host into LovelyRes's own connection store, passwords
+// Writes every lab host into LovelyHawk's own connection store, passwords
 // included, so the window opens with all of them ready to connect.
 //
 // Re-running is the normal thing to do: the WSL virtual machine takes a new
@@ -6,7 +6,7 @@
 // rather than adding duplicates.
 //
 //   node tools/lab/import-labs.mjs            # into the development store
-//   LOVELYRES_ARCHIVE_ROOT=D:/some/where node tools/lab/import-labs.mjs
+//   LOVELYHAWK_ARCHIVE_ROOT=D:/some/where node tools/lab/import-labs.mjs
 //   node tools/lab/import-labs.mjs --remove   # take them all out again
 import { execFileSync } from "node:child_process";
 import path from "node:path";
@@ -18,16 +18,17 @@ import {
   LAB_PORTS,
   ORCHESTRATION_PORTS,
   SERVICE_PORTS,
+  SUPER_PORT,
 } from "./lab-target.mjs";
 
 const PASSWORD = "LabRoot#2026";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repository = path.resolve(here, "..", "..");
 
-// The unpackaged app resolves its archive root to the directory above
-// electron/, which is the repository root.
-const archiveRoot = process.env.LOVELYRES_ARCHIVE_ROOT ?? repository;
-const backend = path.join(repository, "target", "debug", "lovelyres-backend.exe");
+// The debug desktop build (target/debug/lovelyhawk.exe) resolves its archive
+// root to the first ancestor holding Cargo.toml, which is the repository root.
+const archiveRoot = process.env.LOVELYHAWK_ARCHIVE_ROOT ?? repository;
+const backend = path.join(repository, "target", "debug", "lovelyhawk-backend.exe");
 const removing = process.argv.includes("--remove");
 
 function wslAddress() {
@@ -71,6 +72,16 @@ const FAMILIES = [
     label: () => "综合靶机 Ubuntu",
     note: () => "WSL Docker 靶机 lab-arena：一台机器上跑齐 nginx / MariaDB / Redis / PostgreSQL，"
       + "六个基线文件全是错的，还带几处入侵痕迹；见 tools/lab/arena/README.md。",
+  },
+  {
+    // A block of its own, clear of every other family's ids.
+    base: 940,
+    ports: { super: SUPER_PORT },
+    group: "实验靶机 · 综合",
+    label: () => "超级靶机 Ubuntu",
+    note: () => "WSL Docker 靶机 lab-super：综合靶机再加码——第二个 Web 服务（apache:8080）与 "
+      + "匿名可写的 FTP、更多弱账号与 sudo、危险的文件 capability、PATH 上可被任何人写的目录、"
+      + "散落的明文口令，以及被清过的日志；见 tools/lab/super/README.md。",
   },
   {
     base: 0,
@@ -180,7 +191,7 @@ try {
     console.log(`靶机地址 ${host}，口令 ${PASSWORD}`);
     console.log(`已写入连接库：新建 ${created} 台，更新 ${updated} 台。`);
     console.log(`连接库位置：${path.join(archiveRoot, "data")}`);
-    console.log("打开 LovelyRes 就能在连接管理里看到它们；WSL 重启换了地址后再跑一次即可。");
+    console.log("打开 LovelyHawk 就能在连接管理里看到它们；WSL 重启换了地址后再跑一次即可。");
   }
 } catch (error) {
   console.error(`失败：${error.message}`);

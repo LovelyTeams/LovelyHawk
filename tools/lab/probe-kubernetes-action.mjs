@@ -1,10 +1,9 @@
 // Drives a workload action all the way through against a real cluster:
 // plan, confirm, execute, verify — and the paths that must refuse.
 //
-// The core has had compare-and-set patching, journalling, read-back and
-// revision-exact restore for a long time and it has never once run against a
-// cluster that exists. Everything below acts on `payments/ledger` and the
-// single k3s node, both of which the lab plants for exactly this.
+// Everything below acts on `payments/ledger` and the single k3s node, both
+// of which the lab plants for exactly this. Verification covers the requested
+// replica count and scheduling state; it does not certify workload health.
 //
 //   node tools/lab/probe-kubernetes-action.mjs
 import { execFileSync } from "node:child_process";
@@ -39,8 +38,7 @@ async function refuses(label, code, run) {
 function onCluster(command) {
   return execFileSync(
     "wsl.exe",
-    ["-d", "Ubuntu", "-u", "root", "--", "bash", "-lc",
-      `docker exec svc-kubernetes sh -c ${JSON.stringify(command)}`],
+    ["-d", "Ubuntu", "-u", "root", "--", "docker", "exec", "svc-kubernetes", "sh", "-c", command],
     { encoding: "utf8" },
   ).split("\0").join("").trim();
 }
@@ -51,19 +49,28 @@ function onCluster(command) {
  * Cleaning up only at the end means a probe that crashes half way through can
  * never be run again, which is exactly when you most want to re-run it.
  */
-function resetCluster() {
-  // No `$(...)`: this string travels through an outer bash before it reaches
-  // the container, and command substitution would be evaluated out there,
-  // where kubectl does not exist. `--all` needs no substitution.
-  onCluster(
-    "kubectl -n payments scale deployment ledger --replicas=3 >/dev/null 2>&1; " +
-    "kubectl uncordon --all >/dev/null 2>&1; true",
-  );
-}
-
 const target = labTarget("kubernetes");
+const outer = JSON.parse(execFileSync("wsl.exe", ["-d", "Ubuntu", "-u", "root", "--", "docker", "inspect", "svc-kubernetes"], { encoding: "utf8" }))[0];
+if (outer.Config.Image !== "lovelyres-svc:kubernetes" || outer.HostConfig.Privileged ||
+  outer.Mounts.length !== 1 || outer.Mounts[0].Name !== "lab-k3s-config" || outer.Mounts[0].RW) {
+  throw new Error("Refusing to mutate a target that is not the isolated Kubernetes lab client");
+}
+const nodesBefore = JSON.parse(onCluster("kubectl get nodes -o json"));
+const nodeName = nodesBefore.items[0]?.metadata.name;
+const server = JSON.parse(execFileSync("wsl.exe", ["-d", "Ubuntu", "-u", "root", "--", "docker", "inspect", "lab-k3s"], { encoding: "utf8" }))[0];
+if (server.Config.Image !== "docker.m.daocloud.io/rancher/k3s:v1.31.4-k3s1" ||
+  !server.Mounts.some((mount) => mount.Name === "lab-k3s-config") ||
+  server.Mounts.some((mount) => mount.Type === "bind" &&
+    (mount.Source !== "/opt/lab-orchestration/k3s/registries.yaml" || mount.RW)) ||
+  nodesBefore.items.length !== 1 || nodeName !== server.Id.slice(0, 12)) {
+  throw new Error("Expected the single-node k3s lab; no reset was attempted");
+}
+function resetCluster() {
+  onCluster("kubectl -n payments scale deployment ledger --replicas=3");
+  onCluster(`kubectl uncordon ${nodeName}`);
+}
 resetCluster();
-const sidecar = new Sidecar("D:/LovelyRes/target/debug/lovelyres-backend.exe", newDataRoot());
+const sidecar = new Sidecar("D:/LovelyRes/target/debug/lovelyhawk-backend.exe", newDataRoot());
 
 try {
   console.log(`连接 ${target.host}:${target.port}\n`);
@@ -95,8 +102,8 @@ try {
   check("有回滚说明", plan.restoreDescription, (value) => (value ?? "") !== "");
   check("还没确认", plan.confirmed, false);
   check("计划有有效期", plan.expiresInSeconds, (value) => value > 0 && value <= 300);
-  check("计划里没有 namespace/name/UID", JSON.stringify(plan), (value) =>
-    !value.includes("payments") || value.includes("ledger"));
+  check("计划对应所选资源", plan.rowHandle, ledger.rowHandle);
+  check("计划对应所选资源名称", plan.resourceName, ledger.name);
 
   console.log("\n=== 没确认就执行");
   await refuses("被拒绝", "kubernetes-action-not-confirmed", () =>
@@ -257,7 +264,8 @@ try {
     "",
   );
 } finally {
-  sidecar.close();
+  // Restore this lab even if an RPC or assertion path throws midway through.
+  try { resetCluster(); } finally { sidecar.close(); }
 }
 
 console.log(failures === 0 ? "\n全部对上了" : `\n${failures} 处对不上`);

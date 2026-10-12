@@ -5,7 +5,7 @@
 用来验配置生成、中间件发现、数据库巡检和安全基线。
 
 镜像用产品官方镜像做基底，只加一个 sshd。这样每个配置文件都在产品真正放它的位置——
-LovelyRes 得在 `/etc/nginx/nginx.conf` 找到 nginx，而不是在实验室自己定的路径。
+LovelyHawk 得在 `/etc/nginx/nginx.conf` 找到 nginx，而不是在实验室自己定的路径。
 
 ## 起来
 
@@ -66,7 +66,7 @@ PermitRootLogin yes
 node tools/lab/verify-services.mjs
 ```
 
-每台检查四件事：容器在跑、sshd 在跑、故意留的那行配置确实在文件里、LovelyRes 自己的
+每台检查四件事：容器在跑、sshd 在跑、故意留的那行配置确实在文件里、LovelyHawk 自己的
 sidecar 连得上。四项全过才算就绪。
 
 ## WSL 重启之后

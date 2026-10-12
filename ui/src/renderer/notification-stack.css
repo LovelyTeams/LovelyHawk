@@ -1,0 +1,97 @@
+.notification-overlay-layer {
+  position: fixed;
+  z-index: 1400;
+  inset: 0;
+  pointer-events: none;
+}
+
+.notification-overlay-layer.is-modal-blocked {
+  visibility: hidden;
+}
+
+.notification-stack {
+  position: absolute;
+  top: 76px;
+  right: 20px;
+  display: grid;
+  width: min(390px, calc(100vw - 32px));
+  max-height: calc(100vh - 96px);
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.notification-card {
+  display: grid;
+  grid-template-columns: 4px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  color: var(--text);
+  pointer-events: auto;
+}
+
+.notification-marker {
+  align-self: stretch;
+  min-height: 34px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.notification-card.is-success .notification-marker {
+  background: var(--success-bright);
+}
+
+.notification-card.is-warning .notification-marker {
+  background: var(--warning);
+}
+
+.notification-card.is-error .notification-marker {
+  background: var(--danger);
+}
+
+.notification-card strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: var(--font-small);
+  letter-spacing: 0.08em;
+}
+
+.notification-card p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.notification-dismiss {
+  min-width: 32px;
+  min-height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.notification-dismiss:hover,
+.notification-dismiss:focus-visible {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+@media (max-width: 680px) {
+  .notification-stack {
+    top: 12px;
+    right: 16px;
+    left: 16px;
+    width: auto;
+  }
+}

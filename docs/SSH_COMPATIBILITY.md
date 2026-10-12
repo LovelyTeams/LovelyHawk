@@ -1,8 +1,9 @@
 # SSH 兼容性与安全策略
 
-LovelyRes 的“已支持”以自动化契约为准，不以协议实现理论兼容性代替实测结论。版本化
+LovelyHawk 的“已支持”以自动化契约为准，不以协议实现理论兼容性代替实测结论。版本化
 实验矩阵保存在 `tests/ssh-compat/matrix.json`；Core 的兼容性清单是
-`lovelyres_core::ssh_compat::SSH_COMPATIBILITY_CONTRACT`。两者只定义必须覆盖的格子，
+`lovelyhawk_core::ssh_compat::SSH_COMPATIBILITY_CONTRACT`（序列化 schema 仍沿用
+`lovelyres-ssh-compatibility/v1`，以保持兼容）。两者只定义必须覆盖的格子，
 不能代替真实 Linux/OpenSSH/Dropbear 实验室结果。
 
 ## 当前契约
@@ -21,7 +22,7 @@ SFTP（可用时）及有限时 PCAP（显式启用时）。
 
 ## RSA 策略
 
-LovelyRes 不在进程内加载 RSA 私钥。RustCrypto `rsa` 的
+LovelyHawk 不在进程内加载 RSA 私钥。RustCrypto `rsa` 的
 `RUSTSEC-2023-0071` 尚无修复版本，因此直接选择 RSA 私钥会安全失败，并提示改用：
 
 1. Ed25519 或 ECDSA 私钥；
@@ -29,7 +30,7 @@ LovelyRes 不在进程内加载 RSA 私钥。RustCrypto `rsa` 的
 3. 在受控环境使用系统 OpenSSH。
 
 该限制不等于拒绝 RSA 服务端。RSA 身份通过 Agent 使用时，私钥和签名秘密不进入
-LovelyRes 进程。
+LovelyHawk 进程。
 
 ## 目标能力预检
 
@@ -42,21 +43,21 @@ LovelyRes 进程。
 矩阵依赖 Linux Docker 网络与 `NET_ADMIN`。在 Linux runner 上由工作流执行；单个目标也可用：
 
 ```bash
-mkdir -p /tmp/lovelyres-ssh-fixtures
-ssh-keygen -q -t ed25519 -N '' -f /tmp/lovelyres-ssh-fixtures/user_key
-bash scripts/start-ssh-compat-target.sh ubuntu:24.04 lovelyres-ssh 2222 password /tmp/lovelyres-ssh-fixtures
+mkdir -p /tmp/lovelyhawk-ssh-fixtures
+ssh-keygen -q -t ed25519 -N '' -f /tmp/lovelyhawk-ssh-fixtures/user_key
+bash scripts/start-ssh-compat-target.sh ubuntu:24.04 lovelyhawk-ssh 2222 password /tmp/lovelyhawk-ssh-fixtures
 ```
 
-然后设置测试注释列出的 `LOVELYRES_TEST_*` 环境变量并运行 Core 的忽略实机测试：
+然后设置测试注释列出的 `LOVELYHAWK_TEST_*` 环境变量并运行 Core 的忽略实机测试：
 
 ```bash
-cargo test --locked -p lovelyres-core live_openssh_end_to_end_contract -- --ignored --nocapture
-cargo test --locked -p lovelyres-core live_openssh_keyboard_interactive_contract -- --ignored --nocapture
-cargo test --locked -p lovelyres-core live_sftp_crud_atomic_restore_archive_matrix -- --ignored --nocapture
+cargo test --locked -p lovelyhawk-core live_openssh_end_to_end_contract -- --ignored --nocapture
+cargo test --locked -p lovelyhawk-core live_openssh_keyboard_interactive_contract -- --ignored --nocapture
+cargo test --locked -p lovelyhawk-core live_sftp_crud_atomic_restore_archive_matrix -- --ignored --nocapture
 ```
 
-MFA 合约额外要求 `LOVELYRES_TEST_SSH_MFA_{HOST,PORT,USERNAME,HOST_KEY}` 与
-`LOVELYRES_TEST_SSH_MFA_RESPONSES_JSON`；后者是按服务端提示顺序排列的 JSON 字符串数组。
+MFA 合约额外要求 `LOVELYHAWK_TEST_SSH_MFA_{HOST,PORT,USERNAME,HOST_KEY}` 与
+`LOVELYHAWK_TEST_SSH_MFA_RESPONSES_JSON`；后者是按服务端提示顺序排列的 JSON 字符串数组。
 所有账号、因素和远端目录必须是一次性靶场资源。
 
 Windows 开发机若没有 Docker，只能运行编译、单元测试和静态矩阵门禁，不能把它们描述成

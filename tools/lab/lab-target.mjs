@@ -39,6 +39,14 @@ export const ORCHESTRATION_PORTS = {
  */
 export const ARENA_PORT = 2250;
 
+/**
+ * The super arena: the ordinary arena and then some, on one host — a second
+ * web server and an FTP server left open, more weak accounts and sudo, a
+ * dangerous file capability, world-writable things on PATH, plaintext
+ * credentials and tampered logs. One target that lights up every page.
+ */
+export const SUPER_PORT = 2251;
+
 export function labTarget(which = process.env.LAB ?? "ubuntu") {
   const output = execFileSync(
     "wsl.exe",
@@ -48,10 +56,13 @@ export function labTarget(which = process.env.LAB ?? "ubuntu") {
   const address = output.split("\0").join("").trim().split(/\s+/u)[0];
   const port = which === "arena"
     ? ARENA_PORT
-    : LAB_PORTS[which] ?? SERVICE_PORTS[which] ?? ORCHESTRATION_PORTS[which];
+    : which === "super"
+      ? SUPER_PORT
+      : LAB_PORTS[which] ?? SERVICE_PORTS[which] ?? ORCHESTRATION_PORTS[which];
   if (port === undefined) {
     const known = [
       "arena",
+      "super",
       ...Object.keys(LAB_PORTS),
       ...Object.keys(SERVICE_PORTS),
       ...Object.keys(ORCHESTRATION_PORTS),

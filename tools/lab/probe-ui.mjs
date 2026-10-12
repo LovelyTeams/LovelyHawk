@@ -7,26 +7,34 @@
 //
 //   node tools/lab/probe-ui.mjs            # ubuntu
 //   LAB=rocky node tools/lab/probe-ui.mjs
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { startDesktop } from "./desktop.mjs";
 import { Sidecar, connect } from "./rpc-harness.mjs";
-import { labTarget } from "./lab-target.mjs";
+import { LAB_PORTS, labTarget } from "./lab-target.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repository = path.resolve(here, "..", "..");
-const electronRoot = path.join(repository, "electron");
-const backend = path.join(repository, "target", "debug", "lovelyres-backend.exe");
+const backend = path.join(repository, "target", "debug", "lovelyhawk-backend.exe");
 const which = process.env.LAB ?? "ubuntu";
+if (!Object.hasOwn(LAB_PORTS, which)) throw new Error("This probe requires a defined Linux lab target.");
 const container = `lab-${which}`;
 const port = 9333;
+const runId = randomUUID();
+const fixtureDirectory = `/usr/local/lib/lovelyres-probe-${runId}`;
+const fixture = `${fixtureDirectory}/.evidence-sample`;
+const checks = [];
+const consoleErrors = [];
 
 let failures = 0;
 function check(name, actual, expected = true) {
   const ok = actual === expected;
+  checks.push({ name, passed: ok });
   if (!ok) failures += 1;
   console.log(`  ${ok ? "PASS" : "FAIL"} ${name}${ok ? "" : `\n       expected ${JSON.stringify(expected)}\n       actual   ${JSON.stringify(actual)}`}`);
 }
@@ -34,8 +42,8 @@ function check(name, actual, expected = true) {
 function onHost(command) {
   return execFileSync(
     "wsl.exe",
-    ["-d", "Ubuntu", "-u", "root", "-e", "bash", "-lc", `docker exec ${container} sh -c ${JSON.stringify(command)}`],
-    { encoding: "utf8" },
+    ["-d", "Ubuntu", "-u", "root", "--", "docker", "exec", container, "sh", "-c", command],
+    { encoding: "utf8", windowsHide: true, timeout: 30_000 },
   ).split("\0").join("").trim();
 }
 
@@ -50,65 +58,7 @@ async function waitFor(session, expression, label, attempts = 60) {
   throw new Error(`timed out waiting for ${label}`);
 }
 
-async function openSession() {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    try {
-      const targets = await fetch(`http://127.0.0.1:${port}/json/list`).then((r) => r.json());
-      const page = targets.find((target) =>
-        target.type === "page" && String(target.url).startsWith("lovelyres://app/") &&
-        !String(target.url).includes("window=terminal"));
-      if (page !== undefined) return await attach(page.webSocketDebuggerUrl);
-    } catch {
-      // The port is not listening yet.
-    }
-    await sleep(500);
-  }
-  throw new Error("the window never exposed a debugging target");
-}
-
-function attach(url) {
-  return new Promise((resolve, reject) => {
-    const socket = new WebSocket(url);
-    const pending = new Map();
-    let nextId = 1;
-    socket.addEventListener("message", (event) => {
-      const message = JSON.parse(String(event.data));
-      const waiting = pending.get(message.id);
-      if (waiting === undefined) return;
-      pending.delete(message.id);
-      if (message.error !== undefined) waiting.reject(new Error(JSON.stringify(message.error)));
-      else waiting.resolve(message.result);
-    });
-    socket.addEventListener("error", () => reject(new Error("could not attach to the window")));
-    socket.addEventListener("open", () => {
-      const send = (method, params) => new Promise((res, rej) => {
-        const id = nextId++;
-        pending.set(id, { resolve: res, reject: rej });
-        socket.send(JSON.stringify({ id, method, params }));
-        setTimeout(() => {
-          if (pending.delete(id)) rej(new Error(`${method} timed out`));
-        }, 30_000);
-      });
-      resolve({
-        send,
-        close: () => socket.close(),
-        async evaluate(expression) {
-          const result = await send("Runtime.evaluate", {
-            expression,
-            awaitPromise: true,
-            returnByValue: true,
-          });
-          if (result.exceptionDetails !== undefined) {
-            throw new Error(result.exceptionDetails.exception?.description ?? "evaluate threw");
-          }
-          return result.result.value;
-        },
-      });
-    });
-  });
-}
-
-const evidence = path.join(repository, "target", "lab-ui");
+const evidence = path.join(repository, "target", "lab-ui", `emergency-${which}-${runId}`);
 fs.mkdirSync(evidence, { recursive: true });
 
 /** Saves what the operator would be looking at, as evidence for the change. */
@@ -119,11 +69,19 @@ async function shot(session, name) {
   console.log(`      saved ${file}`);
 }
 
-const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "lovelyres-ui-"));
-let electron;
+const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "lovelyhawk-ui-"));
+let app;
 let session;
+let fixtureCreated = false;
 try {
-  onHost("mkdir -p /usr/local/lib/pyshared && printf '#!/bin/sh\\nexit 0\\n' > /usr/local/lib/pyshared/.helper && chmod 4755 /usr/local/lib/pyshared/.helper");
+  const identity = execFileSync("wsl.exe", [
+    "-d", "Ubuntu", "-u", "root", "--", "docker", "inspect", "--format",
+    '{{.Config.Image}}|{{.HostConfig.Privileged}}|{{len .Mounts}}', container,
+  ], { encoding: "utf8", windowsHide: true, timeout: 30_000 }).trim();
+  if (identity !== `lovelyres-lab:${which}|false|0`) throw new Error("The selected target is not an isolated, mount-free LovelyHawk lab.");
+  onHost(`mkdir '${fixtureDirectory}'`);
+  fixtureCreated = true;
+  onHost(`printf '#!/bin/sh\\nexit 0\\n' > '${fixture}' && chmod 4755 '${fixture}'`);
 
   // Connecting once through the sidecar records the connection and accepts the
   // host key, so the window opens with a target it can reach straight away.
@@ -137,39 +95,25 @@ try {
   }
 
   console.log("launching the window ...");
-  // The package exports the path to the real executable, so nothing has to go
-  // through a shell wrapper.
-  const executable = execFileSync(
-    process.execPath,
-    ["-e", "process.stdout.write(require('electron'))"],
-    { cwd: electronRoot, encoding: "utf8" },
-  ).trim();
-  electron = spawn(
-    executable,
-    [".", `--remote-debugging-port=${port}`],
-    {
-      cwd: electronRoot,
-      env: { ...process.env, LOVELYRES_ARCHIVE_ROOT: dataRoot, LOVELYRES_DEBUG: "1" },
-      stdio: "ignore",
-      shell: false,
-      windowsHide: true,
+  app = await startDesktop({
+    dataRoot,
+    port,
+    onConsoleError: (entry) => {
+      if (consoleErrors.length < 20) consoleErrors.push(JSON.stringify(entry.params).slice(0, 2_000));
     },
-  );
-
-  session = await openSession();
-  await session.send("Runtime.enable", {});
-  await session.send("Page.enable", {});
+  });
+  session = app.session;
   await waitFor(session, "document.querySelector('.connection-card') !== null", "the connection list");
 
   // --- connect from the window itself
   await session.evaluate(`(() => {
     const card = document.querySelector('.connection-card');
-    card?.querySelector('button')?.click() ?? card?.click();
+    card?.querySelector('button')?.click();
     return true;
   })()`);
   await waitFor(
     session,
-    "document.body.textContent.includes('实验靶机') || document.querySelector('.nav-item') !== null",
+    "document.querySelector('[data-testid=\"disconnect-target\"]:not([disabled])') !== null",
     "the connected shell",
     120,
   );
@@ -199,7 +143,7 @@ try {
     return {
       lines: lines.length,
       actionable: actionable.length,
-      planted: actionable.some(line => line.textContent.includes('/usr/local/lib/pyshared/.helper')),
+      planted: actionable.some(line => line.textContent.includes(${JSON.stringify(fixture)})),
       title: actionable[0]?.getAttribute('title') ?? null
     };
   })()`);
@@ -212,7 +156,7 @@ try {
   // --- right-click the planted file
   await session.evaluate(`(() => {
     const line = [...document.querySelectorAll('.emergency-command-output pre span.has-path')]
-      .find(candidate => candidate.textContent.includes('/usr/local/lib/pyshared/.helper'));
+      .find(candidate => candidate.textContent.includes(${JSON.stringify(fixture)}));
     line.dispatchEvent(new MouseEvent('contextmenu', {
       bubbles: true, cancelable: true, clientX: 200, clientY: 200
     }));
@@ -227,8 +171,11 @@ try {
     };
   })()`);
   console.log(`\nmenu on ${menu.path}:\n${menu.items.map((item) => `      ${item}`).join("\n")}`);
-  check("the menu names the file the line named", menu.path, "/usr/local/lib/pyshared/.helper");
-  check("the menu offers the three actions", menu.items.length, 3);
+  check("the menu names the file the line named", menu.path, fixture);
+  // 下载留证 joined the menu on 2026-09-08; the other three are the original actions.
+  check("the menu offers evidence download, properties, remove-execute and quarantine",
+    JSON.stringify(menu.items.map((item) => ["下载留证", "查看属性", "去掉执行权限", "隔离"].find((label) => item.startsWith(label)) ?? item)),
+    JSON.stringify(["下载留证", "查看属性", "去掉执行权限", "隔离"]));
   await shot(session, "right-click-menu");
 
   // --- read-only first: the properties dialog talks to the target
@@ -247,7 +194,9 @@ try {
     return { text: dialog.textContent, path: dialog.querySelector('header p')?.textContent ?? null };
   })()`);
   check("the properties came from the target", properties.text.includes("4755（rwsr-xr-x）"));
-  check("and they are about the file that was clicked", properties.path, "/usr/local/lib/pyshared/.helper");
+  check("and they are about the file that was clicked", properties.path, fixture);
+  check("permission copy does not promise that everyone can run the file", !properties.text.includes("任何人都跑得起来"));
+  await shot(session, "file-properties");
   await session.evaluate(`(() => {
     [...document.querySelectorAll('[data-testid="emergency-path-properties"] footer button')]
       .find(button => button.textContent.includes('关闭')).click();
@@ -255,10 +204,10 @@ try {
   })()`);
 
   // --- then the change, which has to be planned, confirmed and verified
-  check("the target is untouched so far", onHost("stat -c %a /usr/local/lib/pyshared/.helper"), "4755");
+  check("the target is untouched so far", onHost(`stat -c %a '${fixture}'`), "4755");
   await session.evaluate(`(() => {
     const line = [...document.querySelectorAll('.emergency-command-output pre span.has-path')]
-      .find(candidate => candidate.textContent.includes('/usr/local/lib/pyshared/.helper'));
+      .find(candidate => candidate.textContent.includes(${JSON.stringify(fixture)}));
     line.dispatchEvent(new MouseEvent('contextmenu', {
       bubbles: true, cancelable: true, clientX: 200, clientY: 200
     }));
@@ -280,10 +229,10 @@ try {
   );
   console.log(`\nplan shown to the operator:\n      ${planned.replace(/\s+/gu, " ").slice(0, 300)}`);
   await shot(session, "plan-before-confirm");
-  check("the plan says what it will do", planned.includes("from 4755 to 0644"));
-  check("and how to undo it", planned.includes("restore the captured permission bits"));
+  check("the plan says what it will do", planned.includes("权限从 4755 改成 0644"));
+  check("and how to undo it", planned.includes("恢复成读到的那组权限位"));
   check("nothing ran while the plan was on screen",
-    onHost("stat -c %a /usr/local/lib/pyshared/.helper"), "4755");
+    onHost(`stat -c %a '${fixture}'`), "4755");
 
   await session.evaluate("document.querySelector('[data-testid=\"emergency-path-execute\"]').click(), true");
   await waitFor(
@@ -298,9 +247,71 @@ try {
   await shot(session, "receipt-after-execute");
   check("the window reports it verified", receipt.includes("已完成，并在目标机上核对过。"));
   check("and the target actually changed",
-    onHost("stat -c %a /usr/local/lib/pyshared/.helper"), "644");
+    onHost(`stat -c %a '${fixture}'`), "644");
   check("the file is still there to examine",
-    onHost("test -f /usr/local/lib/pyshared/.helper && echo yes"), "yes");
+    onHost(`test -f '${fixture}' && echo yes`), "yes");
+
+  // --- a verified action can be put back once, after an explicit second look
+  check("the receipt offers to undo it",
+    await session.evaluate("document.querySelector('[data-testid=\"emergency-path-undo\"]:not([disabled])') !== null"));
+  await session.evaluate("document.querySelector('[data-testid=\"emergency-path-undo\"]').click(), true");
+  await waitFor(session, "document.querySelector('[data-testid=\"emergency-path-undo-ask\"]') !== null", "the undo question");
+  const asking = await session.evaluate(`(() => ({
+    text: document.querySelector('[data-testid="emergency-path-undo-ask"]').textContent,
+    focused: document.activeElement?.textContent ?? null,
+  }))()`);
+  console.log(`\nundo question:\n      ${asking.text.replace(/\s+/gu, " ").slice(0, 200)}`);
+  await shot(session, "undo-question");
+  check("the question says the file can run again", asking.text.includes("这个文件会重新可以执行"));
+  check("the safe answer holds focus", asking.focused, "不撤销");
+  check("asking changed nothing on the target", onHost(`stat -c %a '${fixture}'`), "644");
+  await session.evaluate("document.querySelector('[data-testid=\"emergency-path-undo-confirm\"]').click(), true");
+  await waitFor(session, "document.querySelector('[data-testid=\"emergency-path-undo-result\"]') !== null", "the undo result", 120);
+  const undone = await session.evaluate(
+    "document.querySelector('[data-testid=\"emergency-path-undo-result\"]').textContent",
+  );
+  console.log(`\nundo shown to the operator:\n      ${undone.replace(/\s+/gu, " ").slice(0, 160)}`);
+  await shot(session, "undo-result");
+  check("the window reports the undo verified",
+    undone.startsWith("已撤销。") && undone.includes("权限已恢复为 4755，并在目标机上核对过"));
+  check("and the target has its bits back", onHost(`stat -c %a '${fixture}'`), "4755");
+  check("the undo is not offered a second time",
+    await session.evaluate("document.querySelector('[data-testid=\"emergency-path-undo\"]') === null"));
+  check("focus comes back to the dialog, not the page behind it",
+    await session.evaluate("document.activeElement?.textContent?.trim() ?? null"), "关闭");
+
+  // SUID alone must not be described as execute permission. Ask the actual
+  // sidecar again through the properties UI, using the existing file offer.
+  await session.evaluate("document.querySelector('[data-testid=\"emergency-path-dialog\"] footer button').click(), true");
+  onHost(`chmod 4644 '${fixture}'`);
+  await session.evaluate(`(() => {
+    const line = [...document.querySelectorAll('.emergency-command-output pre span.has-path')]
+      .find(candidate => candidate.textContent.includes(${JSON.stringify(fixture)}));
+    line.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true, cancelable: true, clientX: 200, clientY: 200
+    }));
+    return true;
+  })()`);
+  await waitFor(session, "document.querySelector('.emergency-path-menu') !== null", "the refreshed file menu");
+  await session.evaluate(`(() => {
+    [...document.querySelectorAll('.emergency-path-menu button')]
+      .find(button => button.textContent.includes('查看属性')).click();
+    return true;
+  })()`);
+  await waitFor(session, "document.querySelector('[data-testid=\"emergency-path-properties\"] dl') !== null", "refreshed permissions");
+  const privilegeOnly = await session.evaluate("document.querySelector('[data-testid=\"emergency-path-properties\"]').textContent");
+  check("SUID without execute bits is reported accurately", privilegeOnly.includes("4644（rwSr--r--）") && privilegeOnly.includes("未设置执行位"));
+  await shot(session, "privilege-without-execute");
+  await session.evaluate("document.querySelector('[data-testid=\"emergency-path-properties\"] footer button').click(), true");
+
+  // Keep this page mounted while the target disappears. A hook below the
+  // disconnected early return used to crash this exact transition.
+  await session.evaluate("document.querySelector('[data-testid=\"disconnect-target\"]').click(), true");
+  await waitFor(session, "document.querySelector('.emergency-commands-disconnected') !== null", "the disconnected workbench");
+  check("disconnect keeps an actionable page on screen", await session.evaluate("document.querySelector('.emergency-commands-disconnected').textContent.includes('连接 SSH 目标后')"));
+  check("disconnect removes file dialogs and menus", await session.evaluate("document.querySelector('.emergency-path-menu, .emergency-path-dialog') === null"));
+  await shot(session, "disconnected-workbench");
+  check("the desktop page reported no errors", consoleErrors.length, 0);
 
   console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : `${failures} CHECK(S) FAILED`}`);
   process.exitCode = failures === 0 ? 0 : 1;
@@ -308,9 +319,15 @@ try {
   console.log(`\nFAILED: ${error.message}`);
   process.exitCode = 1;
 } finally {
-  session?.close();
-  electron?.kill();
-  onHost("rm -f /usr/local/lib/pyshared/.helper");
-  await sleep(600);
-  fs.rmSync(dataRoot, { recursive: true, force: true });
+  fs.writeFileSync(path.join(evidence, "report.json"), `${JSON.stringify({
+    schema: "lovelyres-emergency-ui/v1", generatedAt: new Date().toISOString(),
+    target: { lab: which, container }, status: process.exitCode === 0 ? "PASS" : "FAIL",
+    checks, consoleErrors,
+  }, null, 2)}\n`);
+  console.log(`evidence: ${evidence}`);
+  await app?.close();
+  if (fixtureCreated) onHost(`rm -f '${fixture}' && rmdir '${fixtureDirectory}'`);
+  if (path.dirname(dataRoot) === os.tmpdir() && !fs.lstatSync(dataRoot).isSymbolicLink()) {
+    fs.rmSync(dataRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+  }
 }

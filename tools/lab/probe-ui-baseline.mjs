@@ -2,19 +2,19 @@
 // captures what the operator would be looking at.
 //
 //   node tools/lab/probe-ui-baseline.mjs            # ubuntu
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { startDesktop } from "./desktop.mjs";
 import { Sidecar, connect } from "./rpc-harness.mjs";
 import { labTarget } from "./lab-target.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repository = path.resolve(here, "..", "..");
-const electronRoot = path.join(repository, "electron");
-const backend = path.join(repository, "target", "debug", "lovelyres-backend.exe");
+const backend = path.join(repository, "target", "debug", "lovelyhawk-backend.exe");
 const which = process.env.LAB ?? "ubuntu";
 const container = `lab-${which}`;
 const port = 9334;
@@ -45,62 +45,6 @@ async function waitFor(session, expression, label, attempts = 90) {
   throw new Error(`timed out waiting for ${label}`);
 }
 
-async function openSession() {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    try {
-      const targets = await fetch(`http://127.0.0.1:${port}/json/list`).then((r) => r.json());
-      const page = targets.find((target) =>
-        target.type === "page" && String(target.url).startsWith("lovelyres://app/") &&
-        !String(target.url).includes("window=terminal"));
-      if (page !== undefined) return await attach(page.webSocketDebuggerUrl);
-    } catch {
-      // Not listening yet.
-    }
-    await sleep(500);
-  }
-  throw new Error("the window never exposed a debugging target");
-}
-
-function attach(url) {
-  return new Promise((resolve, reject) => {
-    const socket = new WebSocket(url);
-    const pending = new Map();
-    let nextId = 1;
-    socket.addEventListener("message", (event) => {
-      const message = JSON.parse(String(event.data));
-      const waiting = pending.get(message.id);
-      if (waiting === undefined) return;
-      pending.delete(message.id);
-      if (message.error !== undefined) waiting.reject(new Error(JSON.stringify(message.error)));
-      else waiting.resolve(message.result);
-    });
-    socket.addEventListener("error", () => reject(new Error("could not attach to the window")));
-    socket.addEventListener("open", () => {
-      const send = (method, params) => new Promise((res, rej) => {
-        const id = nextId++;
-        pending.set(id, { resolve: res, reject: rej });
-        socket.send(JSON.stringify({ id, method, params }));
-        setTimeout(() => {
-          if (pending.delete(id)) rej(new Error(`${method} timed out`));
-        }, 30_000);
-      });
-      resolve({
-        send,
-        close: () => socket.close(),
-        async evaluate(expression) {
-          const result = await send("Runtime.evaluate", {
-            expression, awaitPromise: true, returnByValue: true,
-          });
-          if (result.exceptionDetails !== undefined) {
-            throw new Error(result.exceptionDetails.exception?.description ?? "evaluate threw");
-          }
-          return result.result.value;
-        },
-      });
-    });
-  });
-}
-
 const evidence = path.join(repository, "target", "lab-ui");
 fs.mkdirSync(evidence, { recursive: true });
 
@@ -111,8 +55,8 @@ async function shot(session, name) {
   console.log(`      saved ${file}`);
 }
 
-const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "lovelyres-base-"));
-let electron;
+const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "lovelyhawk-base-"));
+let app;
 let session;
 try {
   onHost("cp /etc/ssh/sshd_config /tmp/sshd_config.bak");
@@ -132,19 +76,8 @@ try {
   }
 
   console.log("launching the window ...");
-  const executable = execFileSync(
-    process.execPath, ["-e", "process.stdout.write(require('electron'))"],
-    { cwd: electronRoot, encoding: "utf8" },
-  ).trim();
-  electron = spawn(executable, [".", `--remote-debugging-port=${port}`], {
-    cwd: electronRoot,
-    env: { ...process.env, LOVELYRES_ARCHIVE_ROOT: dataRoot, LOVELYRES_DEBUG: "1" },
-    stdio: "ignore", shell: false, windowsHide: true,
-  });
-
-  session = await openSession();
-  await session.send("Runtime.enable", {});
-  await session.send("Page.enable", {});
+  app = await startDesktop({ dataRoot, port });
+  session = app.session;
   await waitFor(session, "document.querySelector('.connection-card') !== null", "the connection list");
   await session.evaluate(`(() => {
     const card = document.querySelector('.connection-card');
@@ -208,7 +141,9 @@ try {
     baselineOwnHeader: document.querySelector('.baseline-header') !== null
   }))()`);
   check("标题只在标题栏上", shell.title, "配置");
-  check("两种模式都在", shell.modes.join(","), "检查这台主机,生成新配置");
+  // 修补已有配置 joined the two original modes with the Nginx repair flow, and
+  // 可视化编辑 the tree editor for Nginx files.
+  check("四种模式都在", shell.modes.join(","), "检查这台主机,修补已有配置,生成新配置,可视化编辑");
   check("默认停在检查", shell.active, "检查这台主机");
   check("嵌进来的基线页不再自带标题", shell.baselineOwnHeader, false);
   await shot(session, "configuration-inspect");
@@ -316,15 +251,35 @@ try {
   check("整页没有重复的大标题", generator.ownTitle, "");
   await shot(session, "configuration-generate");
 
+  // No page may tell an operator that something was hidden from them. Nothing
+  // is: filtering by credential shape was removed because it swallowed the
+  // shadow and auth-log lines these pages exist to surface. What stayed behind
+  // was the wording, wired to flags nothing sets — a counter permanently
+  // reading zero and a promise that credential-like fields had been hidden.
+  // Read from the real window rather than the source, because the source can
+  // be clean while a shared component still says it.
+  for (const [label, nav] of [["配置", "配置"], ["命令审计", "命令审计"], ["文件完整性", "文件完整性"]]) {
+    await session.evaluate(`(() => {
+      [...document.querySelectorAll('.nav-item')]
+        .find(candidate => candidate.textContent?.includes(${JSON.stringify(nav)}))?.click();
+      return true;
+    })()`);
+    await sleep(1_200);
+    const said = await session.evaluate(`(() => {
+      const text = document.body.textContent ?? '';
+      return { hides: text.includes('遮蔽'), zero: /0\\s*遮蔽字段/u.test(text) };
+    })()`);
+    check(`${label} 页没有说"已遮蔽"`, said.hides, false);
+    check(`${label} 页没有恒为 0 的遮蔽计数`, said.zero, false);
+  }
+
   console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : `${failures} CHECK(S) FAILED`}`);
   process.exitCode = failures === 0 ? 0 : 1;
 } catch (error) {
   console.log(`\nFAILED: ${error.message}`);
   process.exitCode = 1;
 } finally {
-  session?.close();
-  electron?.kill();
+  await app?.close();
   onHost("[ -f /tmp/sshd_config.bak ] && cp /tmp/sshd_config.bak /etc/ssh/sshd_config; rm -f /tmp/sshd_config.bak");
-  await sleep(600);
-  fs.rmSync(dataRoot, { recursive: true, force: true });
+  fs.rmSync(dataRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
 }

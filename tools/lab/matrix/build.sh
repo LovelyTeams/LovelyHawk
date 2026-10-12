@@ -4,7 +4,7 @@
 # Each entry names the base image, the package manager incantation that installs
 # an SSH server, and the port to publish. The compromise and entrypoint scripts
 # are shared, so every host carries the same artefacts and any difference in
-# what LovelyRes reports comes from the distribution, not the lab.
+# what LovelyHawk reports comes from the distribution, not the lab.
 set -u
 cd "$(dirname "$0")"
 

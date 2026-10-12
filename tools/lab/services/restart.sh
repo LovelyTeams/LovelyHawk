@@ -2,7 +2,7 @@
 # Brings every lab host back after the WSL virtual machine restarted.
 #
 # A WSL restart stops all containers with exit 255 and gives the machine a new
-# address, so the connections in LovelyRes point at nowhere. This starts what
+# address, so the connections in LovelyHawk point at nowhere. This starts what
 # already exists — no rebuild — and the caller re-imports the addresses.
 set +e
 

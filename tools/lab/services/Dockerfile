@@ -1,7 +1,7 @@
 # One SSH-reachable host running one service with a deliberately bad config.
 #
 # The service image itself is the base, so every path is the canonical one the
-# real product ships with: LovelyRes has to find /etc/nginx/nginx.conf where a
+# real product ships with: LovelyHawk has to find /etc/nginx/nginx.conf where a
 # real nginx keeps it, not where a lab decided to put it.
 ARG BASE
 FROM ${BASE}

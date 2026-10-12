@@ -1,4 +1,4 @@
-name: Electron CI
+name: Desktop CI
 
 on:
   push:
@@ -7,12 +7,12 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: electron-ci-${{ github.ref }}
+  group: desktop-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   quality:
-    name: Electron and Rust quality gates
+    name: Tauri desktop and Rust quality gates
     runs-on: windows-latest
     steps:
       - name: Checkout repository
@@ -43,18 +43,18 @@ jobs:
           corepack prepare pnpm@10.28.2 --activate
           pnpm --version
 
-      - name: Install locked Electron dependencies
+      - name: Install locked UI dependencies
         shell: pwsh
         run: pnpm install --frozen-lockfile
 
       - name: Verify gate failure detection
         shell: pwsh
         run: |
-          ./scripts/electron-quality-gates.ps1 -SelfTest
-          ./scripts/electron-source-gate.ps1 -SelfTest
-          ./scripts/electron-dependency-gate.ps1 -SelfTest
-          ./scripts/electron-ui-ledger-gate.ps1 -SelfTest
+          ./scripts/desktop-quality-gates.ps1 -SelfTest
+          ./scripts/desktop-source-gate.ps1 -SelfTest
+          ./scripts/desktop-dependency-gate.ps1 -SelfTest
+          ./scripts/desktop-ui-ledger-gate.ps1 -SelfTest
 
-      - name: Run Electron and Rust quality gates
+      - name: Run desktop and Rust quality gates
         shell: pwsh
-        run: ./scripts/electron-quality-gates.ps1
+        run: ./scripts/desktop-quality-gates.ps1

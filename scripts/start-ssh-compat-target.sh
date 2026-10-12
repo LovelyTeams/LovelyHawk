@@ -14,19 +14,19 @@ fixture_dir="$5"
 
 docker_args=(-d --name "$name" -p "127.0.0.1:${host_port}:22")
 if [[ "$mode" = 'high-latency' ]]; then docker_args+=(--cap-add NET_ADMIN); fi
-if [[ -n "${LOVELYRES_DOCKER_NETWORK:-}" ]]; then
-  docker_args+=(--network "$LOVELYRES_DOCKER_NETWORK" --network-alias "$name")
+if [[ -n "${LOVELYHAWK_DOCKER_NETWORK:-}" ]]; then
+  docker_args+=(--network "$LOVELYHAWK_DOCKER_NETWORK" --network-alias "$name")
 fi
 docker run "${docker_args[@]}" "$image" sh -c 'while :; do sleep 3600; done' >/dev/null
 
-docker exec -e LOVELYRES_SSHD_MODE="$mode" "$name" sh -lc '
+docker exec -e LOVELYHAWK_SSHD_MODE="$mode" "$name" sh -lc '
   if command -v apk >/dev/null 2>&1; then
-    if [ "$LOVELYRES_SSHD_MODE" = "dropbear" ]; then
+    if [ "$LOVELYHAWK_SSHD_MODE" = "dropbear" ]; then
       apk add --no-cache dropbear shadow sudo tcpdump coreutils findutils grep sed gawk iproute2 procps util-linux
     else
       apk add --no-cache openssh shadow sudo tcpdump coreutils findutils grep sed gawk iproute2 procps util-linux
     fi
-    if [ "$LOVELYRES_SSHD_MODE" = "keyboard-interactive" ]; then apk add --no-cache openssh-server-pam; fi
+    if [ "$LOVELYHAWK_SSHD_MODE" = "keyboard-interactive" ]; then apk add --no-cache openssh-server-pam; fi
   elif command -v apt-get >/dev/null 2>&1; then
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
@@ -55,9 +55,9 @@ docker cp tests/ssh-compat/configure-dropbear-target.sh "$name:/tmp/configure-lo
 target_script=/tmp/configure-lovelyres-target.sh
 if [[ "$mode" = 'dropbear' ]]; then target_script=/tmp/configure-lovelyres-dropbear-target.sh; fi
 docker exec -d \
-  -e LOVELYRES_SSHD_MODE="$mode" \
-  -e LOVELYRES_SSHD_USER=incident \
-  -e LOVELYRES_SSHD_PASSWORD=lovelyres-contract-password \
+  -e LOVELYHAWK_SSHD_MODE="$mode" \
+  -e LOVELYHAWK_SSHD_USER=incident \
+  -e LOVELYHAWK_SSHD_PASSWORD=lovelyres-contract-password \
   "$name" sh -c "exec sh '$target_script' >/tmp/lovelyres-sshd.log 2>&1"
 
 for _ in $(seq 1 45); do

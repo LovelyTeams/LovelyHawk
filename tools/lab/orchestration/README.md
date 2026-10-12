@@ -35,7 +35,7 @@ wsl -d Ubuntu -u root -- docker exec svc-docker cat /var/log/lab-plant.log
 
 口令都是 `LabRoot#2026`。
 
-四台带 SSH 的都会进 LovelyRes 的连接库，打开应用直接点就能连；分组写的是
+四台带 SSH 的都会进 LovelyHawk 的连接库，打开应用直接点就能连；分组写的是
 「实验靶机 · 容器编排」，在连接管理的搜索框里打「容器编排」就只剩这四台。
 `lab-k3s` 不开 SSH，也就不在里面。WSL 重启换了地址之后跑一次 `pnpm lab:import` 刷新即可。
 
@@ -110,7 +110,7 @@ Compose 项目（里面 `shipper` 同时是特权 + 挂 sock，审计要能穿�
 
 ## 这轮查出来的真问题
 
-**一、Pod 的地址列一直是空的。** `crates/lovelyres-core/src/kubernetes.rs` 的 `RawPodStatus`
+**一、Pod 的地址列一直是空的。** `crates/lovelyhawk-core/src/kubernetes.rs` 的 `RawPodStatus`
 用 `rename_all = "camelCase"` 把 `pod_ip` 变成 `podIp`，而 Kubernetes 发出来的是 `podIP`——
 两个字母都大写。字段永远匹配不上，从这个页面存在起，任何真实集群上那一列都是空的。
 

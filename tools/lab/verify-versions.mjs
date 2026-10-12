@@ -85,12 +85,12 @@ function scanScript() {
   const marker = "----LOVELYRES-SCAN----";
   const output = execFileSync(
     "cargo",
-    ["test", "-p", "lovelyres-core", "--lib", "dump_scan_command_for_the_lab", "--", "--nocapture"],
+    ["test", "-p", "lovelyhawk-core", "--lib", "dump_scan_command_for_the_lab", "--", "--nocapture"],
     {
       cwd: path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([a-z]:)/iu, "$1")), "..", ".."),
       encoding: "utf8",
       maxBuffer: 64 * 1024 * 1024,
-      env: { ...process.env, LOVELYRES_DUMP_SCAN: "1" },
+      env: { ...process.env, LOVELYHAWK_DUMP_SCAN: "1" },
     },
   );
   const start = output.indexOf(marker);
@@ -104,7 +104,7 @@ function itemsByComponent() {
   const source = fs.readFileSync(
     path.resolve(
       path.dirname(new URL(import.meta.url).pathname.replace(/^\/([a-z]:)/iu, "$1")),
-      "..", "..", "crates", "lovelyres-core", "src", "baseline.rs",
+      "..", "..", "crates", "lovelyhawk-core", "src", "baseline.rs",
     ),
     "utf8",
   );

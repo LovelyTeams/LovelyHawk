@@ -2,8 +2,10 @@
 // accepts, by running the exact awk the tool sends against real configuration
 // files on a lab host and reading the result back.
 //
-// Nothing here touches a live service: every edit is made on a copy under
-// /tmp, and the copy is deleted afterwards.
+// The writer cases edit copies under /tmp. The validator cases below replace
+// real configuration files temporarily to prove that the product rejects bad
+// input, then restore them. Run only on a disposable lab container; a stopped
+// probe must never leave a user's service with the negative-test configuration.
 //
 //   node tools/lab/probe-baseline-write.mjs [靶机名]
 import { execFileSync } from "node:child_process";
@@ -31,6 +33,7 @@ function run(script) {
 // file still carries these strings, so the probe can never drift into proving
 // something the tool does not send.
 const WRITERS = {
+  sshd: 'BEGIN{done=0;active=0;firstActive=0;firstComment=0;firstMatch=0} NR==FNR{if(firstMatch>0) next; p=$0; sub(/^[[:space:]]+/,"",p); if(p ~ /^#/){c=p; sub(/^#+[[:space:]]*/,"",c); t=c; sub(/[[:space:]=].*$/,"",t); if(tolower(t)==tolower(k) && firstComment==0) firstComment=FNR} else {t=p; sub(/[[:space:]=].*$/,"",t); if(tolower(t)=="match"){firstMatch=FNR; next} if(tolower(t)==tolower(k)){active++; if(firstActive==0) firstActive=FNR}} next} {if(firstMatch>0 && FNR>=firstMatch){ if(FNR==firstMatch && !done){print k " " v; done=1} print; next} indent=""; if(match($0,/[^ \\t]/)>1) indent=substr($0,1,RSTART-1); if(active>0){ if(FNR==firstActive){print indent k " " v; done=1; next} p=$0; sub(/^[[:space:]]+/,"",p); if(p !~ /^#/){t=p; sub(/[[:space:]=].*$/,"",t); if(tolower(t)==tolower(k)) next} } else if(firstComment>0 && FNR==firstComment){ print indent k " " v; done=1; next} print} END{if(!done) print k " " v}',
   flatSpace: 'BEGIN{done=0;active=0;firstActive=0;firstComment=0} NR==FNR{p=$0; sub(/^[[:space:]]+/,"",p); if(p ~ /^#/){c=p; sub(/^#+[[:space:]]*/,"",c); t=c; sub(/[[:space:]=].*$/,"",t); if(tolower(t)==tolower(k) && firstComment==0) firstComment=FNR} else {t=p; sub(/[[:space:]=].*$/,"",t); if(tolower(t)==tolower(k)){active++; if(firstActive==0) firstActive=FNR}} next}  {indent=""; if(match($0,/[^ \\t]/)>1) indent=substr($0,1,RSTART-1); if(active>0){ if(FNR==firstActive){print indent k " " v; done=1; next} p=$0; sub(/^[[:space:]]+/,"",p); if(p !~ /^#/){t=p; sub(/[[:space:]=].*$/,"",t); if(tolower(t)==tolower(k)) next} } else if(firstComment>0 && FNR==firstComment){ print indent k " " v; done=1; next} print} END{if(!done) print k " " v}',
   flatEquals: 'BEGIN{done=0;active=0;firstActive=0;firstComment=0} NR==FNR{p=$0; sub(/^[[:space:]]+/,"",p); if(p ~ /^#/){c=p; sub(/^#+[[:space:]]*/,"",c); t=c; sub(/[[:space:]=].*$/,"",t); if(tolower(t)==tolower(k) && firstComment==0) firstComment=FNR} else {t=p; sub(/[[:space:]=].*$/,"",t); if(tolower(t)==tolower(k)){active++; if(firstActive==0) firstActive=FNR}} next}  {indent=""; if(match($0,/[^ \\t]/)>1) indent=substr($0,1,RSTART-1); if(active>0){ if(FNR==firstActive){print indent k " = " v; done=1; next} p=$0; sub(/^[[:space:]]+/,"",p); if(p !~ /^#/){t=p; sub(/[[:space:]=].*$/,"",t); if(tolower(t)==tolower(k)) next} } else if(firstComment>0 && FNR==firstComment){ print indent k " = " v; done=1; next} print} END{if(!done) print k " = " v}',
   flatSemicolon: 'BEGIN{done=0;active=0;firstActive=0;firstComment=0} NR==FNR{p=$0; sub(/^[[:space:]]+/,"",p); if(p ~ /^#/){c=p; sub(/^#+[[:space:]]*/,"",c); t=c; sub(/[[:space:]=].*$/,"",t); if(tolower(t)==tolower(k) && firstComment==0) firstComment=FNR} else {t=p; sub(/[[:space:]=].*$/,"",t); if(tolower(t)==tolower(k)){active++; if(firstActive==0) firstActive=FNR}} next}  {indent=""; if(match($0,/[^ \\t]/)>1) indent=substr($0,1,RSTART-1); if(active>0){ if(FNR==firstActive){print indent k " " v ";"; done=1; next} p=$0; sub(/^[[:space:]]+/,"",p); if(p !~ /^#/){t=p; sub(/[[:space:]=].*$/,"",t); if(tolower(t)==tolower(k)) next} } else if(firstComment>0 && FNR==firstComment){ print indent k " " v ";"; done=1; next} print} END{if(!done) print k " " v ";"}',
@@ -54,16 +57,63 @@ const YAML_READ =
 
 const XML_READ = '{s = s $0 "\\n"} END{rest = s; out = ""; while (length(rest) > 0) { ci = index(rest, "<!--"); ei = index(rest, "<Server"); if (ci > 0 && (ei == 0 || ci < ei)) { r2 = substr(rest, ci + 4); j = index(r2, "-->"); if (j == 0) { skip = rest; rest = ""; break } skip = substr(rest, 1, ci + 3 + j + 2); rest = substr(r2, j + 3); continue } if (ei == 0) break; tagrest = substr(rest, ei); gt = index(tagrest, ">"); if (gt == 0) break; skip = substr(rest, 1, ei - 1); tag = substr(tagrest, 1, gt); rest = substr(tagrest, gt + 1); after = substr(tag, 7 + 1, 1); if (after != " " && after != "\\t" && after != "\\n" && after != "/" && after != ">") { skip = tag; continue } if (match(tag, "[ \\t\\n]" k "[ \\t\\n]*=[ \\t\\n]*\\"[^\\"]*\\"")) { piece = substr(tag, RSTART, RLENGTH); sub(/^[^"]*"/, "", piece); sub(/".*$/, "", piece); if (first == "") first = piece; if (piece != r && best == "") best = piece } } print (best != "" ? best : first)}';
 
+// A `Match` block is somebody's decision for some connections. sshd itself
+// says what each file means: globally, and for a connection the block covers.
+const MATCHED = "user=deploy,host=probe.example,addr=192.0.2.10";
+
 const CASES = [
   {
     name: "sshd_config（每行一条指令）",
     source: "/etc/ssh/sshd_config",
     key: "PermitRootLogin",
     value: "no",
-    writer: WRITERS.flatSpace,
+    writer: WRITERS.sshd,
     reader: FLAT_READ_LAST,
     // sshd validates its own file, which is the strongest proof available.
     validate: "sshd -t -f",
+    effective: "no",
+  },
+  {
+    name: "sshd_config：全局注释默认 + Match 块里放行 root",
+    content: "#PermitRootLogin prohibit-password\nPasswordAuthentication yes\nMatch User deploy\n    PermitRootLogin yes\n",
+    key: "PermitRootLogin",
+    value: "no",
+    writer: WRITERS.sshd,
+    reader: FLAT_READ_LAST,
+    // The reader that takes the last line sees the block; sshd decides.
+    expectRead: "yes",
+    validate: "sshd -t -f",
+    countExpected: "2",
+    effective: "no",
+    matched: "yes",
+  },
+  {
+    // What a scan reports as plain `yes` and offers to change: the block's own
+    // line is not a duplicate of the global one.
+    name: "sshd_config：全局放行 root，Match 块里也写了",
+    content: "PermitRootLogin yes\nPasswordAuthentication yes\nMatch User deploy\n    PermitRootLogin yes\n",
+    key: "PermitRootLogin",
+    value: "no",
+    writer: WRITERS.sshd,
+    reader: FLAT_READ_LAST,
+    expectRead: "yes",
+    validate: "sshd -t -f",
+    countExpected: "2",
+    effective: "no",
+    matched: "yes",
+  },
+  {
+    // Not set anywhere, and the file ends in a block about something else:
+    // appended at the end, the fix would hold for that block's users only.
+    name: "sshd_config：全局没写，结尾是别的 Match 块",
+    content: "PasswordAuthentication yes\nMatch User deploy\n    X11Forwarding yes\n",
+    key: "PermitRootLogin",
+    value: "no",
+    writer: WRITERS.sshd,
+    reader: FLAT_READ_LAST,
+    validate: "sshd -t -f",
+    effective: "no",
+    matched: "no",
   },
   {
     name: "redis.conf（每行一条指令）",
@@ -124,15 +174,18 @@ const CASES = [
 
 console.log(`在 ${container} 上验证每种文件格式的改写\n`);
 for (const entry of CASES) {
-  const exists = run(`[ -f '${entry.source}' ] && echo yes || echo no`).trim();
+  const exists = entry.content !== undefined ? "yes" : run(`[ -f '${entry.source}' ] && echo yes || echo no`).trim();
   if (exists !== "yes") {
     console.log(`  跳过 ${entry.name}：这台机器上没有 ${entry.source}`);
     continue;
   }
-  console.log(`${entry.name} — ${entry.source}`);
+  console.log(`${entry.name} — ${entry.source ?? "构造的文件"}`);
+  const sshdSays = (spec) => `sshd -T -f /tmp/lr-write-out ${spec} 2>/dev/null | awk 'tolower($1)==tolower("${entry.key}"){print $2; exit}'`;
   const script = `
 set -e
-cp '${entry.source}' /tmp/lr-write-test
+${entry.content !== undefined
+    ? `printf '%s' '${Buffer.from(entry.content, "utf8").toString("base64")}' | base64 -d > /tmp/lr-write-test`
+    : `cp '${entry.source}' /tmp/lr-write-test`}
 awk -v k='${entry.key}' -v v='${entry.value}' '${entry.writer}' /tmp/lr-write-test /tmp/lr-write-test > /tmp/lr-write-out
 echo "READ<<<$(awk -v k='${entry.key}' -v r='${entry.value}' '${entry.reader}' /tmp/lr-write-out)>>>"
 echo "COUNT<<<$(${entry.countPattern === undefined
@@ -142,6 +195,8 @@ echo "LINESBEFORE<<<$(wc -l < /tmp/lr-write-test)>>>"
 echo "LINESAFTER<<<$(wc -l < /tmp/lr-write-out)>>>"
 ${entry.section ? `echo "SECTION<<<$(awk '/^[[:space:]]*\\[/{s=$0; gsub(/[][]/,"",s); last=s} /${entry.key}/{print last; exit}' /tmp/lr-write-out)>>>"` : ""}
 ${entry.validate ? `${entry.validate} /tmp/lr-write-out >/tmp/lr-valid 2>&1 && echo "VALID<<<ok>>>" || echo "VALID<<<$(head -c 200 /tmp/lr-valid)>>>"` : ""}
+${entry.effective ? `echo "EFFECTIVE<<<$(${sshdSays("")})>>>"` : ""}
+${entry.matched ? `echo "MATCHED<<<$(${sshdSays(`-C ${MATCHED}`)})>>>"` : ""}
 rm -f /tmp/lr-write-test /tmp/lr-write-out /tmp/lr-valid
 `;
   let output;
@@ -160,6 +215,8 @@ rm -f /tmp/lr-write-test /tmp/lr-write-out /tmp/lr-valid
   check(`文件其余部分没被动过（${before} 行 -> ${after} 行）`, after >= before && after - before <= 2, true);
   if (entry.section) check(`写在 [${entry.section}] 里`, field("SECTION"), entry.section);
   if (entry.validate) check(`${entry.validate.split(" ")[0]} 认这个文件`, field("VALID"), "ok");
+  if (entry.effective) check("sshd 全局生效的就是写入的值", field("EFFECTIVE"), entry.effective);
+  if (entry.matched) check("Match 块覆盖的连接仍按原块生效，没被改写", field("MATCHED"), entry.matched);
   console.log("");
 }
 

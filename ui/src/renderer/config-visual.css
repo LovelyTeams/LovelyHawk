@@ -1,0 +1,201 @@
+/* The visual editor: a configuration file as a tree beside its editor. */
+
+.configuration-page > .config-visual { flex: 1 1 auto; min-height: 0; }
+
+.config-visual {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  color: var(--text);
+  font-size: var(--font-small);
+}
+
+.config-visual button {
+  padding: 7px 12px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  font: inherit;
+  cursor: pointer;
+}
+.config-visual button:hover:enabled { background: var(--surface-hover); }
+.config-visual button:disabled { cursor: default; opacity: .55; }
+.config-visual button:focus-visible,
+.config-visual input:focus-visible,
+.config-visual pre:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.config-visual .primary { color: var(--on-accent); background: var(--accent); border-color: var(--accent); font-weight: 600; }
+.config-visual .primary:hover:enabled { background: var(--accent-strong); }
+.config-visual .danger { color: var(--danger-text); border-color: var(--danger-border); }
+.config-visual .danger:hover:enabled { background: var(--danger-soft); }
+/* The mode switch keeps its own look. */
+.config-visual .configuration-modes button { padding: 3px 11px; background: transparent; border-color: transparent; }
+.config-visual .configuration-modes button.is-active { background: var(--surface); border-color: var(--accent); }
+
+.config-visual-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.config-visual-toolbar .configuration-modes { margin-right: auto; }
+.config-visual-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.config-visual-notice { margin: 0; padding: 9px 12px; border: 1px solid var(--info-border); border-radius: 8px; color: var(--info-text); background: var(--info-soft); }
+.config-visual-notice.error { color: var(--danger-text); background: var(--danger-soft); border-color: var(--danger-border); }
+
+.config-visual-empty {
+  padding: 26px 28px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.config-visual-empty h2 { margin: 0 0 10px; font-size: var(--font-subtitle); }
+.config-visual-empty p { max-width: 760px; margin: 0 0 10px; color: var(--text-secondary); line-height: 1.7; }
+.config-visual-empty-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+
+.config-visual-status { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; color: var(--muted); }
+.config-visual-status strong { color: var(--text); font-size: var(--font-subtitle); }
+.config-visual-dirty { color: var(--warning-text); font-weight: 600; }
+
+.config-visual-banners { display: grid; gap: 6px; }
+.config-visual-banners p { margin: 0; padding: 8px 12px; color: var(--muted); background: var(--surface-alt); border: 1px solid var(--border); border-radius: 8px; font-size: var(--font-small); line-height: 1.6; }
+.config-visual-banners p.warning { color: var(--warning-text); background: var(--warning-soft); border-color: var(--warning-border); }
+
+.config-visual-body {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(340px, 1.1fr);
+  gap: 12px;
+  align-items: start;
+  min-height: 0;
+}
+
+.config-visual-tree,
+.config-visual-panel {
+  min-width: 0;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.config-visual-tree { position: sticky; top: 0; display: flex; flex-direction: column; max-height: calc(100vh - 210px); }
+.config-visual-side { display: grid; gap: 12px; min-width: 0; }
+.config-visual-panel h2 { margin: 0 0 10px; font-size: var(--font-subtitle); }
+
+.config-visual-search { display: grid; gap: 5px; color: var(--muted); font-size: var(--font-caption); }
+.config-visual input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 9px;
+  color: var(--text);
+  background: var(--input-bg);
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  font: inherit;
+  font-family: "Cascadia Mono", ui-monospace, monospace;
+  font-size: var(--font-small);
+}
+.config-visual-search input,
+.config-visual input[type="radio"] { font-family: inherit; }
+.config-visual input[type="radio"] { width: auto; margin: 0; }
+.config-visual-count { margin: 8px 0 6px; color: var(--faint); font-size: var(--font-caption); }
+.config-visual-tree-empty { margin: 8px 0 0; color: var(--muted); line-height: 1.6; }
+
+.config-visual-rows { flex: 1 1 auto; min-height: 0; overflow: auto; margin: 0; padding: 0; list-style: none; scrollbar-width: thin; }
+.config-visual-rows li + li { margin-top: 2px; }
+.config-visual .config-visual-row {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding-top: 5px;
+  padding-right: 10px;
+  padding-bottom: 5px;
+  text-align: left;
+  background: transparent;
+  border-color: transparent;
+}
+.config-visual .config-visual-row.is-selected { background: var(--accent-soft); border-color: var(--accent-soft-border); box-shadow: inset 2px 0 var(--accent); }
+.config-visual-row-label { overflow: hidden; color: var(--text); font-size: var(--font-small); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.config-visual-row.is-locked .config-visual-row-label { color: var(--warning-text); }
+.config-visual-row[data-kind="comment"] .config-visual-row-label { color: var(--muted); font-weight: 500; }
+.config-visual-row-preview { overflow: hidden; color: var(--muted); font-family: "Cascadia Mono", ui-monospace, monospace; font-size: var(--font-caption); text-overflow: ellipsis; white-space: nowrap; }
+
+.config-visual-hint { margin: 0; color: var(--muted); line-height: 1.6; }
+.config-visual-facts { margin: 0 0 10px; color: var(--muted); font-size: var(--font-caption); }
+.config-visual-locked { margin: 0; padding: 9px 11px; color: var(--warning-text); background: var(--warning-soft); border: 1px solid var(--warning-border); border-radius: 8px; line-height: 1.6; }
+.config-visual-field { display: grid; gap: 5px; margin-bottom: 10px; color: var(--muted); font-size: var(--font-caption); }
+.config-visual-row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.config-visual-choice { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-bottom: 10px; }
+.config-visual-choice label { display: inline-flex; align-items: center; gap: 6px; }
+
+.config-visual-preview pre {
+  overflow: auto;
+  max-height: 360px;
+  margin: 0;
+  padding: 12px;
+  color: var(--text-secondary);
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: "Cascadia Mono", ui-monospace, monospace;
+  font-size: var(--font-small);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 980px) {
+  .config-visual-body { grid-template-columns: minmax(0, 1fr); }
+  .config-visual-tree { position: static; max-height: 420px; }
+}
+
+/* Which product a new or imported document is in: a small segmented switch. */
+.config-visual-product { display: flex; gap: 3px; padding: 3px; background: var(--surface-inset); border: 1px solid var(--border); border-radius: 9px; }
+.config-visual .config-visual-product button { padding: 3px 11px; color: var(--muted); background: transparent; border-color: transparent; font-size: var(--font-small); }
+.config-visual .config-visual-product button.is-active { color: var(--accent-text); background: var(--surface); border-color: var(--accent); font-weight: 600; }
+
+/* Built-in Chinese notes: under a tree row, for the selected item, while adding. */
+.config-visual-row-help { overflow: hidden; color: var(--muted); font-size: var(--font-caption); text-overflow: ellipsis; white-space: nowrap; }
+.config-visual .config-visual-row.is-selected .config-visual-row-help { color: var(--text-secondary); }
+.config-visual-help { display: grid; gap: 4px; margin: 0 0 10px; padding: 9px 11px; color: var(--info-text); background: var(--info-soft); border: 1px solid var(--info-border); border-radius: 8px; line-height: 1.6; }
+.config-visual-help p { margin: 0; }
+.config-visual-help strong { margin-right: 8px; font-weight: 600; }
+.config-visual-help code { overflow-wrap: anywhere; font-family: "Cascadia Mono", ui-monospace, monospace; font-size: var(--font-caption); }
+.config-visual-help .config-visual-help-caution { color: var(--warning-text); }
+.config-visual-help.is-unknown { color: var(--muted); background: var(--surface-alt); border-color: var(--border); }
+
+.config-visual-suggest { display: grid; gap: 5px; margin-bottom: 10px; color: var(--muted); font-size: var(--font-caption); }
+.config-visual select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 9px;
+  color: var(--text);
+  background: var(--input-bg);
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  font: inherit;
+  font-size: var(--font-small);
+}
+.config-visual select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.config-visual-note { display: grid; gap: 6px; margin-bottom: 12px; }
+.config-visual-note-toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: var(--font-small); }
+.config-visual input[type="checkbox"] { width: auto; margin: 0; }
+.config-visual-note input:not([type="checkbox"]) { font-family: inherit; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .config-visual-help { transition: background-color .15s ease; }
+}
+
+/* Catalogued database files: product and file choice, version catalogue, parameter list. */
+.config-visual-database-picker { display: flex; flex-wrap: wrap; align-items: end; gap: 6px 10px; }
+.config-visual-database-picker label { display: grid; gap: 4px; min-width: 0; color: var(--muted); font-size: var(--font-caption); }
+.config-visual-database-picker select { max-width: 260px; }
+.config-visual-row-catalog { justify-self: start; padding: 0 6px; color: var(--accent-text); background: var(--accent-soft); border: 1px solid var(--accent-soft-border); border-radius: 999px; font-size: var(--font-caption); font-style: normal; }
+.config-visual-parameter-list { display: grid; gap: 2px; max-height: 320px; overflow: auto; margin: 8px 0 10px; padding: 0; list-style: none; scrollbar-width: thin; }
+.config-visual .config-visual-parameter-list button { display: grid; gap: 2px; width: 100%; padding: 6px 9px; text-align: left; background: transparent; border-color: transparent; }
+.config-visual .config-visual-parameter-list button.is-selected { background: var(--accent-soft); border-color: var(--accent-soft-border); box-shadow: inset 2px 0 var(--accent); }
+.config-visual-parameter-key { overflow: hidden; color: var(--text); font-family: "Cascadia Mono", ui-monospace, monospace; font-size: var(--font-caption); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.config-visual-parameter-facts { overflow: hidden; color: var(--muted); font-size: var(--font-caption); text-overflow: ellipsis; white-space: nowrap; }
+.config-visual-parameter-set { display: grid; gap: 6px; margin-top: 8px; }
+.config-visual-parameter-set .primary { justify-self: start; }
+.config-visual-help.config-visual-parameter code { overflow-wrap: anywhere; }
+.config-visual-hint.is-blocking { color: var(--warning-text); }
+.config-visual-actions.is-database { align-items: flex-end; }
+.config-visual-help.config-visual-parameter p > span + span { margin-left: 16px; }

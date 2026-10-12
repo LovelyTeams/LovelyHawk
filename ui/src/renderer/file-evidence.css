@@ -1,0 +1,6 @@
+.emergency-path-dialog.file-evidence-dialog { width: min(680px, calc(100vw - 48px)); max-height: calc(100vh - 48px); overflow: auto; }
+.file-evidence-dialog > p { line-height: 1.6; }
+.file-evidence-dialog dd, .file-evidence-dialog header p { overflow-wrap: anywhere; }
+.file-evidence-dialog progress { width: 100%; accent-color: var(--accent); margin-top: 16px; }
+.file-evidence-hash { font-family: "Cascadia Mono", monospace; user-select: text; }
+.emergency-commands-page button.emergency-path-open { margin-left: 12px; padding: 2px 8px; color: var(--accent); background: var(--surface); border: 1px solid var(--border); border-radius: 4px; font: inherit; cursor: pointer; }

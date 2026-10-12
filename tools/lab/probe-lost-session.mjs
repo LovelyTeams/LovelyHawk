@@ -1,6 +1,6 @@
 // What happens after the target goes away underneath a live connection.
 //
-// A lab host is stopped while LovelyRes is connected to it. Every feature then
+// A lab host is stopped while LovelyHawk is connected to it. Every feature then
 // asks the same dead session for a command channel. This records what each of
 // them says, so "the connection is gone" can be told apart from "this feature
 // is broken" — which is the difference between one honest message and a wall
@@ -38,7 +38,7 @@ function check(name, actual, expected) {
   console.log(`  ${ok ? "PASS" : "FAIL"} ${name}${ok ? "" : `\n       expected ${JSON.stringify(expected)}\n       actual   ${JSON.stringify(actual)}`}`);
 }
 
-const sidecar = new Sidecar("D:/LovelyRes/target/debug/lovelyres-backend.exe", newDataRoot());
+const sidecar = new Sidecar("D:/LovelyRes/target/debug/lovelyhawk-backend.exe", newDataRoot());
 
 try {
   const status = await connect(sidecar, labTarget(which));
@@ -87,7 +87,7 @@ try {
   );
   // And the window turns every one of those into the same sentence.
   const helper = readFileSync(
-    new URL("../../electron/src/renderer/target-lost.ts", import.meta.url),
+    new URL("../../ui/src/renderer/target-lost.ts", import.meta.url),
     "utf8",
   );
   check("窗口对这一族只有一句话", helper.includes('"与目标的连接已断开。请重新连接后再试。"'), true);

@@ -1,5 +1,5 @@
 // Checks that each service lab is reachable over SSH and that the deliberate
-// misconfiguration is where LovelyRes will look for it.
+// misconfiguration is where LovelyHawk will look for it.
 //
 //   node tools/lab/verify-services.mjs
 import { execFileSync } from "node:child_process";
@@ -54,7 +54,7 @@ for (const [name, port] of Object.entries(SERVICE_PORTS)) {
     ? true
     : onHost(container, `grep -qF ${JSON.stringify(expected.contains)} ${expected.file} && echo yes || echo no`) === "yes";
 
-  const sidecar = new Sidecar("D:/LovelyRes/target/debug/lovelyres-backend.exe", newDataRoot());
+  const sidecar = new Sidecar("D:/LovelyRes/target/debug/lovelyhawk-backend.exe", newDataRoot());
   let reachable = false;
   try {
     const status = await connect(sidecar, { host, port, username: "root", password: "LabRoot#2026" }, 2);

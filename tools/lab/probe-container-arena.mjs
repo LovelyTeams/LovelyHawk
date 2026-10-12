@@ -18,7 +18,7 @@ function check(label, actual, expected) {
 }
 
 const target = labTarget("container-arena");
-const sidecar = new Sidecar("D:/LovelyRes/target/debug/lovelyres-backend.exe", newDataRoot());
+const sidecar = new Sidecar("D:/LovelyRes/target/debug/lovelyhawk-backend.exe", newDataRoot());
 
 try {
   console.log(`连接 ${target.host}:${target.port}\n`);

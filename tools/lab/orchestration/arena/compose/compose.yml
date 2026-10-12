@@ -1,5 +1,5 @@
 # A small Compose project, so the Compose tab has a real one to read rather
-# than an empty list. The labels Compose writes are what LovelyRes groups by,
+# than an empty list. The labels Compose writes are what LovelyHawk groups by,
 # so this has to be brought up by `docker compose`, not by `docker run`.
 services:
   # Writes to stdout continuously, so the log reader has something to page.

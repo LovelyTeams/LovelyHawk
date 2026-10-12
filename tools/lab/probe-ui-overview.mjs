@@ -3,19 +3,18 @@
 // only where a detail exists, and the network tabs with their columns lined up.
 //
 //   node tools/lab/probe-ui-overview.mjs [靶机名]
-import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { startDesktop } from "./desktop.mjs";
 import { Sidecar, connect } from "./rpc-harness.mjs";
 import { labTarget } from "./lab-target.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repository = path.resolve(here, "..", "..");
-const electronRoot = path.join(repository, "electron");
-const backend = path.join(repository, "target", "debug", "lovelyres-backend.exe");
+const backend = path.join(repository, "target", "debug", "lovelyhawk-backend.exe");
 const port = 9337;
 const lab = process.argv[2] ?? "arena";
 
@@ -34,58 +33,6 @@ async function waitFor(session, expression, label, attempts = 160) {
     await sleep(500);
   }
   throw new Error(`一直没等到 ${label}`);
-}
-
-function attach(url) {
-  return new Promise((resolve, reject) => {
-    const socket = new WebSocket(url);
-    const pending = new Map();
-    let nextId = 1;
-    socket.addEventListener("message", (event) => {
-      const message = JSON.parse(String(event.data));
-      const waiting = pending.get(message.id);
-      if (waiting === undefined) return;
-      pending.delete(message.id);
-      if (message.error !== undefined) waiting.reject(new Error(JSON.stringify(message.error)));
-      else waiting.resolve(message.result);
-    });
-    socket.addEventListener("error", () => reject(new Error("附加调试端口失败")));
-    socket.addEventListener("open", () => {
-      const send = (method, params) => new Promise((res, rej) => {
-        const id = nextId++;
-        pending.set(id, { resolve: res, reject: rej });
-        socket.send(JSON.stringify({ id, method, params }));
-        setTimeout(() => { if (pending.delete(id)) rej(new Error(`${method} 超时`)); }, 30_000);
-      });
-      resolve({
-        send,
-        close: () => socket.close(),
-        async evaluate(expression) {
-          const result = await send("Runtime.evaluate", {
-            expression, awaitPromise: true, returnByValue: true,
-          });
-          if (result.exceptionDetails !== undefined) {
-            throw new Error(result.exceptionDetails.exception?.description ?? "求值抛出");
-          }
-          return result.result.value;
-        },
-      });
-    });
-  });
-}
-
-async function openSession() {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    try {
-      const targets = await fetch(`http://127.0.0.1:${port}/json/list`).then((r) => r.json());
-      const page = targets.find((target) =>
-        target.type === "page" && String(target.url).startsWith("lovelyres://app/") &&
-        !String(target.url).includes("window=terminal"));
-      if (page !== undefined) return await attach(page.webSocketDebuggerUrl);
-    } catch { /* not listening yet */ }
-    await sleep(500);
-  }
-  throw new Error("窗口没有开出调试端口");
 }
 
 /** Click a tab in the overview and wait for it to finish collecting. */
@@ -111,8 +58,8 @@ async function openTab(session, label) {
 
 const evidence = path.join(repository, "target", "lab-ui");
 fs.mkdirSync(evidence, { recursive: true });
-const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "lovelyres-overview-"));
-let electron;
+const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "lovelyhawk-overview-"));
+let app;
 let session;
 
 try {
@@ -125,19 +72,8 @@ try {
     sidecar.close();
   }
 
-  const executable = execFileSync(
-    process.execPath, ["-e", "process.stdout.write(require('electron'))"],
-    { cwd: electronRoot, encoding: "utf8" },
-  ).trim();
-  electron = spawn(executable, [".", `--remote-debugging-port=${port}`], {
-    cwd: electronRoot,
-    env: { ...process.env, LOVELYRES_ARCHIVE_ROOT: dataRoot, LOVELYRES_DEBUG: "1" },
-    stdio: "ignore", shell: false, windowsHide: true,
-  });
-
-  session = await openSession();
-  await session.send("Runtime.enable", {});
-  await session.send("Page.enable", {});
+  app = await startDesktop({ dataRoot, port });
+  session = app.session;
 
   await waitFor(session, "document.querySelector('[data-testid=open-connections]') !== null", "窗口");
   await session.evaluate("document.querySelector('[data-testid=open-connections]').click(); true");
@@ -224,8 +160,6 @@ try {
   console.log(`\nFAILED: ${error.message}`);
   process.exitCode = 1;
 } finally {
-  session?.close();
-  electron?.kill();
-  await sleep(600);
-  fs.rmSync(dataRoot, { recursive: true, force: true });
+  await app?.close();
+  fs.rmSync(dataRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
 }

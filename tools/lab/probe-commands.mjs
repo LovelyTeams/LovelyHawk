@@ -1,7 +1,7 @@
 import { Sidecar, newDataRoot, connect } from "./rpc-harness.mjs";
 import { labTarget } from "./lab-target.mjs";
 
-const sidecar = new Sidecar("D:/LovelyRes/target/debug/lovelyres-backend.exe", newDataRoot());
+const sidecar = new Sidecar("D:/LovelyRes/target/debug/lovelyhawk-backend.exe", newDataRoot());
 try {
   const status = await connect(sidecar, labTarget());
   if (status.stage !== "connected") throw new Error(`connect: ${JSON.stringify(status)}`);

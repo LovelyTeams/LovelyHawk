@@ -1,5 +1,2 @@
 packages:
-  - electron
-
-onlyBuiltDependencies:
-  - electron
+  - ui

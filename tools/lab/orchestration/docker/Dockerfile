@@ -1,6 +1,6 @@
 # An SSH-reachable host that runs its own Docker daemon.
 #
-# The daemon is the host's own, not the lab machine's: LovelyRes gets a real
+# The daemon is the host's own, not the lab machine's: LovelyHawk gets a real
 # `docker ps`, real images, networks and volumes, and — the point of this host
 # — containers deliberately started the way an audit is supposed to complain
 # about. Sharing the lab machine's socket instead would have worked for reading,

@@ -4,22 +4,24 @@
 //
 //   node tools/lab/probe-ui-system-info.mjs            # ubuntu
 //   LAB=rocky node tools/lab/probe-ui-system-info.mjs
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { startDesktop } from "./desktop.mjs";
 import { Sidecar, connect } from "./rpc-harness.mjs";
 import { labTarget } from "./lab-target.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repository = path.resolve(here, "..", "..");
-const electronRoot = path.join(repository, "electron");
-const backend = path.join(repository, "target", "debug", "lovelyres-backend.exe");
+const backend = path.join(repository, "target", "debug", "lovelyhawk-backend.exe");
 const which = process.env.LAB ?? "ubuntu";
 const container = `lab-${which}`;
-const port = 9334;
+// Configurable so a run cannot collide with a debugging port another probe
+// (or a previous run that has not let go of it yet) is still holding.
+const port = Number(process.env.LAB_UI_PORT ?? 9334);
 /** A process nobody else on the host runs, so the row is unmistakable. */
 const marker = "sleep 36001";
 
@@ -44,9 +46,20 @@ function onHost(command) {
   ).split("\0").join("").trim();
 }
 
-/** Kills any planted sleeper a previous run left behind. */
+/**
+ * Kills any planted sleeper a previous run left behind.
+ *
+ * Walks /proc rather than calling pgrep: the busybox images do not all have
+ * it, and /proc is the one thing every target here agrees on. The name is
+ * checked before the arguments, because the shell running this very loop has
+ * the marker in its own command line and would otherwise kill itself.
+ */
 function cleanPlanted() {
-  onHost(`for p in $(pgrep -x sleep); do grep -q 36001 /proc/$p/cmdline 2>/dev/null && kill -9 $p; done; true`);
+  onHost(
+    `for d in /proc/[0-9]*; do p=\${d#/proc/}; [ "$p" = "$$" ] && continue; ` +
+    `c=$(cat "$d/comm" 2>/dev/null) || continue; [ "$c" = "sleep" ] || continue; ` +
+    `tr '\\0' ' ' < "$d/cmdline" 2>/dev/null | grep -q 36001 && kill -9 "$p" 2>/dev/null; done; true`,
+  );
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -59,65 +72,55 @@ async function waitFor(session, expression, label, attempts = 60) {
   throw new Error(`timed out waiting for ${label}`);
 }
 
-async function openSession() {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    try {
-      const targets = await fetch(`http://127.0.0.1:${port}/json/list`).then((r) => r.json());
-      const page = targets.find((target) =>
-        target.type === "page" && String(target.url).startsWith("lovelyres://app/") &&
-        !String(target.url).includes("window=terminal"));
-      if (page !== undefined) return await attach(page.webSocketDebuggerUrl);
-    } catch {
-      // The port is not listening yet.
-    }
-    await sleep(500);
+/**
+ * Waits for the target's own actions to fill the menu, and says what was on
+ * screen instead when they do not.
+ *
+ * A bare "timed out" is not actionable: the menu showing an error, the menu
+ * saying the row has nothing, and the menu never opening at all are three
+ * different bugs that look identical from the outside.
+ */
+async function waitForMenuActions(session, label) {
+  try {
+    await waitFor(session, "document.querySelector('.system-info-row-menu-parent') !== null", label);
+  } catch (error) {
+    const state = await session.evaluate(`(() => {
+      const menu = document.querySelector('.system-info-row-menu');
+      return {
+        menuPresent: menu !== null,
+        text: menu?.textContent?.slice(0, 400) ?? null,
+        note: menu?.querySelector('.system-info-row-menu-note')?.textContent ?? null,
+        dialog: document.querySelector('[data-testid="system-info-row-action-dialog"]')?.textContent?.slice(0, 200) ?? null,
+        rows: document.querySelectorAll('.system-info-table-scroll tbody tr').length,
+      };
+    })()`);
+    console.log(`      menu state at timeout: ${JSON.stringify(state)}`);
+    await shot(session, `timeout-${label.replace(/\s+/gu, "-")}`);
+    throw error;
   }
-  throw new Error("the window never exposed a debugging target");
 }
 
-function attach(url) {
-  return new Promise((resolve, reject) => {
-    const socket = new WebSocket(url);
-    const pending = new Map();
-    let nextId = 1;
-    socket.addEventListener("message", (event) => {
-      const message = JSON.parse(String(event.data));
-      const waiting = pending.get(message.id);
-      if (waiting === undefined) return;
-      pending.delete(message.id);
-      if (message.error !== undefined) waiting.reject(new Error(JSON.stringify(message.error)));
-      else waiting.resolve(message.result);
-    });
-    socket.addEventListener("error", () => reject(new Error("could not attach to the window")));
-    socket.addEventListener("open", () => {
-      const send = (method, params) => new Promise((res, rej) => {
-        const id = nextId++;
-        pending.set(id, { resolve: res, reject: rej });
-        socket.send(JSON.stringify({ id, method, params }));
-        setTimeout(() => {
-          if (pending.delete(id)) rej(new Error(`${method} timed out`));
-        }, 30_000);
-      });
-      resolve({
-        send,
-        close: () => socket.close(),
-        async evaluate(expression) {
-          const result = await send("Runtime.evaluate", {
-            expression,
-            awaitPromise: true,
-            returnByValue: true,
-          });
-          if (result.exceptionDetails !== undefined) {
-            throw new Error(result.exceptionDetails.exception?.description ?? "evaluate threw");
-          }
-          return result.result.value;
-        },
-      });
-    });
-  });
+/**
+ * Waits for a step of the action dialog, and says what the dialog was showing
+ * when it does not arrive — an error the target returned looks exactly like a
+ * request still in flight from the outside.
+ */
+async function waitForDialog(session, expression, label, attempts = 120) {
+  try {
+    await waitFor(session, expression, label, attempts);
+  } catch (error) {
+    const text = await session.evaluate(
+      `document.querySelector('[data-testid="system-info-row-action-dialog"]')?.textContent?.slice(0, 400) ?? null`,
+    );
+    console.log(`      dialog at timeout: ${JSON.stringify(text)}`);
+    await shot(session, `timeout-${label.replace(/\s+/gu, "-")}`);
+    throw error;
+  }
 }
 
-const evidence = path.join(repository, "target", "lab-ui-system-info");
+// One directory per target, so a sweep across the matrix keeps every target's
+// screenshots instead of each one overwriting the last.
+const evidence = path.join(repository, "target", "lab-ui-system-info", which);
 fs.mkdirSync(evidence, { recursive: true });
 
 async function shot(session, name) {
@@ -125,6 +128,40 @@ async function shot(session, name) {
   const file = path.join(evidence, `${name}.png`);
   fs.writeFileSync(file, Buffer.from(data, "base64"));
   console.log(`      saved ${file}`);
+}
+
+/**
+ * Right-clicks the process row whose PID cell is exactly this PID.
+ *
+ * Matching the command text instead picks the first row that merely mentions
+ * it, and on a host that has run this probe before that can be a different
+ * process entirely — which then fails at the plan, because the core checks the
+ * PID it was given and not the words next to it.
+ */
+function contextMenuOnPid(session, pid) {
+  return session.evaluate(`(() => {
+    const row = [...document.querySelectorAll('.system-info-table-scroll tbody tr')]
+      .find(candidate => candidate.querySelectorAll('td')[1]?.textContent.trim() === ${JSON.stringify(String(pid))});
+    if (row === undefined) return false;
+    const cells = row.querySelectorAll('td');
+    const cell = cells[cells.length - 3] ?? row;
+    cell.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true, cancelable: true, clientX: 300, clientY: 300
+    }));
+    return true;
+  })()`);
+}
+
+/** Right-clicks the first row of whatever table is showing. */
+function contextMenuOnFirstRow(session) {
+  return session.evaluate(`(() => {
+    const row = document.querySelector('.system-info-table-scroll tbody tr');
+    if (row === null) return false;
+    (row.querySelector('td') ?? row).dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true, cancelable: true, clientX: 300, clientY: 300
+    }));
+    return true;
+  })()`);
 }
 
 /** Right-clicks the command cell of the row whose text contains `text`. */
@@ -148,36 +185,82 @@ function readMenu(session) {
     if (element === null) return null;
     return {
       title: element.querySelector('.system-info-row-menu-title')?.textContent ?? null,
-      groups: [...element.querySelectorAll('.system-info-row-menu-group h3')].map(h => h.textContent),
-      items: [...element.querySelectorAll('button')].map(button => button.textContent),
+      // Each group is one entry whose actions sit in its submenu.
+      groups: [...element.querySelectorAll('.system-info-row-menu-parent .system-info-row-menu-label')].map(label => label.textContent),
+      items: [...element.querySelectorAll('button:not(.system-info-row-menu-parent)')].map(button => button.textContent),
       dangerous: [...element.querySelectorAll('button.is-dangerous')].map(button => button.textContent),
       selected: document.querySelector('.system-info-table-scroll tbody tr.is-selected')?.textContent ?? null,
     };
   })()`);
 }
 
+/**
+ * Clicks an action the way an operator reaches it: opens its group first, and
+ * only clicks the action once its submenu is actually showing.
+ */
 function clickMenuItem(session, label) {
-  return session.evaluate(`(() => {
-    const button = [...document.querySelectorAll('.system-info-row-menu button')]
+  return session.evaluate(`(async () => {
+    const button = [...document.querySelectorAll('.system-info-row-menu button:not(.system-info-row-menu-parent)')]
       .find(candidate => candidate.textContent.includes(${JSON.stringify(label)}));
     if (button === undefined) return false;
+    const submenu = button.closest('.system-info-row-submenu');
+    if (submenu !== null) {
+      if (submenu.hidden) submenu.previousElementSibling.click();
+      for (let frame = 0; frame < 60 && (submenu.hidden || submenu.style.visibility === 'hidden'); frame += 1) {
+        await new Promise(resolve => setTimeout(resolve, 16));
+      }
+      if (submenu.hidden || submenu.style.visibility === 'hidden') return false;
+    }
     button.click();
     return true;
   })()`);
 }
 
+/**
+ * Selects a tab, and does not click one that is already selected.
+ *
+ * Clicking the active tab re-collects it, which is what an operator asking for
+ * a refresh wants — but it also mints a new snapshot, and a new snapshot
+ * closes any menu opened against the old one. On a host with hundreds of
+ * processes that second collect lands seconds later, so a probe that clicks
+ * anyway is racing itself rather than testing the menu.
+ */
 function selectTab(session, label) {
   return session.evaluate(`(() => {
     const button = [...document.querySelectorAll('.system-info-tabs button')]
       .find(candidate => candidate.textContent.trim() === ${JSON.stringify(label)});
     if (button === undefined) return false;
-    button.click();
+    if (button.getAttribute('aria-pressed') !== 'true') button.click();
     return true;
   })()`);
 }
 
-const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "lovelyres-ui-sysinfo-"));
-let electron;
+/**
+ * Waits until the table has stopped being replaced.
+ *
+ * A collect in flight is visible as the "正在采集" state; a collect that has
+ * just landed shows up as a changed row count. Both have to be quiet before a
+ * row id is worth right-clicking.
+ */
+async function waitForTableSettled(session, attempts = 120) {
+  let previous = -1;
+  let stable = 0;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const state = await session.evaluate(`(() => ({
+      collecting: [...document.querySelectorAll('.system-info-table-state')]
+        .some(element => element.textContent.includes('正在采集')),
+      rows: document.querySelectorAll('.system-info-table-scroll tbody tr').length,
+    }))()`);
+    stable = !state.collecting && state.rows > 0 && state.rows === previous ? stable + 1 : 0;
+    previous = state.rows;
+    if (stable >= 4) return state.rows;
+    await sleep(500);
+  }
+  throw new Error("the table never settled");
+}
+
+const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "lovelyhawk-ui-sysinfo-"));
+let app;
 let session;
 let plantedPid = "";
 try {
@@ -185,6 +268,7 @@ try {
   plantedPid = onHost(`nohup ${marker} >/dev/null 2>&1 & echo $!`);
   if (!/^[0-9]+$/u.test(plantedPid)) throw new Error(`could not plant a process: ${plantedPid}`);
   check("the planted process is running on the host", onHost(`kill -0 ${plantedPid} && echo alive`), "alive");
+  console.log(`      planted pid=${plantedPid} on ${which}`);
 
   console.log(`preparing ${dataRoot} ...`);
   const sidecar = new Sidecar(backend, dataRoot);
@@ -196,26 +280,8 @@ try {
   }
 
   console.log("launching the window ...");
-  const executable = execFileSync(
-    process.execPath,
-    ["-e", "process.stdout.write(require('electron'))"],
-    { cwd: electronRoot, encoding: "utf8" },
-  ).trim();
-  electron = spawn(
-    executable,
-    [".", `--remote-debugging-port=${port}`],
-    {
-      cwd: electronRoot,
-      env: { ...process.env, LOVELYRES_ARCHIVE_ROOT: dataRoot, LOVELYRES_DEBUG: "1" },
-      stdio: "ignore",
-      shell: false,
-      windowsHide: true,
-    },
-  );
-
-  session = await openSession();
-  await session.send("Runtime.enable", {});
-  await session.send("Page.enable", {});
+  app = await startDesktop({ dataRoot, port });
+  session = app.session;
   await waitFor(session, "document.querySelector('.connection-card') !== null", "the connection list");
 
   await session.evaluate(`(() => {
@@ -239,16 +305,36 @@ try {
   })()`);
   await waitFor(session, "document.querySelector('.system-info-tabs') !== null", "the page", 120);
   check("the processes tab exists", await selectTab(session, "进程详情"));
-  await waitFor(
-    session,
-    `[...document.querySelectorAll('.system-info-table-scroll tbody tr')].some(row => row.textContent.includes(${JSON.stringify(marker)}))`,
-    "the planted process in the table",
-    120,
-  );
+  try {
+    await waitFor(
+      session,
+      `[...document.querySelectorAll('.system-info-table-scroll tbody tr')].some(row => row.querySelectorAll('td')[1]?.textContent.trim() === ${JSON.stringify(String(plantedPid))})`,
+      "the planted process in the table",
+      120,
+    );
+  } catch (error) {
+    // The table stops at five hundred rows. This container's PID 1 is
+    // `sleep infinity`, which never reaps, so every command any probe has
+    // ever run is still listed as a zombie — and a freshly planted process
+    // has the highest PID of all, so it is the first thing off the end.
+    const rows = await session.evaluate(
+      "document.querySelectorAll('.system-info-table-scroll tbody tr').length",
+    );
+    const truncated = await session.evaluate(
+      "document.querySelector('.system-info-truncated') !== null",
+    );
+    const zombies = onHost("z=0; for d in /proc/[0-9]*; do s=$(cat \"$d/stat\" 2>/dev/null) || continue; r=${s##*) }; case \"${r%% *}\" in Z) z=$((z+1));; esac; done; echo \"$z\"");
+    console.log(`      table shows ${rows} rows (truncated=${truncated}); the host has ${zombies} zombies`);
+    if (truncated) {
+      console.log("      the planted process is past the 500-row ceiling; restart this container to clear the zombies");
+    }
+    throw error;
+  }
+  console.log(`      process table settled at ${await waitForTableSettled(session)} rows`);
 
   // --- the menu
-  check("the planted row can be right-clicked", await contextMenuOnRow(session, marker));
-  await waitFor(session, "document.querySelector('.system-info-row-menu-group') !== null", "the menu actions");
+  check("the planted row can be right-clicked", await contextMenuOnPid(session, plantedPid));
+  await waitForMenuActions(session, "the menu actions");
   const menu = await readMenu(session);
   console.log(`\nmenu on ${menu.title}:\n      groups: ${menu.groups.join(" / ")}\n      ${menu.items.length} items, ${menu.dangerous.length} dangerous`);
   check("the menu names the process by PID", menu.title?.includes(`PID ${plantedPid}`) === true);
@@ -261,7 +347,7 @@ try {
 
   // --- read-only first
   check("the command line action is offered", await clickMenuItem(session, "命令行参数"));
-  await waitFor(
+  await waitForDialog(
     session,
     "document.querySelector('[data-testid=\"system-info-row-action-output\"]') !== null",
     "the inspection output",
@@ -282,10 +368,10 @@ try {
 
   // --- then the change, which has to be planned, confirmed and verified
   check("the target is untouched so far", onHost(`kill -0 ${plantedPid} && echo alive`), "alive");
-  check("the row can be right-clicked again", await contextMenuOnRow(session, marker));
-  await waitFor(session, "document.querySelector('.system-info-row-menu-group') !== null", "the menu again");
+  check("the row can be right-clicked again", await contextMenuOnPid(session, plantedPid));
+  await waitForMenuActions(session, "the menu again");
   check("the kill action is offered", await clickMenuItem(session, "强制终止进程（SIGKILL）"));
-  await waitFor(
+  await waitForDialog(
     session,
     "document.querySelector('[data-testid=\"system-info-row-action-execute\"]:not([disabled])') !== null",
     "the plan",
@@ -298,10 +384,15 @@ try {
   await shot(session, "kill-plan-before-confirm");
   check("the plan names the signal and the PID", planned.includes("SIGKILL") && planned.includes(`PID ${plantedPid}`));
   check("the plan says it cannot be undone", planned.includes("不可恢复"));
+  // How long the plan is good for, read out loud. It used to print the raw
+  // seconds, which asked an operator to divide three hundred by sixty on the
+  // one screen where they are about to kill something.
+  check("the plan says its window in minutes", planned.includes("5 分钟"));
+  check("and not as a number to divide", planned.includes("300 秒"), false);
   check("nothing ran while the plan was on screen", onHost(`kill -0 ${plantedPid} && echo alive`), "alive");
 
   await session.evaluate("document.querySelector('[data-testid=\"system-info-row-action-execute\"]').click(), true");
-  await waitFor(
+  await waitForDialog(
     session,
     "document.querySelector('[data-testid=\"system-info-row-action-dialog\"]')?.textContent.includes('目标机反馈') === true",
     "the receipt",
@@ -333,8 +424,9 @@ try {
     "the open ports table",
     120,
   );
+  await waitForTableSettled(session);
   check("a port row can be right-clicked", await contextMenuOnRow(session, ":22") || await contextMenuOnRow(session, "sshd") || await contextMenuOnRow(session, "22"));
-  await waitFor(session, "document.querySelector('.system-info-row-menu-group') !== null || document.querySelector('.system-info-row-menu-note') !== null", "the port menu");
+  await waitFor(session, "document.querySelector('.system-info-row-menu-parent') !== null || document.querySelector('.system-info-row-menu-note') !== null", "the port menu");
   const portMenu = await readMenu(session);
   console.log(`\nport menu on ${portMenu.title}:\n      groups: ${portMenu.groups.join(" / ")}`);
   check("a listening port gets port analysis", portMenu.groups.includes("端口分析"));
@@ -353,6 +445,54 @@ try {
   console.log(`\nport inspection output:\n      ${portOutput.replace(/\s+/gu, " ").slice(0, 200)}`);
   check("the port inspection answered", portOutput.trim().length > 0);
   await shot(session, "port-process");
+  await session.evaluate(`(() => {
+    [...document.querySelectorAll('[data-testid="system-info-row-action-dialog"] header button')]
+      .find(button => button.textContent.includes('关闭')).click();
+    return true;
+  })()`);
+
+  // --- a boot entry, which on a host that does not boot with systemd is a
+  //     script; those rows listed fine and offered nothing at all.
+  check("the autostart tab exists", await selectTab(session, "自启动"));
+  await waitFor(
+    session,
+    "document.querySelector('.system-info-table-scroll tbody tr') !== null",
+    "the autostart table",
+    120,
+  );
+  await waitForTableSettled(session);
+  const bootKind = await session.evaluate(
+    "document.querySelector('.system-info-table-scroll tbody tr td:nth-child(4)')?.textContent ?? null",
+  );
+  check("a boot entry can be right-clicked", await contextMenuOnFirstRow(session));
+  await waitForMenuActions(session, "the boot entry menu");
+  const bootMenu = await readMenu(session);
+  console.log(`\nboot entry menu (${bootKind}) on ${bootMenu.title}:\n      groups: ${bootMenu.groups.join(" / ")}\n      ${bootMenu.items.length} items`);
+  check("the boot entry offers more than the window's own items", bootMenu.items.length > 3);
+  check("it offers investigation", bootMenu.groups.length > 0);
+  // Everything this tab lists already starts at boot, so taking it out is the
+  // change on offer — on a host that has something to change boot links with.
+  console.log(`      change group present: ${bootMenu.groups.includes("处置")}`);
+  await shot(session, "autostart-menu");
+  check("the boot entry's script can be read", await clickMenuItem(session, "启动文件内容"));
+  await waitForDialog(
+    session,
+    "document.querySelector('[data-testid=\"system-info-row-action-output\"]') !== null",
+    "the boot script output",
+    120,
+  );
+  const bootOutput = await session.evaluate(
+    "document.querySelector('[data-testid=\"system-info-row-action-output\"]').textContent",
+  );
+  console.log(`\nboot entry file, first lines:\n      ${bootOutput.split("\n").slice(0, 3).join(" | ").slice(0, 180)}`);
+  if (bootKind === "init.d") {
+    check("the script came back from the target", bootOutput.trim().length > 0);
+  } else {
+    // A systemd row answers through systemctl, which has nothing to say in a
+    // container that never booted with systemd. That path is unchanged here.
+    console.log(`      systemd row, ${bootOutput.trim().length} bytes back`);
+  }
+  await shot(session, "autostart-script");
 
   console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : `${failures} CHECK(S) FAILED`}`);
   process.exitCode = failures === 0 ? 0 : 1;
@@ -360,9 +500,7 @@ try {
   console.log(`\nFAILED: ${error.message}`);
   process.exitCode = 1;
 } finally {
-  session?.close();
-  electron?.kill();
+  await app?.close();
   cleanPlanted();
-  await sleep(600);
-  fs.rmSync(dataRoot, { recursive: true, force: true });
+  fs.rmSync(dataRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
 }

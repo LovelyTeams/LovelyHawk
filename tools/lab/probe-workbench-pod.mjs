@@ -24,7 +24,7 @@ function check(label, actual, expected) {
 // The combined host: one machine running both a Docker daemon and a k3s
 // cluster, so one catalogue offers containers and pods together.
 const target = labTarget("container-arena");
-const sidecar = new Sidecar("D:/LovelyRes/target/debug/lovelyres-backend.exe", newDataRoot());
+const sidecar = new Sidecar("D:/LovelyRes/target/debug/lovelyhawk-backend.exe", newDataRoot());
 
 try {
   console.log(`连接 ${target.host}:${target.port}\n`);

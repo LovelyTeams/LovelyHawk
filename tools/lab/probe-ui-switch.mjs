@@ -3,19 +3,18 @@
 // working target.
 //
 //   node tools/lab/probe-ui-switch.mjs
-import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { startDesktop } from "./desktop.mjs";
 import { Sidecar, connect } from "./rpc-harness.mjs";
 import { labTarget } from "./lab-target.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repository = path.resolve(here, "..", "..");
-const electronRoot = path.join(repository, "electron");
-const backend = path.join(repository, "target", "debug", "lovelyres-backend.exe");
+const backend = path.join(repository, "target", "debug", "lovelyhawk-backend.exe");
 const port = 9336;
 // The order the operator would click them in.
 const LABS = ["arena", "nginx", "redis"];
@@ -47,72 +46,23 @@ async function waitFor(session, expression, label, attempts = 120) {
     rows: document.querySelectorAll('.system-info-table-scroll tbody tr').length,
     tabs: [...document.querySelectorAll('.system-info-tabs button')]
       .map(b => b.textContent.trim()).slice(0, 8),
-    panel: document.querySelector('.system-info-table-panel')?.textContent.slice(0, 160) ?? '(no panel)'
+    panel: document.querySelector('.system-info-table-panel')?.textContent.slice(0, 160) ?? '(no panel)',
+    manager: document.querySelector('.connection-manager-backdrop') === null ? null : {
+      selected: document.querySelector('.connection-details-view h2')?.textContent ?? null,
+      notice: document.querySelector('.connection-notice')?.textContent ?? null,
+      hidden: document.querySelector('.connection-manager')?.classList.contains('is-hidden') ?? false,
+      attempt: document.querySelector('.ssh-attempt-dialog, [aria-labelledby^="ssh-attempt"]')?.textContent.slice(0, 300) ?? null,
+      dialogs: [...document.querySelectorAll('[role=dialog],[role=alertdialog]')].map(n => n.textContent.slice(0, 200)),
+    },
   }))()`).catch(() => null);
   console.log(`  当时页面：${JSON.stringify(seen)}`);
   throw new Error(`timed out waiting for ${label}`);
 }
 
-async function openSession() {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    try {
-      const targets = await fetch(`http://127.0.0.1:${port}/json/list`).then((r) => r.json());
-      const page = targets.find((target) =>
-        target.type === "page" && String(target.url).startsWith("lovelyres://app/") &&
-        !String(target.url).includes("window=terminal"));
-      if (page !== undefined) return await attach(page.webSocketDebuggerUrl);
-    } catch {
-      // Not listening yet.
-    }
-    await sleep(500);
-  }
-  throw new Error("the window never exposed a debugging target");
-}
-
-function attach(url) {
-  return new Promise((resolve, reject) => {
-    const socket = new WebSocket(url);
-    const pending = new Map();
-    let nextId = 1;
-    socket.addEventListener("message", (event) => {
-      const message = JSON.parse(String(event.data));
-      const waiting = pending.get(message.id);
-      if (waiting === undefined) return;
-      pending.delete(message.id);
-      if (message.error !== undefined) waiting.reject(new Error(JSON.stringify(message.error)));
-      else waiting.resolve(message.result);
-    });
-    socket.addEventListener("error", () => reject(new Error("could not attach")));
-    socket.addEventListener("open", () => {
-      const send = (method, params) => new Promise((res, rej) => {
-        const id = nextId++;
-        pending.set(id, { resolve: res, reject: rej });
-        socket.send(JSON.stringify({ id, method, params }));
-        setTimeout(() => {
-          if (pending.delete(id)) rej(new Error(`${method} timed out`));
-        }, 30_000);
-      });
-      resolve({
-        send,
-        close: () => socket.close(),
-        async evaluate(expression) {
-          const result = await send("Runtime.evaluate", {
-            expression, awaitPromise: true, returnByValue: true,
-          });
-          if (result.exceptionDetails !== undefined) {
-            throw new Error(result.exceptionDetails.exception?.description ?? "evaluate threw");
-          }
-          return result.result.value;
-        },
-      });
-    });
-  });
-}
-
 const evidence = path.join(repository, "target", "lab-ui");
 fs.mkdirSync(evidence, { recursive: true });
-const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "lovelyres-switch-"));
-let electron;
+const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "lovelyhawk-switch-"));
+let app;
 let session;
 
 /** What the status bar says about the target right now. */
@@ -143,19 +93,8 @@ try {
     sidecar.close();
   }
 
-  const executable = execFileSync(
-    process.execPath, ["-e", "process.stdout.write(require('electron'))"],
-    { cwd: electronRoot, encoding: "utf8" },
-  ).trim();
-  electron = spawn(executable, [".", `--remote-debugging-port=${port}`], {
-    cwd: electronRoot,
-    env: { ...process.env, LOVELYRES_ARCHIVE_ROOT: dataRoot, LOVELYRES_DEBUG: "1" },
-    stdio: "ignore", shell: false, windowsHide: true,
-  });
-
-  session = await openSession();
-  await session.send("Runtime.enable", {});
-  await session.send("Page.enable", {});
+  app = await startDesktop({ dataRoot, port });
+  session = app.session;
   await waitFor(session, "document.querySelector('[data-testid=open-connections]') !== null", "the window");
 
   for (const [index, name] of LABS.entries()) {
@@ -173,9 +112,11 @@ try {
         .find(row => row.textContent?.includes(${JSON.stringify(name)}))?.click();
       return true;
     })()`);
+    // The button is drawn while the selected connection is still loading, and
+    // stays disabled until it has loaded; a click before then does nothing.
     await waitFor(
       session,
-      "[...document.querySelectorAll('.connection-detail button')].some(b => b.textContent?.trim() === '连接目标')",
+      "[...document.querySelectorAll('.connection-detail button')].some(b => b.textContent?.trim() === '连接目标' && !b.disabled)",
       "the connection detail",
     );
     await session.evaluate(`(() => {
@@ -240,8 +181,6 @@ try {
   console.log(`\nFAILED: ${error.message}`);
   process.exitCode = 1;
 } finally {
-  session?.close();
-  electron?.kill();
-  await sleep(600);
-  fs.rmSync(dataRoot, { recursive: true, force: true });
+  await app?.close();
+  fs.rmSync(dataRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
 }

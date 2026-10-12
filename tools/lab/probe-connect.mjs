@@ -1,7 +1,7 @@
 import { Sidecar, newDataRoot, connect } from "./rpc-harness.mjs";
 import { labTarget } from "./lab-target.mjs";
 
-const sidecar = new Sidecar("D:/LovelyRes/target/debug/lovelyres-backend.exe", newDataRoot());
+const sidecar = new Sidecar("D:/LovelyRes/target/debug/lovelyhawk-backend.exe", newDataRoot());
 try {
   const boot = await sidecar.call("app.bootstrap", {});
   console.log("bootstrap pages:", boot.pages.length);

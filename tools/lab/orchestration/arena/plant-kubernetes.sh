@@ -53,9 +53,12 @@ try "frontend/storefront (2)" kubectl -n frontend create deployment storefront \
 try "jobs/nightly-report（镜像拉不到，故意的）" kubectl -n jobs create deployment nightly-report \
   --image=lovelyres-lab/does-not-exist:9.9 --replicas=1
 
-# A pod that exits and restarts forever, so RESTARTS is not always 0.
+# A pod that exits and restarts forever, so RESTARTS is not always 0. It says
+# why before it dies, so the logs of the run before a restart have a cause in
+# them — the line a responder opens 上次日志 to find.
 try "jobs/flapping-worker（反复重启，故意的）" kubectl -n jobs run flapping-worker \
-  --image="$IMAGE" --restart=Always --command -- sh -c 'sleep 5; exit 1'
+  --image="$IMAGE" --restart=Always --command -- sh -c \
+  'echo "flapping-worker lab-marker: cannot reach queue, exiting 1"; sleep 5; exit 1'
 
 # A pod that writes to stdout, so the log reader has something to page.
 try "frontend/access-logger（持续输出日志）" kubectl -n frontend run access-logger \

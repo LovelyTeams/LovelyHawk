@@ -1,7 +1,7 @@
 import { Sidecar, newDataRoot, connect } from "./rpc-harness.mjs";
 import { labTarget } from "./lab-target.mjs";
 
-const sidecar = new Sidecar("D:/LovelyRes/target/debug/lovelyres-backend.exe", newDataRoot());
+const sidecar = new Sidecar("D:/LovelyRes/target/debug/lovelyhawk-backend.exe", newDataRoot());
 const step = async (label, run) => {
   try {
     const value = await run();

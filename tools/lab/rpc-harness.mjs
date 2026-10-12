@@ -6,20 +6,21 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-const PROTOCOL = "lovelyres-backend/v1";
+const PROTOCOL = "lovelyhawk-backend/v1";
 
 /**
  * Which sidecar binary a probe should drive.
  *
  * The debug build is the default, but Windows holds an .exe open while it
- * runs: with the app started from `pnpm electron:dev`, `cargo build` cannot
- * replace `target/debug/lovelyres-backend.exe` and quietly leaves the old one
+ * runs: while another probe's harness is still running, `cargo build` cannot
+ * replace `target/debug/lovelyhawk-backend.exe` and quietly leaves the old one
  * in place — so a probe would then test code that is not the code just
- * written. Set LOVELYRES_BACKEND_BIN to the release build to get out of the
- * way of a running window instead of closing it.
+ * written. Set LOVELYHAWK_BACKEND_BIN to another build to get out of the way
+ * of a running harness instead of stopping it. (The desktop app runs the
+ * backend in-process, so an open window no longer holds this file.)
  */
 export function backendBinary() {
-  return process.env.LOVELYRES_BACKEND_BIN ?? "D:/LovelyRes/target/debug/lovelyres-backend.exe";
+  return process.env.LOVELYHAWK_BACKEND_BIN ?? "D:/LovelyRes/target/debug/lovelyhawk-backend.exe";
 }
 
 export class Sidecar {
@@ -31,6 +32,7 @@ export class Sidecar {
 
   constructor(binaryPath, dataRoot) {
     this.#child = spawn(binaryPath, ["--archive-root", dataRoot], {
+      windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env, RUST_LOG: process.env.RUST_LOG ?? "info" },
     });

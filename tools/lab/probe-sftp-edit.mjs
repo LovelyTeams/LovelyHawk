@@ -15,16 +15,18 @@ import { execFileSync } from "node:child_process";
 
 import { Sidecar, newDataRoot, connect } from "./rpc-harness.mjs";
 import { labTarget } from "./lab-target.mjs";
-// The app's own validator, compiled, not a copy of its rules.
+// The app's own validator, loaded from its TypeScript source through Node's
+// built-in type stripping (Node 22.18 or later), not a copy of its rules.
 //
-// This probe talks straight to the sidecar, which is the whole point — but it
-// also means it skips the main process, and the main process re-validates
-// every reply before the window sees it. A read that satisfies the sidecar and
-// fails that check reaches the operator as "读不到这个文件", which is exactly
-// what happened: the projection started keeping a file's trailing newline and
-// the validator was still counting it as an extra line, so every ordinary text
-// file was rejected. Running the real validator here closes that gap.
-import { isSftpTextPreview } from "../../electron/dist-electron/shared/sftp-browser-contract.js";
+// This probe talks straight to the backend, which is the whole point — but it
+// also means it skips the host bridge, and the bridge and the SFTP page
+// re-validate every reply before the operator sees it. A read that satisfies
+// the backend and fails that check reaches the operator as "读不到这个文件",
+// which is exactly what happened: the projection started keeping a file's
+// trailing newline and the validator was still counting it as an extra line,
+// so every ordinary text file was rejected. Running the real validator here
+// closes that gap.
+import { isSftpTextPreview } from "../../ui/src/shared/sftp-browser-contract.ts";
 
 let failures = 0;
 function check(label, actual, expected) {
@@ -50,7 +52,7 @@ async function refuses(label, run) {
 const which = process.env.LAB ?? "arena";
 const target = labTarget(which);
 const container = which === "arena" ? "lab-arena" : `svc-${which}`;
-const sidecar = new Sidecar("D:/LovelyRes/target/debug/lovelyres-backend.exe", newDataRoot());
+const sidecar = new Sidecar("D:/LovelyRes/target/debug/lovelyhawk-backend.exe", newDataRoot());
 
 /** Reads the target directly, so "it was written" is not the tool's own claim. */
 function onHost(command) {
@@ -99,7 +101,7 @@ try {
   // Byte for byte, trailing newline included. Reading a file and saving it
   // back unchanged must not change it, and the projection used to drop the
   // final newline — which every text file on a Unix machine has.
-  check("主进程的校验器认这份回复", isSftpTextPreview(read), true);
+  check("界面自己的校验器认这份回复", isSftpTextPreview(read), true);
   check("读到的就是文件本身，一个字节不差", read.text, ORIGINAL);
   check("说清了这份内容可以原样写回", read.exact, true);
   check("带回了 64 位小写十六进制的摘要", read.sha256, (value) => /^[0-9a-f]{64}$/u.test(value ?? ""));

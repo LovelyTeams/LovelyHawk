@@ -1,7 +1,7 @@
 # One Ubuntu server with several services on it, the way a competition box
 # actually looks — rather than twelve containers each holding one product.
 #
-# Fewer moving parts to keep alive, and every LovelyRes page has something to
+# Fewer moving parts to keep alive, and every LovelyHawk page has something to
 # find on the same host: middleware, databases, the six baseline files, and a
 # handful of intrusion artefacts.
 FROM ubuntu:22.04

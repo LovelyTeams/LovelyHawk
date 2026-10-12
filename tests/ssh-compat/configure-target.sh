@@ -1,10 +1,10 @@
 #!/bin/sh
 set -eu
 
-mode="${LOVELYRES_SSHD_MODE:-password}"
-user="${LOVELYRES_SSHD_USER:-incident}"
-password="${LOVELYRES_SSHD_PASSWORD:-lovelyres-contract-password}"
-fixture_dir="${LOVELYRES_SSHD_FIXTURE_DIR:-/tmp/lovelyres-ssh-fixtures}"
+mode="${LOVELYHAWK_SSHD_MODE:-password}"
+user="${LOVELYHAWK_SSHD_USER:-incident}"
+password="${LOVELYHAWK_SSHD_PASSWORD:-lovelyres-contract-password}"
+fixture_dir="${LOVELYHAWK_SSHD_FIXTURE_DIR:-/tmp/lovelyres-ssh-fixtures}"
 config=/tmp/lovelyres-sshd_config
 
 mkdir -p /run/sshd /var/run/sshd "$fixture_dir"

@@ -26,7 +26,7 @@ function rowsOf(result) {
 }
 
 const target = labTarget("kubernetes");
-const sidecar = new Sidecar("D:/LovelyRes/target/debug/lovelyres-backend.exe", newDataRoot());
+const sidecar = new Sidecar("D:/LovelyRes/target/debug/lovelyhawk-backend.exe", newDataRoot());
 
 try {
   console.log(`连接 ${target.host}:${target.port}\n`);
@@ -153,7 +153,52 @@ try {
       if (lines.length > 0) console.log(`  末行：${lines[lines.length - 1].slice(0, 90)}`);
       check("日志读到了内容", lines.length, (value) => value >= 3);
       check("日志是这个 Pod 写的", body.includes("path=/health"), true);
+      check("当前日志标的是当前日志", logs.contentKind, "pod-logs");
     }
+  }
+
+  // --- 重启前那次运行的日志
+  // A crash loop's cause is in the run that ended. flapping-worker says why it
+  // exits before it does; access-logger never restarted, so it has no earlier
+  // run, and asking for one must fail rather than hand back its current logs.
+  console.log("\n=== 重启前日志");
+  const flapping = rowsOf(collected.pods ?? {}).find(
+    (row) => (row.name ?? "") === "flapping-worker",
+  );
+  if (flapping === undefined) {
+    failures += 1;
+    console.log("  ✗ 找不到 flapping-worker");
+  } else {
+    let previous = null;
+    // The kubelet briefly cannot hand over the old log while it swaps the
+    // container; that is a real answer, so a couple of tries, not a retry loop.
+    for (let attempt = 0; attempt < 3 && (previous === null || previous.failed !== undefined); attempt += 1) {
+      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 4_000));
+      previous = await sidecar.call("kubernetes.pod.logs.get", {
+        bindingHandle: binding,
+        snapshotHandle: (collected.pods ?? {}).snapshotHandle,
+        rowHandle: flapping.rowHandle,
+        previous: true,
+      }, 90_000).catch((error) => ({ failed: error.message }));
+    }
+    if (previous.failed !== undefined) {
+      failures += 1;
+      console.log(`  ✗ 重启前日志读取失败 —— ${previous.failed}`);
+    } else {
+      console.log(`  ${previous.text.length} 字节：${previous.text.trim().split("\n").at(-1)?.slice(0, 90) ?? ""}`);
+      check("标的是重启前日志", previous.contentKind, "pod-previous-logs");
+      check("里面有它退出前说的原因", previous.text.includes("lab-marker: cannot reach queue"), true);
+    }
+  }
+  if (logger !== undefined) {
+    const none = await sidecar.call("kubernetes.pod.logs.get", {
+      bindingHandle: binding,
+      snapshotHandle: (collected.pods ?? {}).snapshotHandle,
+      rowHandle: logger.rowHandle,
+      previous: true,
+    }, 90_000).catch((error) => ({ failed: error.message }));
+    check("没重启过的 Pod 读重启前日志会明确失败，不拿当前日志顶替",
+      none.failed !== undefined || !(none.text ?? "").includes("path=/health"), true);
   }
 } finally {
   sidecar.close();

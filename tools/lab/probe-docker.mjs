@@ -34,7 +34,7 @@ function check(label, actual, expected) {
 }
 
 const target = labTarget("docker");
-const sidecar = new Sidecar("D:/LovelyRes/target/debug/lovelyres-backend.exe", newDataRoot());
+const sidecar = new Sidecar("D:/LovelyRes/target/debug/lovelyhawk-backend.exe", newDataRoot());
 
 /** Reads the inner daemon directly, so "it matches" is not the tool agreeing with itself. */
 import { execFileSync } from "node:child_process";

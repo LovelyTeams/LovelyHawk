@@ -35,7 +35,7 @@ async function refuses(label, code, run) {
 }
 
 const target = labTarget("docker");
-const sidecar = new Sidecar("D:/LovelyRes/target/debug/lovelyres-backend.exe", newDataRoot());
+const sidecar = new Sidecar("D:/LovelyRes/target/debug/lovelyhawk-backend.exe", newDataRoot());
 
 /** Reads the host directly, so "it worked" is not the tool marking its own work. */
 import { execFileSync } from "node:child_process";

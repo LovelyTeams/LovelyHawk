@@ -1,0 +1,478 @@
+/* Browsing inside a container or a pod. Every colour is a theme token. */
+
+.exec-file-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: var(--backdrop);
+}
+
+.exec-file-dialog {
+  display: grid;
+  gap: 10px;
+  width: min(980px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  padding: 16px 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+}
+
+.exec-file-dialog > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.exec-file-dialog h2 {
+  margin: 0;
+  font-size: var(--font-subtitle);
+}
+
+.exec-file-dialog header p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: var(--font-caption);
+  overflow-wrap: anywhere;
+}
+
+.exec-file-dialog button {
+  min-height: 30px;
+  padding: 4px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  font-size: var(--font-small);
+  cursor: pointer;
+}
+
+.exec-file-dialog button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.exec-file-dialog button:focus-visible,
+.exec-file-dialog textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.exec-file-dialog .exec-file-close {
+  min-width: 30px;
+  padding: 2px 8px;
+}
+
+.exec-file-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.exec-file-tabs button {
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: var(--font-caption);
+}
+
+.exec-file-tabs button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: var(--accent-soft);
+}
+
+.exec-file-view {
+  display: grid;
+  gap: 8px;
+}
+
+.exec-file-view dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 6px 14px;
+  margin: 0;
+  font-size: var(--font-caption);
+}
+
+.exec-file-view dt {
+  color: var(--muted);
+}
+
+.exec-file-view dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+
+.exec-file-digest {
+  user-select: all;
+}
+
+.exec-file-view textarea {
+  min-height: 320px;
+  padding: 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface-inset);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: var(--font-caption);
+  line-height: 1.5;
+  resize: vertical;
+  white-space: pre;
+}
+
+.exec-file-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-caption);
+}
+
+.exec-file-dialog > footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.exec-browser {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.exec-browser-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.exec-browser-path {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.exec-browser-path label {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.exec-browser-path input,
+.exec-browser-tools input {
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface-inset);
+  font: inherit;
+  font-size: var(--font-small);
+}
+
+.exec-browser-path input {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+
+.exec-browser button {
+  min-height: 28px;
+  padding: 3px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  font-size: var(--font-caption);
+  cursor: pointer;
+}
+
+.exec-browser button:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.exec-browser button:focus-visible,
+.exec-browser input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.exec-browser button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.exec-browser-places {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.exec-browser-places button {
+  min-height: 24px;
+  padding: 1px 9px;
+  border-radius: 999px;
+  color: var(--muted);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+
+.exec-browser-places button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: var(--accent-soft);
+}
+
+.exec-browser-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.exec-browser-tools label {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.exec-browser-sort {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.exec-browser-sort button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: var(--accent-soft);
+}
+
+.exec-browser-count {
+  color: var(--muted);
+  font-size: var(--font-caption);
+}
+
+.exec-browser-note,
+.exec-browser-error,
+.exec-browser-warning {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: var(--font-caption);
+}
+
+.exec-browser-note {
+  color: var(--muted);
+  background: var(--surface-inset);
+}
+
+.exec-browser-error {
+  border: 1px solid var(--danger-border);
+  color: var(--danger-text);
+  background: var(--danger-soft);
+}
+
+.exec-browser-warning {
+  border: 1px solid var(--warning-border);
+  color: var(--warning-text);
+  background: var(--warning-soft);
+}
+
+.exec-browser-table {
+  max-height: min(52vh, 520px);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.exec-browser-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-caption);
+}
+
+.exec-browser-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  background: var(--surface-alt);
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.exec-browser-table tbody th,
+.exec-browser-table tbody td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text);
+  font-weight: 400;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.exec-browser-table tbody tr:hover {
+  background: var(--surface-hover);
+}
+
+.exec-browser-table tbody tr.is-hidden .exec-browser-name {
+  color: var(--text-secondary);
+}
+
+.exec-browser-table .is-numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.exec-browser-table tbody th {
+  max-width: 0;
+  width: 46%;
+}
+
+.exec-browser-kind {
+  display: inline-block;
+  min-width: 2.6em;
+  margin-right: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: var(--font-caption);
+  text-align: center;
+}
+
+.exec-browser-kind.is-directory {
+  border-color: var(--info-border);
+  color: var(--info-text);
+  background: var(--info-soft);
+}
+
+.exec-browser-kind.is-symlink {
+  border-color: var(--accent-soft-border);
+  color: var(--accent-text);
+}
+
+.exec-browser-name {
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+
+.exec-browser .exec-browser-name:is(button) {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  color: var(--accent-text);
+  background: transparent;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.exec-browser-mode {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+
+.exec-browser-mode.is-notable {
+  padding: 0 5px;
+  border: 1px solid var(--warning-border);
+  border-radius: 5px;
+  color: var(--warning-text);
+  background: var(--warning-soft);
+}
+
+.exec-browser-actions {
+  white-space: nowrap;
+  text-align: right;
+}
+
+.exec-browser-actions button + button {
+  margin-left: 4px;
+}
+
+.exec-browser-empty {
+  padding: 18px 8px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.exec-file-view-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* A pod file being kept as evidence: progress, then what was kept. */
+.pod-evidence {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface-inset);
+  font-size: var(--font-caption);
+}
+
+.pod-evidence header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pod-evidence[data-state="completed"] header strong {
+  color: var(--success-text);
+}
+
+.pod-evidence[data-state="failed"] header strong,
+.pod-evidence[data-state="cancelled"] header strong,
+.pod-evidence[data-state="saved-unlinked"] header strong {
+  color: var(--warning-text);
+}
+
+.pod-evidence p {
+  margin: 0;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.pod-evidence dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 4px 14px;
+  margin: 0;
+}
+
+.pod-evidence dt {
+  color: var(--muted);
+}
+
+.pod-evidence dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.pod-evidence code {
+  user-select: all;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+
+.pod-evidence-error {
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--danger-border);
+  border-radius: 8px;
+  color: var(--danger-text);
+  background: var(--danger-soft);
+}

@@ -37,7 +37,7 @@ const wanted = process.argv.length > 2 ? process.argv.slice(2) : runningHosts();
 const results = new Map();
 
 for (const name of wanted) {
-  const sidecar = new Sidecar("D:/LovelyRes/target/debug/lovelyres-backend.exe", newDataRoot());
+  const sidecar = new Sidecar("D:/LovelyRes/target/debug/lovelyhawk-backend.exe", newDataRoot());
   try {
     const status = await connect(sidecar, {
       host, port: PORTS[name], username: "root", password: "LabRoot#2026",

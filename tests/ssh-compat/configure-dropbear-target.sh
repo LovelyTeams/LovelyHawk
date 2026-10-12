@@ -1,9 +1,9 @@
 #!/bin/sh
 set -eu
 
-user="${LOVELYRES_SSHD_USER:-incident}"
-password="${LOVELYRES_SSHD_PASSWORD:-lovelyres-contract-password}"
-fixture_dir="${LOVELYRES_SSHD_FIXTURE_DIR:-/tmp/lovelyres-ssh-fixtures}"
+user="${LOVELYHAWK_SSHD_USER:-incident}"
+password="${LOVELYHAWK_SSHD_PASSWORD:-lovelyres-contract-password}"
+fixture_dir="${LOVELYHAWK_SSHD_FIXTURE_DIR:-/tmp/lovelyres-ssh-fixtures}"
 
 if ! id "$user" >/dev/null 2>&1; then
   adduser -D -s /bin/sh "$user"

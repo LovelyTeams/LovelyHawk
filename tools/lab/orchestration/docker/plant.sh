@@ -3,7 +3,7 @@
 # find, plus enough ordinary clutter that finding them is not trivial.
 #
 # Every item here matches one branch of `build_security_audit` in
-# crates/lovelyres-core/src/docker.rs. If a check has nothing to fire on, the
+# crates/lovelyhawk-core/src/docker.rs. If a check has nothing to fire on, the
 # lab proves the check runs but never proves it can say "yes".
 set +e
 

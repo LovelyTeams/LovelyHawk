@@ -39,7 +39,7 @@ async function refuses(label, code, run) {
 
 const which = process.env.LAB ?? "docker";
 const target = labTarget(which);
-const sidecar = new Sidecar("D:/LovelyRes/target/debug/lovelyres-backend.exe", newDataRoot());
+const sidecar = new Sidecar("D:/LovelyRes/target/debug/lovelyhawk-backend.exe", newDataRoot());
 
 /** Drains the terminal until `needle` shows up, or gives up. */
 async function readUntil(handle, needle, attempts = 40) {

@@ -11,7 +11,7 @@ set +e
 SSHD_PID=$!
 
 # The service starts detached and is allowed to fail. Its own log stays where
-# the product puts it, so LovelyRes reads a real one.
+# the product puts it, so LovelyHawk reads a real one.
 if [ -n "${LAB_SERVICE_COMMAND:-}" ]; then
   sh -c "$LAB_SERVICE_COMMAND" >/var/log/lab-service.log 2>&1 &
 fi

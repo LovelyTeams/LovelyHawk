@@ -32,7 +32,7 @@ function check(name, actual, expected) {
 }
 
 async function withConnection(run) {
-  const sidecar = new Sidecar("D:/LovelyRes/target/debug/lovelyres-backend.exe", newDataRoot());
+  const sidecar = new Sidecar("D:/LovelyRes/target/debug/lovelyhawk-backend.exe", newDataRoot());
   try {
     const status = await connect(sidecar, labTarget(which));
     if (status.stage !== "connected") throw new Error(JSON.stringify(status));

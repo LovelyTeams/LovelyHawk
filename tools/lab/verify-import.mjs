@@ -19,8 +19,8 @@ import {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repository = path.resolve(here, "..", "..");
-const archiveRoot = process.env.LOVELYRES_ARCHIVE_ROOT ?? repository;
-const backend = path.join(repository, "target", "debug", "lovelyres-backend.exe");
+const archiveRoot = process.env.LOVELYHAWK_ARCHIVE_ROOT ?? repository;
+const backend = path.join(repository, "target", "debug", "lovelyhawk-backend.exe");
 
 function wslAddress() {
   const output = execFileSync("wsl.exe", ["-d", "Ubuntu", "-e", "bash", "-lc", "hostname -I"], {

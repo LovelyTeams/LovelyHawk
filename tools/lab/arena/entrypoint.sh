@@ -15,7 +15,7 @@ SSHD_PID=$!
 log "sshd started"
 
 # Every service is started detached and allowed to fail. Its own log stays
-# where the product puts it, so LovelyRes reads a real one.
+# where the product puts it, so LovelyHawk reads a real one.
 # These live under /run, which a container starts empty. Without them MariaDB
 # aborts on "Bind on unix socket: No such file or directory" seconds after it
 # says it started, which reads as a database that is up until something asks
