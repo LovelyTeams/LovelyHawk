@@ -23,6 +23,7 @@ mod test_hooks;
 mod theme;
 
 use std::{
+    path::PathBuf,
     process::ExitCode,
     sync::{Arc, atomic::AtomicBool},
     time::Duration,
@@ -30,7 +31,7 @@ use std::{
 
 use lovelyhawk_backend::{BackendState, DiagnosticLogCapture, DiagnosticLogLevel};
 use parking_lot::Mutex;
-use tauri::{Manager, RunEvent, WindowEvent};
+use tauri::{AppHandle, Manager, RunEvent, Runtime, WindowEvent};
 use tracing_subscriber::prelude::*;
 
 use crate::{
@@ -43,6 +44,8 @@ use crate::{
 };
 
 const BACKEND_STOP_GRACE: Duration = Duration::from_secs(3);
+/// How long a restored window gets to notice it is no longer minimised.
+const SHOW_SETTLE: Duration = Duration::from_millis(150);
 /// DevTools for a portable build someone has to debug in the field.
 const DEBUG_MODE_VARIABLE: &str = "LOVELYHAWK_DEBUG";
 
@@ -127,7 +130,11 @@ pub fn run() -> ExitCode {
     let _instance = match instance_lock::acquire(&data_directory) {
         Ok(lock) => lock,
         Err(instance_lock::InstanceLockError::AlreadyRunning) => {
-            already_running();
+            // The running copy brings its window forward; only when it does
+            // not answer is the operator told to find it themselves.
+            if !instance_lock::request_show(&data_directory, instance_lock::SHOW_WAIT) {
+                already_running();
+            }
             return ExitCode::SUCCESS;
         }
         Err(instance_lock::InstanceLockError::Io(error)) => {
@@ -142,6 +149,7 @@ pub fn run() -> ExitCode {
     }
 
     let debug_mode = development || std::env::var(DEBUG_MODE_VARIABLE).as_deref() == Ok("1");
+    let show_requests = data_directory.clone();
 
     let built = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -168,6 +176,7 @@ pub fn run() -> ExitCode {
                 close: CloseGate::default(),
             });
             app.state::<Host>().build_main_window(app.handle())?;
+            watch_show_requests(app.handle().clone(), show_requests);
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -286,6 +295,37 @@ pub fn run() -> ExitCode {
         }
     });
     ExitCode::SUCCESS
+}
+
+/// A second launch of the same copy asks for the window instead of opening
+/// another: the main window is restored, shown and focused.
+fn watch_show_requests<R: Runtime>(app: AppHandle<R>, data_directory: PathBuf) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(instance_lock::SHOW_POLL).await;
+            if !instance_lock::take_show_request(&data_directory) {
+                continue;
+            }
+            tracing::info!("a second launch asked for the window");
+            if let Some(window) = app.get_webview_window(MAIN_LABEL) {
+                // Each step only when needed, and the restore given a moment:
+                // show() issued before the window has noticed the restore put
+                // it straight back to the taskbar.
+                if window.is_minimized().unwrap_or(false) {
+                    let _ = window.unminimize();
+                    tokio::time::sleep(SHOW_SETTLE).await;
+                }
+                if !window.is_visible().unwrap_or(true) {
+                    let _ = window.show();
+                }
+                let _ = window.set_focus();
+                // The window in front is not enough: the page inside it needs
+                // the keyboard too, or typing goes nowhere.
+                let webview: &tauri::Webview<R> = window.as_ref();
+                let _ = webview.set_focus();
+            }
+        }
+    });
 }
 
 #[cfg(windows)]

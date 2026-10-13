@@ -2,8 +2,9 @@
 
 发布版没有调试端口，下面几项自动化做不了，需要人在打包好的程序上点一遍。结果（每项“通过 / 不通过 + 看到了什么”）记回 `docs/DESKTOP_UI_LEDGER.json` 对应条目的验证记录。
 
-本轮的包：`artifacts\manual-check-2026-10-13\LovelyHawk-0.0.1-dev-windows-x64.zip`
-（已通过 `desktop-validate-package.ps1` 与 `desktop-portable-smoke.ps1`；SHA-256 见同目录 `.sha256`）
+本轮的包：`artifacts\manual-check-2026-10-13b\LovelyHawk-0.0.1-dev-windows-x64.zip`
+（已通过 `desktop-validate-package.ps1` 与 `desktop-portable-smoke.ps1`；SHA-256 `3777cb8c…fde447`，全文见同目录 `.sha256`。
+比上一版 `manual-check-2026-10-13` 多了 B 段的“再次双击把窗口带回来”；A、C、D、E 的步骤和期望不变，用旧包点过的结果仍然有效。）
 
 ## 准备
 
@@ -17,13 +18,19 @@
 2. 看 exe 旁边。
    - 期望：多了一个 `data` 文件夹；`C:\Users\<你>\AppData` 下**没有**新建 LovelyHawk 相关目录。
 
-## B. 只能开一个（条目 windows/main）
+## B. 只能开一个，再次双击把已开的窗口带回来（条目 windows/main）
 
-1. 程序开着时，再双击一次 `LovelyHawk.exe`。
-   - 期望：不会出现第二个窗口。现在第二次启动发现已有实例会**直接安静退出**，
-     已开的窗口不会被带到最前（见 `docs/OPEN_ITEMS.md` 第 26 条）；这一步只确认没有第二个窗口、没有报错弹窗。
-2. 任务管理器里看。
+1. 程序开着时，先点主窗口右上角的“最小化”，再双击一次 `LovelyHawk.exe`。
+   - 期望：1 秒内原来的窗口从任务栏还原并出现在最前；**不会**出现第二个窗口，也**不会**弹提示框。
+2. 不点窗口，直接按一下 `Tab` 键。
+   - 期望：窗口里有一个按钮出现焦点框——说明键盘已经交给了窗口。
+3. 窗口在最前面时，再双击一次 `LovelyHawk.exe`。
+   - 期望：什么都不变，仍然只有这一个窗口，没有提示框。
+4. 任务管理器里看。
    - 期望：只有一个 `LovelyHawk.exe` 进程，原来的窗口照常可用。
+
+如果双击后过了约 3 秒弹出“LovelyHawk 已经在运行……”的提示框，说明正在运行的那个没有响应，请记为不通过并截图。
+（用 `manual-check-2026-10-13` 那一版旧包时，第 1 步会弹这个提示框、窗口不回到前面，那是旧行为；请用本页开头写的新包。）
 
 ## C. 应用日志导出到系统保存框（条目 overlays/application-log）
 
