@@ -4263,6 +4263,17 @@ fn ssh_failure(error: CoreError) -> RpcFailure {
 /// when all they had to do was start the container. The subject on the core
 /// error is what separates them.
 fn container_shell_failure(error: CoreError) -> RpcFailure {
+    // Asking the host which shell the image has is the first thing that
+    // touches the target. If the connection is gone that is the answer — not
+    // "this container has no shell".
+    if matches!(error, CoreError::SshDisconnected { .. }) {
+        return RpcFailure::core(
+            "detect container shell",
+            "docker-binding-unavailable",
+            "The SSH connection to the target is gone.",
+            error,
+        );
+    }
     let not_running = matches!(
         &error,
         CoreError::Validation { subject, .. } if *subject == "container terminal"
@@ -4288,6 +4299,13 @@ fn container_shell_failure(error: CoreError) -> RpcFailure {
 /// The subject on the core error separates them, as for a container.
 fn pod_shell_failure(error: CoreError) -> RpcFailure {
     match &error {
+        // The SSH host that runs kubectl went away: not the pod, not RBAC.
+        CoreError::SshDisconnected { .. } => RpcFailure::core(
+            "run kubectl exec in a pod",
+            "kubernetes-binding-unavailable",
+            "The SSH connection to the target is gone.",
+            error,
+        ),
         CoreError::Validation { subject, .. } if *subject == "Kubernetes pod shell" => {
             RpcFailure::core(
                 "open a shell in a pod",
@@ -4426,6 +4444,16 @@ fn docker_exec_failure(error: CoreError) -> RpcFailure {
 
 fn terminal_failure(error: TerminalApiError) -> RpcFailure {
     match error {
+        // A host that went away is not a failure of the terminal. Said the way
+        // every other page says it (a `-binding-unavailable` code), so the
+        // window can tell the operator the connection is gone instead of
+        // guessing at the terminal, the folder or the shell.
+        TerminalApiError::Core(source @ CoreError::SshDisconnected { .. }) => RpcFailure::core(
+            "run target-bound terminal operation",
+            "terminal-binding-unavailable",
+            "The SSH connection to the target is gone.",
+            source,
+        ),
         TerminalApiError::Core(source) => RpcFailure::core(
             "run target-bound terminal operation",
             "terminal-operation-failed",
@@ -4585,12 +4613,43 @@ fn system_info_failure(error: SystemInfoApiError) -> RpcFailure {
             public_message: "The system-information row action is not one LovelyHawk offers.",
             source: None,
         },
-        SystemInfoApiError::ActionUnavailable(source) => RpcFailure::core(
-            "check system-information row action precondition",
-            "system-info-action-unavailable",
-            "That action does not apply to the selected row any more.",
-            source,
-        ),
+        SystemInfoApiError::ActionUnavailable(source) => {
+            use lovelyhawk_core::system_info::{
+                USER_ACCOUNT_ROOT_REFUSAL, USER_ACCOUNT_SESSION_REFUSAL, USER_ACCOUNT_STATE_REFUSAL,
+            };
+            // Refusals with a reason the operator can act on get their own
+            // code; everything else stays "does not apply", reason in the log.
+            let (code, public_message) = match &source {
+                CoreError::Validation { subject, .. }
+                    if *subject == USER_ACCOUNT_SESSION_REFUSAL =>
+                {
+                    (
+                        "system-info-account-session",
+                        "That is the account this SSH session is logged in as.",
+                    )
+                }
+                CoreError::Validation { subject, .. } if *subject == USER_ACCOUNT_ROOT_REFUSAL => (
+                    "system-info-account-root",
+                    "The root account is not deleted.",
+                ),
+                CoreError::Validation { subject, .. } if *subject == USER_ACCOUNT_STATE_REFUSAL => {
+                    (
+                        "system-info-account-state",
+                        "The account is already in that state.",
+                    )
+                }
+                _ => (
+                    "system-info-action-unavailable",
+                    "That action does not apply to the selected row any more.",
+                ),
+            };
+            RpcFailure::core(
+                "check system-information row action precondition",
+                code,
+                public_message,
+                source,
+            )
+        }
         SystemInfoApiError::PlanStale | SystemInfoApiError::PlanNotConfirmed => RpcFailure {
             operation: "validate system-information row plan",
             code: "system-info-plan-unavailable",
@@ -7959,6 +8018,72 @@ mod tests {
             assert!(!failure.public_message.contains("HOSTILE"), "{subject}");
             assert!(failure.public_message.ends_with('。'), "{subject}");
         }
+    }
+
+    #[test]
+    fn an_account_refusal_says_which_reason_it_was() {
+        use lovelyhawk_core::system_info::{
+            USER_ACCOUNT_ROOT_REFUSAL, USER_ACCOUNT_SESSION_REFUSAL, USER_ACCOUNT_STATE_REFUSAL,
+        };
+        let refused = |subject: &'static str| {
+            system_info_failure(SystemInfoApiError::ActionUnavailable(
+                CoreError::Validation {
+                    subject,
+                    message: "alice cannot be deleted: HOSTILE_DETAIL".to_owned(),
+                },
+            ))
+        };
+        for (subject, code) in [
+            (USER_ACCOUNT_SESSION_REFUSAL, "system-info-account-session"),
+            (USER_ACCOUNT_ROOT_REFUSAL, "system-info-account-root"),
+            (USER_ACCOUNT_STATE_REFUSAL, "system-info-account-state"),
+            ("process identity", "system-info-action-unavailable"),
+        ] {
+            let failure = refused(subject);
+            assert_eq!(failure.code, code, "{subject}");
+            assert!(!failure.public_message.contains("HOSTILE"), "{subject}");
+        }
+    }
+
+    #[test]
+    fn a_terminal_on_a_target_that_dropped_off_says_the_connection_is_gone() {
+        // What the log showed when a lab host went down: "SSH connection to
+        // the target is gone: Channel send error", reported as a terminal
+        // failure, a missing shell, or a failed kubectl exec. Each window can
+        // only say the right thing if the code says the connection is gone,
+        // the way every other page's `-binding-unavailable` code does.
+        let gone = || CoreError::SshDisconnected {
+            message: "Channel send error".to_owned(),
+        };
+        for failure in [
+            terminal_failure(TerminalApiError::Core(gone())),
+            container_shell_failure(gone()),
+            pod_shell_failure(gone()),
+        ] {
+            assert!(
+                failure.code.ends_with("-binding-unavailable"),
+                "{}",
+                failure.code
+            );
+            assert!(!failure.public_message.contains("Channel send error"));
+        }
+        // An ordinary failure keeps its own code.
+        assert_eq!(
+            terminal_failure(TerminalApiError::Core(CoreError::Ssh {
+                operation: "open terminal",
+                message: "remote probe exited with Some(1)".to_owned(),
+            }))
+            .code,
+            "terminal-operation-failed"
+        );
+        assert_eq!(
+            container_shell_failure(CoreError::Validation {
+                subject: "container shell",
+                message: "none".to_owned(),
+            })
+            .code,
+            "docker-container-shell-missing"
+        );
     }
 
     #[test]

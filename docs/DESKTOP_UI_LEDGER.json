@@ -1385,6 +1385,24 @@
    "command": "cargo test --locked -p lovelyhawk-core kubernetes; cargo test --locked -p lovelyhawk-backend --lib; cargo test --locked -p lovelyhawk-desktop; pnpm ui:check; node tools/lab/probe-kubernetes-manifest.mjs; node ui/scripts/probe-kubernetes-manifest.mjs; LAB=docker VIEWPORT=1080x700 node tools/lab/probe-ui-accessibility.mjs",
    "result": "Passed",
    "notes": "Kubernetes export: 导出 YAML… in the detail of a Pod, Deployment or Node writes its live manifest to a new file the host's save dialog names. Host command kubernetes_manifest_export (main window only; build.rs, capability allow-kubernetes-manifest-export) → backend kubernetes.manifest.export (host-only; listed in backend_bridge's never-from-a-page test) → KubernetesReadApi::export_manifest resolving the row by handles → core KubernetesService::object_manifest running kubectl get <kind> <name> [-n ns] -o yaml with stderr discarded (the transport appends stderr to output, which would put a deprecation warning inside the YAML), the kubeconfig context and kubectl's status after a marker line; a failed read is asked once more with stderr so a refusal reports kubernetes-forbidden; the manifest's own kind, name, namespace and UID (from the top-level kind and the two-space metadata keys, not an owner reference's uid) must still be the row's or kubernetes-manifest-unavailable; more than 1 MB refused, not cut. The file is kubectl's text unchanged under YAML comments naming the SSH host, context, object, UID and resourceVersion, the read time on this machine's clock (the lab cluster's clock ran about five seconds ahead, so the label says whose), the command, and that clear-text secrets may be inside; existing files are never replaced. The page sends handles only (exportKubernetesManifest(binding, snapshot, row); API count 164), never sees the contents, guards against a second click, and shows the outcome under the object it was for. Tests: core 3 new (own YAML kept with an owner uid ignored and stderr kept out; replaced/moved/other-kind/uid-less refused; Forbidden after a failed read and oversize refused), backend header/name test and an RPC test refusing kind/namespace/name in the request, UI bridge arity and routing, the page guard narrowed to exactly this export by handles. Lab (k3s, a namespace of this run's, removed by label): RPC 15/15 — Pod, Deployment and Node exported with the UID kubectl reads independently and a planted clear-text env value kept, namespace row, forged handle and a pod recreated under the same name refused (the last with its own reason), the deployment's generation unchanged; real window 8/8 — the button says it is read-only, the saved file is the pod's manifest, the notice names the file and warns about secrets, a dismissed dialog writes and says nothing, an existing file is not replaced and the page says so, no console errors. Same build, layout follow-ups from desktop-ui-type-scale-2026-10-12: at the 1080x700 minimum the Docker container table keeps the name column and the actions pinned and scrolls the readings between them (opaque backgrounds in all four themes), and the Kubernetes snapshot search shows its whole placeholder (svc-docker tour 194/194 at 1080x700)."
+  },
+  {
+   "id": "desktop-system-info-layout-2026-10-13",
+   "command": "pnpm ui:check; cargo test --locked -p lovelyhawk-core --lib system_info; cargo test --locked -p lovelyhawk-backend --lib system_info; cargo clippy --locked -p lovelyhawk-core --lib --no-deps -- -D warnings; pnpm desktop:build; LAB=super node tools/lab/probe-ui-system-info.mjs",
+   "result": "Passed",
+   "notes": "The host overview on the super arena (lab-super, lovelyres-lab:super, port 2251). The grouped row menu committed in db7ddff was measured in the real window at 1920x1080 and 1100x600, right-clicking the lowest visible row of 用户列表: the menu flips above the cursor and stays inside the window without scrolling, seven groups open as submenus beside it and inside the window, ArrowRight/ArrowLeft/Escape move one level at a time, no page errors (target/lab-ui-system-info/super-row-menu). Changed: the page grew with its table, so the page scrolled instead of the table, the column headers went with it and the last rows sat under the status bar; it now fills the window (system-info.css) and the table and tabs scroll on their own. The process, service, SUID and connection receipts said their readback in English (PID … no longer has the confirmed start identity); core now writes them in Chinese and says a systemd 'active' is not proof the service works. The probe looked for the PID in a fixed column that moved when the duplicate 风险 column was hidden, and read the port menu while it still showed its loading note; it now finds the column by header and waits for the note to go. Results: UI 131 files / 1088 tests; core system_info 68, backend system_info 12; probe-ui-system-info all checks passed on lab-super, including four new layout checks and the Chinese readback after a planned, confirmed and verified SIGKILL (target/lab-ui-system-info/super)."
+  },
+  {
+   "id": "desktop-receipt-language-2026-10-13",
+   "command": "cargo test --locked -p lovelyhawk-core; cargo test --locked -p lovelyhawk-backend; cargo clippy --locked -p lovelyhawk-core --all-targets --no-deps -- -D warnings; cargo clippy --locked -p lovelyhawk-backend --all-targets --no-deps -- -D warnings; pnpm ui:check; pnpm desktop:build; BASELINE=deb node tools/lab/probe-ui-baseline-actions.mjs",
+   "result": "Passed",
+   "notes": "Readbacks shown as is under 目标机反馈 / 集群反馈 / 核对结果 are written in Chinese by core: Docker bulk removal that left resources and Compose readback (docker.rs), a Kubernetes object not in the reviewed state (kubernetes.rs), Java update and restore digests, saying only the JAR on disk changed (java.rs), a failed baseline readback named by the setting's title with expected and read values (baseline.rs, new unit test), and middleware repair readback (middleware.rs). Local-record deletions keep English details: they are not shown and do not enter a target's disposal report. Results: core 1224 passed / 11 ignored, backend 767 passed, clippy clean; probe-ui-baseline-actions 13/13 in a throwaway labelled Debian container that was removed afterwards, with two new checks (the receipt survives the rescan; it reads 由独立读回核对 and does not claim the service is healthy) and a race fixed (the probe read the receipt in the instant the rescan replaced the list). NOT_RUN: Docker Compose, Kubernetes and Java receipts in the real window — the svc-docker, svc-kubernetes and Tomcat lab images are no longer present locally."
+  },
+  {
+   "id": "desktop-ui-polish-2026-10-13",
+   "command": "pnpm ui:check; pnpm desktop:build; pnpm desktop:test:debug; node ui/scripts/probe-notes.mjs; LAB=super node tools/lab/probe-ui-accessibility.mjs; LAB=super VIEWPORT=1080x700 node tools/lab/probe-ui-accessibility.mjs; LAB=super node tools/lab/probe-ui-log-analysis.mjs; LAB=super node tools/lab/probe-ui-integrity.mjs; LAB=super node tools/lab/probe-ui.mjs; LAB=super node tools/lab/probe-ui-baseline.mjs",
+   "result": "Passed",
+   "notes": "A pass over screenshots of every page at the 1080x700 window minimum on lab-super. Changed: the command workbench's 重新加载 was squeezed until its four characters stood one above another (the search box now gives way first and the counts wrap); the log page's search box was squeezed to its icon with the source count running under it (the toolbar wraps, the search keeps 200px) and its query fields keep room for a whole date; the SFTP panes in the terminal window left file names four characters wide, so a pane under 380px puts size and date under the name, and names carry their full text as a tooltip; notes and AI history grew past the window like the host overview did and now fill it, which also brought AI history's pager back into view; a note card's preview showed one line and the top half of the next (fixed 29px for two 20px lines); five search fields used a ⌕ character instead of the shared SVG icon. The accessibility sweep now fails any page laid out to fill the window (主机全景 and its 27 tabs, 笔记, AI 历史) if the page itself scrolls; probe-ui, probe-ui-integrity and probe-ui-accessibility accept the arena and super hosts. Results: UI 131 files / 1088 tests; desktop debug smoke 95/95 (target/desktop-debug/4a705c41-8405-4ba9-9ec5-47c414dcd9a8); probe-notes 27/27 (one earlier run timed out reattaching after its restart and passed on rerun); probe-ui-accessibility 221/221 at 1280x800 and at 1080x700; probe-ui-log-analysis, probe-ui-integrity, probe-ui and probe-ui-baseline all checks passed on lab-super; no console errors."
   }
  ],
  "foundations": [
@@ -1791,7 +1809,8 @@
      "desktop-kubernetes-pod-evidence-2026-10-12",
      "desktop-quality-gate-2026-10-12g",
      "desktop-kubernetes-manifest-export-2026-10-12",
-     "desktop-quality-gate-2026-10-12l"
+     "desktop-quality-gate-2026-10-12l",
+     "desktop-receipt-language-2026-10-13"
     ]
    }
   },
@@ -1943,7 +1962,8 @@
      "desktop-log-analysis-labs-2026-10-11",
      "desktop-log-analysis-keep-2026-10-11",
      "desktop-quality-gate-2026-10-11o",
-     "desktop-ui-polish-2026-10-11"
+     "desktop-ui-polish-2026-10-11",
+     "desktop-ui-polish-2026-10-13"
     ]
    }
   },
@@ -2184,7 +2204,8 @@
      "electron-source-gate-baseline-central-2026-08-25",
      "electron-cdp-baseline-central-2026-08-25",
      "desktop-baseline-actions-2026-10-12",
-     "desktop-quality-gate-2026-10-12i"
+     "desktop-quality-gate-2026-10-12i",
+     "desktop-receipt-language-2026-10-13"
     ]
    }
   },
@@ -2264,7 +2285,8 @@
      "desktop-java-hot-update-2026-10-11",
      "desktop-quality-gate-2026-10-11p",
      "desktop-java-hot-update-2026-10-12",
-     "desktop-quality-gate-2026-10-12e"
+     "desktop-quality-gate-2026-10-12e",
+     "desktop-receipt-language-2026-10-13"
     ]
    }
   },
@@ -2300,7 +2322,8 @@
      "desktop CDP page smoke"
     ],
     "evidence": [
-     "desktop-ui-polish-2026-10-11b"
+     "desktop-ui-polish-2026-10-11b",
+     "desktop-ui-polish-2026-10-13"
     ]
    }
   },
@@ -2630,7 +2653,9 @@
      "Packaged Windows/macOS/Linux window smoke"
     ],
     "evidence": [
-     "electron-cdp-smoke-2026-08-24"
+     "electron-cdp-smoke-2026-08-24",
+     "desktop-system-info-layout-2026-10-13",
+     "desktop-ui-polish-2026-10-13"
     ]
    }
   },
@@ -2739,7 +2764,8 @@
      "desktop-terminal-lanes-2026-10-11",
      "desktop-directory-terminal-2026-10-11",
      "desktop-quality-gate-2026-10-11n",
-     "desktop-sftp-expiry-2026-10-11"
+     "desktop-sftp-expiry-2026-10-11",
+     "desktop-ui-polish-2026-10-13"
     ]
    }
   },

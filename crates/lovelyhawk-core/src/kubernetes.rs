@@ -1853,7 +1853,7 @@ impl OperationExecutor for KubernetesMutationExecutor<'_> {
                     self.plan.state_change()
                 )
             } else {
-                "resource did not reach the exact reviewed target state".to_owned()
+                "核对未通过：资源没有处于确认时计划的状态，或已被换成另一个同名对象。".to_owned()
             },
         })
     }

@@ -3255,11 +3255,10 @@ async fn authenticate(
                 .as_ref()
                 .map(SecretValue::expose)
                 .filter(|value| !value.is_empty());
-            let key = russh::keys::decode_secret_key(private_key.expose(), passphrase)
-                .map_err(|error| CoreError::ssh("private-key decoding", error.to_string()))?;
-            if key.algorithm().is_rsa() {
-                return Err(rsa_policy_error());
-            }
+            let key = Arc::new(
+                russh::keys::decode_secret_key(private_key.expose(), passphrase)
+                    .map_err(|error| CoreError::ssh("private-key decoding", error.to_string()))?,
+            );
             if authentication.method == SshAuthMethod::Certificate {
                 let certificate = authentication.certificate.as_ref().ok_or_else(|| {
                     CoreError::validation("SSH certificate", "certificate is unavailable")
@@ -3267,23 +3266,76 @@ async fn authenticate(
                 let certificate = Certificate::from_openssh(certificate)
                     .map_err(|error| CoreError::ssh("certificate decoding", error.to_string()))?;
                 if certificate.algorithm().is_rsa() {
-                    return Err(rsa_policy_error());
+                    // russh 0.62 names every RSA certificate
+                    // `ssh-rsa-cert-v01@openssh.com` whatever hash it signs
+                    // with, so the only consistent login is a SHA-1 signature.
+                    // OpenSSH before 8.8 (or with that algorithm re-enabled)
+                    // accepts it; 8.8+ refuses it, and says so in its log
+                    // only. The operator gets the reason here instead of "the
+                    // server rejected the credential". Fixed upstream in a
+                    // later russh; see docs/SSH_COMPATIBILITY.md.
+                    let mut signer = InProcessSigner(key);
+                    let result = tokio::time::timeout(
+                        AUTH_TIMEOUT,
+                        handle.authenticate_certificate_with(
+                            username,
+                            certificate,
+                            None,
+                            &mut signer,
+                        ),
+                    )
+                    .await
+                    .map_err(|_| CoreError::ssh("certificate authentication", "timed out"))?
+                    .map_err(|error| {
+                        CoreError::ssh("certificate authentication", error.to_string())
+                    })?;
+                    if !result.success() {
+                        return Err(CoreError::ssh(
+                            "RSA certificate authentication",
+                            "the server refused an RSA certificate signed with SHA-1 (ssh-rsa-cert-v01). OpenSSH 8.8 and later accept RSA certificates only with SHA-2, which this SSH library cannot send yet; use an Ed25519 or ECDSA certificate, or log in with the RSA private key itself",
+                        ));
+                    }
+                    result
+                } else {
+                    tokio::time::timeout(
+                        AUTH_TIMEOUT,
+                        handle.authenticate_openssh_cert(username, key, certificate),
+                    )
+                    .await
+                    .map_err(|_| CoreError::ssh("certificate authentication", "timed out"))?
+                    .map_err(|error| {
+                        CoreError::ssh("certificate authentication", error.to_string())
+                    })?
                 }
-                tokio::time::timeout(
-                    AUTH_TIMEOUT,
-                    handle.authenticate_openssh_cert(username, Arc::new(key), certificate),
-                )
-                .await
-                .map_err(|_| CoreError::ssh("certificate authentication", "timed out"))?
-                .map_err(|error| CoreError::ssh("certificate authentication", error.to_string()))?
             } else {
-                let key = PrivateKeyWithHashAlg::new(Arc::new(key), None);
-                tokio::time::timeout(AUTH_TIMEOUT, handle.authenticate_publickey(username, key))
+                // RSA keys sign with the hash the server asks for; every other
+                // algorithm carries its own and gets exactly one attempt.
+                let hashes = if key.algorithm().is_rsa() {
+                    rsa_hash_candidates(handle).await
+                } else {
+                    vec![None]
+                };
+                let mut outcome = None;
+                for hash in hashes {
+                    let signing = PrivateKeyWithHashAlg::new(key.clone(), hash);
+                    let result = tokio::time::timeout(
+                        AUTH_TIMEOUT,
+                        handle.authenticate_publickey(username, signing),
+                    )
                     .await
                     .map_err(|_| CoreError::ssh("public-key authentication", "timed out"))?
                     .map_err(|error| {
                         CoreError::ssh("public-key authentication", error.to_string())
-                    })?
+                    })?;
+                    let success = result.success();
+                    outcome = Some(result);
+                    if success {
+                        break;
+                    }
+                }
+                outcome.ok_or_else(|| {
+                    CoreError::ssh("public-key authentication", "no signature hash to try")
+                })?
             }
         }
         SshAuthMethod::Agent => {
@@ -3495,11 +3547,82 @@ fn validate_keyboard_interactive_text(
     Ok(())
 }
 
-fn rsa_policy_error() -> CoreError {
-    CoreError::ssh(
-        "authentication",
-        "RSA identities are disabled fail-closed because of RUSTSEC-2023-0071; use Ed25519/ECDSA, an approved agent identity, or system OpenSSH",
-    )
+/// The signature hashes to try for an RSA identity, best first.
+///
+/// OpenSSH 8.8+ refuses SHA-1 `ssh-rsa`, so the server's announced
+/// `server-sig-algs` decides: rsa-sha2-512/256 when it lists them, SHA-1 only
+/// for a server that says that is all it has. A server that announces nothing
+/// (OpenSSH 7.2–7.3 accept SHA-2 without saying so; older ones only SHA-1)
+/// gets rsa-sha2-256 first and SHA-1 second.
+///
+/// RSA private keys are signed in this process with RustCrypto `rsa`, which
+/// carries RUSTSEC-2023-0071 (a timing side channel, no fixed release). An
+/// SSH client signs once per login, over a network, so the many precise
+/// timings that attack needs are not available to it; the trade was made so
+/// that the RSA keys many hosts are still set up with can log in at all.
+/// See docs/SSH_COMPATIBILITY.md.
+async fn rsa_hash_candidates(handle: &Handle<ClientHandler>) -> Vec<Option<russh::keys::HashAlg>> {
+    use russh::keys::HashAlg;
+    match tokio::time::timeout(Duration::from_secs(5), handle.best_supported_rsa_hash()).await {
+        Ok(Ok(Some(best))) => vec![best],
+        _ => vec![Some(HashAlg::Sha256), None],
+    }
+}
+
+/// Signs a certificate login with a private key held in this process, with
+/// an explicit hash. russh's own certificate login signs RSA with ssh-key's
+/// default hash, which does not match the `ssh-rsa-cert-v01` name russh 0.62
+/// sends for it; this signer makes the two agree.
+struct InProcessSigner(Arc<russh::keys::PrivateKey>);
+
+#[derive(Debug)]
+enum InProcessSignError {
+    Send,
+    Sign(String),
+}
+
+impl From<russh::SendError> for InProcessSignError {
+    fn from(_: russh::SendError) -> Self {
+        Self::Send
+    }
+}
+
+impl fmt::Display for InProcessSignError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Send => formatter.write_str("the SSH session closed during authentication"),
+            Self::Sign(message) => write!(formatter, "signing failed: {message}"),
+        }
+    }
+}
+
+impl russh::Signer for InProcessSigner {
+    type Error = InProcessSignError;
+
+    fn auth_sign(
+        &mut self,
+        _identity: &AgentIdentity,
+        hash_alg: Option<russh::keys::HashAlg>,
+        mut to_sign: Vec<u8>,
+    ) -> impl std::future::Future<Output = Result<Vec<u8>, Self::Error>> + Send {
+        let key = PrivateKeyWithHashAlg::new(self.0.clone(), hash_alg);
+        async move {
+            use russh::keys::signature::Signer as _;
+            use russh::keys::ssh_encoding::Encode as _;
+            let signature = key
+                .try_sign(&to_sign)
+                .map_err(|error| InProcessSignError::Sign(error.to_string()))?;
+            // The same shape an agent's answer is appended in: the encoded
+            // signature (algorithm name, then bytes) as one length-prefixed blob.
+            let blob = signature
+                .encode_vec()
+                .map_err(|error| InProcessSignError::Sign(error.to_string()))?;
+            blob.as_slice()
+                .encode(&mut to_sign)
+                .map_err(|error| InProcessSignError::Sign(error.to_string()))?;
+            Ok(to_sign)
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -3540,43 +3663,56 @@ async fn authenticate_with_agent(
             .await
             .map_err(|error| CoreError::ssh("agent identities", error.to_string()))?;
         let mut attempted = 0usize;
-        let mut rejected_rsa = 0usize;
+        // Asked once, and only if an RSA identity is actually offered.
+        let mut rsa_hashes = None;
         for identity in identities {
             let public_key = identity.public_key();
             let fingerprint = fingerprint(&public_key);
             if requested_fingerprint.is_some_and(|requested| requested != fingerprint) {
                 continue;
             }
-            if public_key.algorithm().is_rsa() {
-                rejected_rsa += 1;
-                continue;
-            }
+            // The agent signs, so an RSA private key never enters this
+            // process; it only needs to be told which hash the server takes.
+            let hashes = if matches!(identity, AgentIdentity::Certificate { .. })
+                && public_key.algorithm().is_rsa()
+            {
+                // Same limit as an RSA certificate file: russh can only name
+                // it `ssh-rsa-cert-v01`, so only a SHA-1 signature matches.
+                vec![None]
+            } else if public_key.algorithm().is_rsa() {
+                if rsa_hashes.is_none() {
+                    rsa_hashes = Some(rsa_hash_candidates(handle).await);
+                }
+                rsa_hashes.clone().unwrap_or_default()
+            } else {
+                vec![None]
+            };
             attempted += 1;
-            let result = match &identity {
-                AgentIdentity::PublicKey { key, .. } => {
-                    handle
-                        .authenticate_publickey_with(username, key.clone(), None, &mut agent)
-                        .await
+            for hash in hashes {
+                let result = match &identity {
+                    AgentIdentity::PublicKey { key, .. } => {
+                        handle
+                            .authenticate_publickey_with(username, key.clone(), hash, &mut agent)
+                            .await
+                    }
+                    AgentIdentity::Certificate { certificate, .. } => {
+                        handle
+                            .authenticate_certificate_with(
+                                username,
+                                certificate.clone(),
+                                hash,
+                                &mut agent,
+                            )
+                            .await
+                    }
                 }
-                AgentIdentity::Certificate { certificate, .. } => {
-                    handle
-                        .authenticate_certificate_with(
-                            username,
-                            certificate.clone(),
-                            None,
-                            &mut agent,
-                        )
-                        .await
+                .map_err(|error| CoreError::ssh("agent authentication", error.to_string()))?;
+                if result.success() {
+                    return Ok(());
                 }
-            }
-            .map_err(|error| CoreError::ssh("agent authentication", error.to_string()))?;
-            if result.success() {
-                return Ok(());
             }
         }
-        if attempted == 0 && rejected_rsa > 0 {
-            Err(rsa_policy_error())
-        } else if attempted == 0 && requested_fingerprint.is_some() {
+        if attempted == 0 && requested_fingerprint.is_some() {
             Err(CoreError::ssh(
                 "agent authentication",
                 "the requested identity fingerprint is unavailable",
@@ -6072,12 +6208,36 @@ mod tests {
         }));
     }
 
-    #[test]
-    fn rsa_private_keys_fail_closed_with_actionable_advisory() {
-        let message = rsa_policy_error().to_string();
-        assert!(message.contains("RUSTSEC-2023-0071"));
-        assert!(message.contains("Ed25519/ECDSA"));
-        assert!(message.contains("system OpenSSH"));
+    /// The in-process signer must hand back exactly what an agent would: the
+    /// data it was given, followed by the encoded signature as one
+    /// length-prefixed blob — or the server sees a malformed login. RSA's
+    /// hash choice is exercised end to end against real OpenSSH (see
+    /// docs/SSH_COMPATIBILITY.md); this pins the wire shape.
+    #[tokio::test]
+    async fn the_in_process_signer_appends_a_signature_the_public_key_verifies() {
+        use russh::keys::signature::Verifier;
+        use russh::keys::ssh_encoding::Decode as _;
+        use russh::keys::ssh_key::{Signature, private::Ed25519Keypair};
+
+        let key = Arc::new(russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(
+            &[7; 32],
+        )));
+        let identity = AgentIdentity::PublicKey {
+            key: key.public_key().clone(),
+            comment: String::new(),
+        };
+        let data = b"session identifier and userauth request".to_vec();
+        let mut signer = InProcessSigner(key.clone());
+        let signed = russh::Signer::auth_sign(&mut signer, &identity, None, data.clone())
+            .await
+            .unwrap();
+        assert!(signed.starts_with(&data));
+        let mut rest = &signed[data.len()..];
+        let blob = Vec::<u8>::decode(&mut rest).unwrap();
+        assert!(rest.is_empty(), "nothing may follow the signature blob");
+        let signature = Signature::decode(&mut blob.as_slice()).unwrap();
+        assert!(Verifier::verify(key.public_key(), &data, &signature).is_ok());
+        assert!(Verifier::verify(key.public_key(), b"other data", &signature).is_err());
     }
 
     #[test]
@@ -7074,6 +7234,283 @@ mod tests {
         assert!(ssh.list_sessions().await?.is_empty());
         drop(ssh);
         let _ = std::fs::remove_dir_all(local_root);
+        Ok(())
+    }
+
+    /// One agent connection: identities and sign requests, the two messages
+    /// a login uses. Unlike russh's own agent server, which always signs RSA
+    /// with SHA-1, this honours the rsa-sha2-256/512 flags the way OpenSSH's
+    /// agent (and Windows') does — so it tests the client, not a weaker agent.
+    #[cfg(windows)]
+    async fn serve_test_agent_connection<S>(
+        mut stream: S,
+        keys: Arc<Vec<Arc<russh::keys::PrivateKey>>>,
+    ) -> std::io::Result<()>
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    {
+        use russh::keys::HashAlg;
+        use russh::keys::signature::Signer as _;
+        use russh::keys::ssh_encoding::{Decode as _, Encode as _};
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        const FAILURE: u8 = 5;
+        const REQUEST_IDENTITIES: u8 = 11;
+        const IDENTITIES_ANSWER: u8 = 12;
+        const SIGN_REQUEST: u8 = 13;
+        const SIGN_RESPONSE: u8 = 14;
+        const RSA_SHA2_256: u32 = 2;
+        const RSA_SHA2_512: u32 = 4;
+        loop {
+            let length = match stream.read_u32().await {
+                Ok(length) => length as usize,
+                Err(_) => return Ok(()),
+            };
+            let mut body = vec![0; length];
+            stream.read_exact(&mut body).await?;
+            let mut reply = Vec::new();
+            match body.split_first() {
+                Some((&REQUEST_IDENTITIES, _)) => {
+                    reply.push(IDENTITIES_ANSWER);
+                    (keys.len() as u32).encode(&mut reply).unwrap();
+                    for key in keys.iter() {
+                        key.public_key()
+                            .to_bytes()
+                            .unwrap()
+                            .as_slice()
+                            .encode(&mut reply)
+                            .unwrap();
+                        "lovelyhawk-test".encode(&mut reply).unwrap();
+                    }
+                }
+                Some((&SIGN_REQUEST, mut rest)) => {
+                    let blob = Vec::<u8>::decode(&mut rest).unwrap();
+                    let data = Vec::<u8>::decode(&mut rest).unwrap();
+                    let flags = u32::decode(&mut rest).unwrap();
+                    let key = keys
+                        .iter()
+                        .find(|key| key.public_key().to_bytes().unwrap() == blob);
+                    match key {
+                        Some(key) => {
+                            let hash = if !key.algorithm().is_rsa() {
+                                None
+                            } else if flags & RSA_SHA2_512 != 0 {
+                                Some(HashAlg::Sha512)
+                            } else if flags & RSA_SHA2_256 != 0 {
+                                Some(HashAlg::Sha256)
+                            } else {
+                                None
+                            };
+                            let signature = PrivateKeyWithHashAlg::new(key.clone(), hash)
+                                .try_sign(&data)
+                                .unwrap();
+                            reply.push(SIGN_RESPONSE);
+                            signature
+                                .encode_vec()
+                                .unwrap()
+                                .as_slice()
+                                .encode(&mut reply)
+                                .unwrap();
+                        }
+                        None => reply.push(FAILURE),
+                    }
+                }
+                _ => reply.push(FAILURE),
+            }
+            stream.write_u32(reply.len() as u32).await?;
+            stream.write_all(&reply).await?;
+        }
+    }
+
+    /// Serves an SSH agent holding `keys` on the pipe the client looks for,
+    /// for as long as the returned task runs. The pipe must be free: a real
+    /// agent already listening would answer instead, and the test would no
+    /// longer know which keys it holds.
+    #[cfg(windows)]
+    fn host_test_agent(
+        keys: Vec<russh::keys::PrivateKey>,
+    ) -> CoreResult<tokio::task::JoinHandle<()>> {
+        use tokio::net::windows::named_pipe::ServerOptions;
+        const PIPE: &str = r"\\.\pipe\openssh-ssh-agent";
+        let mut server = ServerOptions::new()
+            .first_pipe_instance(true)
+            .create(PIPE)
+            .map_err(|error| {
+                CoreError::ssh(
+                    "test agent",
+                    format!("{PIPE} is already served by another agent: {error}"),
+                )
+            })?;
+        let keys = Arc::new(keys.into_iter().map(Arc::new).collect::<Vec<_>>());
+        Ok(tokio::spawn(async move {
+            loop {
+                if server.connect().await.is_err() {
+                    return;
+                }
+                let connected = server;
+                server = match ServerOptions::new().create(PIPE) {
+                    Ok(next) => next,
+                    Err(_) => return,
+                };
+                tokio::spawn(serve_test_agent_connection(connected, keys.clone()));
+            }
+        }))
+    }
+
+    /// Every way the connection editor offers to log in, against one real
+    /// OpenSSH target and a bastion in front of it.
+    ///
+    /// Uses the `LOVELYHAWK_TEST_SSH_*` and `LOVELYHAWK_TEST_SSH_JUMP_*`
+    /// endpoints of the end-to-end contract, plus
+    /// `LOVELYHAWK_TEST_SSH_MATRIX_DIR` holding `id_ed25519` (protected by
+    /// `LOVELYHAWK_TEST_SSH_MATRIX_KEY_PASSPHRASE`), `id_ecdsa`, `id_rsa`,
+    /// `cert_ed25519` and `cert_rsa` with their `-cert.pub` (signed by a CA in
+    /// the target's TrustedUserCAKeys, the keys themselves not authorised),
+    /// and `agent_ed25519` / `agent_rsa` (authorised; on Windows the test
+    /// serves its own agent with them on the OpenSSH pipe).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "release gate: requires the disposable login-method lab (key, certificate, agent, jump)"]
+    async fn live_openssh_every_login_method() -> CoreResult<()> {
+        let endpoint = LiveEndpoint::from_prefix("LOVELYHAWK_TEST_SSH");
+        let jump = LiveEndpoint::from_prefix("LOVELYHAWK_TEST_SSH_JUMP");
+        let dir = PathBuf::from(live_required("LOVELYHAWK_TEST_SSH_MATRIX_DIR"));
+        assert!(
+            dir.is_absolute(),
+            "LOVELYHAWK_TEST_SSH_MATRIX_DIR must be absolute"
+        );
+        let passphrase = live_required("LOVELYHAWK_TEST_SSH_MATRIX_KEY_PASSPHRASE");
+        let (local_root, _store, connections, ssh) = live_service("openssh-login-methods")?;
+
+        let read_key = |name: &str| -> russh::keys::PrivateKey {
+            let text = std::fs::read_to_string(dir.join(name)).expect("matrix key is readable");
+            russh::keys::decode_secret_key(&text, None).expect("matrix agent key decodes")
+        };
+        let agent_keys = [read_key("agent_ed25519"), read_key("agent_rsa")];
+        let agent_fingerprints = agent_keys
+            .iter()
+            .map(|key| fingerprint(key.public_key()))
+            .collect::<Vec<_>>();
+        #[cfg(windows)]
+        let agent_task = host_test_agent(agent_keys.to_vec())?;
+
+        let mut cases: Vec<(&str, bool)> = Vec::new();
+        let password = endpoint.connection("m-password", SshAuthMethod::Password);
+        upsert_live_connection(&connections, password, Some(&endpoint.password), None, None)?;
+        cases.push(("m-password", true));
+
+        for (id, file, key_passphrase) in [
+            (
+                "m-ed25519-passphrase",
+                "id_ed25519",
+                Some(passphrase.as_str()),
+            ),
+            ("m-ecdsa", "id_ecdsa", None),
+            ("m-rsa", "id_rsa", None),
+        ] {
+            let mut config = endpoint.connection(id, SshAuthMethod::PublicKey);
+            config.private_key_path = Some(dir.join(file));
+            upsert_live_connection(&connections, config, None, key_passphrase, None)?;
+            cases.push((id, false));
+        }
+        let certificate = |endpoint: &LiveEndpoint, id: &str, file: &str| {
+            let mut config = endpoint.connection(id, SshAuthMethod::Certificate);
+            config.private_key_path = Some(dir.join(file));
+            config.certificate_path = Some(dir.join(format!("{file}-cert.pub")));
+            config
+        };
+        upsert_live_connection(
+            &connections,
+            certificate(&endpoint, "m-cert-ed25519", "cert_ed25519"),
+            None,
+            None,
+            None,
+        )?;
+        cases.push(("m-cert-ed25519", false));
+        // An RSA certificate against OpenSSH 8.8+: refused, and saying why.
+        upsert_live_connection(
+            &connections,
+            certificate(&endpoint, "m-cert-rsa-modern", "cert_rsa"),
+            None,
+            None,
+            None,
+        )?;
+        // …and against an OpenSSH that still takes ssh-rsa-cert-v01: accepted.
+        let legacy = live_optional("LOVELYHAWK_TEST_SSH_LEGACY_HOST")
+            .map(|_| LiveEndpoint::from_prefix("LOVELYHAWK_TEST_SSH_LEGACY"));
+        if let Some(legacy) = &legacy {
+            upsert_live_connection(
+                &connections,
+                certificate(legacy, "m-cert-rsa-legacy", "cert_rsa"),
+                None,
+                None,
+                None,
+            )?;
+            cases.push(("m-cert-rsa-legacy", false));
+        }
+        for (id, fingerprint) in [
+            ("m-agent-ed25519", &agent_fingerprints[0]),
+            ("m-agent-rsa", &agent_fingerprints[1]),
+        ] {
+            let mut config = endpoint.connection(id, SshAuthMethod::Agent);
+            config.agent_identity_fingerprint = Some(fingerprint.clone());
+            upsert_live_connection(&connections, config, None, None, None)?;
+            cases.push((id, false));
+        }
+        let mut through_jump = endpoint.connection("m-jump", SshAuthMethod::Password);
+        through_jump.jump_host = Some(JumpHostConfig {
+            host: jump.host,
+            port: jump.port,
+            username: jump.username,
+            auth_method: SshAuthMethod::Password,
+            private_key_path: None,
+            certificate_path: None,
+            agent_identity_fingerprint: None,
+            host_key_fingerprint: Some(jump.fingerprint),
+        });
+        upsert_live_connection(
+            &connections,
+            through_jump,
+            Some(&endpoint.password),
+            None,
+            Some(&jump.password),
+        )?;
+        cases.push(("m-jump", true));
+
+        let mut failures = Vec::new();
+        for (id, pty) in cases {
+            if let Err(error) = assert_live_exec_and_optional_pty(&ssh, id, pty).await {
+                failures.push(format!("{id}: {error}"));
+            } else {
+                println!("login method ok: {id}");
+            }
+        }
+        match ssh
+            .connect("m-cert-rsa-modern", HostKeyConfirmations::default())
+            .await
+        {
+            Ok(status) => {
+                let _ = ssh.disconnect(&status.session_id).await;
+                failures.push(
+                    "m-cert-rsa-modern: OpenSSH 8.8+ accepted a SHA-1 RSA certificate".to_owned(),
+                );
+            }
+            Err(error) if error.to_string().contains("SHA-1") => {
+                println!("login method refused as expected: m-cert-rsa-modern ({error})");
+            }
+            Err(error) => failures.push(format!("m-cert-rsa-modern: unexplained refusal: {error}")),
+        }
+        if legacy.is_none() {
+            println!("login method not run: m-cert-rsa-legacy (no LOVELYHAWK_TEST_SSH_LEGACY_*)");
+        }
+        #[cfg(windows)]
+        agent_task.abort();
+        assert!(ssh.list_sessions().await?.is_empty());
+        drop(ssh);
+        let _ = std::fs::remove_dir_all(local_root);
+        assert!(
+            failures.is_empty(),
+            "login methods that failed:\n{}",
+            failures.join("\n")
+        );
         Ok(())
     }
 

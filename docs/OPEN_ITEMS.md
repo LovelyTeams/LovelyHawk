@@ -248,6 +248,32 @@ ubuntu/rocky/alpine 三台通过。
 等用户点了运行才报错；真要续期，需按分类与标题对应新旧命令、保留选中项，并让旧结果的操作
 入口同时说明已过期。
 
+### 25. 处置完成后的“目标机反馈”有不少还是英文（2026-10-13）
+
+**现在**：确认执行后，回执里“目标机反馈”一栏原样显示核心层核对时写的说明（`VerificationResult.detail`）。
+第 1 条改的是计划摘要与回滚说明，这一栏没有跟着改，例如主机全景结束进程后显示
+`PID 602 no longer has the confirmed start identity`。
+
+**已处理一部分（2026-10-13）**：主机全景的四个处置——结束进程、服务启停、移除 SUID/SGID 位、
+断开连接——由核心直接写中文（`crates/lovelyhawk-core/src/system_info.rs`）；启动、重启、重载服务时
+还说明“systemd 报告一致不代表业务正常”。`tools/lab/probe-ui-system-info.mjs` 在真实窗口里断言
+结束进程后显示“确认时的进程 PID … 已经结束”。
+
+**又处理一部分（2026-10-13）**：逐个核对了把核对说明送到界面的路径。SFTP、应急路径、命令审计、
+Nginx 修补本来就是中文；改成中文的有 Docker 批量删除没删完的说明和 Compose 操作的回读
+（`docker.rs`）、Kubernetes 对象状态不符（`kubernetes.rs`）、Java 热更新与恢复的摘要核对（`java.rs`，
+并说明“只更新了磁盘上的 JAR，运行中的进程不会因此加载新类”）、基线修改回读不符时的逐项说明
+（`baseline.rs`，按检查项标题列出期望值与回读值）、中间件修补的回读（`middleware.rs`）。
+基线回读有新的单元测试；`tools/lab/probe-ui-baseline-actions.mjs` 在真实窗口断言回执是中文、
+不声称业务已恢复，并且自动重新扫描之后回执仍在（原先探针在扫描替换列表的瞬间读取，会偶发失败）。
+
+**还剩**：Docker Compose、Kubernetes、Java 热更新这几条改动只有单元测试，没有在真实窗口里跑过——
+对应的实验靶机（`svc-docker`、`svc-kubernetes`、Tomcat）眼下不在本机 Docker 里，需要重建后用
+`probe-ui-orchestration.mjs` 等探针补验。本机记录的删除（`connections.rs`、`investigation.rs`、`settings.rs`、
+`log_analysis.rs`、`operations.rs`、`database.rs`）的核对说明仍是英文，但它们不显示在界面上，
+也不会进入远端主机的处置报告（报告按目标身份筛选，这些记录用的是本机专用身份）。各模块恢复失败时的
+英文报错（`CoreError::validation`）另经错误码映射显示，不在本条范围内。
+
 ---
 
 ## 做的时候记下的坑

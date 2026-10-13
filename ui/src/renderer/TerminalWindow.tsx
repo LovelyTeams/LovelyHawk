@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { CommandAssistant } from "./CommandAssistant";
 import { SftpBrowserPage } from "./SftpBrowserPage";
+import { TERMINAL_ERROR_MESSAGES } from "./terminal-controller";
 import { TerminalSurface, type TerminalSessionState } from "./TerminalSurface";
 import { WindowControls } from "./WindowControls";
 import "./ssh-window.css";
@@ -70,6 +71,7 @@ export function TerminalWindow({ kind = "terminal" }: { kind?: TerminalWindowKin
               onViewport={(columns, rows) => setViewport({ columns, rows })}
               onSession={setSession}
               insert={insert}
+              {...(kind === "directory" ? { openFailure: TERMINAL_ERROR_MESSAGES.openFolder } : {})}
             />
           </div>
           <CommandAssistant

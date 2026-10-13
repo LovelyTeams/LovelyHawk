@@ -19,13 +19,13 @@ import { randomUUID } from "node:crypto";
 
 import { ACCESSIBILITY_AUDIT } from "../../ui/scripts/accessibility-audit.mjs";
 import { startDesktop } from "./desktop.mjs";
-import { LAB_PORTS, ORCHESTRATION_PORTS, labTarget } from "./lab-target.mjs";
+import { ORCHESTRATION_PORTS, isLinuxLab, labTarget } from "./lab-target.mjs";
 import { Sidecar, backendBinary, connect } from "./rpc-harness.mjs";
 
 const lab = process.env.LAB ?? "ubuntu";
 // The nine distributions, or the Docker host, whose containers give the
 // container window something to open.
-if (!Object.hasOwn(LAB_PORTS, lab) && lab !== "docker") throw new Error(`Unknown LAB ${lab}`);
+if (!isLinuxLab(lab) && lab !== "docker") throw new Error(`Unknown LAB ${lab}`);
 if (lab === "docker" && !Object.hasOwn(ORCHESTRATION_PORTS, "docker")) throw new Error("No Docker lab host");
 const viewport = /^(\d{3,4})x(\d{3,4})$/u.exec(process.env.VIEWPORT ?? "1280x800");
 if (viewport === null) throw new Error("VIEWPORT is <width>x<height>, e.g. 1080x700");
@@ -91,7 +91,21 @@ async function auditPage(session, label, { heading = true } = {}) {
     return main === null ? null : { client: main.clientWidth, scroll: main.scrollWidth };
   })()`);
   if (overflow !== null) check(`${label}: does not scroll sideways`, overflow.scroll <= overflow.client, overflow);
+  // Pages built to fill the window scroll inside their own lists and tables.
+  // The page itself scrolling means one of them grew past the window again,
+  // which is how the last rows ended up under the status bar.
+  const filling = await session.evaluate(`(() => {
+    const main = document.querySelector("main.content");
+    if (main === null || main.querySelector(${JSON.stringify(FILLING_PAGES)}) === null) return null;
+    return { client: main.clientHeight, scroll: main.scrollHeight };
+  })()`);
+  if (filling !== null) {
+    check(`${label}: fills the window without scrolling the page`, filling.scroll <= filling.client + 1, filling);
+  }
 }
+
+/** The pages laid out to fill the window rather than grow with their content. */
+const FILLING_PAGES = ".system-info-page, .notes-page, .ai-history-page";
 
 try {
   const sidecar = new Sidecar(backendBinary(), dataRoot);

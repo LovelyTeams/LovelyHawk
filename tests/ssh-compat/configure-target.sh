@@ -72,4 +72,11 @@ chown -R "$user" "/home/$user/.ssh"
   fi
 } > "$config"
 
-exec /usr/sbin/sshd -D -e -f "$config"
+# Alpine ships the PAM-enabled server as a separate binary (openssh-server-pam
+# installs /usr/sbin/sshd.pam); the plain one rejects "UsePAM" and would leave
+# keyboard-interactive with nothing behind it.
+sshd=/usr/sbin/sshd
+if [ "$mode" = 'keyboard-interactive' ] && [ -x /usr/sbin/sshd.pam ]; then
+  sshd=/usr/sbin/sshd.pam
+fi
+exec "$sshd" -D -e -f "$config"

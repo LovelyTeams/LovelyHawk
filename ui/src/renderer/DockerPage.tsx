@@ -1,4 +1,5 @@
-import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useReducer, useRef, useState, type ReactNode, type RefObject } from "react";
+import { createPortal } from "react-dom";
 
 import { targetFailureMessage } from "./target-lost";
 
@@ -71,6 +72,7 @@ import {
   dockerActionTone,
 } from "./docker-action-helpers";
 import { DockerIcon } from "./docker-icons";
+import { menuStep, placeDropdown } from "./menu-placement";
 import { useModalScrim } from "./modal-scrim";
 import "./docker-page.css";
 
@@ -1306,7 +1308,7 @@ function StatusPanel({ label }: { label: string }) {
  * open the same confirmation before anything runs; this is about which button
  * the mouse lands on, not about safety.
  */
-function RowActions({ container, actions, onAction, onOpenTerminal, onOpenFiles, onInvestigate }: {
+export function RowActions({ container, actions, onAction, onOpenTerminal, onOpenFiles, onInvestigate }: {
   container: { containerHandle: string; name: string; state: string };
   actions: readonly DockerWriteAction[];
   onAction(containerHandle: string, containerName: string, action: DockerWriteAction): void;
@@ -1315,6 +1317,11 @@ function RowActions({ container, actions, onAction, onOpenTerminal, onOpenFiles,
   onInvestigate?: ((kind: "container", name: string) => void) | undefined;
 }) {
   const [open, setOpen] = useState(false);
+  const moreRef = useRef<HTMLButtonElement>(null);
+  const closeMenu = (returnFocus: boolean) => {
+    setOpen(false);
+    if (returnFocus) moreRef.current?.focus();
+  };
   const name = container.name || "（未命名）";
   const inline = actions.filter((action) => dockerActionTone(action) !== "danger");
   const overflow = actions.filter((action) => dockerActionTone(action) === "danger");
@@ -1377,18 +1384,20 @@ function RowActions({ container, actions, onAction, onOpenTerminal, onOpenFiles,
       {overflow.length > 0 && (
         <div className="docker-overflow">
           <button
+            ref={moreRef}
             type="button"
             className="docker-action-button"
             aria-expanded={open}
+            aria-haspopup="menu"
             aria-label={`${name} 的更多操作`}
             onClick={() => setOpen((value) => !value)}
           >
             <DockerIcon name="more" />更多
           </button>
           {open && (
-            <div className="docker-overflow-menu" role="group" aria-label={`${name} 的不可撤销操作`}>
+            <OverflowMenu label={`${name} 的不可撤销操作`} anchor={moreRef} onClose={closeMenu}>
               {overflow.map((action) => button(action, " is-menu-item"))}
-            </div>
+            </OverflowMenu>
           )}
         </div>
       )}
@@ -1396,6 +1405,110 @@ function RowActions({ container, actions, onAction, onOpenTerminal, onOpenFiles,
         <span className="docker-muted">—</span>
       )}
     </div>
+  );
+}
+
+/**
+ * The 更多 list of one row.
+ *
+ * Fixed to the window rather than absolute inside the row: the table scrolls,
+ * and an absolute list was clipped by it — on the lower rows it opened under
+ * the rows beneath and its items could not be reached. Its buttons keep their
+ * look through `:is(.docker-page, .docker-overflow-menu)` in docker-page.css. Placed under the
+ * button, or above it when the window runs out. It closes on Escape (focus back
+ * on 更多), on a click elsewhere, and when the page scrolls or the window
+ * resizes, since it would no longer sit beside its button.
+ */
+function OverflowMenu({ label, anchor, onClose, children }: {
+  label: string;
+  anchor: RefObject<HTMLButtonElement | null>;
+  onClose(returnFocus: boolean): void;
+  children: ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [placed, setPlaced] = useState<{ x: number; y: number } | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useLayoutEffect(() => {
+    const button = anchor.current;
+    const menu = ref.current;
+    if (button === null || menu === null) return;
+    const box = menu.getBoundingClientRect();
+    setPlaced(placeDropdown(
+      button.getBoundingClientRect(),
+      { width: box.width, height: box.height },
+      { width: window.innerWidth, height: window.innerHeight },
+    ));
+  }, [anchor]);
+
+  useEffect(() => {
+    if (placed === null) return;
+    ref.current?.querySelector<HTMLElement>("button")?.focus();
+  }, [placed]);
+
+  useEffect(() => {
+    const close = (returnFocus: boolean) => onCloseRef.current(returnFocus);
+    function onMouseDown(event: MouseEvent): void {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      // The 更多 button toggles itself; treating its press as "elsewhere"
+      // would close the list only for the click to open it again.
+      if (ref.current?.contains(target) === true || anchor.current?.contains(target) === true) return;
+      close(false);
+    }
+    function onKeyDown(event: KeyboardEvent): void {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      close(true);
+    }
+    function onScroll(event: Event): void {
+      if (event.target instanceof Node && ref.current?.contains(event.target) === true) return;
+      close(false);
+    }
+    function onResize(): void {
+      close(false);
+    }
+    window.addEventListener("mousedown", onMouseDown, true);
+    window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("mousedown", onMouseDown, true);
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [anchor]);
+
+  // Into the document body, not the row: the actions column is sticky, and
+  // each sticky cell is a layer of its own, so the next row's cell painted over
+  // this list whatever its z-index — a click on 删除 landed on that row's 暂停.
+  return createPortal(
+    <div
+      ref={ref}
+      className="docker-overflow-menu"
+      role="group"
+      aria-label={label}
+      onKeyDown={(event) => {
+        if (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Home" && event.key !== "End") return;
+        const items = [...(ref.current?.querySelectorAll<HTMLElement>("button") ?? [])];
+        const target = event.target instanceof HTMLElement ? event.target : null;
+        const next = items[menuStep(target === null ? -1 : items.indexOf(target), items.length, event.key)];
+        if (next === undefined) return;
+        event.preventDefault();
+        next.focus();
+      }}
+      style={{
+        left: `${placed?.x ?? 0}px`,
+        top: `${placed?.y ?? 0}px`,
+        visibility: placed === null ? "hidden" : undefined,
+      }}
+    >
+      {children}
+    </div>,
+    document.body,
   );
 }
 

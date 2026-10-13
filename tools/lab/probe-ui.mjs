@@ -16,13 +16,13 @@ import { fileURLToPath } from "node:url";
 
 import { startDesktop } from "./desktop.mjs";
 import { Sidecar, connect } from "./rpc-harness.mjs";
-import { LAB_PORTS, labTarget } from "./lab-target.mjs";
+import { isLinuxLab, labTarget } from "./lab-target.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repository = path.resolve(here, "..", "..");
 const backend = path.join(repository, "target", "debug", "lovelyhawk-backend.exe");
 const which = process.env.LAB ?? "ubuntu";
-if (!Object.hasOwn(LAB_PORTS, which)) throw new Error("This probe requires a defined Linux lab target.");
+if (!isLinuxLab(which)) throw new Error("This probe requires a defined Linux lab target.");
 const container = `lab-${which}`;
 const port = 9333;
 const runId = randomUUID();

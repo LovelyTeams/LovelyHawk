@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  DROPDOWN_GAP,
   MENU_VIEWPORT_MARGIN,
+  placeDropdown,
   SUBMENU_ALIGN,
   menuMaxHeight,
   menuStep,
@@ -110,6 +112,29 @@ describe("context menu placement", () => {
     const narrow = { width: 500, height: 800 };
     const placed = placeSubmenu({ left: 120, right: 400, top: 300 }, { width: 300, height: 900 }, narrow);
     expect(placed).toEqual({ x: narrow.width - MENU_VIEWPORT_MARGIN - 300, y: MENU_VIEWPORT_MARGIN });
+  });
+
+  it("drops a dropdown under its button, right edges aligned", () => {
+    const button = { left: 600, right: 640, top: 100, bottom: 130 };
+    expect(placeDropdown(button, { width: 120, height: 80 }, viewport)).toEqual({
+      x: 520,
+      y: 130 + DROPDOWN_GAP,
+    });
+  });
+
+  it("opens a dropdown above its button when the rows below run out", () => {
+    // The Docker table's last row: below the button there is no room left, and
+    // a menu there was cut off by the table's own scroll box.
+    const button = { left: 600, right: 640, top: 740, bottom: 770 };
+    const placed = placeDropdown(button, { width: 120, height: 80 }, viewport);
+    expect(placed.y + 80).toBe(740 - DROPDOWN_GAP);
+  });
+
+  it("keeps a dropdown inside the window at the left edge and when it fits neither way", () => {
+    expect(placeDropdown({ left: 2, right: 30, top: 100, bottom: 130 }, { width: 120, height: 80 }, viewport).x)
+      .toBe(MENU_VIEWPORT_MARGIN);
+    const tall = placeDropdown({ left: 600, right: 640, top: 400, bottom: 430 }, { width: 120, height: 600 }, viewport);
+    expect(tall.y).toBe(MENU_VIEWPORT_MARGIN);
   });
 
   it("moves keyboard focus through a menu and wraps at both ends", () => {

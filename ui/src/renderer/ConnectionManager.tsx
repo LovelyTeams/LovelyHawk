@@ -38,6 +38,7 @@ import { errorText } from "./error-text";
 import { useConfirmDialog } from "./use-confirm-dialog";
 import { SshAttemptDialog, type SshAttemptApi } from "./SshAttemptDialog";
 import { useModalScrim } from "./modal-scrim";
+import { SearchIcon } from "./file-icons";
 
 const authOptions: ReadonlyArray<{ value: SshAuthMethod; label: string }> = [
   { value: "password", label: "密码" },
@@ -148,7 +149,19 @@ export function ConnectionManager({
   const [chromeHidden, setChromeHidden] = useState(initialIntent === "connect");
   const operationInFlightRef = useRef(false);
   const mountedRef = useRef(false);
+  // Three separate questions, which one counter used to answer together:
+  // - may a finished read still change the selection/detail? (readGeneration,
+  //   which opening a form bumps so a late detail cannot overwrite it);
+  // - is this the newest list read? (listGeneration, which only a new list
+  //   read bumps, so the list still arrives after a form opened);
+  // - should the loading indicator stop? (loadingToken: the newest operation
+  //   that started it ends it, whether or not its result was still wanted).
+  // Tying the indicator to readGeneration left it on for good whenever a form
+  // opened while a read was in flight: every button stayed disabled, the save
+  // button said 处理中… and the list said 读取中… with no connections.
   const readGenerationRef = useRef(0);
+  const listGenerationRef = useRef(0);
+  const loadingTokenRef = useRef(0);
   const interactionLocked = busy || loading || sshAttempt !== null;
 
   const visibleConnections = useMemo(() => {
@@ -227,6 +240,16 @@ export function ConnectionManager({
     readGenerationRef.current += 1;
   }
 
+  function startLoading(): number {
+    loadingTokenRef.current += 1;
+    setLoading(true);
+    return loadingTokenRef.current;
+  }
+
+  function endLoading(token: number) {
+    if (mountedRef.current && loadingTokenRef.current === token) setLoading(false);
+  }
+
   function replaceForm(next: ConnectionForm | null) {
     formRef.current = next;
     setForm(next);
@@ -274,19 +297,28 @@ export function ConnectionManager({
     preferredId: string | null = selectedId,
   ): Promise<ConnectionEditView | null> {
     const generation = beginRead();
-    setLoading(true);
+    listGenerationRef.current += 1;
+    const listGeneration = listGenerationRef.current;
+    const listIsCurrent = () => mountedRef.current && listGenerationRef.current === listGeneration;
+    const token = startLoading();
     try {
       let result: ConnectionSummary[];
       try {
         result = await window.lovelyhawk.listConnections();
       } catch (reason: unknown) {
-        if (readIsCurrent(generation)) setListUnreadable(true);
-        throw reason;
+        if (listIsCurrent()) {
+          setListUnreadable(true);
+          setError(messageFrom(reason, "连接列表或详情读取失败。"));
+        }
+        return null;
       }
-      if (!readIsCurrent(generation)) return null;
+      // The list is wanted even when a form opened meanwhile; only a newer
+      // list read supersedes it.
+      if (!listIsCurrent()) return null;
       setListUnreadable(false);
       setConnections(result);
       onConnectionsChanged(result);
+      if (!readIsCurrent(generation)) return null;
       if (formRef.current !== null) {
         setError(null);
         return null;
@@ -312,14 +344,14 @@ export function ConnectionManager({
       }
       return null;
     } finally {
-      if (readIsCurrent(generation)) setLoading(false);
+      endLoading(token);
     }
   }
 
   async function loadConnection(id: string) {
     if (interactionLocked || !(await confirmDiscardEditor())) return;
     const generation = beginRead();
-    setLoading(true);
+    const token = startLoading();
     try {
       const connection = await window.lovelyhawk.getConnection(id);
       if (!readIsCurrent(generation)) return;
@@ -335,7 +367,7 @@ export function ConnectionManager({
         setError(messageFrom(reason, "连接详情读取失败。"));
       }
     } finally {
-      if (readIsCurrent(generation)) setLoading(false);
+      endLoading(token);
     }
   }
 
@@ -693,7 +725,7 @@ export function ConnectionManager({
         <div className="connection-manager-body">
           <aside className="connection-sidebar">
             <label className="connection-search">
-              <span aria-hidden="true">⌕</span>
+              <SearchIcon />
               <input ref={managerInitialFocusRef} aria-label="搜索连接" maxLength={256} value={query} placeholder="名称、主机、标签…" onChange={(event) => setQuery(event.currentTarget.value)} />
             </label>
             <div className="connection-sidebar-meta"><strong>{listUnreadable ? "连接未读出" : `${connections.length} 个连接`}</strong><span>{loading ? "读取中…" : "凭据已加密"}</span></div>

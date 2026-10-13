@@ -47,6 +47,16 @@ export const ARENA_PORT = 2250;
  */
 export const SUPER_PORT = 2251;
 
+/**
+ * The single-container Linux hosts a probe may plant files and processes on:
+ * the nine intrusion hosts, the arena and the super arena. Each runs as
+ * `lab-<name>` from the `lovelyres-lab:<name>` image, unprivileged and with
+ * nothing mounted — which the probes still check before touching it.
+ */
+export function isLinuxLab(name) {
+  return Object.hasOwn(LAB_PORTS, name) || name === "arena" || name === "super";
+}
+
 export function labTarget(which = process.env.LAB ?? "ubuntu") {
   const output = execFileSync(
     "wsl.exe",

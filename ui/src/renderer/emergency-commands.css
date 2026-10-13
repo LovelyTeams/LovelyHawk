@@ -69,10 +69,15 @@
   margin-bottom: 12px;
 }
 
+/* The search gives way first on a narrow window. It kept its full width and
+   the toolbar squeezed the reload button instead, until its four characters
+   stood one above another. */
 .emergency-commands-search {
   position: relative;
   display: flex;
-  width: min(430px, 100%);
+  min-width: 220px;
+  max-width: 430px;
+  flex: 1 1 300px;
   align-items: center;
 }
 
@@ -129,8 +134,11 @@
 
 .emergency-commands-meta {
   display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  justify-content: flex-end;
+  gap: 8px 12px;
   color: var(--muted);
   font-size: var(--font-small);
 }
@@ -183,7 +191,9 @@
 
 .emergency-commands-reload {
   display: inline-flex;
+  flex: none;
   min-height: 34px;
+  white-space: nowrap;
   align-items: center;
   gap: 6px;
   padding: 6px 12px;
@@ -671,6 +681,16 @@
   padding: 14px 16px;
   font: inherit;
   white-space: pre;
+}
+
+/* Each number and its line are one line box tall, always. The two columns
+   are separate boxes, so anything that grew one line — the 文件操作 button on
+   a line that named a path was 6px taller than text — pushed every later line
+   out of step with its number. */
+.emergency-command-gutter > span,
+.emergency-command-output pre > span {
+  flex: none;
+  height: 1lh;
 }
 
 /* Abnormal lines ---------------------------------------------------------- */

@@ -1,6 +1,6 @@
 {
   "name": "@lovelyhawk/ui",
-  "version": "1.0.0",
+  "version": "0.0.1-dev",
   "private": true,
   "description": "LovelyHawk desktop user interface, served by the Tauri 2 host",
   "scripts": {

@@ -50,7 +50,8 @@ pub const SSH_COMPATIBILITY_CONTRACT: SshCompatibilityContract = SshCompatibilit
         "agent",
         "rsa-agent",
         "jump-host",
-        "rsa-private-key-rejected",
+        "rsa-private-key",
+        "rsa-certificate",
     ],
     fault_contracts: &[
         "raw-ipv6",
@@ -369,7 +370,8 @@ mod tests {
             "agent",
             "rsa-agent",
             "jump-host",
-            "rsa-private-key-rejected",
+            "rsa-private-key",
+            "rsa-certificate",
         ] {
             assert!(
                 SSH_COMPATIBILITY_CONTRACT

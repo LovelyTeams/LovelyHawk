@@ -986,11 +986,11 @@
   position: relative;
 }
 
+/* Fixed, placed by the page under (or above) its button: the table scrolls,
+   and an absolute list was clipped by it on the lower rows. */
 .docker-overflow-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 20;
+  position: fixed;
+  z-index: 40;
   display: flex;
   flex-direction: column;
   min-width: 116px;
@@ -1001,7 +1001,7 @@
   box-shadow: 0 10px 24px var(--backdrop);
 }
 
-.docker-page .docker-action-button.is-menu-item {
+:is(.docker-page, .docker-overflow-menu) .docker-action-button.is-menu-item {
   flex-direction: row;
   justify-content: flex-start;
   gap: 7px;
@@ -1012,7 +1012,7 @@
 /* Text controls, not four bordered buttons per row. Eight rows of four made
    thirty-two boxes competing with the data they sit beside; every one of them
    opens a confirmation dialog first, so weight here buys no safety. */
-.docker-page .docker-action-button {
+:is(.docker-page, .docker-overflow-menu) .docker-action-button {
   display: inline-flex;
   flex-direction: column;
   align-items: center;
@@ -1028,12 +1028,12 @@
   white-space: nowrap;
 }
 
-.docker-page .docker-action-button > span {
+:is(.docker-page, .docker-overflow-menu) .docker-action-button > span {
   font-size: var(--font-small);
   line-height: 1;
 }
 
-.docker-page .docker-action-button:hover:not(:disabled) {
+:is(.docker-page, .docker-overflow-menu) .docker-action-button:hover:not(:disabled) {
   border: 0;
   color: var(--text);
   background: var(--surface-hover);
@@ -1041,20 +1041,20 @@
 
 /* Only the two that cannot be taken back are coloured. Marking all four spends
    the row's one warning signal on things that do not need it. */
-.docker-page .docker-action-button.is-danger {
+:is(.docker-page, .docker-overflow-menu) .docker-action-button.is-danger {
   color: var(--danger-text);
 }
 
-.docker-page .docker-action-button.is-danger:hover:not(:disabled) {
+:is(.docker-page, .docker-overflow-menu) .docker-action-button.is-danger:hover:not(:disabled) {
   color: var(--danger-text);
   background: var(--danger-soft);
 }
 
-.docker-page .docker-action-button.is-terminal {
+:is(.docker-page, .docker-overflow-menu) .docker-action-button.is-terminal {
   color: var(--accent-text);
 }
 
-.docker-page .docker-action-button.is-terminal:hover:not(:disabled) {
+:is(.docker-page, .docker-overflow-menu) .docker-action-button.is-terminal:hover:not(:disabled) {
   color: var(--accent-text);
   background: var(--info-soft);
 }

@@ -118,6 +118,39 @@ export function placeSubmenu(
   return { x, y: Math.max(margin, y) };
 }
 
+/** A button's box, in client coordinates. */
+export interface MenuRect {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
+/** Space between a dropdown and the button that opened it. */
+export const DROPDOWN_GAP = 4;
+
+/**
+ * Where a dropdown goes under the button that opened it.
+ *
+ * Right edges aligned, just below the button; above it when the window has no
+ * room below, so the button stays visible either way; clamped inside the
+ * window margin when it is wider or taller than the space on both sides.
+ */
+export function placeDropdown(
+  button: MenuRect,
+  menu: MenuBox,
+  viewport: MenuBox,
+  margin: number = MENU_VIEWPORT_MARGIN,
+): MenuPoint {
+  const x = Math.min(Math.max(margin, button.right - menu.width), viewport.width - margin - menu.width);
+  const below = button.bottom + DROPDOWN_GAP;
+  const above = button.top - DROPDOWN_GAP - menu.height;
+  const y = below + menu.height <= viewport.height - margin
+    ? below
+    : above >= margin ? above : margin;
+  return { x: Math.max(margin, x), y };
+}
+
 /**
  * The item focus moves to on an arrow, Home or End key, wrapping at the ends
  * the way a native menu does. `current` is -1 when no item has focus yet.

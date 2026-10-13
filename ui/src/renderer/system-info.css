@@ -1,5 +1,11 @@
-.system-info-page { min-height: calc(100vh - var(--titlebar-height) - 64px); }
-.system-info-background { min-height: 100%; }
+/* The page fills the window instead of growing with the table. It grew, so
+   the page scrolled rather than the table: the column headers scrolled away
+   and the last rows sat under the status bar. Now the tabs and the table each
+   scroll on their own, and only a window too short for the minimum scrolls
+   the page as a whole. */
+.system-info-page { display: flex; height: 100%; min-height: 520px; flex-direction: column; }
+.system-info-background { display: flex; min-height: 0; flex: 1; flex-direction: column; }
+.system-info-background > * { flex: none; }
 .system-info-heading-actions button,
 .system-info-panel-actions { display: flex; flex: none; align-items: center; gap: 7px; }
 .system-info-table-panel > header button { padding: 7px 12px; color: var(--text-secondary); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 7px; font-size: var(--font-small); }
@@ -20,7 +26,7 @@
 .system-info-summary article:last-child { border-bottom: 0; }
 .system-info-summary span { color: var(--faint); font-size: var(--font-caption); }
 .system-info-summary strong { min-width: 0; color: var(--text); font-size: var(--font-small); font-weight: 500; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.system-info-workbench { display: grid; min-height: 560px; grid-template-columns: 190px minmax(0, 1fr); overflow: hidden; background: var(--surface); border: 1px solid var(--border); border-radius: 15px; box-shadow: var(--shadow-sm); }
+.system-info-workbench { display: grid; min-height: 0; flex: 1 1 auto; grid-template-columns: 190px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); overflow: hidden; background: var(--surface); border: 1px solid var(--border); border-radius: 15px; box-shadow: var(--shadow-sm); }
 .system-info-tabs { overflow: auto; padding: 12px 9px; background: var(--surface-alt); border-right: 1px solid var(--border); scrollbar-width: thin; }
 .system-info-tabs section + section { margin-top: 14px; }
 .system-info-tabs h2 { margin: 0 7px 5px; color: var(--faint); font-size: var(--font-caption); letter-spacing: .08em; }
@@ -32,6 +38,26 @@
 .system-info-table-panel h2 { margin: 0 0 3px; font-size: var(--font-subtitle); }
 .system-info-table-panel header p { margin: 0; color: var(--faint); font-size: var(--font-caption); }
 .system-info-table-state { min-height: 300px; flex: 1; border-style: dashed; }
+.system-info-table-state p { margin: 0; padding: 0 16px; text-align: center; }
+.system-info-table-state button { padding: 6px 12px; color: var(--text-secondary); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 7px; font-size: var(--font-small); }
+
+/* Search and filter over the rows already read ---------------------------- */
+.system-info-filter { display: flex; flex: none; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+.system-info-filter-search { display: flex; min-width: 220px; flex: 1 1 260px; align-items: center; gap: 7px; padding: 0 10px; color: var(--faint); background: var(--input-bg); border: 1px solid var(--border-strong); border-radius: 8px; }
+.system-info-filter-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-ring); }
+.system-info-filter-search svg { flex: none; }
+.system-info-filter-search input { min-width: 0; flex: 1; padding: 7px 0; color: var(--text); background: transparent; border: 0; outline: 0; font-size: var(--font-small); }
+.system-info-filter-column { display: flex; flex: none; align-items: center; gap: 6px; color: var(--muted); font-size: var(--font-caption); }
+.system-info-filter-column select { max-width: 160px; padding: 6px 8px; color: var(--text); background: var(--input-bg); border: 1px solid var(--border-strong); border-radius: 7px; font-size: var(--font-small); }
+.system-info-filter-risk { display: flex; flex: none; overflow: hidden; border: 1px solid var(--border-strong); border-radius: 8px; }
+.system-info-filter-risk button { display: flex; align-items: center; gap: 6px; padding: 6px 10px; color: var(--muted); background: var(--surface); border: 0; font-size: var(--font-caption); }
+.system-info-filter-risk button + button { border-left: 1px solid var(--border-strong); }
+.system-info-filter-risk button:hover:not(.active) { background: var(--surface-hover); }
+.system-info-filter-risk button.active { color: var(--accent-text); background: var(--accent-soft); font-weight: 600; }
+.system-info-filter-risk button span { color: var(--faint); font-variant-numeric: tabular-nums; }
+.system-info-filter-count { flex: none; color: var(--faint); font-size: var(--font-caption); font-variant-numeric: tabular-nums; }
+.system-info-filter-clear { flex: none; padding: 6px 10px; color: var(--accent-text); background: transparent; border: 1px solid transparent; border-radius: 7px; font-size: var(--font-caption); }
+.system-info-filter-clear:hover { background: var(--surface-hover); }
 .system-info-table-scroll { min-height: 0; flex: 1; overflow: auto; border: 1px solid var(--border); border-radius: 10px; scrollbar-width: thin; }
 .system-info-table-scroll table { width: max-content; min-width: 100%; border-collapse: collapse; color: var(--text-secondary); font-family: "Cascadia Mono", monospace; font-size: var(--font-caption); }
 .system-info-table-scroll th { position: sticky; z-index: 1; top: 0; padding: 8px 10px; color: var(--muted); text-align: left; background: var(--surface-inset); border-bottom: 1px solid var(--border); white-space: nowrap; }

@@ -2571,11 +2571,24 @@ pub struct ArtifactMutationOutcome {
     pub restored_after_failed_verification: bool,
 }
 
+/// Why an account action was refused before anything ran, as the subject of
+/// the refusal. Each is something the operator can understand and act on, so
+/// the boundary gives each its own code instead of "does not apply".
+pub const USER_ACCOUNT_ROOT_REFUSAL: &str = "user account root";
+/// Deleting the account the SSH session itself logged in as.
+pub const USER_ACCOUNT_SESSION_REFUSAL: &str = "user account session";
+/// Locking an account that is already locked, or unlocking one that is not.
+pub const USER_ACCOUNT_STATE_REFUSAL: &str = "user account state";
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum UserAccountAction {
     Lock,
     Unlock,
+    /// Removes the account record only. The home directory, mail spool and
+    /// every file the account owns stay where they are: they are evidence, and
+    /// removing them is a separate decision this action does not make.
+    Delete,
 }
 
 impl UserAccountAction {
@@ -2583,13 +2596,24 @@ impl UserAccountAction {
         match self {
             Self::Lock => "锁定用户账户",
             Self::Unlock => "解锁用户账户",
+            Self::Delete => "删除用户账户",
         }
     }
 
-    const fn command(self) -> &'static str {
+    /// The `passwd` flag for the two actions that toggle the password lock.
+    const fn passwd_flag(self) -> Option<&'static str> {
         match self {
-            Self::Lock => "-l",
-            Self::Unlock => "-u",
+            Self::Lock => Some("-l"),
+            Self::Unlock => Some("-u"),
+            Self::Delete => None,
+        }
+    }
+
+    const fn metadata_key(self) -> &'static str {
+        match self {
+            Self::Lock => "lock",
+            Self::Unlock => "unlock",
+            Self::Delete => "delete",
         }
     }
 }
@@ -2624,6 +2648,15 @@ pub enum UserPasswordState {
 }
 
 impl UserPasswordState {
+    /// How the state reads on screen; `label` stays the stable journal word.
+    const fn display(self) -> &'static str {
+        match self {
+            Self::Locked => "已锁定",
+            Self::PasswordSet => "已设置口令",
+            Self::NoPassword => "没有口令",
+        }
+    }
+
     const fn label(self) -> &'static str {
         match self {
             Self::Locked => "locked",
@@ -3388,7 +3421,23 @@ impl SystemInfoTable {
         let (row_id, username) = match self.tab {
             SystemInfoTab::Users => {
                 let identity = self.user_identity(row_id)?;
+                // root itself is never offered for deletion. A *second* UID 0
+                // account is — it is the commonest backdoor there is.
+                if action == UserAccountAction::Delete && identity.username == "root" {
+                    return Err(CoreError::validation(
+                        "user account operation",
+                        "the root account is not deleted",
+                    ));
+                }
                 (identity.row_id, identity.username)
+            }
+            // Deletion is offered where the account itself is listed, with its
+            // UID in hand, not from a line of login history.
+            SystemInfoTab::LoginHistory if action == UserAccountAction::Delete => {
+                return Err(CoreError::validation(
+                    "user account operation",
+                    "accounts are deleted from the user inventory",
+                ));
             }
             SystemInfoTab::LoginHistory => {
                 let identity = self.login_identity(row_id)?;
@@ -3946,29 +3995,46 @@ impl SystemInfoService {
                 id: request.username.clone(),
             })?;
         validate_user_account_precondition(&snapshot, request.action)?;
-        self.target.validate(session.target())?;
-        let session_warning = if snapshot.username == snapshot.session_username {
-            " 这是当前 SSH 登录账户，操作可能阻止重新连接。"
+        // What a person would need to recreate the account by hand. Read only
+        // for a deletion, which has no automatic way back.
+        let groups = if request.action == UserAccountAction::Delete {
+            Some(self.user_account_groups(session, &snapshot.username).await)
         } else {
-            ""
+            None
         };
-        let mut operation = OperationPlan::new(
-            session.target().clone(),
-            format!(
-                "{} {}（UID {}，当前密码状态 {}）。执行后将回读账户状态；验证失败时恢复确认前锁定状态。{}",
-                request.action.label(),
-                snapshot.username,
-                snapshot.uid,
-                snapshot.password_state.label(),
-                session_warning,
-            ),
-            true,
-            Some(format!(
-                "恢复用户 {} 的密码锁定状态为 {}。",
-                snapshot.username,
-                snapshot.password_state.label(),
-            )),
-        )?;
+        self.target.validate(session.target())?;
+        let mut operation = match &groups {
+            Some(groups) => OperationPlan::new(
+                session.target().clone(),
+                user_account_delete_summary(&snapshot, groups.as_deref()),
+                true,
+                None,
+            )?,
+            None => {
+                let session_warning = if snapshot.username == snapshot.session_username {
+                    " 这是当前 SSH 登录账户，操作可能阻止重新连接。"
+                } else {
+                    ""
+                };
+                OperationPlan::new(
+                    session.target().clone(),
+                    format!(
+                        "{} {}（UID {}，当前{}）。执行后将回读账户状态；验证失败时恢复确认前锁定状态。{}",
+                        request.action.label(),
+                        snapshot.username,
+                        snapshot.uid,
+                        snapshot.password_state.display(),
+                        session_warning,
+                    ),
+                    true,
+                    Some(format!(
+                        "把账户 {} 恢复为确认前的状态（{}）。",
+                        snapshot.username,
+                        snapshot.password_state.display(),
+                    )),
+                )?
+            }
+        };
         operation
             .metadata
             .insert("source".to_owned(), "system-info-user".to_owned());
@@ -3980,12 +4046,25 @@ impl SystemInfoService {
             .insert("uid".to_owned(), snapshot.uid.to_string());
         operation.metadata.insert(
             "action".to_owned(),
-            match request.action {
-                UserAccountAction::Lock => "lock",
-                UserAccountAction::Unlock => "unlock",
-            }
-            .to_owned(),
+            request.action.metadata_key().to_owned(),
         );
+        if let Some(groups) = &groups {
+            // Kept in the journal so the account can be rebuilt by hand. The
+            // password hash is deliberately not among them.
+            operation
+                .metadata
+                .insert("gid".to_owned(), snapshot.gid.to_string());
+            operation
+                .metadata
+                .insert("home".to_owned(), snapshot.home.clone());
+            operation
+                .metadata
+                .insert("shell".to_owned(), snapshot.shell.clone());
+            operation.metadata.insert(
+                "groups".to_owned(),
+                groups.clone().unwrap_or_else(|| "unknown".to_owned()),
+            );
+        }
         operation.metadata.insert(
             "snapshot-sha256".to_owned(),
             user_account_snapshot_sha256(&snapshot),
@@ -4019,6 +4098,27 @@ impl SystemInfoService {
             return Err(error);
         }
         operation.journal(journal)?;
+        if plan.action == UserAccountAction::Delete {
+            // There is no way back from a deletion, so a failed verification is
+            // reported, not "restored". What is said instead is whether the
+            // account is still exactly as it was confirmed — i.e. nothing
+            // happened — which is the one thing the operator needs to know.
+            let verification = operation.verify(&self.target, &executor, journal).await?;
+            let unchanged = verification.passed
+                || self
+                    .user_account_snapshot(session, &plan.snapshot.username)
+                    .await
+                    .ok()
+                    .flatten()
+                    .as_ref()
+                    == Some(&plan.snapshot);
+            return Ok(UserAccountOutcome {
+                username: plan.snapshot.username,
+                action: plan.action,
+                restored_after_failed_verification: !verification.passed && unchanged,
+                verification,
+            });
+        }
         let verification = match operation.verify(&self.target, &executor, journal).await {
             Ok(verification) => verification,
             Err(verification_error) => {
@@ -4555,6 +4655,41 @@ impl SystemInfoService {
         parse_suid_snapshot(path, &output.output)
     }
 
+    async fn root_is_uid_zero(&self, session: &BoundSshSession) -> CoreResult<bool> {
+        self.target.validate(session.target())?;
+        let output = self
+            .ssh
+            .execute_bound(session, root_uid_command().to_owned(), PRECONDITION_TIMEOUT)
+            .await?;
+        self.target.validate(session.target())?;
+        if output.timed_out {
+            return Err(command_failed("root account check", &output));
+        }
+        Ok(output.output.trim() == "0")
+    }
+
+    /// The account's group names, or `None` when they could not be read. Only
+    /// recorded, never acted on, so a failed read does not stop the plan.
+    async fn user_account_groups(
+        &self,
+        session: &BoundSshSession,
+        username: &str,
+    ) -> Option<String> {
+        let output = self
+            .ssh
+            .execute_bound(
+                session,
+                user_account_groups_command(username),
+                PRECONDITION_TIMEOUT,
+            )
+            .await
+            .ok()?;
+        if output.timed_out || output.exit_code != Some(0) {
+            return None;
+        }
+        parse_user_account_groups(&output.output)
+    }
+
     async fn user_account_snapshot(
         &self,
         session: &BoundSshSession,
@@ -4696,14 +4831,15 @@ impl OperationExecutor for ProcessSignalExecutor<'_> {
         let passed = observed.as_ref() != Some(&self.plan.snapshot);
         Ok(VerificationResult {
             passed,
+            // Shown to the operator as is, so it is said in their language.
             detail: if passed {
                 format!(
-                    "PID {} no longer has the confirmed start identity",
+                    "回读：确认时的进程 PID {} 已经结束。",
                     self.plan.snapshot.pid
                 )
             } else {
                 format!(
-                    "PID {} still has the confirmed start identity",
+                    "回读：确认时的进程 PID {} 仍在运行（它可能忽略了这个信号，或还在退出中）。",
                     self.plan.snapshot.pid
                 )
             },
@@ -4809,17 +4945,24 @@ impl OperationExecutor for ServiceRuntimeExecutor<'_> {
         let passed = service_runtime_verified(&observed, self.plan.action);
         Ok(VerificationResult {
             passed,
+            // A unit systemd calls active is not proof the service works, so a
+            // start says as much rather than reading like a recovery.
             detail: format!(
-                "{} is {} / {} with unit-file state {} after systemctl {}{}",
+                "{}后回读：{} 运行状态 {} / {}，开机自启状态 {}。{}",
+                self.plan.action.label(),
                 observed.unit,
                 observed.active_state,
                 observed.sub_state,
                 observed.unit_file_state,
-                self.plan.action.command(),
-                if passed {
-                    " (verified)"
-                } else {
-                    " (not verified)"
+                match (passed, self.plan.action) {
+                    (false, _) => "与预期不符。",
+                    (
+                        true,
+                        ServiceRuntimeAction::Start
+                        | ServiceRuntimeAction::Restart
+                        | ServiceRuntimeAction::Reload,
+                    ) => "systemd 报告与预期一致；业务本身是否正常需要另行检查。",
+                    (true, _) => "与预期一致。",
                 },
             ),
         })
@@ -5178,12 +5321,20 @@ impl OperationExecutor for SuidPermissionExecutor<'_> {
         // setuid-root file left a setuid-root copy of it. The original mode is
         // kept in the plan, which is where the restore reads it from.
         let backup_matches = backup.sha256 == token.sha256 && backup.mode == MANAGED_BACKUP_MODE;
+        let passed = current_matches && backup_matches;
         Ok(VerificationResult {
-            passed: current_matches && backup_matches,
-            detail: format!(
-                "original mode {:04o}, managed backup SHA-256 {}, identity {}:{}",
-                current.mode, backup.sha256, current.device, current.inode
-            ),
+            passed,
+            detail: if passed {
+                format!(
+                    "回读：文件权限现为 {:04o}，仍是原来那个文件且内容未变（设备 {}，inode {}）；备份副本内容与原文件一致（SHA-256 {}）。",
+                    current.mode, current.device, current.inode, backup.sha256
+                )
+            } else {
+                format!(
+                    "回读与预期不符：文件权限现为 {:04o}（设备 {}，inode {}），备份副本 SHA-256 {}。",
+                    current.mode, current.device, current.inode, backup.sha256
+                )
+            },
         })
     }
 
@@ -5362,7 +5513,7 @@ impl OperationExecutor for UserAccountExecutor<'_> {
             .ssh
             .execute_bound(
                 self.session,
-                user_account_command(&self.plan.snapshot.username, self.plan.action),
+                user_account_dispatch_command(&self.plan.snapshot, self.plan.action),
                 Duration::from_secs(20),
             )
             .await
@@ -5386,18 +5537,35 @@ impl OperationExecutor for UserAccountExecutor<'_> {
     async fn verify(
         &self,
         operation: &OperationPlan,
-        _receipt: &ExecutionReceipt,
+        receipt: &ExecutionReceipt,
     ) -> CoreResult<VerificationResult> {
         self.ensure_plan(operation)?;
+        let done = |observed: &Option<UserAccountSnapshot>| match self.plan.action {
+            // `None` is only ever a definite "no such account" from getent:
+            // a failed read is an error, not an absence.
+            UserAccountAction::Delete => observed.is_none(),
+            UserAccountAction::Lock | UserAccountAction::Unlock => {
+                observed.as_ref().is_some_and(|snapshot| {
+                    same_user_account_identity(snapshot, &self.plan.snapshot)
+                        && user_account_action_verified(snapshot, self.plan.action)
+                })
+            }
+        };
         let mut observed = self
             .service
             .user_account_snapshot(self.session, &self.plan.snapshot.username)
             .await?;
-        for _ in 0..20 {
-            if observed.as_ref().is_some_and(|snapshot| {
-                same_user_account_identity(snapshot, &self.plan.snapshot)
-                    && user_account_action_verified(snapshot, self.plan.action)
-            }) {
+        // userdel has finished when it returns: an account still there will
+        // not vanish later, and on hosts where every SSH command costs ~11 s,
+        // twenty more reads would run past the execute deadline and turn a
+        // clear refusal into "the target did not answer".
+        let retries = if self.plan.action == UserAccountAction::Delete {
+            0
+        } else {
+            20
+        };
+        for _ in 0..retries {
+            if done(&observed) {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -5406,28 +5574,47 @@ impl OperationExecutor for UserAccountExecutor<'_> {
                 .user_account_snapshot(self.session, &self.plan.snapshot.username)
                 .await?;
         }
-        let passed = observed.as_ref().is_some_and(|snapshot| {
-            same_user_account_identity(snapshot, &self.plan.snapshot)
-                && user_account_action_verified(snapshot, self.plan.action)
-        });
+        let passed = done(&observed);
+        if self.plan.action == UserAccountAction::Delete {
+            if passed
+                && self.plan.snapshot.uid == 0
+                && !self.service.root_is_uid_zero(self.session).await?
+            {
+                return Ok(VerificationResult {
+                    passed: false,
+                    detail: format!(
+                        "账户 {} 已删除，但回读时 root 已不是 UID 0。请立即在仍然打开的终端里检查 /etc/passwd，不要断开现有连接。",
+                        self.plan.snapshot.username,
+                    ),
+                });
+            }
+            return Ok(VerificationResult {
+                passed,
+                detail: user_account_delete_detail(
+                    &self.plan.snapshot,
+                    observed.as_ref(),
+                    &receipt.summary,
+                ),
+            });
+        }
         Ok(VerificationResult {
             passed,
             detail: match observed {
                 Some(snapshot) => format!(
-                    "user {} is {} after {}{}",
-                    snapshot.username,
-                    snapshot.password_state.label(),
+                    "{}后回读：账户 {} 现在{}{}。",
                     self.plan.action.label(),
+                    snapshot.username,
+                    snapshot.password_state.display(),
                     if passed {
-                        " (verified)"
+                        "，与预期一致"
                     } else {
-                        " (not verified)"
+                        "，与预期不符"
                     },
                 ),
                 None => format!(
-                    "user {} disappeared while verifying {}",
-                    self.plan.snapshot.username,
+                    "{}后回读时，账户 {} 已不存在。",
                     self.plan.action.label(),
+                    self.plan.snapshot.username,
                 ),
             },
         })
@@ -5439,6 +5626,15 @@ impl OperationExecutor for UserAccountExecutor<'_> {
         _receipt: &ExecutionReceipt,
     ) -> CoreResult<()> {
         self.ensure_plan(operation)?;
+        if self.plan.action == UserAccountAction::Delete {
+            // The plan carries no restore description, so the operation layer
+            // refuses before reaching here; this is the second lock on a door
+            // that has no key. The password hash was never saved.
+            return Err(CoreError::validation(
+                "user account restore",
+                "a deleted account is not recreated automatically",
+            ));
+        }
         let observed = self
             .service
             .user_account_snapshot(self.session, &self.plan.snapshot.username)
@@ -5465,6 +5661,7 @@ impl OperationExecutor for UserAccountExecutor<'_> {
         let restore_action = match self.plan.action {
             UserAccountAction::Lock => UserAccountAction::Unlock,
             UserAccountAction::Unlock => UserAccountAction::Lock,
+            UserAccountAction::Delete => unreachable!("refused above"),
         };
         let output = self
             .service
@@ -5584,12 +5781,12 @@ impl OperationExecutor for NetworkDisconnectExecutor<'_> {
             passed,
             detail: if passed {
                 format!(
-                    "connection {} -> {} no longer has the confirmed identity",
+                    "回读：确认时的连接 {} → {} 已经不在了。",
                     self.plan.snapshot.local_display, self.plan.snapshot.remote_display
                 )
             } else {
                 format!(
-                    "connection {} -> {} still has the confirmed identity",
+                    "回读：确认时的连接 {} → {} 仍然存在。",
                     self.plan.snapshot.local_display, self.plan.snapshot.remote_display
                 )
             },
@@ -6988,10 +7185,20 @@ fn ssh_key_investigation_command(
     ))
 }
 
+/// `passwd -S` on another account needs root, so a non-root session asks
+/// `sudo -n` exactly as the change itself does; without it every lock, unlock
+/// and delete failed at the plan for an operator logged in as an ordinary
+/// sudoer, because the empty status read as an invalid snapshot. An empty
+/// status is now a failed read (exit 45), not a state.
+///
+/// The session account is the name sshd logged in (`LOGNAME`/`USER`), with
+/// `id -un` only as a fallback: when a second account shares UID 0, `id -un`
+/// names whichever of the two comes first in /etc/passwd, so it cannot tell
+/// "logged in as root" from "logged in as the backdoor".
 fn user_account_snapshot_command(username: &str) -> String {
     let username = shq(username);
     format!(
-        "u={username}; line=$(getent passwd \"$u\" 2>/dev/null) || {{ printf 'ABSENT\\n'; exit 44; }}; state=$(passwd -S \"$u\" 2>/dev/null | awk '{{print $2}}') || exit 45; current=$(id -un 2>/dev/null) || exit 46; printf '%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' \"$(printf '%s' \"$line\" | cut -d: -f1)\" \"$(printf '%s' \"$line\" | cut -d: -f3)\" \"$(printf '%s' \"$line\" | cut -d: -f4)\" \"$(printf '%s' \"$line\" | cut -d: -f6)\" \"$(printf '%s' \"$line\" | cut -d: -f7)\" \"$state\" \"$current\""
+        "u={username}; line=$(getent passwd \"$u\" 2>/dev/null) || {{ printf 'ABSENT\\n'; exit 44; }}; if [ \"$(id -u)\" -eq 0 ]; then run=; else run='sudo -n'; fi; state=$($run passwd -S \"$u\" 2>/dev/null | awk '{{print $2}}'); [ -n \"$state\" ] || exit 45; current=${{LOGNAME:-${{USER:-}}}}; [ -n \"$current\" ] || current=$(id -un 2>/dev/null) || exit 46; printf '%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' \"$(printf '%s' \"$line\" | cut -d: -f1)\" \"$(printf '%s' \"$line\" | cut -d: -f3)\" \"$(printf '%s' \"$line\" | cut -d: -f4)\" \"$(printf '%s' \"$line\" | cut -d: -f6)\" \"$(printf '%s' \"$line\" | cut -d: -f7)\" \"$state\" \"$current\""
     )
 }
 
@@ -7030,15 +7237,37 @@ fn validate_user_account_precondition(
     snapshot: &UserAccountSnapshot,
     action: UserAccountAction,
 ) -> CoreResult<()> {
+    if action == UserAccountAction::Delete {
+        // Read from the target, not the table: the row could be stale, and the
+        // session account is only known here.
+        let refusal = if snapshot.username == "root" {
+            Some((USER_ACCOUNT_ROOT_REFUSAL, "the root account is not deleted"))
+        } else if snapshot.username == snapshot.session_username {
+            Some((
+                USER_ACCOUNT_SESSION_REFUSAL,
+                "this is the account the SSH session is logged in as",
+            ))
+        } else {
+            None
+        };
+        return match refusal {
+            None => Ok(()),
+            Some((subject, reason)) => Err(CoreError::validation(
+                subject,
+                format!("{} cannot be deleted: {reason}", snapshot.username),
+            )),
+        };
+    }
     let valid = match action {
         UserAccountAction::Lock => snapshot.password_state != UserPasswordState::Locked,
         UserAccountAction::Unlock => snapshot.password_state == UserPasswordState::Locked,
+        UserAccountAction::Delete => unreachable!("handled above"),
     };
     if valid {
         Ok(())
     } else {
         Err(CoreError::validation(
-            "user account precondition",
+            USER_ACCOUNT_STATE_REFUSAL,
             format!(
                 "{} cannot be {} from password state {}",
                 snapshot.username,
@@ -7053,6 +7282,8 @@ fn user_account_action_verified(snapshot: &UserAccountSnapshot, action: UserAcco
     match action {
         UserAccountAction::Lock => snapshot.password_state == UserPasswordState::Locked,
         UserAccountAction::Unlock => snapshot.password_state != UserPasswordState::Locked,
+        // An account that can still be read was not deleted.
+        UserAccountAction::Delete => false,
     }
 }
 
@@ -7067,11 +7298,136 @@ fn same_user_account_identity(left: &UserAccountSnapshot, right: &UserAccountSna
 
 fn user_account_command(username: &str, action: UserAccountAction) -> String {
     let username = shq(username);
+    let Some(flag) = action.passwd_flag() else {
+        return user_account_delete_command(&username, false);
+    };
     format!(
-        "u={username}; if [ \"$(id -u)\" -eq 0 ]; then passwd {} \"$u\"; elif command -v sudo >/dev/null 2>&1; then sudo -n passwd {} \"$u\"; else printf 'Root privileges are required\\n' >&2; exit 77; fi",
-        action.command(),
-        action.command(),
+        "u={username}; if [ \"$(id -u)\" -eq 0 ]; then passwd {flag} \"$u\"; elif command -v sudo >/dev/null 2>&1; then sudo -n passwd {flag} \"$u\"; else printf 'Root privileges are required\\n' >&2; exit 77; fi",
     )
+}
+
+/// `userdel` where shadow-utils is installed, BusyBox `deluser` where it is
+/// not (Alpine and other small images). Neither is given the flag that removes
+/// the home directory. `username` is already shell-quoted.
+///
+/// For an ordinary account `userdel -f` is never used: if it still has
+/// processes running, userdel refuses and that refusal is the answer. A second
+/// UID 0 account is the exception that needs it: userdel looks for "its"
+/// processes by UID, finds every one of root's, and would refuse forever.
+/// `-f` skips exactly that check; without `-r` it still removes no files.
+/// Both paths first confirm root is still UID 0, so this never runs on a host
+/// where removing the other UID 0 entry could leave no root at all.
+fn user_account_delete_command(username: &str, uid_zero: bool) -> String {
+    let userdel = if uid_zero { "userdel -f" } else { "userdel" };
+    format!(
+        "u={username}; if [ \"$(id -u)\" -eq 0 ]; then run=; elif command -v sudo >/dev/null 2>&1; then run='sudo -n'; else printf 'Root privileges are required\\n' >&2; exit 77; fi; [ \"$(getent passwd root 2>/dev/null | cut -d: -f3)\" = 0 ] || {{ printf 'root is not UID 0 on this host\\n' >&2; exit 79; }}; if command -v userdel >/dev/null 2>&1; then $run {userdel} \"$u\"; elif command -v deluser >/dev/null 2>&1; then $run deluser \"$u\"; else printf 'Neither userdel nor deluser is available\\n' >&2; exit 78; fi"
+    )
+}
+
+/// The command the confirmed plan runs: the delete form depends on the UID
+/// the plan read from the target, not on anything the row said.
+fn user_account_dispatch_command(
+    snapshot: &UserAccountSnapshot,
+    action: UserAccountAction,
+) -> String {
+    match action {
+        UserAccountAction::Delete => {
+            user_account_delete_command(&shq(&snapshot.username), snapshot.uid == 0)
+        }
+        UserAccountAction::Lock | UserAccountAction::Unlock => {
+            user_account_command(&snapshot.username, action)
+        }
+    }
+}
+
+/// Whether root is still UID 0. Read after a UID 0 account is deleted: both
+/// entries share an identity, and the one thing that must not happen is
+/// losing the real one.
+fn root_uid_command() -> &'static str {
+    "getent passwd root 2>/dev/null | cut -d: -f3"
+}
+
+/// Supplementary group names, space-separated, for the journal.
+fn user_account_groups_command(username: &str) -> String {
+    format!("id -Gn -- {} 2>/dev/null", shq(username))
+}
+
+fn parse_user_account_groups(output: &str) -> Option<String> {
+    let groups = output.split_whitespace().collect::<Vec<_>>();
+    (!groups.is_empty()
+        && groups.len() <= 256
+        && groups.iter().all(|group| is_valid_username(group)))
+    .then(|| groups.join(" "))
+}
+
+fn user_account_delete_summary(snapshot: &UserAccountSnapshot, groups: Option<&str>) -> String {
+    let (process_rule, service_warning) = if snapshot.uid == 0 {
+        (
+            "这是除 root 之外的 UID 0 账户，拥有与 root 相同的权限，常见于后门。它与 root 共用身份，userdel 会把 root 自己的进程当成它的进程而拒绝，所以这里用 userdel -f 只跳过这一项检查，不删除任何文件；部分旧版 userdel 在 -f 下会一并删除 /var/mail 下同名的邮件文件。执行前确认 root 仍是 UID 0，执行后再核对一次。",
+            "",
+        )
+    } else if snapshot.uid < 1000 {
+        (
+            "若该账户还有进程在运行，userdel 会拒绝执行，这次不会有任何改动。",
+            " UID 小于 1000，通常是系统或服务账户：依赖它运行的服务可能因此无法启动。",
+        )
+    } else {
+        (
+            "若该账户还有进程在运行，userdel 会拒绝执行，这次不会有任何改动。",
+            "",
+        )
+    };
+    format!(
+        "删除用户账户 {}（UID {}，GID {}，主目录 {}，Shell {}，所属组 {}）。只删除账户记录：主目录和该账户拥有的文件保留在原处，之后显示为无属主文件，便于留证。{process_rule}执行后回读确认账户已不存在。{}此操作不可自动恢复：口令哈希不会被保存，账户信息（不含口令）记入操作日志，需要时可按相同 UID/GID 手动重建。",
+        snapshot.username,
+        snapshot.uid,
+        snapshot.gid,
+        snapshot.home,
+        if snapshot.shell.is_empty() {
+            "（无）"
+        } else {
+            &snapshot.shell
+        },
+        groups.unwrap_or("未能读出"),
+        service_warning,
+    )
+}
+
+/// What the operator is told after a deletion, in their terms. The receipt
+/// summary ends with how the command was received (`accepted`,
+/// `rejected-exit-8`, …), which is the only clue to *why* an account is still
+/// there.
+fn user_account_delete_detail(
+    planned: &UserAccountSnapshot,
+    observed: Option<&UserAccountSnapshot>,
+    receipt_summary: &str,
+) -> String {
+    let dispatch = receipt_summary.rsplit(": ").next().unwrap_or_default();
+    match observed {
+        None => format!(
+            "账户 {} 已不存在（已回读核实）。主目录 {} 保留在原处。",
+            planned.username, planned.home
+        ),
+        Some(snapshot) if snapshot == planned => {
+            let reason = match dispatch {
+                "rejected-exit-Some(8)" => {
+                    "userdel 退出码 8：该账户还有进程在运行。先在进程页结束这些进程，或改为锁定账户。"
+                }
+                "rejected-exit-Some(77)" => "需要 root 权限，或当前账户无法免密使用 sudo。",
+                "rejected-exit-Some(78)" => "目标机上既没有 userdel 也没有 deluser。",
+                "rejected-exit-Some(79)" => {
+                    "目标机上 root 已不是 UID 0，为免失去 root 账户没有执行，请先人工检查 /etc/passwd。"
+                }
+                other if other.starts_with("indeterminate") => "删除命令没有在时限内给出结果。",
+                _ => "删除命令没有成功。",
+            };
+            format!("账户 {} 仍然存在，没有改动。{reason}", planned.username)
+        }
+        Some(_) => format!(
+            "账户 {} 仍然存在，但它的 UID、主目录或状态已和确认时不同，请刷新后核对。",
+            planned.username
+        ),
+    }
 }
 
 fn user_account_snapshot_sha256(snapshot: &UserAccountSnapshot) -> String {
@@ -7858,7 +8214,7 @@ fn parse_table(request: &SystemInfoRequest, output: &str) -> SystemInfoTable {
             .map(|cell| bounded_text(cell, MAX_CELL_CHARS))
             .collect();
         cells.resize(column_count, String::new());
-        let risk = infer_risk(&cells);
+        let risk = stronger_risk(infer_risk(&cells), tab_risk(request.tab, &cells));
         let base_id = stable_row_id(request.tab, &cells);
         let duplicate = duplicate_ids.entry(base_id.clone()).or_default();
         let id = format!("{base_id}-{duplicate}");
@@ -8360,6 +8716,33 @@ fn a_cell_says(cells: &[String], words: &[&str]) -> bool {
     })
 }
 
+/// What a row means in its own table, beyond the words in it.
+///
+/// `infer_risk` reads text, and a backdoor account has none to read: a line
+/// `sys-update 0 0 /var/tmp /bin/sh` says nothing alarming. What gives it away
+/// is a column — a second account with UID 0 is root under another name. GID 0
+/// alone is not marked: several distributions ship `sync`, `shutdown` and
+/// `halt` in group 0.
+fn tab_risk(tab: SystemInfoTab, cells: &[String]) -> SystemInfoRisk {
+    match tab {
+        SystemInfoTab::Users
+            if cells.get(1).map(|uid| uid.trim()) == Some("0")
+                && cells.first().map(|name| name.trim()) != Some("root") =>
+        {
+            SystemInfoRisk::High
+        }
+        _ => SystemInfoRisk::Normal,
+    }
+}
+
+const fn stronger_risk(left: SystemInfoRisk, right: SystemInfoRisk) -> SystemInfoRisk {
+    match (left, right) {
+        (SystemInfoRisk::High, _) | (_, SystemInfoRisk::High) => SystemInfoRisk::High,
+        (SystemInfoRisk::Warning, _) | (_, SystemInfoRisk::Warning) => SystemInfoRisk::Warning,
+        _ => SystemInfoRisk::Normal,
+    }
+}
+
 fn infer_risk(cells: &[String]) -> SystemInfoRisk {
     let text = cells.join(" ").to_lowercase();
     // These are specific enough that finding them anywhere means something:
@@ -8460,7 +8843,18 @@ awk -F'[: ]+' 'NR>2 && $1!="lo"{rx+=$3;tx+=$11} END{printf "rx\t%.0f\ntx\t%.0f\n
 /// Processes that run come before the ones that exited and were never reaped
 /// (state Z), each in PID order, so the 500 rows show what is actually running
 /// on a host with a zombie flood rather than a page of `<defunct>`.
-const PROCESS_COMMAND: &str = r#"ps -eo pid=,ppid=,user=,stat=,pcpu=,pmem=,etimes=,args= --no-headers 2>/dev/null | awk '{print ($4 ~ /^Z/ ? 1 : 0) "\t" $0}' | sort -s -n -k1,1 | cut -f2- | head -n 500 | awk '{risk="normal"; cmd=""; for(i=8;i<=NF;i++) cmd=cmd (i==8?"":" ") $i; if($4 ~ /^Z/ || $5+0>=80) risk="warning"; gsub(/\t/," ",cmd); print risk"\t"$1"\t"$2"\t"$3"\t"$4"\t"$5"\t"$6"\t"$7"\t"cmd}'"#;
+/// The process table: procps `ps` where it exists, `/proc` read directly where
+/// it does not.
+///
+/// BusyBox `ps` (Alpine, most small images) has no `pcpu`, `pmem`, `etimes` or
+/// `--no-headers`, so the procps form fails there, and with its error sent to
+/// /dev/null the tab used to come back empty and say the machine had no
+/// processes — on exactly the kind of minimal host an intruder likes. The
+/// fallback reads the same eight fields from /proc: %CPU as procps defines it
+/// (CPU time over elapsed time), %MEM from resident pages over MemTotal,
+/// elapsed seconds from the start time, and `[comm]` for a kernel thread with
+/// no command line, as `ps` prints it. Both feed the same pipeline below.
+const PROCESS_COMMAND: &str = r#"{ ps -eo pid=,ppid=,user=,stat=,pcpu=,pmem=,etimes=,args= --no-headers 2>/dev/null | grep . || { hz=$(getconf CLK_TCK 2>/dev/null || echo 100); pg=$(getconf PAGESIZE 2>/dev/null || echo 4096); up=$(cut -d' ' -f1 /proc/uptime); mt=$(awk '/^MemTotal:/{print $2; exit}' /proc/meminfo); for d in /proc/[0-9]*; do st=$(cat "$d/stat" 2>/dev/null) || continue; u=$(awk '/^Uid:/{print $2; exit}' "$d/status" 2>/dev/null); a=$(tr '\0\t' '  ' < "$d/cmdline" 2>/dev/null); printf '%s\t%s\t%s\n' "$u" "$a" "$st"; done | awk -F'\t' -v hz="$hz" -v pg="$pg" -v up="$up" -v mt="$mt" 'BEGIN{while((getline l < "/etc/passwd")>0){split(l,f,":"); if(!(f[3] in nm)) nm[f[3]]=f[1]}} {st=$3; p=0; s=st; while((i=index(s,")"))>0){p+=i; s=substr(s,i+1)} o=index(st,"("); if(o<2||p<=o) next; pid=substr(st,1,o-2); comm=substr(st,o+1,p-o-1); n=split(substr(st,p+2),f," "); if(n<22) next; el=up-f[20]/hz; if(el<0) el=0; cpu=(el>0)?(f[12]+f[13])/hz/el*100:0; mem=(mt>0)?f[22]*pg/1024/mt*100:0; c=$2; sub(/ +$/,"",c); if(c=="") c="[" comm "]"; u=($1 in nm)?nm[$1]:$1; printf "%s %s %s %s %.1f %.1f %d %s\n", pid, f[2], u, f[1], cpu, mem, el, c}' | sort -n; }; } | awk '{print ($4 ~ /^Z/ ? 1 : 0) "\t" $0}' | sort -s -n -k1,1 | cut -f2- | head -n 500 | awk '{risk="normal"; cmd=""; for(i=8;i<=NF;i++) cmd=cmd (i==8?"":" ") $i; if($4 ~ /^Z/ || $5+0>=80) risk="warning"; gsub(/\t/," ",cmd); print risk"\t"$1"\t"$2"\t"$3"\t"$4"\t"$5"\t"$6"\t"$7"\t"cmd}'"#;
 /// A socket's owning process, read out of what `ss` prints.
 ///
 /// `ss` reports the owner as `users:(("nginx",pid=13,fd=6))`, and the tab used
@@ -10841,6 +11235,416 @@ mod tests {
                     .all(|entry| entry.source == "system-info-user")
             );
         }
+    }
+
+    #[test]
+    fn account_delete_is_offered_for_every_account_but_root_in_the_user_inventory() {
+        let users = |line: &str| {
+            parse_table(
+                &SystemInfoRequest::new(SystemInfoTab::Users, 1).unwrap(),
+                line,
+            )
+        };
+        // An ordinary account, and a second UID 0 account — the classic
+        // backdoor, which is exactly the one an operator needs to remove.
+        for line in [
+            "alice\t1000\t1000\t/home/alice\t/bin/bash",
+            "sys-update\t0\t0\t/var/tmp\t/bin/sh",
+        ] {
+            let table = users(line);
+            assert!(
+                table
+                    .user_account_request(&table.rows[0].id, UserAccountAction::Delete)
+                    .is_ok(),
+                "{line}"
+            );
+        }
+        let root = users("root\t0\t0\t/root\t/bin/bash");
+        assert!(
+            root.user_account_request(&root.rows[0].id, UserAccountAction::Delete)
+                .is_err()
+        );
+        // Locking stays available for root.
+        assert!(
+            root.user_account_request(&root.rows[0].id, UserAccountAction::Lock)
+                .is_ok()
+        );
+        let login = login_table("198.51.100.7");
+        assert!(
+            login
+                .user_account_request(&login.rows[0].id, UserAccountAction::Delete)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn account_delete_keeps_the_home_directory_and_never_forces() {
+        let command = user_account_command("alice'; reboot; '", UserAccountAction::Delete);
+        assert!(
+            command.starts_with("u='alice'\\''; reboot; '\\'''; "),
+            "{command}"
+        );
+        assert!(command.contains("userdel \"$u\""));
+        assert!(command.contains("deluser \"$u\""));
+        for forbidden in [
+            "userdel -r",
+            "userdel -f",
+            "--remove-home",
+            "--force",
+            "rm -",
+            "passwd -l",
+            "passwd -u",
+        ] {
+            assert!(!command.contains(forbidden), "{forbidden}: {command}");
+        }
+        assert!(
+            user_account_command("alice", UserAccountAction::Lock).contains("passwd -l \"$u\"")
+        );
+        assert!(
+            user_account_command("alice", UserAccountAction::Unlock).contains("passwd -u \"$u\"")
+        );
+        // Every delete first checks root is still UID 0.
+        assert!(command.contains("getent passwd root") && command.contains("exit 79"));
+    }
+
+    #[test]
+    fn a_second_uid_zero_account_is_deleted_with_only_the_busy_check_skipped() {
+        let backdoor =
+            parse_user_account_snapshot("sys-update\t0\t0\t/var/tmp\t/bin/sh\tP\troot").unwrap();
+        let command = user_account_dispatch_command(&backdoor, UserAccountAction::Delete);
+        assert!(command.contains("userdel -f \"$u\""), "{command}");
+        // -f skips the process check; nothing that removes files comes with it.
+        for forbidden in ["userdel -r", "-rf", "--remove-home", "rm -"] {
+            assert!(!command.contains(forbidden), "{forbidden}: {command}");
+        }
+        // BusyBox deluser has no such check and is not forced.
+        assert!(command.contains("deluser \"$u\"") && !command.contains("deluser -"));
+        // root is confirmed UID 0 before userdel is reached.
+        let guard = command.find("getent passwd root").unwrap();
+        assert!(guard < command.find("userdel -f").unwrap());
+        // An ordinary account is never forced.
+        let alice = parse_user_account_snapshot(&user_snapshot(1000, "P")).unwrap();
+        let ordinary = user_account_dispatch_command(&alice, UserAccountAction::Delete);
+        assert!(!ordinary.contains("userdel -f"), "{ordinary}");
+        // The plan says what -f does and does not do, and where the risk lies.
+        let summary = user_account_delete_summary(&backdoor, Some("root"));
+        assert!(
+            summary.contains("UID 0") && summary.contains("userdel -f"),
+            "{summary}"
+        );
+        assert!(!summary.contains("通常是系统或服务账户"), "{summary}");
+    }
+
+    #[test]
+    fn account_delete_refuses_root_and_the_session_account_on_the_target() {
+        let base = parse_user_account_snapshot(&user_snapshot(1000, "P")).unwrap();
+        assert!(validate_user_account_precondition(&base, UserAccountAction::Delete).is_ok());
+        let mut uid_zero = base.clone();
+        uid_zero.uid = 0;
+        assert!(validate_user_account_precondition(&uid_zero, UserAccountAction::Delete).is_ok());
+        let root =
+            parse_user_account_snapshot("root\t0\t0\t/root\t/bin/bash\tP\toperator").unwrap();
+        assert!(validate_user_account_precondition(&root, UserAccountAction::Delete).is_err());
+        // Logged in as the UID 0 account itself: refused, by login name.
+        let own = parse_user_account_snapshot("sys-update\t0\t0\t/var/tmp\t/bin/sh\tP\tsys-update")
+            .unwrap();
+        assert!(validate_user_account_precondition(&own, UserAccountAction::Delete).is_err());
+        // The session account is the name sshd logged in, not `id -un`, which
+        // cannot tell two UID 0 accounts apart.
+        let snapshot = user_account_snapshot_command("alice");
+        assert!(
+            snapshot.contains("current=${LOGNAME:-${USER:-}}"),
+            "{snapshot}"
+        );
+        let mut session = base.clone();
+        session.session_username = "alice".to_owned();
+        assert!(validate_user_account_precondition(&session, UserAccountAction::Delete).is_err());
+        // Locked or not makes no difference to whether an account may go.
+        let locked = parse_user_account_snapshot(&user_snapshot(1000, "L")).unwrap();
+        assert!(validate_user_account_precondition(&locked, UserAccountAction::Delete).is_ok());
+    }
+
+    #[test]
+    fn account_delete_explains_why_an_account_is_still_there() {
+        let planned = parse_user_account_snapshot(&user_snapshot(1000, "P")).unwrap();
+        assert!(user_account_delete_detail(&planned, None, "x: accepted").contains("已不存在"));
+        let busy = user_account_delete_detail(
+            &planned,
+            Some(&planned),
+            "删除 alice: rejected-exit-Some(8)",
+        );
+        assert!(
+            busy.contains("仍然存在，没有改动") && busy.contains("进程"),
+            "{busy}"
+        );
+        assert!(
+            user_account_delete_detail(&planned, Some(&planned), "x: rejected-exit-Some(77)")
+                .contains("root")
+        );
+        assert!(
+            user_account_delete_detail(&planned, Some(&planned), "x: rejected-exit-Some(78)")
+                .contains("userdel")
+        );
+        let mut moved = planned.clone();
+        moved.uid = 1001;
+        assert!(user_account_delete_detail(&planned, Some(&moved), "x: accepted").contains("不同"));
+        assert_eq!(
+            parse_user_account_groups("alice sudo docker\n").as_deref(),
+            Some("alice sudo docker")
+        );
+        assert_eq!(parse_user_account_groups("alice $(reboot)"), None);
+        assert_eq!(parse_user_account_groups(""), None);
+    }
+
+    #[tokio::test]
+    async fn account_delete_is_irreversible_journaled_and_verified_by_absence() {
+        let root = TestRoot::new();
+        let (services, session, harness) = bound_services(&root).await;
+        let table = user_table();
+        let request = table
+            .user_account_request(&table.rows[0].id, UserAccountAction::Delete)
+            .unwrap();
+        harness.set_execute_outputs([
+            user_snapshot(1000, "P"),
+            "alice sudo".to_owned(),
+            user_snapshot(1000, "P"),
+            String::new(),
+            "ABSENT".to_owned(),
+        ]);
+        let plan = services
+            .system_info()
+            .plan_user_account(&session, &request)
+            .await
+            .unwrap();
+        // No restore path is promised, and the plan says so in words.
+        assert!(plan.definition().restore_description.is_none());
+        let summary = &plan.definition().summary;
+        assert!(
+            summary.contains("不可自动恢复") && summary.contains("主目录"),
+            "{summary}"
+        );
+        assert!(summary.contains("所属组 alice sudo"), "{summary}");
+        assert_eq!(
+            plan.definition().metadata.get("action").map(String::as_str),
+            Some("delete")
+        );
+        assert_eq!(
+            plan.definition().metadata.get("home").map(String::as_str),
+            Some("/home/alice")
+        );
+        assert_eq!(
+            plan.definition().metadata.get("groups").map(String::as_str),
+            Some("alice sudo")
+        );
+        let confirmation = DangerousConfirmation::approve(plan.definition());
+        let outcome = services
+            .system_info()
+            .execute_user_account(&session, plan, confirmation, services.operation_journal())
+            .await
+            .unwrap();
+        assert!(
+            outcome.verification.passed,
+            "{}",
+            outcome.verification.detail
+        );
+        assert!(outcome.verification.detail.contains("已不存在"));
+        assert!(!outcome.restored_after_failed_verification);
+        let commands = harness.execute_commands();
+        assert!(
+            commands
+                .iter()
+                .any(|command| command.contains("userdel \"$u\""))
+        );
+        let entries = services.operation_journal().entries().unwrap();
+        assert_eq!(entries.len(), 2);
+        assert!(
+            entries
+                .iter()
+                .all(|entry| entry.source == "system-info-user")
+        );
+    }
+
+    #[tokio::test]
+    async fn account_delete_that_did_not_happen_says_nothing_changed() {
+        let root = TestRoot::new();
+        let (services, session, harness) = bound_services(&root).await;
+        let table = user_table();
+        let request = table
+            .user_account_request(&table.rows[0].id, UserAccountAction::Delete)
+            .unwrap();
+        // The account is still there after the command: one read-back, then
+        // one check that it is exactly as confirmed. No polling — on an RPM
+        // host each read costs ~11 s and twenty of them outrun the deadline.
+        harness.set_execute_outputs([
+            user_snapshot(1000, "P"),
+            "alice".to_owned(),
+            user_snapshot(1000, "P"),
+            String::new(),
+            user_snapshot(1000, "P"),
+            user_snapshot(1000, "P"),
+        ]);
+        let plan = services
+            .system_info()
+            .plan_user_account(&session, &request)
+            .await
+            .unwrap();
+        let confirmation = DangerousConfirmation::approve(plan.definition());
+        let outcome = services
+            .system_info()
+            .execute_user_account(&session, plan, confirmation, services.operation_journal())
+            .await
+            .unwrap();
+        assert!(!outcome.verification.passed);
+        assert!(
+            outcome.verification.detail.contains("仍然存在，没有改动"),
+            "{}",
+            outcome.verification.detail
+        );
+        // "Restored" here means: verified to be exactly as before.
+        assert!(outcome.restored_after_failed_verification);
+        // Nothing was attempted after the one delete command, and the whole
+        // run was plan (2) + precondition + delete + read-back + final check.
+        let commands = harness.execute_commands();
+        assert_eq!(commands.len(), 6, "{commands:#?}");
+        assert_eq!(
+            commands
+                .iter()
+                .filter(|command| command.contains("userdel"))
+                .count(),
+            1
+        );
+        assert!(
+            !commands
+                .iter()
+                .any(|command| command.contains("passwd -l") || command.contains("passwd -u"))
+        );
+    }
+
+    #[tokio::test]
+    async fn account_delete_of_the_session_account_is_refused_before_anything_runs() {
+        let root = TestRoot::new();
+        let (services, session, harness) = bound_services(&root).await;
+        let table = user_table();
+        let request = table
+            .user_account_request(&table.rows[0].id, UserAccountAction::Delete)
+            .unwrap();
+        harness.set_execute_output("alice\t1000\t1000\t/home/alice\t/bin/bash\tP\talice");
+        assert!(
+            services
+                .system_info()
+                .plan_user_account(&session, &request)
+                .await
+                .is_err()
+        );
+        assert!(
+            !harness
+                .execute_commands()
+                .iter()
+                .any(|command| command.contains("userdel"))
+        );
+        assert!(services.operation_journal().entries().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_uid_zero_backdoor_is_deleted_and_root_is_checked_afterwards() {
+        for (root_uid, passes) in [("0", true), ("1000", false)] {
+            let root = TestRoot::new();
+            let (services, session, harness) = bound_services(&root).await;
+            let table = parse_table(
+                &SystemInfoRequest::new(SystemInfoTab::Users, 1).unwrap(),
+                "sys-update\t0\t0\t/var/tmp\t/bin/sh",
+            );
+            let request = table
+                .user_account_request(&table.rows[0].id, UserAccountAction::Delete)
+                .unwrap();
+            let snapshot = "sys-update\t0\t0\t/var/tmp\t/bin/sh\tP\troot";
+            harness.set_execute_outputs([
+                snapshot.to_owned(),
+                "root".to_owned(),
+                snapshot.to_owned(),
+                String::new(),
+                "ABSENT".to_owned(),
+                root_uid.to_owned(),
+                // Read only when root was lost: is the account still as confirmed?
+                "ABSENT".to_owned(),
+            ]);
+            let plan = services
+                .system_info()
+                .plan_user_account(&session, &request)
+                .await
+                .unwrap();
+            let confirmation = DangerousConfirmation::approve(plan.definition());
+            let outcome = services
+                .system_info()
+                .execute_user_account(&session, plan, confirmation, services.operation_journal())
+                .await
+                .unwrap();
+            assert_eq!(
+                outcome.verification.passed, passes,
+                "{}",
+                outcome.verification.detail
+            );
+            if !passes {
+                assert!(
+                    outcome.verification.detail.contains("root 已不是 UID 0"),
+                    "{}",
+                    outcome.verification.detail
+                );
+            }
+            let commands = harness.execute_commands();
+            assert!(
+                commands
+                    .iter()
+                    .any(|command| command.contains("userdel -f \"$u\""))
+            );
+            // root is read back after the account is gone…
+            let deleted = commands
+                .iter()
+                .position(|command| command.contains("userdel -f \"$u\""))
+                .unwrap();
+            assert!(
+                commands[deleted..]
+                    .iter()
+                    .any(|command| command == root_uid_command())
+            );
+            // …and a run that lost root is not called "restored".
+            if !passes {
+                assert!(!outcome.restored_after_failed_verification);
+            }
+        }
+    }
+
+    #[test]
+    fn a_second_uid_zero_account_is_marked_high_risk_in_the_user_table() {
+        let table = parse_table(
+            &SystemInfoRequest::new(SystemInfoTab::Users, 10).unwrap(),
+            "root\t0\t0\t/root\t/bin/bash\n\
+             sys-update\t0\t0\t/var/tmp\t/bin/sh\n\
+             sync\t4\t0\t/bin\t/bin/sync\n\
+             alice\t1000\t1000\t/home/alice\t/bin/bash",
+        );
+        let risks = table
+            .rows
+            .iter()
+            .map(|row| (row.cells[0].as_str(), row.risk))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            risks,
+            [
+                ("root", SystemInfoRisk::Normal),
+                ("sys-update", SystemInfoRisk::High),
+                // GID 0 alone is how several distributions ship sync/halt.
+                ("sync", SystemInfoRisk::Normal),
+                ("alice", SystemInfoRisk::Normal),
+            ]
+        );
+        // The rule belongs to the user table: a 0 in another table's second
+        // column means nothing of the kind.
+        let cron = parse_table(
+            &SystemInfoRequest::new(SystemInfoTab::Cron, 10).unwrap(),
+            "alice\t0\t/usr/bin/backup\t/etc/crontab",
+        );
+        assert_eq!(cron.rows[0].risk, SystemInfoRisk::Normal);
     }
 
     fn network_table() -> SystemInfoTable {

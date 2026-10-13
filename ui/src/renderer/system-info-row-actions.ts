@@ -57,6 +57,14 @@ export function rowActionFailureText(error: unknown): string {
       // target's own words on screen, so it goes to the application log and
       // the operator is told where to look.
       return "这一行现在做不了这个操作：目标机上的状态或可用工具不满足前提。具体原因见应用日志。";
+    // Three refusals with a reason worth saying outright, instead of sending
+    // the operator to the log for it.
+    case "system-info-account-session":
+      return "这是当前 SSH 连接登录用的账户，删掉它就再也不能用它连回这台主机，所以这里不提供。确实要删时，请换一个有 sudo 权限的账户登录后再操作。";
+    case "system-info-account-root":
+      return "root 账户不在这里删除。要阻止它登录，可以改用锁定。";
+    case "system-info-account-state":
+      return "这个账户已经是这个状态了（例如已经锁定的账户再锁一次）。刷新一下看看它现在的状态。";
     case "system-info-binding-unavailable":
       return "与目标机的连接已经断开。";
     case "system-info-snapshot-stale":

@@ -66,7 +66,7 @@
   border-radius: 10px;
   box-shadow: var(--shadow-sm);
 }
-.config-search > span:first-child { color: var(--accent-text); font-size: var(--font-title); }
+.config-search > svg { flex: none; color: var(--accent-text); }
 .config-search input { min-width: 0; flex: 1; color: var(--text); background: transparent; border: 0; outline: 0; font-size: var(--font-caption); }
 .config-search small { flex: none; color: var(--faint); font-size: var(--font-small); }
 .config-search:focus-within { border-color: var(--focus-ring); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus-ring) 15%, transparent); }

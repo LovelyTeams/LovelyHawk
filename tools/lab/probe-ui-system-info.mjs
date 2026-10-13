@@ -131,6 +131,12 @@ async function shot(session, name) {
 }
 
 /**
+ * The PID cell of a process row, found by its column header. A fixed index
+ * broke once the table stopped repeating the risk column (级别 shows it).
+ */
+const PID_CELL = `(row) => row.querySelectorAll('td')[[...document.querySelectorAll('.system-info-table-scroll thead th')].findIndex(th => th.textContent.trim() === 'PID')]`;
+
+/**
  * Right-clicks the process row whose PID cell is exactly this PID.
  *
  * Matching the command text instead picks the first row that merely mentions
@@ -141,7 +147,7 @@ async function shot(session, name) {
 function contextMenuOnPid(session, pid) {
   return session.evaluate(`(() => {
     const row = [...document.querySelectorAll('.system-info-table-scroll tbody tr')]
-      .find(candidate => candidate.querySelectorAll('td')[1]?.textContent.trim() === ${JSON.stringify(String(pid))});
+      .find(candidate => (${PID_CELL})(candidate)?.textContent.trim() === ${JSON.stringify(String(pid))});
     if (row === undefined) return false;
     const cells = row.querySelectorAll('td');
     const cell = cells[cells.length - 3] ?? row;
@@ -308,7 +314,7 @@ try {
   try {
     await waitFor(
       session,
-      `[...document.querySelectorAll('.system-info-table-scroll tbody tr')].some(row => row.querySelectorAll('td')[1]?.textContent.trim() === ${JSON.stringify(String(plantedPid))})`,
+      `[...document.querySelectorAll('.system-info-table-scroll tbody tr')].some(row => (${PID_CELL})(row)?.textContent.trim() === ${JSON.stringify(String(plantedPid))})`,
       "the planted process in the table",
       120,
     );
@@ -331,6 +337,34 @@ try {
     throw error;
   }
   console.log(`      process table settled at ${await waitForTableSettled(session)} rows`);
+
+  // --- the layout: the page fills the window and the table scrolls inside it.
+  // It used to grow with the table instead, so the page scrolled: the column
+  // headers went with it and the last rows sat under the status bar.
+  const layout = await session.evaluate(`(() => {
+    const content = document.querySelector('.content');
+    const scroll = document.querySelector('.system-info-table-scroll');
+    const pageScrolls = content.scrollHeight > content.clientHeight + 1;
+    const tableBottom = scroll.getBoundingClientRect().bottom;
+    const contentBottom = content.getBoundingClientRect().bottom;
+    scroll.scrollTop = scroll.scrollHeight;
+    const box = scroll.getBoundingClientRect();
+    const rows = scroll.querySelectorAll('tbody tr');
+    const last = rows[rows.length - 1].getBoundingClientRect();
+    const head = scroll.querySelector('thead th').getBoundingClientRect();
+    const result = {
+      pageScrolls,
+      tableInside: tableBottom <= contentBottom,
+      lastInside: last.bottom <= box.bottom + 1 && last.top >= box.top,
+      headAtTop: Math.abs(head.top - box.top) <= 2,
+    };
+    scroll.scrollTop = 0;
+    return result;
+  })()`);
+  check("the page does not scroll as a whole", layout.pageScrolls, false);
+  check("the table ends above the status bar", layout.tableInside);
+  check("the last row scrolls into view inside the table", layout.lastInside);
+  check("the column headers stay in view", layout.headAtTop);
 
   // --- the menu
   check("the planted row can be right-clicked", await contextMenuOnPid(session, plantedPid));
@@ -404,6 +438,8 @@ try {
   console.log(`\nreceipt shown to the operator:\n      ${receipt.replace(/\s+/gu, " ").slice(0, 240)}`);
   await shot(session, "kill-receipt");
   check("the window reports it verified", receipt.includes("已完成，并在目标机上核对过。"));
+  // The readback is shown as is, so it has to be in the operator's language.
+  check("the readback says the process ended, in Chinese", receipt.includes(`确认时的进程 PID ${plantedPid} 已经结束`));
   // The lab container's PID 1 is `sleep infinity`, which never reaps, so a
   // killed child lingers as a zombie: dead, but still listed. Dead is what
   // matters here.
@@ -426,7 +462,9 @@ try {
   );
   await waitForTableSettled(session);
   check("a port row can be right-clicked", await contextMenuOnRow(session, ":22") || await contextMenuOnRow(session, "sshd") || await contextMenuOnRow(session, "22"));
-  await waitFor(session, "document.querySelector('.system-info-row-menu-parent') !== null || document.querySelector('.system-info-row-menu-note') !== null", "the port menu");
+  // The groups, or a note that is not "still reading": the loading note is a
+  // note too, and reading the menu while it shows found no groups at all.
+  await waitFor(session, "document.querySelector('.system-info-row-menu-parent') !== null || [...document.querySelectorAll('.system-info-row-menu-note')].some(note => note.getAttribute('role') !== 'status')", "the port menu");
   const portMenu = await readMenu(session);
   console.log(`\nport menu on ${portMenu.title}:\n      groups: ${portMenu.groups.join(" / ")}`);
   check("a listening port gets port analysis", portMenu.groups.includes("端口分析"));

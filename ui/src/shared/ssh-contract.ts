@@ -59,6 +59,7 @@ export const sshAttemptFailureCodes = [
   "ssh-auth-rejected",
   "ssh-key-unusable",
   "ssh-agent-unavailable",
+  "ssh-rsa-certificate-refused",
 ] as const;
 export type SshAttemptFailureCode = typeof sshAttemptFailureCodes[number];
 

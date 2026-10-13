@@ -68,7 +68,7 @@ describe("SSH process-boundary validators", () => {
     ).toBe(true);
     expect(isSshAttemptStatus({ stage: "cancelled" })).toBe(true);
     for (const code of ["ssh-attempt-failed", "ssh-host-not-found", "ssh-unreachable", "ssh-jump-failed",
-      "ssh-auth-rejected", "ssh-key-unusable", "ssh-agent-unavailable"]) {
+      "ssh-auth-rejected", "ssh-key-unusable", "ssh-agent-unavailable", "ssh-rsa-certificate-refused"]) {
       expect(isSshAttemptStatus({ stage: "failed", error: { code, message: "fixed" } }), code).toBe(true);
       // A failure says what kind it was, never where or with whose words.
       expect(isSshAttemptStatus({ stage: "failed", error: { code, message: "fixed", host: "10.0.0.9" } }), code).toBe(false);

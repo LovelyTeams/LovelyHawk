@@ -60,11 +60,15 @@
 
 /* Toolbar --------------------------------------------------------------- */
 
+/* Wraps on a narrow window, the counts and the reload button moving to a line
+   of their own. It did not, and the search box was what gave way: squeezed
+   to its icon, with the source count running in under it. */
 .log-analysis-toolbar {
   display: flex;
   flex: none;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 14px;
+  gap: 10px 14px;
   margin-bottom: 12px;
 }
 
@@ -104,8 +108,8 @@
 .log-analysis-search {
   position: relative;
   display: flex;
-  min-width: 0;
-  flex: 1;
+  min-width: 200px;
+  flex: 1 1 220px;
   align-items: center;
 }
 
@@ -130,6 +134,7 @@
   display: flex;
   flex: none;
   align-items: center;
+  margin-left: auto;
   gap: 12px;
   color: var(--muted);
   font-size: var(--font-small);
@@ -144,7 +149,9 @@
 
 .log-analysis-reload {
   display: inline-flex;
+  flex: none;
   min-height: 34px;
+  white-space: nowrap;
   align-items: center;
   gap: 6px;
   padding: 6px 12px;
@@ -465,11 +472,13 @@
   background: var(--surface-inset);
 }
 
+/* Wide enough for a whole date: a field allowed to shrink to nothing cut the
+   date picker's own text short ("yyyy/mm/日"). The form wraps instead. */
 .log-analysis-query label,
 .log-analysis-ioc-input {
   display: flex;
-  min-width: 0;
-  flex: 1;
+  min-width: 150px;
+  flex: 1 1 160px;
   flex-direction: column;
   gap: 4px;
   color: var(--muted);

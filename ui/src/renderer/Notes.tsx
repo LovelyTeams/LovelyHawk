@@ -23,6 +23,7 @@ import {
 import { errorText } from "./error-text";
 import { useModalScrim } from "./modal-scrim";
 import { planExpiryLabel } from "./plan-expiry";
+import { SearchIcon } from "./file-icons";
 
 const PAGE_SIZE = 100;
 
@@ -634,7 +635,7 @@ export const Notes = forwardRef<NotesHandle>(function Notes(_props, ref) {
       <div className="notes-workbench">
         <aside className="notes-list-panel">
           <label className="notes-search">
-            <span aria-hidden="true">⌕</span>
+            <SearchIcon />
             <input
               aria-label="搜索笔记"
               type="search"

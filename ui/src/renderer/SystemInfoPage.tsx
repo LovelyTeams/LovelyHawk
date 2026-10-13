@@ -15,13 +15,20 @@ import {
   buildSystemInfoSummaryCopy,
   buildSystemInfoTableCopy,
   describeSystemInfoValue,
+  EMPTY_SYSTEM_INFO_FILTER,
+  filterSystemInfoRows,
   systemInfoGauges,
   formatSystemInfoValue,
   groupShellConfigRows,
   groupSystemInfoCatalog,
+  isSystemInfoFilterActive,
   nextModalFocusIndex,
   SUMMARY_FIELDS,
+  systemInfoRiskCounts,
+  type SystemInfoRiskFilter,
+  type SystemInfoRowFilter,
 } from "./system-info-helpers";
+import { SearchIcon } from "./file-icons";
 import { rowActionFailureText, useSystemInfoRowActions } from "./system-info-row-actions";
 import { SystemInfoRowActionDialog } from "./SystemInfoRowActionDialog";
 import { SystemInfoRowMenu, type SystemInfoRowLocalAction } from "./SystemInfoRowMenu";
@@ -67,6 +74,43 @@ export function SystemInfoPage({ connection, api, writeClipboard }: SystemInfoPa
   // Most tabs have no detail behind any of their rows; the column is only worth
   // its width where at least one row can answer.
   const anyDetail = table?.rows.some((row) => row.detail) ?? false;
+  // Each tab keeps what it was narrowed to, so moving between 进程 and 网络
+  // does not throw either search away; a different target starts clean, since
+  // its rows are a different machine's.
+  const [filters, setFilters] = useState<{
+    scope: string | null;
+    byTab: Partial<Record<SystemInfoTabKey, SystemInfoRowFilter>>;
+  }>({ scope: null, byTab: {} });
+  const filter = (selectedTab === null || filters.scope !== scope
+    ? undefined
+    : filters.byTab[selectedTab]) ?? EMPTY_SYSTEM_INFO_FILTER;
+  const filterActive = isSystemInfoFilterActive(filter);
+  const visibleRows = useMemo(
+    () => table === null
+      ? []
+      : filterSystemInfoRows(table.rows, filter, (index) => shownColumn(table.columns, index)),
+    [table, filter],
+  );
+  const riskCounts = useMemo(() => systemInfoRiskCounts(table?.rows ?? []), [table]);
+  const visibleTable = useMemo(
+    () => table === null ? null : { ...table, rows: visibleRows },
+    [table, visibleRows],
+  );
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  function updateFilter(patch: Partial<SystemInfoRowFilter>) {
+    if (selectedTab === null) return;
+    const tab = selectedTab;
+    setFilters((current) => {
+      const byTab = current.scope === scope ? current.byTab : {};
+      return { scope, byTab: { ...byTab, [tab]: { ...(byTab[tab] ?? EMPTY_SYSTEM_INFO_FILTER), ...patch } } };
+    });
+  }
+
+  function clearFilter() {
+    updateFilter(EMPTY_SYSTEM_INFO_FILTER);
+    searchRef.current?.focus();
+  }
   // The summary is a renderer-only tab: it reuses the snapshot the page already
   // loaded, so it never sends a collect request or crosses the tab contract.
   const [summaryTabActive, setSummaryTabActive] = useState(true);
@@ -276,11 +320,14 @@ export function SystemInfoPage({ connection, api, writeClipboard }: SystemInfoPa
   }
 
   async function copyTable() {
-    if (table === null) return;
+    if (visibleTable === null) return;
     try {
-      const text = buildSystemInfoTableCopy(table);
+      // What is on screen: a filtered table copies the rows it shows.
+      const text = buildSystemInfoTableCopy(visibleTable);
       await (writeClipboard ?? ((value) => window.lovelyhawk.writeClipboard(value)))(text);
-      setNotice(`已复制 ${table.rows.length} 行纯文本表格。`);
+      setNotice(filterActive
+        ? `已复制筛选后的 ${visibleTable.rows.length} 行（共 ${table?.rows.length ?? 0} 行）纯文本表格。`
+        : `已复制 ${visibleTable.rows.length} 行纯文本表格。`);
     } catch {
       setNotice("复制表格失败，或表格太大无法复制。");
     }
@@ -457,21 +504,88 @@ export function SystemInfoPage({ connection, api, writeClipboard }: SystemInfoPa
                         : "这台机器上没有这类条目。"}
                   </div>
                 ) : null}
+                {state.tableStatus === "ready" && table !== null && table.rows.length > 0 ? (
+                  <div className="system-info-filter" role="search" aria-label="搜索和筛选这一页">
+                    <label className="system-info-filter-search">
+                      <SearchIcon />
+                      <input
+                        ref={searchRef}
+                        type="search"
+                        value={filter.query}
+                        placeholder="搜索这一页，空格分隔多个词"
+                        aria-label="搜索这一页"
+                        maxLength={200}
+                        onChange={(event) => updateFilter({ query: event.target.value })}
+                        onKeyDown={(event) => {
+                          if (event.key === "Escape" && filter.query !== "") {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            updateFilter({ query: "" });
+                          }
+                        }}
+                      />
+                    </label>
+                    <label className="system-info-filter-column">
+                      <span>在</span>
+                      <select
+                        value={filter.column === null ? "all" : String(filter.column)}
+                        aria-label="搜索哪一列"
+                        onChange={(event) => updateFilter({
+                          column: event.target.value === "all" ? null : Number(event.target.value),
+                        })}
+                      >
+                        <option value="all">所有列</option>
+                        {table.columns.map((column, index) => shownColumn(table.columns, index)
+                          ? <option key={column} value={String(index)}>{column}</option>
+                          : null)}
+                      </select>
+                    </label>
+                    <div className="system-info-filter-risk" role="group" aria-label="按级别筛选">
+                      {RISK_FILTERS.map(({ key, label }) => (
+                        <button
+                          type="button"
+                          key={key}
+                          aria-pressed={filter.risk === key}
+                          className={filter.risk === key ? "active" : undefined}
+                          onClick={() => updateFilter({ risk: key })}
+                        >
+                          {label}<span>{riskCounts[key]}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <span className="system-info-filter-count" aria-live="polite">
+                      {filterActive ? `显示 ${visibleRows.length} / 共 ${table.rows.length} 行` : `共 ${table.rows.length} 行`}
+                    </span>
+                    {filterActive ? (
+                      <button type="button" className="system-info-filter-clear" onClick={clearFilter}>清除筛选</button>
+                    ) : null}
+                  </div>
+                ) : null}
                 {state.tableStatus === "ready" && table !== null && table.rows.length > 0
-                  && table.tab === "shell-configs" ? (
+                  && visibleRows.length === 0 ? (
+                  <div className="system-info-table-state">
+                    <p>
+                      没有符合条件的行。筛选只在已经读到的 {table.rows.length} 行里找
+                      {table.truncated ? `；主机上还有更多没读到的，那些不在其中` : ""}。
+                    </p>
+                    <button type="button" onClick={clearFilter}>清除筛选</button>
+                  </div>
+                ) : null}
+                {state.tableStatus === "ready" && visibleTable !== null && visibleRows.length > 0
+                  && visibleTable.tab === "shell-configs" ? (
                   <ShellConfigText
-                    table={table}
+                    table={visibleTable}
                     selectedRowId={rowActions.menu?.row.id ?? null}
                     onRowContextMenu={rowActions.openMenu}
                   />
                 ) : null}
-                {state.tableStatus === "ready" && table !== null && table.rows.length > 0
+                {state.tableStatus === "ready" && table !== null && visibleRows.length > 0
                   && table.tab !== "shell-configs" ? (
                   <div className="system-info-table-scroll">
                     <table>
                       <thead><tr>{table.columns.map((column, index) => shownColumn(table.columns, index) ? <th key={column}>{column}</th> : null)}<th>级别</th>{anyDetail ? <th>详情</th> : null}</tr></thead>
                       <tbody>
-                        {table.rows.map((row) => (
+                        {visibleRows.map((row) => (
                           <tr
                             key={row.id}
                             className={rowActions.menu?.row.id === row.id ? "is-selected" : undefined}
@@ -622,6 +736,12 @@ function ShellConfigText({
 export function shownColumn(columns: readonly string[], index: number): boolean {
   return columns[index] !== "风险";
 }
+
+const RISK_FILTERS: readonly { key: SystemInfoRiskFilter; label: string }[] = [
+  { key: "all", label: "全部" },
+  { key: "attention", label: "注意及以上" },
+  { key: "high", label: "只看高风险" },
+];
 
 function riskLabel(risk: "normal" | "warning" | "high"): string {
   switch (risk) {

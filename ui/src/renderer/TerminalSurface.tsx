@@ -32,6 +32,8 @@ interface TerminalSurfaceProps {
    * the operator, so a half-formed command never runs on its own.
    */
   insert?: { token: number; text: string } | null;
+  /** The window's own "could not open" sentence, when it has a better one. */
+  openFailure?: string;
 }
 
 interface TerminalSelectionSource {
@@ -94,6 +96,7 @@ export function TerminalSurface({
   onViewport,
   onSession,
   insert = null,
+  openFailure,
 }: TerminalSurfaceProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const mountRef = useRef<HTMLDivElement>(null);
@@ -184,6 +187,8 @@ export function TerminalSurface({
       },
     }, {
       isScopeCurrent: () => active,
+      // Read once, at open: the window's kind never changes.
+      ...(openFailure === undefined ? {} : { openFailure }),
       onError: (message) => {
         if (!active) return;
         setError(message);

@@ -140,7 +140,7 @@ node ui/scripts/probe-docker.mjs                # 容器编排靶机 svc-docker�
 
 ~~~powershell
 pnpm release:package -Build      # 构建 UI 与静态 CRT 的 release 宿主，打包并校验
-pnpm release:smoke -ArchivePath artifacts/LovelyHawk-1.0.0-windows-x64.zip
+pnpm release:smoke -ArchivePath artifacts/LovelyHawk-0.0.1-dev-windows-x64.zip
 ~~~
 
 便携包只有一个 `LovelyHawk.exe`（页面资源已嵌入）、许可文件、Rust 依赖许可证全文、SBOM 与清单，详见 [便携发布说明](docs/DESKTOP_PORTABLE_RELEASE.md)。首次启动在程序旁创建 `data/`，不写用户配置目录；同一数据目录同时只允许运行一份。Linux x64 包（`scripts/desktop-package-linux.sh`）目前只在 Debian 12 容器中做过启动级冒烟；macOS 包与干净环境冒烟尚未完成，不得宣称三平台发布已经通过。SSH 实机覆盖见 [SSH 兼容性与安全策略](docs/SSH_COMPATIBILITY.md)。

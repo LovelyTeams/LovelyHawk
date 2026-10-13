@@ -2511,7 +2511,7 @@ impl OperationExecutor for MiddlewareChangeExecutor {
         Ok(VerificationResult {
             passed: true,
             detail: format!(
-                "{} passed {}, {}, and runtime health readback (application health is not asserted)",
+                "{} 已通过 {}，完成{}，进程状态回读正常；这不代表业务本身已经正常。",
                 self.instance.unit,
                 self.instance.validator.label(),
                 self.instance.activation.label()

@@ -5,6 +5,7 @@ import {
   securityReferenceCatalog,
   type SecuritySnippet,
 } from "./catalog";
+import { SearchIcon } from "./file-icons";
 
 interface SecurityReferenceProps {
   favoriteIds: string[];
@@ -73,7 +74,7 @@ export function SecurityReference({
 
       <div className="reference-toolbar">
         <label className="search-field">
-          <span>⌕</span>
+          <SearchIcon />
           <input
             aria-label="搜索安全速查目录"
             value={query}

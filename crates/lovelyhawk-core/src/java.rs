@@ -963,13 +963,15 @@ impl OperationExecutor for JarUpdateExecutor<'_> {
         let verified = parse_verify_receipt(&output)?;
         Ok(VerificationResult {
             passed: verified == receipt,
+            // Shown to the operator as is. Only the JAR on disk changed; a
+            // running JVM keeps the classes it already loaded.
             detail: if verified == receipt {
                 format!(
-                    "class and archive SHA-256 verified for {}",
+                    "已回读核对：{} 与整个 JAR 的 SHA-256 都与计划一致。这只说明磁盘上的 JAR 已更新，运行中的进程不会因此加载新类。",
                     self.plan.entry_path.as_str()
                 )
             } else {
-                "remote Java update evidence differed from the immutable plan".to_owned()
+                "目标机上读回的类或 JAR 摘要与计划不一致。".to_owned()
             },
         })
     }
@@ -1071,9 +1073,9 @@ impl OperationExecutor for JavaRestoreExecutor<'_> {
         Ok(VerificationResult {
             passed: actual == self.plan.record.before_jar_sha256,
             detail: if actual == self.plan.record.before_jar_sha256 {
-                "original JAR SHA-256 restored".to_owned()
+                "已恢复原 JAR：回读的 SHA-256 与更新前的记录一致。".to_owned()
             } else {
-                "restored JAR SHA-256 differed from history".to_owned()
+                "恢复后的 JAR SHA-256 与更新前的记录不一致。".to_owned()
             },
         })
     }

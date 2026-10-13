@@ -172,25 +172,17 @@ pub async fn terminal_open<R: Runtime>(
     };
     let opened = match host.bridge.call(request.0, request.1).await {
         Ok(opened) => opened,
-        // A folder window stays open and says why: the folder may have gone
-        // stale in the file browser, or too many terminals are open. The page
-        // maps the code to plain words; nothing from the target is in it.
-        Err(error) if matches!(scope.kind, ChildKind::Directory(_)) => {
-            tracing::warn!(%error, "directory terminal open failed");
-            return Err(error);
-        }
-        // So does a pod's: kubectl exec is refused for reasons the operator
-        // can act on — no exec permission, no shell in the image, the pod
-        // replaced since the list was read — and a window that vanished would
-        // say none of them. The backend's sentences are fixed text.
-        Err(error) if matches!(scope.kind, ChildKind::Pod(_)) => {
-            tracing::warn!(%error, "pod terminal open failed");
-            return Err(error);
-        }
+        // Every terminal window stays open and says why it could not start.
+        // A plain SSH or container window used to close itself instead, so a
+        // target that had dropped off the network looked like the app
+        // crashing: the window flashed and was gone, with the reason only in
+        // the log. The reasons are worth reading — the connection is gone,
+        // too many terminals are open, the folder went stale, the container
+        // has no shell, the pod was replaced — and the page maps each code to
+        // plain words; nothing from the target is in it.
         Err(error) => {
-            tracing::warn!(%error, "terminal open failed");
-            host.release_child(&app, &scope.label, true).await;
-            return Err(TERMINAL_OPEN_FAILURE.to_owned());
+            tracing::warn!(%error, kind = scope.kind.page(), "terminal open failed");
+            return Err(error);
         }
     };
     let Some(handle) = opened

@@ -105,18 +105,55 @@ describe("terminal base64 and bounded input queue", () => {
   });
 
   it("says why a folder terminal did not open, in the window that stays open to say it", () => {
-    const open = TERMINAL_ERROR_MESSAGES.open;
+    const open = TERMINAL_ERROR_MESSAGES.openFolder;
     const crowded = terminalFailureMessage(new Error("打开的终端太多，请先关闭一些。 (terminal-capacity)"), open);
     const stale = terminalFailureMessage(new Error("这个目录或文件入口已过期，请刷新。 (sftp-browser-unavailable)"), open);
     const failed = terminalFailureMessage(new Error("终端操作没有完成，详细原因见应用日志。 (terminal-operation-failed)"), open);
     expect(crowded).toContain("最多 4 个");
     expect(stale).toContain("回到 SSH 终端窗口的文件管理刷新");
     // A failure with no more detail does not claim to know which cause it was.
+    expect(failed).toBe(TERMINAL_ERROR_MESSAGES.folderUnusable);
     expect(failed).toContain("可能");
     expect(failed).toContain("应用日志");
     // The same code from anything but an open keeps the caller's sentence.
     expect(terminalFailureMessage(new Error("x (terminal-operation-failed)"), "fallback")).toBe("fallback");
     for (const text of [crowded, stale, failed]) expect(text).not.toMatch(/terminal-|sftp-|\(/u);
+  });
+
+  it("says the target is gone, before any guess about the terminal, folder or shell", () => {
+    // The log from a target that dropped off the network: every window then
+    // used to vanish, or blame the folder, or say the container had no shell.
+    const lost = [
+      "The SSH connection to the target is gone. (terminal-binding-unavailable)",
+      "The SSH connection to the target is gone. (docker-binding-unavailable)",
+      "The SSH connection to the target is gone. (kubernetes-binding-unavailable)",
+    ];
+    for (const fallback of [
+      TERMINAL_ERROR_MESSAGES.open,
+      TERMINAL_ERROR_MESSAGES.openFolder,
+      TERMINAL_ERROR_MESSAGES.poll,
+      TERMINAL_ERROR_MESSAGES.search,
+    ]) {
+      for (const message of lost) {
+        expect(terminalFailureMessage(new Error(message), fallback)).toBe(TERMINAL_ERROR_MESSAGES.connectionLost);
+      }
+    }
+    const text = TERMINAL_ERROR_MESSAGES.connectionLost;
+    expect(text).toContain("连接已断开");
+    expect(text).toContain("重新连接");
+    expect(text).not.toMatch(/binding|SSH connection|\(/u);
+    // The live-session ending names the likelier cause first, and claims neither.
+    expect(TERMINAL_ERROR_MESSAGES.remoteFailure).toContain("连接中断");
+    expect(TERMINAL_ERROR_MESSAGES.remoteFailure).toContain("或");
+  });
+
+  it("does not blame a folder for an ordinary SSH or container terminal that did not open", () => {
+    // These windows used to close on any failure, so only folder windows ever
+    // read this code; now they stay open too and need their own sentence.
+    const failed = terminalFailureMessage(new Error("x (terminal-operation-failed)"), TERMINAL_ERROR_MESSAGES.open);
+    expect(failed).toBe(TERMINAL_ERROR_MESSAGES.openFailed);
+    expect(failed).not.toContain("文件夹");
+    expect(failed).toContain("应用日志");
   });
 
   it("round-trips arbitrary bytes without Buffer or text coercion", () => {

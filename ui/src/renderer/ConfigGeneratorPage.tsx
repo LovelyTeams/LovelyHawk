@@ -22,6 +22,7 @@ import { isConfigCatalog, isConfigGenerateInput } from "../shared/config-contrac
 import { isConfigVisualProduct } from "../shared/config-visual-contract";
 import { ConfigArtifactNotes } from "./ConfigArtifactNotes";
 import { ConfigGoalResults, type ConfigGoalOpenVisual } from "./ConfigGoalPanel";
+import { SearchIcon } from "./file-icons";
 import type { LovelyHawkApi } from "../shared/contract";
 import {
   CONFIG_VALUE_FIELDS,
@@ -977,7 +978,7 @@ function ConfigGeneratorPage({ api, embedded = false, modeSwitch, onOpenVisual, 
       )}
 
       <label className="config-search">
-        <span aria-hidden="true">⌕</span>
+        <SearchIcon />
         <span className="visually-hidden">搜索全部配置特性</span>
         <input
           type="search"

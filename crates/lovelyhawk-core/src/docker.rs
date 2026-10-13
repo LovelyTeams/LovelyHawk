@@ -3859,9 +3859,9 @@ impl OperationExecutor for DockerResourceMutationExecutor<'_> {
                 format!("{} 个已确认资源均已删除", status.total)
             } else {
                 format!(
-                    "dispatch {}/{} succeeded; {} failed; {} indeterminate; {} resource(s) remain{}",
-                    status.succeeded,
+                    "没有全部删除：{} 个中成功 {} 个、失败 {} 个、结果不确定 {} 个；还剩 {} 个资源{}。",
                     status.total,
+                    status.succeeded,
                     status.failed,
                     status.indeterminate,
                     remaining.len(),
@@ -3869,8 +3869,8 @@ impl OperationExecutor for DockerResourceMutationExecutor<'_> {
                         String::new()
                     } else {
                         format!(
-                            ": {}",
-                            remaining.into_iter().take(8).collect::<Vec<_>>().join(", ")
+                            "：{}",
+                            remaining.into_iter().take(8).collect::<Vec<_>>().join("、")
                         )
                     }
                 )
@@ -3994,13 +3994,14 @@ impl OperationExecutor for DockerComposeActionExecutor<'_> {
         self.ensure_plan(operation)?;
         let dispatch_ok = receipt.restore_token.as_deref() == Some("compose-dispatch/v1/ok");
         let current = self.current_project().await?;
+        // Shown to the operator as is, so it is said in their language.
         let (state_ok, detail) = match (self.plan.action, current) {
-            (DockerComposeAction::Down, None) => (true, "project is absent after down".to_owned()),
+            (DockerComposeAction::Down, None) => (true, "down 之后项目已经不在了。".to_owned()),
             (DockerComposeAction::Down, Some(project)) => (
                 false,
-                format!("project remains present with status {}", project.status),
+                format!("down 之后项目还在，状态 {}。", project.status),
             ),
-            (_, None) => (false, "project is absent after the action".to_owned()),
+            (_, None) => (false, "操作之后找不到这个项目了。".to_owned()),
             (action, Some(project)) => {
                 let config_matches =
                     parse_compose_config_files(&project.config_files)? == self.plan.config_files;
@@ -4013,10 +4014,14 @@ impl OperationExecutor for DockerComposeActionExecutor<'_> {
                 (
                     config_matches && expected_state,
                     format!(
-                        "project status {}; running {}; config identity {}",
+                        "项目状态 {}，运行中的容器 {} 个，配置文件{}。",
                         project.status,
                         project.running,
-                        if config_matches { "matches" } else { "changed" }
+                        if config_matches {
+                            "与确认时一致"
+                        } else {
+                            "和确认时不一样了"
+                        }
                     ),
                 )
             }
@@ -4024,11 +4029,11 @@ impl OperationExecutor for DockerComposeActionExecutor<'_> {
         Ok(VerificationResult {
             passed: dispatch_ok && state_ok,
             detail: format!(
-                "dispatch {}; {detail}",
+                "{}{detail}",
                 if dispatch_ok {
-                    "succeeded"
+                    "Compose 命令已执行。"
                 } else {
-                    "did not succeed"
+                    "Compose 命令没有成功完成。"
                 }
             ),
         })
@@ -6853,7 +6858,8 @@ mod tests {
             .await
             .unwrap();
         assert!(outcome.verified);
-        assert!(outcome.verification_detail.contains("running 0"));
+        assert!(outcome.verification_detail.contains("运行中的容器 0 个"));
+        assert!(outcome.verification_detail.contains("配置文件与确认时一致"));
         assert_eq!(services.operation_journal().entries().unwrap().len(), 2);
 
         let malicious = DockerComposeProject {

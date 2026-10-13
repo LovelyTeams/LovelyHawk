@@ -15,7 +15,7 @@ default-members = [
 resolver = "2"
 
 [workspace.package]
-version = "1.0.0"
+version = "0.0.1-dev"
 edition = "2024"
 rust-version = "1.93.1"
 license = "AGPL-3.0-only"
@@ -37,7 +37,10 @@ postgres-native-tls = { version = "0.5.3", default-features = false }
 regex = "1"
 rfd = { version = "0.16", default-features = false }
 reqwest = { version = "0.12", features = ["json", "stream", "socks"] }
-russh = { version = "0.62.5", default-features = false, features = ["ring", "flate2"] }
+# `rsa`: RSA private keys, RSA certificates and RSA agent identities can sign.
+# RustCrypto `rsa` carries RUSTSEC-2023-0071; why that is accepted for an SSH
+# client is in docs/SSH_COMPATIBILITY.md.
+russh = { version = "0.62.5", default-features = false, features = ["ring", "flate2", "rsa"] }
 russh-sftp = "2.4.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

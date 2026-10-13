@@ -396,6 +396,19 @@
 .sftp-browser-action svg, .sftp-browser-pathbar svg { flex: none; }
 .sftp-browser-pathbar button { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; }
 .sftp-browser-row-size, .sftp-browser-row-time { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-caption); }
+/* A narrow pane — the terminal window shares its width between the terminal
+   and two of these — left the name column four characters wide while the
+   date kept all of its own. There the size and date move under the name,
+   which gets the whole row. */
+.sftp-browser-pane { container: sftp-pane / inline-size; }
+@container sftp-pane (max-width: 380px) {
+  .sftp-browser-table-head { grid-template-columns: minmax(0, 1fr); }
+  .sftp-browser-table-head > span:not(:first-child) { display: none; }
+  .sftp-browser-rows .sftp-browser-row { grid-template-columns: auto minmax(0, 1fr); row-gap: 1px; }
+  .sftp-browser-row-name { grid-column: 1 / -1; }
+  .sftp-browser-row-size { padding-left: 21px; }
+  .sftp-browser-row-time { text-align: right; }
+}
 .sftp-browser-pane-foot { display: flex; flex: none; flex-wrap: wrap; justify-content: space-between; gap: 6px; padding: 4px 9px; border-top: 1px solid var(--border); color: var(--muted); background: var(--surface-alt); font-size: var(--font-caption); }
 .sftp-browser-page .sftp-browser-detail { flex: 0 1 auto; max-height: 38%; margin-top: 8px; overflow: auto; }
 .sftp-browser-page .sftp-browser-detail-header h2 { font-size: var(--font-subtitle); }

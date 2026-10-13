@@ -17,7 +17,7 @@ usage='usage: desktop-package-linux.sh <executable> <output-directory> <inventor
 executable=${1:?$usage}
 output=${2:?$usage}
 inventory=${3:?$usage}
-version=${4:-1.0.0}
+version=${4:-0.0.1-dev}
 for file in SBOM.cdx.json THIRD_PARTY_LICENSES_RUST.txt; do
   [[ -f $inventory/$file ]] || { echo "missing $inventory/$file" >&2; exit 1; }
 done

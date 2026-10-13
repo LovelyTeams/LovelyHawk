@@ -135,12 +135,22 @@ try {
   await page.shot("baseline-change-confirm.png");
   await evaluate("[...document.querySelectorAll('[role=dialog] button')].find((b) => b.textContent.trim() === '确认修改').click(), true");
   await uiWait("document.querySelector('[data-testid=\"baseline-action-receipt\"]') !== null", "the receipt", 240_000);
-  const receipt = await evaluate("({ verified: document.querySelector('[data-testid=\"baseline-action-receipt\"]').dataset.verified, text: document.querySelector('[data-testid=\"baseline-action-receipt\"]').textContent })");
-  check("the receipt says it was written and read back", receipt.verified === "true" && receipt.text.includes("已完成并核对"), receipt);
   check("sshd itself now refuses root logins", effective("permitrootlogin"), "no");
+  // A change is followed by a rescan, which replaces the list (and the receipt
+  // with it) while it runs. Read the receipt once the rescan is done: that it
+  // is still there then is the point — the operator must not lose it.
   await uiWait(`(${card}) != null && (${card}).querySelector('.baseline-card-verdict')?.classList.contains('is-compliant') === true`, "the rescanned card", 120_000)
     .then(() => check("the page scans again and shows it compliant", true))
     .catch(() => check("the page scans again and shows it compliant", false));
+  await uiWait("document.querySelector('[data-testid=\"baseline-action-receipt\"]') !== null", "the receipt after the rescan", 30_000)
+    .catch(() => {});
+  const receipt = await evaluate("(() => { const element = document.querySelector('[data-testid=\"baseline-action-receipt\"]'); return element === null ? null : { verified: element.dataset.verified, text: element.textContent }; })()");
+  check("the receipt is still shown after the rescan", receipt !== null);
+  check("the receipt says it was written and read back", receipt?.verified === "true" && receipt.text.includes("已完成并核对"), receipt);
+  // The readback is shown as is, so it has to be in the operator's language.
+  check("the readback is said in Chinese, without claiming the service is healthy",
+    receipt?.text.includes("由独立读回核对") === true && receipt.text.includes("不代表业务已恢复健康"),
+    receipt?.text.slice(0, 300) ?? null);
   await page.shot("baseline-changed.png");
 
   // Restore from history.

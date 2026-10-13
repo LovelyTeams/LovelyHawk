@@ -849,6 +849,12 @@ fn attempt_failure(error: &CoreError) -> (&'static str, &'static str) {
         | "keyboard-interactive authentication"
         | "agent authentication"
         | "authentication" => ("ssh-auth-rejected", "SSH authentication did not succeed."),
+        // Not a wrong credential: a modern server will not take an RSA
+        // certificate in the only form the SSH library can send it.
+        "RSA certificate authentication" => (
+            "ssh-rsa-certificate-refused",
+            "The server refused an RSA certificate signed with SHA-1.",
+        ),
         "private-key decoding" | "certificate decoding" => (
             "ssh-key-unusable",
             "The private key or certificate could not be used.",
@@ -1005,6 +1011,10 @@ mod tests {
             ("password authentication", "ssh-auth-rejected"),
             ("public-key authentication", "ssh-auth-rejected"),
             ("authentication", "ssh-auth-rejected"),
+            (
+                "RSA certificate authentication",
+                "ssh-rsa-certificate-refused",
+            ),
             ("private-key decoding", "ssh-key-unusable"),
             ("agent identities", "ssh-agent-unavailable"),
             ("open command channel", "ssh-attempt-failed"),

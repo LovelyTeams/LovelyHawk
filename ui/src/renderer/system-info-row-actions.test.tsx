@@ -80,7 +80,7 @@ function receipt(overrides: Partial<SystemInfoRowReceipt> = {}): SystemInfoRowRe
     label: "强制终止进程（SIGKILL）",
     subject: "PID 4242 · /usr/bin/sshd -D",
     verified: true,
-    detail: "PID 4242 no longer has the confirmed start identity",
+    detail: "回读：确认时的进程 PID 4242 已经结束。",
     restored: false,
     ...overrides,
   };
@@ -234,6 +234,15 @@ describe("system-info row menu", () => {
     expect(gone).toContain("不在表里");
     expect(none).toContain("刷新也不会");
     expect(rowActionFailureText(new Error("Gone. (system-info-binding-unavailable)"))).toContain("断开");
+    // Account refusals say their reason outright, each a different one.
+    const own = rowActionFailureText(new Error("x (system-info-account-session)"));
+    const root = rowActionFailureText(new Error("x (system-info-account-root)"));
+    const same = rowActionFailureText(new Error("x (system-info-account-state)"));
+    expect(own).toContain("当前 SSH 连接登录用的账户");
+    expect(root).toContain("root");
+    expect(same).toContain("已经是这个状态");
+    expect(new Set([own, root, same]).size).toBe(3);
+    for (const text of [own, root, same]) expect(text).not.toContain("应用日志");
     expect(rowActionFailureText(new Error("Used. (system-info-plan-unavailable)"))).toContain("失效");
     expect(rowActionFailureText(new Error("Slow. (system-info-timeout)"))).toContain("回应");
     expect(rowActionFailureText(new Error("目标机返回的结果无法识别。"))).toBe("目标机返回的结果无法识别。");
@@ -314,7 +323,7 @@ describe("system-info row action dialog", () => {
       />,
     );
     expect(done).toContain("已完成，并在目标机上核对过");
-    expect(done).toContain("no longer has the confirmed start identity");
+    expect(done).toContain("确认时的进程 PID 4242 已经结束");
     expect(done).not.toContain("确认并执行");
 
     const failed = renderToStaticMarkup(

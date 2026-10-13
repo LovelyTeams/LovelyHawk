@@ -5476,25 +5476,33 @@ fn verify_expected(
             } else {
                 BaselineObservedValue::Value(change.after.clone())
             };
-            (by_id.get(change.item_id.as_str()).copied() != Some(&expected)).then_some(format!(
-                "{} expected {}, observed {}",
-                change.item_id,
-                expected.label(),
-                by_id
-                    .get(change.item_id.as_str())
-                    .map_or("missing scan row", |value| value.label())
-            ))
+            // Named by the item's title, the way the page lists it; the id is
+            // only a fallback for a record that outlived its definition.
+            let name =
+                definition(&change.item_id).map_or(change.item_id.as_str(), |item| item.title);
+            let observed = by_id.get(change.item_id.as_str()).copied();
+            (observed != Some(&expected)).then(|| match observed {
+                Some(value) => format!(
+                    "{name}：期望 {}，回读到 {}",
+                    expected.label(),
+                    value.label()
+                ),
+                None => format!(
+                    "{name}：期望 {}，但这次检查没有读到这一项",
+                    expected.label()
+                ),
+            })
         })
         .collect::<Vec<_>>();
     VerificationResult {
         passed: mismatches.is_empty(),
         detail: if mismatches.is_empty() {
             format!(
-                "verified {} baseline values by remote readback",
+                "已在目标机上回读核对 {} 项基线值，都与预期一致。",
                 changes.len()
             )
         } else {
-            mismatches.join("; ")
+            format!("回读与预期不符——{}。", mismatches.join("；"))
         },
     }
 }
@@ -5610,6 +5618,48 @@ mod tests {
         operations::JournalPhase,
         ssh::{SshConnectionStatus, TestSessionHarness},
     };
+
+    /// The readback is shown to the operator as is when it fails, so it names
+    /// the setting the way the page does and says what differs in Chinese.
+    #[test]
+    fn a_failed_readback_names_the_setting_and_the_difference_in_chinese() {
+        let change = |item_id: &str| PlannedBaselineChange {
+            item_id: item_id.to_owned(),
+            before: BaselineObservedValue::Value("yes".to_owned()),
+            after: "no".to_owned(),
+            file: String::new(),
+        };
+        let status = |value: &str| BaselineStatus {
+            item_id: "ssh-permit-root-login".to_owned(),
+            observed: BaselineObservedValue::Value(value.to_owned()),
+            compliant: false,
+            source_file: "/etc/ssh/sshd_config".to_owned(),
+        };
+
+        let passed = verify_expected(&[status("no")], &[change("ssh-permit-root-login")], false);
+        assert!(passed.passed);
+        assert_eq!(
+            passed.detail,
+            "已在目标机上回读核对 1 项基线值，都与预期一致。"
+        );
+
+        let failed = verify_expected(&[status("yes")], &[change("ssh-permit-root-login")], false);
+        assert!(!failed.passed);
+        assert_eq!(
+            failed.detail,
+            "回读与预期不符——禁止 root 直接登录：期望 no，回读到 yes。"
+        );
+
+        // A setting the scan did not return, under an id no longer in the
+        // catalogue: still said, by its id, rather than dropped.
+        let missing = verify_expected(&[], &[change("retired-item")], false);
+        assert!(!missing.passed);
+        assert_eq!(
+            missing.detail,
+            "回读与预期不符——retired-item：期望 no，但这次检查没有读到这一项。"
+        );
+        assert!(!missing.detail.is_ascii());
+    }
 
     #[derive(Debug)]
     struct TestRoot(PathBuf);

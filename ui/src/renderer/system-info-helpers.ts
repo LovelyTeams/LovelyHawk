@@ -207,6 +207,66 @@ export function groupShellConfigRows(table: SystemInfoTable): ShellConfigFile[] 
   return files;
 }
 
+/** Which levels a table shows: everything, anything marked, or only the worst. */
+export type SystemInfoRiskFilter = "all" | "attention" | "high";
+
+/** What an operator narrowed one tab down to. Kept per tab, cleared with the target. */
+export interface SystemInfoRowFilter {
+  /** Words to find; every one has to appear, in any searched cell. */
+  query: string;
+  /** The one column to search, or null for every shown column. */
+  column: number | null;
+  risk: SystemInfoRiskFilter;
+}
+
+export const EMPTY_SYSTEM_INFO_FILTER: SystemInfoRowFilter = Object.freeze({
+  query: "",
+  column: null,
+  risk: "all",
+});
+
+export function isSystemInfoFilterActive(filter: SystemInfoRowFilter): boolean {
+  return filter.query.trim() !== "" || filter.risk !== "all";
+}
+
+/**
+ * The rows a filter keeps, in their collected order.
+ *
+ * Case-insensitive, and every whitespace-separated word must match somewhere
+ * — `sshd root` finds the root sshd, not every row with either word. A word
+ * can match a different cell from the next one, because "process and user"
+ * spans columns. Cells are searched as the text shown, never interpreted.
+ * `searchable` leaves out columns the table does not show.
+ */
+export function filterSystemInfoRows(
+  rows: readonly SystemInfoRow[],
+  filter: SystemInfoRowFilter,
+  searchable: (index: number) => boolean = () => true,
+): SystemInfoRow[] {
+  const terms = filter.query.trim().toLocaleLowerCase().split(/\s+/u).filter((term) => term !== "");
+  return rows.filter((row) => {
+    if (filter.risk === "high" && row.risk !== "high") return false;
+    if (filter.risk === "attention" && row.risk === "normal") return false;
+    if (terms.length === 0) return true;
+    const cells = filter.column === null
+      ? row.cells.filter((_, index) => searchable(index))
+      : [row.cells[filter.column] ?? ""];
+    const haystack = cells.map((cell) => cell.toLocaleLowerCase());
+    return terms.every((term) => haystack.some((cell) => cell.includes(term)));
+  });
+}
+
+/** How many rows each level filter would keep, for the buttons that choose one. */
+export function systemInfoRiskCounts(rows: readonly SystemInfoRow[]): Record<SystemInfoRiskFilter, number> {
+  let attention = 0;
+  let high = 0;
+  for (const row of rows) {
+    if (row.risk !== "normal") attention += 1;
+    if (row.risk === "high") high += 1;
+  }
+  return { all: rows.length, attention, high };
+}
+
 /** One row as tab-separated plain text, the same shape the table copy uses. */
 export function buildSystemInfoRowCopy(row: SystemInfoRow): string {
   return boundedClipboardText(row.cells.map(plainCell).join("\t"));

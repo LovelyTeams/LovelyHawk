@@ -1,4 +1,9 @@
-.ai-history-page { min-height: calc(100vh - var(--titlebar-height) - 64px); }
+/* The page fills the window, as 主机全景 does: the record list and the text
+   each scroll on their own instead of growing the page, so a long history
+   no longer pushes the panels under the status bar. */
+.ai-history-page { display: flex; height: 100%; min-height: 520px; flex-direction: column; }
+.ai-history-background { display: flex; min-height: 0; flex: 1; flex-direction: column; }
+.ai-history-background > * { flex: none; }
 .ai-history-heading { margin-bottom: 17px; }
 .ai-history-actions { display: flex; flex: none; gap: 7px; }
 .ai-history-actions button,
@@ -9,7 +14,7 @@
 .ai-history-notice { margin-bottom: 12px; padding: 9px 12px; color: var(--success-text); background: var(--success-soft); border: 1px solid var(--success-border); border-radius: 8px; font-size: var(--font-small); }
 .ai-history-notice.error,
 .ai-history-detail-state.error { color: var(--danger-text); background: var(--danger-soft); border-color: var(--danger-border); }
-.ai-history-workbench { display: grid; min-height: 610px; grid-template-columns: 350px minmax(0, 1fr); overflow: hidden; background: var(--surface); border: 1px solid var(--border); border-radius: 15px; box-shadow: var(--shadow-sm); }
+.ai-history-workbench { display: grid; min-height: 0; flex: 1 1 auto; grid-template-columns: 350px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); overflow: hidden; background: var(--surface); border: 1px solid var(--border); border-radius: 15px; box-shadow: var(--shadow-sm); }
 .ai-history-list-panel { display: flex; min-height: 0; flex-direction: column; padding: 12px; background: var(--surface-alt); border-right: 1px solid var(--border); }
 .ai-history-search { display: flex; align-items: center; gap: 7px; min-height: 38px; padding: 0 10px; color: var(--accent-text); background: var(--surface); border: 1px solid var(--border); border-radius: 9px; }
 .ai-history-search input { min-width: 0; flex: 1; background: transparent; border: 0; outline: 0; font-size: var(--font-small); }

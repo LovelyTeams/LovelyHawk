@@ -22,6 +22,7 @@ import {
 import "./ai-history.css";
 import { useModalScrim } from "./modal-scrim";
 import { planExpiryLabel } from "./plan-expiry";
+import { SearchIcon } from "./file-icons";
 
 export interface AiHistoryPageProps {
   api: AiHistoryApi;
@@ -241,7 +242,7 @@ export function AiHistoryPage({ api, writeClipboard }: AiHistoryPageProps) {
 
         <div className="ai-history-workbench">
           <aside className="ai-history-list-panel">
-            <label className="ai-history-search"><span aria-hidden="true">⌕</span><input aria-label="搜索 AI 历史" value={state.query} maxLength={256} placeholder="搜索服务商、模型、来源或正文" onChange={(event) => dispatch({ type: "query-changed", query: event.currentTarget.value })} /></label>
+            <label className="ai-history-search"><SearchIcon /><input aria-label="搜索 AI 历史" value={state.query} maxLength={256} placeholder="搜索服务商、模型、来源或正文" onChange={(event) => dispatch({ type: "query-changed", query: event.currentTarget.value })} /></label>
             <div className="ai-history-list" aria-busy={state.listStatus === "loading"}>
               {state.listStatus === "loading" && state.page === null ? <p className="ai-history-empty">正在读取 AI 历史…</p> : null}
               {state.listStatus === "ready" && state.page?.items.length === 0 ? <p className="ai-history-empty">{state.query.trim() === "" ? "还没有 AI 记录。本机保存的 AI 分析记录会列在这里，可以搜索、复制和导出。" : "没有匹配的 AI 记录，换个服务商、模型或正文里的词试试。"}</p> : null}

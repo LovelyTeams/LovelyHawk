@@ -238,7 +238,9 @@ impl RowAction {
                     | ServiceRuntimeAction::Disable
                     | ServiceRuntimeAction::Mask
             ),
-            Self::UserAccount(action) => matches!(action, UserAccountAction::Lock),
+            Self::UserAccount(action) => {
+                matches!(action, UserAccountAction::Lock | UserAccountAction::Delete)
+            }
             _ => false,
         }
     }
@@ -293,8 +295,15 @@ impl RowAction {
             }
             SystemInfoTab::Users => {
                 actions.extend(UserInvestigationAction::ALL.map(Self::UserInspect));
+                // Deletion last, after the reversible lock; root and UID 0
+                // rows are refused by the core and so never offered it.
                 actions.extend(
-                    [UserAccountAction::Lock, UserAccountAction::Unlock].map(Self::UserAccount),
+                    [
+                        UserAccountAction::Lock,
+                        UserAccountAction::Unlock,
+                        UserAccountAction::Delete,
+                    ]
+                    .map(Self::UserAccount),
                 );
             }
             SystemInfoTab::LoginHistory => {

@@ -813,7 +813,7 @@ export function SftpBrowserTable({
             <span className={`sftp-browser-row-kind is-${entry.kind}`}>
               <EntryKindIcon kind={entry.kind} />
             </span>
-            <span className="sftp-browser-row-label">{entry.name}</span>
+            <span className="sftp-browser-row-label" title={entry.name}>{entry.name}</span>
             {entry.nameTruncated ? <em>名称已截断</em> : null}
           </span>
           <span className="sftp-browser-row-size" title={entry.kind === "directory" ? undefined : displaySftpBytes(entry.sizeBytes)}>
