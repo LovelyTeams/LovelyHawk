@@ -420,3 +420,10 @@
 .sftp-browser-transfer.is-running button { flex: none; padding: 3px 9px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); background: var(--surface); font-size: var(--font-caption); cursor: pointer; }
 .sftp-browser-transfer.is-running button:disabled { cursor: not-allowed; opacity: .55; }
 .sftp-browser-transfer.is-error { border-color: var(--danger-border); color: var(--danger-text); background: var(--danger-soft); overflow-wrap: anywhere; }
+
+/* Where reopening an expired list brought the operator back to, or why it stopped short. */
+.sftp-browser-return {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-caption);
+}

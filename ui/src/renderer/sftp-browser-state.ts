@@ -33,6 +33,12 @@ export interface SftpBrowserState {
   directory: SftpDirectorySnapshot | null;
   directoryError: string | null;
   rootDirectoryHandle: string | null;
+  /**
+   * The names of the folders from the start directory down to the one shown,
+   * as the listings named them; null when one of them was cut short, so the
+   * way back cannot be told.
+   */
+  trail: string[] | null;
   selectedEntryHandle: string | null;
   previewStatus: SftpBrowserLoadStatus;
   previewRequest: SftpPreviewRequest | null;
@@ -50,6 +56,7 @@ export function createSftpBrowserState(scope: string | null = null): SftpBrowser
     directory: null,
     directoryError: null,
     rootDirectoryHandle: null,
+    trail: null,
     selectedEntryHandle: null,
     previewStatus: "idle",
     previewRequest: null,
@@ -93,6 +100,7 @@ export function sftpBrowserReducer(
         directory: action.request.mode === "open" ? null : state.directory,
         directoryError: null,
         rootDirectoryHandle: action.request.mode === "open" ? null : state.rootDirectoryHandle,
+        trail: action.request.mode === "open" ? null : state.trail,
         selectedEntryHandle: action.request.mode === "open" ? null : state.selectedEntryHandle,
         ...emptyPreview(),
       };
@@ -110,6 +118,7 @@ export function sftpBrowserReducer(
         directoryError: null,
         rootDirectoryHandle: action.request.mode === "open"
           ? action.directory.directoryHandle : state.rootDirectoryHandle,
+        trail: nextTrail(state, action.request),
         selectedEntryHandle,
         ...emptyPreview(),
       };
@@ -123,6 +132,7 @@ export function sftpBrowserReducer(
         directory: action.request.mode === "open" ? null : state.directory,
         directoryError: action.error,
         rootDirectoryHandle: action.request.mode === "open" ? null : state.rootDirectoryHandle,
+        trail: action.request.mode === "open" ? null : state.trail,
         selectedEntryHandle: action.request.mode === "open" ? null : state.selectedEntryHandle,
         ...emptyPreview(),
       };
@@ -166,6 +176,52 @@ export function sftpBrowserReducer(
         previewError: action.error,
       };
   }
+}
+
+/**
+ * Where a listing that just arrived sits, from where the one on screen was:
+ * the same folder again, its parent, the start directory, or one of its
+ * folders.
+ */
+function nextTrail(state: SftpBrowserState, request: SftpDirectoryRequest): string[] | null {
+  if (request.mode === "open") return [];
+  const current = state.directory;
+  const trail = state.trail;
+  if (current === null || request.directoryHandle === null) return null;
+  if (request.directoryHandle === current.directoryHandle) return trail;
+  if (request.directoryHandle === state.rootDirectoryHandle) return [];
+  if (request.directoryHandle === current.parentDirectoryHandle) {
+    return trail === null || trail.length === 0 ? null : trail.slice(0, -1);
+  }
+  const entry = current.entries.find((candidate) => candidate.entryHandle === request.directoryHandle);
+  if (trail === null || entry === undefined || entry.nameTruncated) return null;
+  return trail.length >= SFTP_TRAIL_MAXIMUM_DEPTH ? null : [...trail, entry.name];
+}
+
+/** Deeper than this, the way back is not kept: each step is one more listing. */
+export const SFTP_TRAIL_MAXIMUM_DEPTH = 32;
+
+/** A trail as a path, for saying where something is. */
+export function sftpTrailPath(trail: readonly string[]): string {
+  return `/${trail.join("/")}`;
+}
+
+export type SftpReturnStep =
+  | { kind: "enter"; entryHandle: string }
+  | { kind: "missing" }
+  | { kind: "ambiguous" };
+
+/**
+ * The next step back down to a folder after reopening: the one folder in this
+ * listing with that exact name. Two with the same shown name (or one whose
+ * name was cut short) cannot be told apart, so the walk stops there rather
+ * than guess.
+ */
+export function sftpReturnStep(directory: SftpDirectorySnapshot, name: string): SftpReturnStep {
+  const matches = directory.entries.filter((entry) => entry.name === name && entry.action === "browse");
+  if (matches.length === 0) return { kind: "missing" };
+  if (matches.length > 1 || matches[0]!.nameTruncated) return { kind: "ambiguous" };
+  return { kind: "enter", entryHandle: matches[0]!.entryHandle };
 }
 
 function validDirectoryRequest(state: SftpBrowserState, request: SftpDirectoryRequest): boolean {

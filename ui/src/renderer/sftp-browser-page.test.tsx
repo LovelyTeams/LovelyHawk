@@ -185,7 +185,11 @@ describe("SftpBrowserPage", () => {
     expect(source).toContain("setReopenVersion((version) => version + 1)");
     expect(source).toContain("disabled={busy || downloading !== null}");
     expect(source).toContain("if (listStale) return void setWindowError(");
-    expect(source).toContain("目录列表已过期，点“重新打开”从起始目录重新读取");
+    expect(source).toContain("目录列表已过期，点“重新打开”重新读取并回到这个文件夹");
+    // Reopening walks back by the new browser's own listings, never by the old handles.
+    expect(source).toContain("expiredBrowser: directory.browserHandle");
+    expect(source).toContain("const step = sftpReturnStep(current, next);");
+    expect(source).toContain("browserHandle: current.browserHandle,");
   });
 
   it("uses global theme tokens with no color literals", () => {

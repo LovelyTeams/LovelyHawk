@@ -53,11 +53,26 @@ import {
 import {
   createSftpBrowserState,
   sftpBrowserReducer,
+  sftpReturnStep,
+  sftpTrailPath,
   type SftpBrowserLoadStatus,
   type SftpDirectoryRequest,
   type SftpPreviewRequest,
 } from "./sftp-browser-state";
 import "./sftp-browser.css";
+
+/** The way back to a folder after reopening the browser. */
+interface SftpReturn {
+  scope: string;
+  /** The folder names from the start directory down to where the operator was. */
+  target: string[];
+  /** The names still to enter. */
+  remaining: string[];
+  /** The browser that expired; its listing may still be on screen for a moment. */
+  expiredBrowser: string;
+  /** The folder whose listing the walk waits for; null for the reopened start directory. */
+  awaiting: string | null;
+}
 
 export interface SftpBrowserConnection {
   scopeKey: string;
@@ -114,6 +129,10 @@ export function SftpBrowserPage({
   // The backend said this browser is gone (expired or closed): listing again
   // cannot help, only opening a new one can.
   const [browserGone, setBrowserGone] = useState(false);
+  // Reopening walks back down to the folder that was on screen, one listing
+  // of the new browser at a time.
+  const [returning, setReturning] = useState<SftpReturn | null>(null);
+  const [returnNotice, setReturnNotice] = useState<string | null>(null);
   const scope = connection === null ? null : sftpBrowserScope(connection);
   const enabled = active && connection !== null;
   const visibleState = state.scope === scope ? state : createSftpBrowserState(scope);
@@ -183,7 +202,7 @@ export function SftpBrowserPage({
         scope,
         request,
         error: gone
-          ? "目录列表已过期（超过 5 分钟没有读取目录），点“重新打开”从起始目录重新读取。"
+          ? "目录列表已过期（超过 5 分钟没有读取目录），点“重新打开”重新读取并回到这个文件夹。"
           : targetFailureMessage(reason, "目录读取失败；目录入口可能已过期、目标已切换、权限不足或条目已变化。"),
       });
     });
@@ -215,6 +234,61 @@ export function SftpBrowserPage({
     };
   }, [api, enabled, pendingPreview, scope]);
 
+  // One step of the way back after reopening, each time the listing it
+  // waits for arrives. Every step is an ordinary listing of a folder the new
+  // browser just listed; where the name is gone or cannot be told apart, the
+  // walk stops there and says so.
+  useEffect(() => {
+    if (returning === null) return;
+    if (returning.scope !== scope || !enabled) {
+      setReturning(null);
+      return;
+    }
+    const current = visibleState.directory;
+    const status = visibleState.directoryStatus;
+    // Until the new browser's first listing arrives, the expired one may still be on screen.
+    const fresh = current !== null && current.browserHandle !== returning.expiredBrowser;
+    if (status === "error" && (current === null || fresh)) {
+      setReturning(null);
+      return;
+    }
+    if (status !== "ready" || current === null || !fresh) return;
+    const arrived = returning.awaiting === null
+      ? current.parentDirectoryHandle === null
+      : current.directoryHandle === returning.awaiting;
+    if (!arrived) return;
+    const reached = returning.target.slice(0, returning.target.length - returning.remaining.length);
+    const trail = visibleState.trail;
+    if (trail === null || trail.length !== reached.length || trail.some((name, index) => name !== reached[index])) {
+      setReturning(null);
+      return;
+    }
+    const next = returning.remaining[0];
+    if (next === undefined) {
+      setReturning(null);
+      setReturnNotice(`已回到重新打开前所在的 ${sftpTrailPath(returning.target)}。`);
+      return;
+    }
+    const step = sftpReturnStep(current, next);
+    if (step.kind !== "enter") {
+      setReturning(null);
+      setReturnNotice(step.kind === "missing"
+        ? `没能回到 ${sftpTrailPath(returning.target)}：${sftpTrailPath(reached)} 里已经没有“${next}”这个文件夹（可能已被删除、改名或无权查看），停在这里。`
+        : `没能回到 ${sftpTrailPath(returning.target)}：${sftpTrailPath(reached)} 里有不止一个显示为“${next}”的文件夹，分不清是哪个，停在这里。`);
+      return;
+    }
+    setReturning({ ...returning, remaining: returning.remaining.slice(1), awaiting: step.entryHandle });
+    setPendingDirectory({
+      scope: returning.scope,
+      request: {
+        id: ++requestRef.current,
+        mode: "list",
+        browserHandle: current.browserHandle,
+        directoryHandle: step.entryHandle,
+      },
+    });
+  }, [enabled, returning, scope, visibleState.directory, visibleState.directoryStatus, visibleState.trail]);
+
   if (connection === null) {
     return (
       <main className="sftp-browser-page sftp-browser-disconnected">
@@ -244,19 +318,31 @@ export function SftpBrowserPage({
   const listStale = directory !== null && (listExpiry.expired || browserGone);
   const staleTitle = listStale ? "目录列表已过期，先点“重新打开”" : undefined;
 
-  /** A new browser from the start directory: the expired one cannot be renewed. */
+  /**
+   * A new browser from the start directory: the expired one cannot be
+   * renewed. It then walks back down to the folder that was on screen.
+   */
   function reopenBrowser() {
     if (busy || downloading !== null) return;
     setPendingDirectory(null);
     setPendingPreview(null);
     setWindowError(null);
     setBrowserGone(false);
+    const trail = visibleState.trail;
+    setReturnNotice(trail === null && directory !== null && directory.parentDirectoryHandle !== null
+      ? "原来所在的文件夹没能完整记下（名字被截短或层级太深），重新打开后从起始目录开始。"
+      : null);
+    setReturning(trail !== null && trail.length > 0 && directory !== null
+      ? { scope: connectedScope, target: trail, remaining: trail, expiredBrowser: directory.browserHandle, awaiting: null }
+      : null);
     setReopenVersion((version) => version + 1);
   }
 
   function requestDirectory(directoryHandle: string) {
     if (directory === null || busy) return;
     if (listStale) return reopenBrowser();
+    setReturning(null);
+    setReturnNotice(null);
     setPendingPreview(null);
     setWindowError(null);
     setPendingDirectory({
@@ -524,7 +610,7 @@ export function SftpBrowserPage({
         {listStale ? (
           <button type="button" className="sftp-browser-action is-attention" data-testid="sftp-reopen"
             disabled={busy || downloading !== null}
-            title={downloading !== null ? "等下载结束或取消后再重新打开" : "目录列表已过期，从起始目录重新读取"}
+            title={downloading !== null ? "等下载结束或取消后再重新打开" : "目录列表已过期，重新读取并回到这个文件夹"}
             onClick={reopenBrowser}>
             <RefreshIcon />重新打开
           </button>
@@ -581,6 +667,13 @@ export function SftpBrowserPage({
         <>
           {visibleState.directoryStatus === "error" && <SftpBrowserError
             message={visibleState.directoryError ?? "目录读取失败。"} compact />}
+          {returning !== null ? (
+            <p className="sftp-browser-return" role="status" data-testid="sftp-return">
+              正在回到重新打开前所在的 {sftpTrailPath(returning.target)}…
+            </p>
+          ) : returnNotice !== null ? (
+            <p className="sftp-browser-return" role="status" data-testid="sftp-return">{returnNotice}</p>
+          ) : null}
           <div className="sftp-browser-panes">
             <LocalFilePane
               api={api}
@@ -648,7 +741,7 @@ export function SftpBrowserPage({
                 </span>
                 {listStale ? (
                   <span className="sftp-browser-expired" role="status" data-testid="sftp-list-expired">
-                    目录列表已过期，点“重新打开”从起始目录重新读取
+                    目录列表已过期，点“重新打开”重新读取并回到这个文件夹
                   </span>
                 ) : (
                   <span title="每次读取目录都会重新计时；超过这个时间再操作会被拒绝，刷新目录即可继续。">

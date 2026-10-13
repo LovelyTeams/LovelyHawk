@@ -4,10 +4,13 @@
 // has to say so when it happens — not when the next click is refused — turn
 // off what would be refused, and offer the one thing that helps: opening the
 // browser again. This waits out the five minutes once, idle, and checks all
-// three, then reopens. Nothing on the lab host is changed.
+// three, then reopens: the new browser walks back down to the folder that was
+// on screen. The probe makes three empty folders under /tmp on the lab host
+// for that, and removes them afterwards.
 //
-//   LAB=ubuntu node ui/scripts/probe-sftp-expiry.mjs
+//   LAB=super node ui/scripts/probe-sftp-expiry.mjs
 
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -29,6 +32,15 @@ function check(name, ok, detail = null) {
   console.log(`${ok ? "PASS" : "FAIL"} ${name}${detail === null ? "" : ` — ${JSON.stringify(detail).slice(0, 400)}`}`);
 }
 fs.mkdirSync(evidence, { recursive: true });
+
+/** A command in the lab container, as root; only for the probe's own folders under /tmp. */
+function onHost(command) {
+  return execFileSync("wsl.exe", ["-d", "Ubuntu", "-u", "root", "-e", "docker", "exec", `lab-${lab}`, "sh", "-c", command],
+    { encoding: "utf8", windowsHide: true, timeout: 60_000 }).trim();
+}
+const folder = `lh-return-${randomUUID().slice(0, 8)}`;
+const deepPath = `/tmp/${folder}/inner/deep`;
+onHost(`mkdir -p ${deepPath}`);
 
 const sidecar = new Sidecar(backendBinary(), runRoot);
 try {
@@ -85,6 +97,12 @@ try {
       throw error;
     });
 
+  // Down to the probe's folder, three levels below /tmp.
+  for (const name of [folder, "inner", "deep"]) {
+    await waitFor(() => terminal.evaluate(`(() => { const candidate = ${row(name)}; if (!candidate || candidate.disabled) return false; candidate.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); return true; })()`), { timeoutMs: 30_000, label: `the ${name} folder` });
+    await waitFor(() => terminal.evaluate(`${remotePath} === ${JSON.stringify(name)}`), { timeoutMs: 30_000, label: `${name} listed` });
+  }
+
   const fresh = await terminal.evaluate(toolbar);
   check("a fresh listing says how long it is good for, and every action is on", /约 5 分钟内有效/u.test(fresh.footer) && fresh.refresh && !fresh.expired && fresh.upload === false && fresh.newFolder === false, fresh);
   await terminal.screenshot(path.join(evidence, "sftp-fresh.png"));
@@ -99,13 +117,24 @@ try {
 
   await terminal.evaluate("document.querySelector('[data-testid=\"sftp-reopen\"]').click(), true");
   await waitFor(() => terminal.evaluate("document.querySelector('[data-testid=\"sftp-list-expired\"]') === null && (document.querySelector('section[aria-label=\"远程文件\"] .sftp-browser-pane-foot')?.textContent ?? '').includes('分钟内有效')"), { timeoutMs: 30_000, label: "the reopened browser" }).catch(() => undefined);
+  const returned = await waitFor(() => terminal.evaluate(`(() => {
+    const notice = document.querySelector('[data-testid="sftp-return"]')?.textContent ?? '';
+    return notice.startsWith('已回到') ? { path: ${remotePath} ?? null, notice } : null;
+  })()`), { timeoutMs: 30_000, label: "the walk back" }).catch(async () => terminal.evaluate(`({
+    path: ${remotePath} ?? null, notice: document.querySelector('[data-testid="sftp-return"]')?.textContent ?? null,
+  })`));
+  check("and walks back down to the folder that was on screen, saying so",
+    returned.path === "deep" && returned.notice === `已回到重新打开前所在的 ${deepPath}。`, returned);
+  // Read once the walk has settled: each step's listing turns the actions off while it loads.
   const reopened = await terminal.evaluate(toolbar);
-  check("重新打开 reads the start directory again and everything is back on", !reopened.expired && reopened.refresh && reopened.upload === false && /约 5 分钟内有效/u.test(reopened.footer), reopened);
-  // And the new browser really works: entering a directory lists it.
-  const entered = await waitFor(() => terminal.evaluate(`(() => { const candidate = ${row("tmp")}; if (!candidate) return false; candidate.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); return true; })()`), { timeoutMs: 30_000, label: "tmp after reopening" })
-    .then(() => waitFor(() => terminal.evaluate(`${remotePath} === 'tmp'`), { timeoutMs: 30_000, label: "/tmp again" }))
-    .then(() => true).catch(() => false);
-  check("the reopened browser lists directories again", entered);
+  check("重新打开 reads the directory list again and everything is back on", !reopened.expired && reopened.refresh && reopened.upload === false && /约 5 分钟内有效/u.test(reopened.footer), reopened);
+  await terminal.screenshot(path.join(evidence, "sftp-returned.png"));
+  // And the new browser really works from there: up one level lists inner.
+  const up = await terminal.evaluate("(() => { const button = document.querySelector('section[aria-label=\"远程文件\"] button[aria-label=\"上一级\"]'); if (!button || button.disabled) return false; button.click(); return true; })()");
+  const listedUp = up && await waitFor(() => terminal.evaluate(`${remotePath} === 'inner'`), { timeoutMs: 30_000, label: "inner after going up" })
+    .then(() => true, () => false);
+  check("the reopened browser lists directories again", listedUp);
+  check("and moving on clears the notice", await terminal.evaluate("document.querySelector('[data-testid=\"sftp-return\"]') === null"));
   await terminal.screenshot(path.join(evidence, "sftp-reopened.png"));
   check("no console errors in the terminal window", errors.length === 0, errors.slice(0, 3));
   await main.evaluate("document.querySelector('[data-testid=\"window-close\"]').click(), true");
@@ -116,6 +145,11 @@ try {
   console.error(output.join("").slice(-3_000));
 } finally {
   if (exitCode === null) child.kill();
+  try {
+    onHost(`rm -rf /tmp/${folder}`);
+  } catch (error) {
+    console.error(`could not remove /tmp/${folder}: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 const failed = checks.filter((entry) => !entry.ok);

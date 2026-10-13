@@ -16,7 +16,11 @@ import {
 } from "./sftp-browser-helpers";
 import {
   createSftpBrowserState,
+  SFTP_TRAIL_MAXIMUM_DEPTH,
   sftpBrowserReducer,
+  sftpReturnStep,
+  sftpTrailPath,
+  type SftpBrowserState,
   type SftpDirectoryRequest,
   type SftpPreviewRequest,
 } from "./sftp-browser-state";
@@ -177,5 +181,61 @@ describe("sftp browser helpers and state", () => {
       request: { ...openRequest, id: 3 }, error: "fixed" });
     expect(openError.directory).toBeNull();
     expect(openError.rootDirectoryHandle).toBeNull();
+  });
+
+  it("keeps the folder names from the start directory to the one shown", () => {
+    let id = 10;
+    const list = (state: SftpBrowserState, directory: SftpDirectorySnapshot) => {
+      const request: SftpDirectoryRequest = {
+        id: ++id, mode: "list", browserHandle: directory.browserHandle, directoryHandle: directory.directoryHandle,
+      };
+      const started = sftpBrowserReducer(state, { type: "directory-started", scope, request });
+      return sftpBrowserReducer(started, { type: "directory-loaded", scope, request, directory });
+    };
+    const deeper: SftpDirectorySnapshot = {
+      ...child,
+      entries: [{ ...entries[0]!, entryHandle: "deep-handle", name: "nginx" }],
+    };
+    const deep: SftpDirectorySnapshot = {
+      ...root, directoryHandle: "deep-handle", parentDirectoryHandle: "dir-handle", directoryLabel: "nginx", entries: [],
+    };
+    let state = loadedRoot();
+    expect(state.trail).toEqual([]);
+    state = list(state, deeper);
+    expect(state.trail).toEqual(["配置目录"]);
+    state = list(state, deep);
+    expect(state.trail).toEqual(["配置目录", "nginx"]);
+    expect(sftpTrailPath(state.trail!)).toBe("/配置目录/nginx");
+    // Listing the same folder again keeps it; up one drops a name; home empties it.
+    expect(list(state, deep).trail).toEqual(["配置目录", "nginx"]);
+    expect(list(state, deeper).trail).toEqual(["配置目录"]);
+    expect(list(state, root).trail).toEqual([]);
+
+    // A name cut short cannot be walked back to, nor can anything below it.
+    const cut = list(loadedRoot(), deeper);
+    const truncatedParent = { ...cut, directory: { ...deeper, entries: [{ ...deeper.entries[0]!, nameTruncated: true }] } };
+    const lost = list(truncatedParent, deep);
+    expect(lost.trail).toBeNull();
+    expect(list(lost, { ...deep, directoryHandle: "deep-handle" }).trail).toBeNull();
+    // A new browser starts the trail over; a failed open forgets it.
+    expect(sftpBrowserReducer(state, { type: "directory-started", scope, request: { ...openRequest, id: 99 } }).trail).toBeNull();
+    expect(SFTP_TRAIL_MAXIMUM_DEPTH).toBeGreaterThan(8);
+  });
+
+  it("walks back only into the one folder with exactly that name", () => {
+    const listing = (named: SftpBrowserEntry[]): SftpDirectorySnapshot => ({ ...root, entries: named });
+    const folder = (handle: string, name: string, extra: Partial<SftpBrowserEntry> = {}): SftpBrowserEntry =>
+      ({ ...entries[0]!, entryHandle: handle, name, ...extra });
+    expect(sftpReturnStep(listing([folder("a", "log"), folder("b", "lib")]), "log"))
+      .toEqual({ kind: "enter", entryHandle: "a" });
+    // Gone, or only a file or an unfollowed link of that name.
+    expect(sftpReturnStep(listing([folder("b", "lib")]), "log")).toEqual({ kind: "missing" });
+    expect(sftpReturnStep(listing([{ ...entries[1]!, name: "log" }, { ...entries[2]!, name: "log" }]), "log"))
+      .toEqual({ kind: "missing" });
+    // Names are compared exactly: no case folding, no trimming.
+    expect(sftpReturnStep(listing([folder("a", "Log"), folder("c", "log ")]), "log")).toEqual({ kind: "missing" });
+    // Two shown the same way, or one cut short, cannot be told apart.
+    expect(sftpReturnStep(listing([folder("a", "log"), folder("d", "log")]), "log")).toEqual({ kind: "ambiguous" });
+    expect(sftpReturnStep(listing([folder("a", "log", { nameTruncated: true })]), "log")).toEqual({ kind: "ambiguous" });
   });
 });
