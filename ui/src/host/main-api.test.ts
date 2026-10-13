@@ -42,7 +42,7 @@ describe("main window API", () => {
   it("is frozen and keeps the method count the renderer was built against", () => {
     const api = createMainApi();
     expect(Object.isFrozen(api)).toBe(true);
-    expect(Object.keys(api)).toHaveLength(164);
+    expect(Object.keys(api)).toHaveLength(165);
   });
 
   it("refuses bad arity and bad shapes before anything reaches the host", async () => {
@@ -62,6 +62,7 @@ describe("main window API", () => {
       setWindowTheme: [{ theme: "neon", scrim: false }],
       writeClipboard: ["x".repeat(128 * 1_024 + 1)],
       nginxRepair: [{ action: "discover", bindingHandle: "b", command: "injected" }],
+      logRules: [{ action: "add", name: "x", pattern: "x", severity: "low", path: "/etc" }],
       caseLibrary: [{ action: "export", snapshotHandle: "s", selectedDestination: "C:\\x.json" }],
       fileEvidence: [{ action: "begin", bindingHandle: "b", pathHandle: "p", selectedDirectory: "C:\\" }],
       packetCaptureEvidence: [{

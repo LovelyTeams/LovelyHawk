@@ -458,7 +458,9 @@ describe("EmergencyCommandsPage", () => {
       .filter((name) => name.endsWith(".tsx") && !name.includes(".test."))
       .filter((name) => /className="[^"]*emergency-path-(?:backdrop|dialog|menu)\b/u
         .test(readFileSync(new URL(name, directory), "utf8")));
-    expect(users.sort()).toEqual(["EmergencyPathDialog.tsx", "EmergencyPathMenu.tsx", "FileEvidenceDialog.tsx"]);
+    expect(users.sort()).toEqual([
+      "EmergencyPathDialog.tsx", "EmergencyPathMenu.tsx", "FileEvidenceDialog.tsx", "LogRulesDialog.tsx",
+    ]);
     for (const name of users) {
       expect(readFileSync(new URL(name, directory), "utf8"), name).toContain('import "./emergency-path.css";');
     }

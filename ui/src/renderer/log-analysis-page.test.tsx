@@ -12,6 +12,7 @@ import type {
 } from "../shared/log-analysis-read-contract";
 import type { FileEvidenceApi } from "../shared/file-evidence-contract";
 import { logEvidenceOffer } from "./log-analysis-read-helpers";
+import type { LogRulesApi } from "./log-rule-hits";
 import {
   EmptyPanel,
   ErrorPanel,
@@ -20,6 +21,7 @@ import {
   LogIocResultsView,
   LogPagination,
   LogResultCopy,
+  LogRuleSummary,
   LogSourceBranch,
   logAnalysisFailureMessage,
   logDiscoveryGap,
@@ -29,12 +31,13 @@ import {
 } from "./LogAnalysisPage";
 
 const hostile = "</pre><script>steal()</script><img src=x onerror=steal()>";
-const api: LogAnalysisReadApi & FileEvidenceApi = {
+const api: LogAnalysisReadApi & FileEvidenceApi & LogRulesApi = {
   discoverLogSources: async () => { throw new Error(); },
   readLogSource: async () => { throw new Error(); },
   correlateLogSources: async () => { throw new Error(); },
   searchLogIocs: async () => { throw new Error(); },
   fileEvidence: async () => { throw new Error(); },
+  logRules: async () => { throw new Error(); },
 };
 
 const entry: PublicLogEntry = {
@@ -380,5 +383,28 @@ describe("copying a log result", () => {
       onCopy: () => undefined,
     }} />);
     expect(failed).toMatch(/class="is-failed" role="alert">复制失败/u);
+  });
+});
+
+describe("the operator's match rules on a page", () => {
+  const hit = { id: "log-rule-0f8fad5b-d9cb-469f-a165-70867728950e", name: "webshell", severity: "high" as const };
+
+  it("marks a matched line at its start, with the rule's name and level", () => {
+    const html = renderToStaticMarkup(<LogEntriesView entries={[entry, { ...entry, rawText: "plain" }]} empty="none"
+      hits={{ hits: [hit, null], ruleCount: 1, failed: false }} />);
+    // The fixture line is also flagged suspicious; the two marks sit side by side.
+    expect(html).toMatch(/<p class="is-abnormal has-rule"><span class="log-analysis-rule-hit is-high" data-testid="log-analysis-rule-hit" title="命中你的规则「webshell」，级别高">webshell<\/span>/u);
+    expect(html.match(/data-testid="log-analysis-rule-hit"/gu)).toHaveLength(1);
+  });
+
+  it("says how many lines the rules marked, or that none did, or that it could not tell", () => {
+    expect(renderToStaticMarkup(<LogRuleSummary hits={null} />)).toBe("");
+    expect(renderToStaticMarkup(<LogRuleSummary hits={{ hits: [null], ruleCount: 0, failed: false }} />)).toBe("");
+    expect(renderToStaticMarkup(<LogRuleSummary hits={{ hits: [hit, null, hit], ruleCount: 3, failed: false }} />))
+      .toContain("2 行命中你的匹配规则，已在行首标出。");
+    expect(renderToStaticMarkup(<LogRuleSummary hits={{ hits: [null], ruleCount: 3, failed: false }} />))
+      .toContain("这些行没有命中你的 3 条匹配规则。");
+    expect(renderToStaticMarkup(<LogRuleSummary hits={{ hits: [null], ruleCount: 0, failed: true }} />))
+      .toContain("没能用匹配规则比对这些行");
   });
 });

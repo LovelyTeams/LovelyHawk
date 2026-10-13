@@ -1415,6 +1415,12 @@
    "command": "pnpm ui:check; pnpm desktop:build; LAB=super node tools/lab/probe-ui-log-analysis.mjs",
    "result": "Passed",
    "notes": "Exporting analysis results, as the GPUI page's 导出报告 did: each of the three views (日志浏览, 多源关联, IOC 搜索) offers 复制分析结果 once it has a result, which puts a plain-text report on the host clipboard (ui/src/renderer/log-analysis-report.ts). The report says when it was copied with the local offset, which sources by name and location, the read conditions (keyword, date, journal unit for the journal only), the page and its bounds, the threat summary said as an estimate from the lines read and not a verdict on the host, every line with suspicious ones marked, the IOCs searched and the ones that matched nothing, any truncation, and that the read was read-only and covers only what was read. Remote text stays as written (nothing masked) with line breaks flattened and control and bidi characters replaced; a report keeps its head and closing note whole and drops lines from the end to stay inside the host's 128 KiB clipboard bound, saying how many. The notice beside the button says what was copied; failures are alerts. Results: UI 133 files / 1100 tests (new: report contents, hostile text, the clipboard bound, unknown sources, IOC misses, time zone; the copy control's markup); probe-ui-log-analysis all checks passed on lab-super, now also driving the correlation and IOC views in the real window for the first time — two planted logs correlated (201 lines observed), an IOC search with one planted indicator and one absent, and each copy read back through the debug clipboard hook. NOT_RUN: phase 2 rules and AI analysis are not built; journald, permission-denied sources and VMs remain."
+  },
+  {
+   "id": "desktop-log-rules-2026-10-13",
+   "command": "cargo test --locked -p lovelyhawk-backend; cargo test --locked -p lovelyhawk-desktop; cargo clippy --locked -p lovelyhawk-backend --all-targets --no-deps -- -D warnings; pnpm ui:check; pnpm release:source-gate; pnpm desktop:build; pnpm desktop:test:debug; LAB=super node tools/lab/probe-ui-log-analysis.mjs",
+   "result": "Passed",
+   "notes": "Log analysis phase 2 rules, as the GPUI page's 规则 tab had them, over core's existing LogAnalysisService rules (list_rules, add_rule, match_rules, plan_remove_rule / execute_remove_rule). New backend method log.rules (crates/lovelyhawk-backend/src/log_rules_api.rs): list, add, match, plan-remove, confirm-remove, cancel-remove; local only, nothing reaches a target. Matching is core's, on the lines a page already read, with the same case-insensitive regex engine that validated each pattern, at most 500 lines of 16 KiB per call; removal is permanent and runs through a plan the operator confirms, five-minute expiry, journalled and read back. Each refusal has its own code and a Chinese reason (invalid or duplicate name, pattern that does not compile, 128 rules, plan used or expired, rule gone). Wired through the main-window allowlist, ui/src/shared/log-rules-contract.ts (exact request shapes, answers checked against each request, one match per line asked), BackendClient.logRules and window.lovelyhawk.logRules (165 methods). The page: 匹配规则 in the toolbar opens a dialog listing the rules with their level and pattern, a form to add one, and 删除… through the in-app confirmation showing the plan; lines on the browse and correlation views are matched once read and whenever the rules change, a matched line carries the rule's name coloured by level, a line above says how many matched, and copied reports mark them. Results: backend 768 tests (new: the whole RPC flow and every refusal code), desktop 36, clippy clean; UI 134 files / 1106 tests (new: contract shapes and byte bounds, rule marks and summary, report marks); desktop debug smoke 95/95 with 165 methods; probe-ui-log-analysis all checks passed on lab-super — a rule saved, an uncompilable pattern refused with its reason, focus back on the toolbar button, the line already on the page marked case-insensitively without reading it again, the copy carrying the mark, the removal confirmation naming the rule, its pattern, that it cannot be undone and the five-minute window, the rule removed and checked gone, and the line's mark gone with it. NOT_RUN: AI analysis is not built; journald, permission-denied sources and VMs remain."
   }
  ],
  "foundations": [
@@ -1945,7 +1951,8 @@
      "crates/lovelyhawk-backend/src/log_analysis_read_api.rs over core LogAnalysisService",
      "Keeping a listed log file as evidence: discovery offers each file whose shown location is its whole path through the shared path offers (PathOfferSource::LogAnalysis), and 留存这个日志文件 opens the same file-evidence dialog the command workbench uses (raw bytes, source host, time, SHA-256, case link). No handle for the journal or a location cut short.",
      "Export of analysis results: 复制分析结果 in the browse, correlation and IOC views copies a plain-text report (source, conditions, bounds, threat summary, lines, IOC misses, truncation) through the host clipboard",
-     "Pending: phase 2 rules and AI analysis; journal sources have not been read on a host that runs journald"
+     "Match rules: log.rules (list, add, match, plan-remove, confirm-remove, cancel-remove) over core's rule store; 匹配规则 dialog, matched lines marked with the rule on the browse and correlation views and in copied reports, removal through a confirmed plan",
+     "Pending: AI analysis; journal sources have not been read on a host that runs journald"
     ]
    },
    "status": "Pending",
@@ -1977,7 +1984,8 @@
      "desktop-quality-gate-2026-10-11o",
      "desktop-ui-polish-2026-10-11",
      "desktop-ui-polish-2026-10-13",
-     "desktop-log-analysis-copy-2026-10-13"
+     "desktop-log-analysis-copy-2026-10-13",
+     "desktop-log-rules-2026-10-13"
     ]
    }
   },

@@ -154,4 +154,27 @@ describe("log analysis reports", () => {
   it("writes the time with its zone", () => {
     expect(formatReportTime(copiedAt)).toMatch(/^2026-10-13 15:04:05（本机时间，UTC[+-]\d{2}:\d{2}）$/u);
   });
+
+  it("carries the operator's rule marks into the report", () => {
+    const hit = { id: "log-rule-0f8fad5b-d9cb-469f-a165-70867728950e", name: "webshell", severity: "high" as const };
+    const report = buildLogReadReport({
+      source: source("auth", "access.log", "/var/log/nginx/access.log"),
+      filter: { keyword: "", date: "", journalUnit: "" },
+      result: read([entry("GET /up.php?c=eval(1)"), entry("GET /")]),
+      copiedAt,
+      hits: [hit, null],
+    });
+    expect(report.text).toContain("匹配规则：1 行命中你的规则，已在行内标出");
+    expect(report.text).toContain("1. [规则：webshell（高）] GET /up.php?c=eval(1)");
+    expect(report.text).toContain("2. GET /");
+    // No rule fired: nothing is said about rules at all.
+    const quietReport = buildLogReadReport({
+      source: source("auth", "access.log", "/var/log/nginx/access.log"),
+      filter: { keyword: "", date: "", journalUnit: "" },
+      result: read([entry("GET /")]),
+      copiedAt,
+      hits: [null],
+    });
+    expect(quietReport.text).not.toContain("匹配规则");
+  });
 });

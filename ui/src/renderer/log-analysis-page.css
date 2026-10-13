@@ -902,3 +902,184 @@
   font-size: var(--font-caption);
   text-align: center;
 }
+
+/* The operator's own match rules ------------------------------------------ */
+
+.log-analysis-rules-open {
+  display: inline-flex;
+  flex: none;
+  min-height: 34px;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: var(--font-small);
+  white-space: nowrap;
+}
+
+/* The rule's name at the start of a line it matched, coloured by its level. */
+.log-analysis-rule-hit {
+  display: inline-block;
+  flex: none;
+  max-width: 14em;
+  overflow: hidden;
+  padding: 0 7px;
+  border: 1px solid var(--info-border);
+  border-radius: 999px;
+  color: var(--info-text);
+  background: var(--info-soft);
+  font-family: inherit;
+  font-size: var(--font-caption);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-analysis-rule-hit.is-medium {
+  border-color: var(--warning-border);
+  color: var(--warning-text);
+  background: var(--warning-soft);
+}
+
+.log-analysis-rule-hit.is-high,
+.log-analysis-rule-hit.is-critical {
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+  background: var(--danger-soft);
+}
+
+.log-analysis-rule-hit.is-critical {
+  font-weight: 750;
+}
+
+.log-analysis-gutter span.has-rule {
+  color: var(--warning-text);
+  font-weight: 700;
+}
+
+.log-analysis-rule-summary {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-small);
+}
+
+.log-analysis-rule-summary.is-failed {
+  color: var(--warning-text);
+}
+
+/* The rules dialog: wider than a confirmation, a list and a form. */
+.emergency-path-dialog.log-rules-dialog {
+  width: min(720px, 100%);
+}
+
+.log-rules-dialog > p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-small);
+  line-height: 1.6;
+}
+
+.log-rules-dialog code {
+  font-family: "Cascadia Mono", monospace;
+  font-size: var(--font-caption);
+}
+
+.log-rules-list {
+  display: flex;
+  max-height: 260px;
+  margin: 0;
+  padding: 0;
+  flex-direction: column;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  list-style: none;
+  scrollbar-width: thin;
+}
+
+.log-rules-list li {
+  display: grid;
+  flex: none;
+  align-items: center;
+  grid-template-columns: auto minmax(0, 10em) minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--font-small);
+}
+
+.log-rules-list li:last-child {
+  border-bottom: 0;
+}
+
+.log-rules-list strong {
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-rules-list li code {
+  overflow: hidden;
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-rules-list li button {
+  padding: 4px 10px;
+  font-size: var(--font-caption);
+  white-space: nowrap;
+}
+
+.log-rules-form {
+  display: grid;
+  align-items: end;
+  grid-template-columns: minmax(0, 10em) minmax(0, 1fr) auto auto;
+  gap: 8px 10px;
+}
+
+.log-rules-form label {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--muted);
+  font-size: var(--font-caption);
+}
+
+.log-rules-form input,
+.log-rules-form select {
+  min-height: 34px;
+  padding: 6px 9px;
+  font-size: var(--font-small);
+}
+
+.log-rules-form label:nth-child(2) input {
+  font-family: "Cascadia Mono", monospace;
+}
+
+.log-rules-form button {
+  min-height: 34px;
+  padding: 6px 14px;
+  white-space: nowrap;
+}
+
+.log-rules-empty,
+.log-rules-notice {
+  margin: 0;
+  font-size: var(--font-small);
+}
+
+.log-rules-empty {
+  color: var(--muted);
+}
+
+.log-rules-notice {
+  color: var(--success-text);
+}
+
+@media (max-width: 760px) {
+  .log-rules-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

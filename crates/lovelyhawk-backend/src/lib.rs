@@ -28,6 +28,7 @@ mod kubernetes_pod_evidence_api;
 mod kubernetes_read_api;
 mod kubernetes_write_api;
 mod log_analysis_read_api;
+mod log_rules_api;
 mod nginx_repair_api;
 mod notes_api;
 mod packet_capture_evidence_api;
@@ -98,6 +99,7 @@ use crate::{
         LogAnalysisReadApi, LogAnalysisReadApiError, LogCorrelationInput, LogIocSearchInput,
         LogSourceReadInput,
     },
+    log_rules_api::{LogRulesApi, LogRulesApiError, LogRulesRequest},
     nginx_repair_api::{NginxRepairApi, NginxRepairError, NginxRepairRequest},
     notes_api::{NotesApi, NotesApiError},
     packet_capture_evidence_api::{
@@ -182,6 +184,7 @@ const NOTE_REPLAY_TTL: Duration = Duration::from_secs(10 * 60);
 pub struct BackendState {
     services: BackendServices,
     ai_history: AiHistoryApi,
+    log_rules: LogRulesApi,
     baseline_read: BaselineReadApi,
     baseline_write: baseline_write_api::BaselineWriteApi,
     check_audit_read: CheckAuditReadApi,
@@ -331,6 +334,7 @@ impl BackendState {
         Ok(Self {
             services,
             ai_history: AiHistoryApi::default(),
+            log_rules: LogRulesApi::default(),
             baseline_read,
             baseline_write,
             check_audit_read,
@@ -1101,6 +1105,15 @@ impl BackendState {
                     Err(failure) => Err(failure),
                 }
             }
+            RpcMethod::LogRules => match parse_params::<LogRulesRequest>(request.params) {
+                Ok(params) => self
+                    .log_rules
+                    .dispatch(&self.services, params)
+                    .await
+                    .map(Ok)
+                    .map_err(log_rules_failure),
+                Err(failure) => Err(failure),
+            },
             RpcMethod::NginxRepair => match parse_params::<NginxRepairRequest>(request.params) {
                 Ok(params) => self
                     .nginx_repair
@@ -2775,6 +2788,8 @@ enum RpcMethod {
     BaselineCatalogGet,
     #[serde(rename = "baseline.scan")]
     BaselineScan,
+    #[serde(rename = "log.rules")]
+    LogRules,
     #[serde(rename = "nginx.repair")]
     NginxRepair,
     #[serde(rename = "java.hot-update")]
@@ -5386,6 +5401,66 @@ fn java_hot_update_failure(error: JavaHotUpdateError) -> RpcFailure {
     }
 }
 
+/// Each refusal says what to change, in the operator's language.
+fn log_rules_failure(error: LogRulesApiError) -> RpcFailure {
+    let (operation, code, public_message) = match error {
+        LogRulesApiError::Core(source) => {
+            return RpcFailure::core(
+                "run log match rule operation",
+                "log-rules-operation-failed",
+                "没能完成日志匹配规则的操作，详细原因见应用日志。",
+                source,
+            );
+        }
+        LogRulesApiError::InvalidName => (
+            "validate log rule name",
+            "log-rule-name-invalid",
+            "规则名称不能为空、不能含控制字符，最长 128 字节。",
+        ),
+        LogRulesApiError::InvalidPattern => (
+            "validate log rule pattern",
+            "log-rule-pattern-invalid",
+            "匹配模式不是有效的正则表达式，或超过 1024 字节。",
+        ),
+        LogRulesApiError::DuplicateName => (
+            "validate log rule name",
+            "log-rule-name-taken",
+            "已经有同名的规则（不区分大小写），换一个名称。",
+        ),
+        LogRulesApiError::Capacity => (
+            "bound log match rules",
+            "log-rules-full",
+            "规则已经满 128 条，先删掉不用的再添加。",
+        ),
+        LogRulesApiError::InvalidLines => (
+            "bound log rule matching",
+            "invalid-params",
+            "要匹配的日志行超出了一页的上限。",
+        ),
+        LogRulesApiError::NotFound => (
+            "find log match rule",
+            "log-rule-not-found",
+            "这条规则已经不在了，刷新规则列表再看。",
+        ),
+        LogRulesApiError::InvalidPlan => (
+            "consume log rule removal plan",
+            "log-rule-plan-invalid",
+            "删除计划已过期或已经用过，请重新发起删除。",
+        ),
+        LogRulesApiError::PlanCapacity => (
+            "bound log rule removal plans",
+            "log-rule-plan-capacity",
+            "等待确认的删除太多了，先处理掉已经打开的确认。",
+        ),
+    };
+    RpcFailure {
+        operation,
+        code,
+        public_message,
+        source: None,
+    }
+}
+
 fn nginx_repair_failure(error: NginxRepairError) -> RpcFailure {
     let (code, public_message) = match error {
         NginxRepairError::Invalid => ("invalid-params", "请求无效或尚未确认此计划。"),
@@ -6573,6 +6648,161 @@ mod tests {
             r#"{{"protocol":"{PROTOCOL_VERSION}","requestId":"request-1","method":"{method}","params":{params}}}"#
         )
         .into_bytes()
+    }
+
+    #[tokio::test]
+    async fn log_rules_rpc_saves_matches_and_removes_only_through_a_confirmed_plan() {
+        async fn rules(state: &BackendState, params: serde_json::Value) -> RpcResponse {
+            handle_frame(state, &request("log.rules", &params.to_string())).await
+        }
+        fn code(response: RpcResponse) -> String {
+            assert!(!response.ok);
+            response.error.unwrap().code.to_owned()
+        }
+        let root = TestRoot::new();
+        let state = BackendState::open(root.0.clone()).unwrap();
+
+        let empty = rules(&state, serde_json::json!({ "action": "list" }))
+            .await
+            .result
+            .unwrap();
+        assert_eq!(empty, serde_json::json!({ "rules": [], "maximum": 128 }));
+        let added = rules(&state, serde_json::json!({
+            "action": "add", "name": "webshell", "pattern": r"eval\(|base64_decode", "severity": "high",
+        }))
+        .await
+        .result
+        .unwrap();
+        let id = added["id"].as_str().unwrap().to_owned();
+        assert!(id.starts_with("log-rule-"));
+        assert_eq!(added["severity"], "high");
+
+        // Each refusal has its own code, so the page can say what to change.
+        for (params, expected) in [
+            (
+                serde_json::json!({ "action": "add", "name": "WebShell", "pattern": "x", "severity": "low" }),
+                "log-rule-name-taken",
+            ),
+            (
+                serde_json::json!({ "action": "add", "name": "broken", "pattern": "(", "severity": "low" }),
+                "log-rule-pattern-invalid",
+            ),
+            (
+                serde_json::json!({ "action": "add", "name": "  ", "pattern": "x", "severity": "low" }),
+                "log-rule-name-invalid",
+            ),
+            (
+                serde_json::json!({ "action": "add", "name": "x", "pattern": "x", "severity": "extreme" }),
+                "invalid-params",
+            ),
+            (
+                serde_json::json!({ "action": "add", "name": "x", "pattern": "x", "severity": "low", "path": "/etc" }),
+                "invalid-params",
+            ),
+            (serde_json::json!({ "action": "export" }), "invalid-params"),
+            (
+                serde_json::json!({ "action": "match", "lines": vec!["x"; 501] }),
+                "invalid-params",
+            ),
+            (
+                serde_json::json!({ "action": "plan-remove", "id": "not-a-rule" }),
+                "log-rule-not-found",
+            ),
+        ] {
+            assert_eq!(
+                code(rules(&state, params.clone()).await),
+                expected,
+                "{params}"
+            );
+        }
+
+        // Matching is core's, case-insensitive, first rule wins, one answer per line.
+        let matched = rules(&state, serde_json::json!({
+            "action": "match",
+            "lines": ["GET /up.php?c=eval(base64_decode('aGk='))", "an ordinary line", "EVAL(1)"],
+        }))
+        .await
+        .result
+        .unwrap();
+        assert_eq!(matched["ruleCount"], 1);
+        assert_eq!(matched["matches"][0]["name"], "webshell");
+        assert_eq!(matched["matches"][0]["id"], id.as_str());
+        assert!(matched["matches"][1].is_null());
+        assert_eq!(matched["matches"][2]["severity"], "high");
+
+        // Removing: a cancelled plan cannot be confirmed afterwards.
+        let plan = rules(
+            &state,
+            serde_json::json!({ "action": "plan-remove", "id": id }),
+        )
+        .await
+        .result
+        .unwrap();
+        assert!(plan["summary"].as_str().unwrap().contains("webshell"));
+        assert!(plan["summary"].as_str().unwrap().contains("不可恢复"));
+        let handle = plan["handle"].as_str().unwrap().to_owned();
+        let cancelled = rules(
+            &state,
+            serde_json::json!({ "action": "cancel-remove", "handle": handle }),
+        )
+        .await;
+        assert_eq!(cancelled.result.unwrap()["cancelled"], true);
+        assert_eq!(
+            code(
+                rules(
+                    &state,
+                    serde_json::json!({ "action": "confirm-remove", "handle": handle })
+                )
+                .await
+            ),
+            "log-rule-plan-invalid"
+        );
+        assert_eq!(
+            rules(&state, serde_json::json!({ "action": "list" }))
+                .await
+                .result
+                .unwrap()["rules"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+
+        let plan = rules(
+            &state,
+            serde_json::json!({ "action": "plan-remove", "id": id }),
+        )
+        .await
+        .result
+        .unwrap();
+        let removed = rules(
+            &state,
+            serde_json::json!({ "action": "confirm-remove", "handle": plan["handle"] }),
+        )
+        .await
+        .result
+        .unwrap();
+        assert_eq!(
+            removed,
+            serde_json::json!({ "ruleId": id, "verified": true })
+        );
+        assert_eq!(
+            rules(&state, serde_json::json!({ "action": "list" }))
+                .await
+                .result
+                .unwrap()["rules"],
+            serde_json::json!([])
+        );
+        assert_eq!(
+            code(
+                rules(
+                    &state,
+                    serde_json::json!({ "action": "plan-remove", "id": id })
+                )
+                .await
+            ),
+            "log-rule-not-found"
+        );
     }
 
     #[tokio::test]

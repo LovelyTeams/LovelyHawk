@@ -55,6 +55,8 @@ const SCROLL_LISTS: Record<string, string> = {
   ".java-jars": ".java-jars li",
   ".java-classes": ".java-classes li",
   ".java-dialog": ".java-dialog > *",
+  // The saved log match rules, listed in their dialog.
+  ".log-rules-list": ".log-rules-list li",
 };
 
 function rule(css: string, selector: string): string {

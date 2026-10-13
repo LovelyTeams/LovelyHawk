@@ -345,6 +345,75 @@ try {
   check("the notice says what was copied", await session.evaluate("document.querySelector('.log-analysis-result-actions p').textContent"),
     "已复制本页 1 条日志和威胁摘要（纯文本）。");
 
+  // The operator's own match rules: saved locally, matched by core against the
+  // lines already on the page, marked where they matched, and removed only
+  // through a confirmed plan. The rule is named for this run so nothing a
+  // previous run left can be mistaken for it.
+  const ruleName = `probe-${Date.now().toString(36)}`;
+  await session.evaluate("document.querySelector('[data-testid=\"log-analysis-rules-open\"]').click(), true");
+  await waitFor(session, "document.querySelector('[data-testid=\"log-rules-dialog\"]') !== null && !document.querySelector('[data-testid=\"log-rules-dialog\"] header p').textContent.includes('正在读取')", "the rules dialog");
+  await session.evaluate(`(() => {
+    const dialog = document.querySelector('[data-testid="log-rules-dialog"]');
+    const [name, pattern] = dialog.querySelectorAll('.log-rules-form input');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(name, ${JSON.stringify(ruleName)}); name.dispatchEvent(new Event('input', { bubbles: true }));
+    setter.call(pattern, 'API_KEY=akia[0-9]+'); pattern.dispatchEvent(new Event('input', { bubbles: true }));
+    const select = dialog.querySelector('.log-rules-form select');
+    const pick = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
+    pick.call(select, 'high'); select.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  })()`);
+  await session.evaluate("document.querySelector('.log-rules-form button[type=submit]').click(), true");
+  await waitFor(session, `[...document.querySelectorAll('.log-rules-list li strong')].some(s => s.textContent === ${JSON.stringify(ruleName)})`, "the saved rule");
+  check("a rule is saved and listed", await session.evaluate("document.querySelector('.log-rules-notice')?.textContent ?? ''"), `已保存规则「${ruleName}」。`);
+  // A pattern core cannot compile is refused with a reason, not saved.
+  await session.evaluate(`(() => {
+    const [name, pattern] = document.querySelectorAll('.log-rules-form input');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(name, 'broken'); name.dispatchEvent(new Event('input', { bubbles: true }));
+    setter.call(pattern, '(unclosed'); pattern.dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector('.log-rules-form button[type=submit]').click();
+    return true;
+  })()`);
+  await waitFor(session, "document.querySelector('[data-testid=\"log-rules-dialog\"] [role=alert]') !== null", "the refusal");
+  check("a pattern that does not compile is refused with the reason",
+    await session.evaluate("document.querySelector('[data-testid=\"log-rules-dialog\"] [role=alert]').textContent"),
+    "匹配模式不是有效的正则表达式，或超过 1024 字节。");
+  await shot(session, "log-rules-dialog");
+  await session.evaluate("[...document.querySelectorAll('[data-testid=\"log-rules-dialog\"] footer button')].find(b => b.textContent === '关闭').click(), true");
+  await waitFor(session, "document.querySelector('[data-testid=\"log-rules-dialog\"]') === null", "the rules dialog to close");
+  check("closing it hands focus back to its button", await session.evaluate("document.activeElement?.dataset.testid ?? ''"), "log-analysis-rules-open");
+
+  // The line already on the page is matched without reading it again.
+  await waitFor(session, "document.querySelector('[data-testid=\"log-analysis-rule-hit\"]') !== null", "the rule mark");
+  check("the matching line is marked with the rule, case-insensitively",
+    await session.evaluate("document.querySelector('[data-testid=\"log-analysis-rule-hit\"]').textContent"), ruleName);
+  check("the page says how many lines it marked",
+    await session.evaluate("document.querySelector('[data-testid=\"log-analysis-rule-summary\"]')?.textContent ?? ''"),
+    "1 行命中你的匹配规则，已在行首标出。");
+  app.clearClipboard();
+  await session.evaluate("document.querySelector('[data-testid=\"log-analysis-copy\"]').click(), true");
+  await waitFor(session, "document.querySelector('.log-analysis-result-actions p')?.textContent.includes('已复制') === true", "the copy with rule marks");
+  check("the copy carries the rule mark", (app.readClipboard() ?? "").includes(`[规则：${ruleName}（高）]`));
+  await shot(session, "log-rule-hit");
+
+  // Removing it: the plan is shown in a confirmation, and only then is it gone.
+  await session.evaluate("document.querySelector('[data-testid=\"log-analysis-rules-open\"]').click(), true");
+  await waitFor(session, `[...document.querySelectorAll('.log-rules-list li strong')].some(s => s.textContent === ${JSON.stringify(ruleName)})`, "the listed rule");
+  await session.evaluate(`[...document.querySelectorAll('.log-rules-list li')].find(li => li.querySelector('strong').textContent === ${JSON.stringify(ruleName)}).querySelector('button').click(), true`);
+  await waitFor(session, "document.querySelector('.dialog-host') !== null", "the removal confirmation");
+  const question = await session.evaluate("document.querySelector('.dialog-host').textContent");
+  check("the confirmation names the rule, its pattern and that it cannot be undone",
+    question.includes(ruleName) && question.includes("API_KEY=akia[0-9]+") && question.includes("不可恢复") && question.includes("5 分钟"));
+  await session.evaluate("[...document.querySelectorAll('.dialog-host button')].find(b => b.textContent.trim() === '删除').click(), true");
+  await waitFor(session, "document.querySelector('.log-rules-notice')?.textContent.includes('已删除') === true", "the removal");
+  check("the rule is removed and checked gone", await session.evaluate("document.querySelector('.log-rules-notice').textContent"),
+    `已删除规则「${ruleName}」，并核对它已不在。`);
+  check("and is no longer listed", await session.evaluate(`[...document.querySelectorAll('.log-rules-list li strong')].every(s => s.textContent !== ${JSON.stringify(ruleName)})`));
+  await session.evaluate("[...document.querySelectorAll('[data-testid=\"log-rules-dialog\"] footer button')].find(b => b.textContent === '关闭').click(), true");
+  await waitFor(session, "document.querySelector('[data-testid=\"log-analysis-rule-hit\"]') === null", "the mark to go");
+  check("the line's mark goes with the rule", true);
+
   // Keeping the open log as evidence: the whole file, byte for byte, with
   // where it came from — through the same file-evidence dialog the command
   // workbench uses, by the handle discovery gave this source.

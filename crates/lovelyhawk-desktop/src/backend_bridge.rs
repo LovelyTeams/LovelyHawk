@@ -57,6 +57,7 @@ const MAIN_WINDOW_METHODS: &[&str] = &[
     "baseline.action.execute",
     "baseline.action.cancel",
     "nginx.repair",
+    "log.rules",
     "java.hot-update",
     "postgresql.runtime",
     "emergency.file-evidence",

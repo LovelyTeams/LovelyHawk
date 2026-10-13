@@ -47,6 +47,14 @@ import {
   TagIcon,
 } from "./emergency-command-icons";
 import { CopyIcon } from "./file-icons";
+import { LogRulesDialog } from "./LogRulesDialog";
+import {
+  logRuleHitCount,
+  logRuleSeverityLabel,
+  useLogRuleHits,
+  type LogRuleHits,
+  type LogRulesApi,
+} from "./log-rule-hits";
 import { LogSourceIcon } from "./log-source-icon";
 import {
   buildLogCorrelationReport,
@@ -107,7 +115,7 @@ export function logAnalysisFailureMessage(reason: unknown, fallback: string): st
 export interface LogAnalysisPageProps {
   bindingHandle: string | null;
   /** A listed log file can be kept as evidence, so the file evidence API comes too. */
-  api: LogAnalysisReadApi & FileEvidenceApi;
+  api: LogAnalysisReadApi & FileEvidenceApi & LogRulesApi;
   /** Where a copied report goes: the app clipboard, or a test's own. */
   writeClipboard?: (text: string) => Promise<void>;
 }
@@ -132,6 +140,11 @@ const initialFilter: LogReadFilter = { keyword: "", date: "", journalUnit: "" };
 export function LogAnalysisPage({ bindingHandle, api, writeClipboard }: LogAnalysisPageProps) {
   const [state, dispatch] = useReducer(logAnalysisReadReducer, undefined, createLogAnalysisReadState);
   const [copyNotice, setCopyNotice] = useState<CopyNotice | null>(null);
+  // The saved match rules: their dialog, and a version that changes with them.
+  const [rulesDialog, setRulesDialog] = useState<{ returnFocus: HTMLElement | null } | null>(null);
+  const [rulesVersion, setRulesVersion] = useState(0);
+  const readHits = useLogRuleHits(api, state.read?.entries ?? null, rulesVersion);
+  const correlationHits = useLogRuleHits(api, state.correlation?.entries ?? null, rulesVersion);
   const [snapshotVersion, setSnapshotVersion] = useState(0);
   const [readVersion, setReadVersion] = useState(0);
   const [draftFilter, setDraftFilter] = useState<LogReadFilter>(initialFilter);
@@ -357,6 +370,11 @@ export function LogAnalysisPage({ bindingHandle, api, writeClipboard }: LogAnaly
             `共 ${sources.length} 个日志源` : `${visible.length}/${sources.length} 个日志源`}</span>}
           {state.snapshot !== null && <span className="log-analysis-expiry"><ClockIcon />日志源列表约 {
             Math.max(1, Math.ceil(state.snapshot.expiresInSeconds / 60))} 分钟有效</span>}
+          <button type="button" className="log-analysis-rules-open" data-testid="log-analysis-rules-open"
+            title="管理你自己的匹配规则：读到的日志行命中时会就地标出"
+            onClick={(event) => setRulesDialog({ returnFocus: event.currentTarget })}>
+            <TagIcon />匹配规则
+          </button>
           <button type="button" className="log-analysis-reload"
             disabled={!stateIsCurrent || state.snapshotStatus === "loading" || busy}
             onClick={() => setSnapshotVersion((value) => value + 1)}>
@@ -423,13 +441,14 @@ export function LogAnalysisPage({ bindingHandle, api, writeClipboard }: LogAnaly
                   result={state.read}
                   page={state.page}
                   onPage={(page) => dispatch({ type: "page-selected", page })}
+                  hits={readHits}
                   copy={state.read === null || state.read.sourceHandle !== selectedSource.sourceHandle ? null : {
                     notice: copyNotice?.tab === "browse" ? copyNotice : null,
                     onCopy: () => {
                       const result = state.read;
                       if (result === null) return;
                       void copyReport("browse", () => buildLogReadReport({
-                        source: selectedSource, filter: state.appliedFilter, result, copiedAt: new Date(),
+                        source: selectedSource, filter: state.appliedFilter, result, copiedAt: new Date(), hits: readHits?.hits,
                       }), `本页 ${result.entries.length} 条日志和威胁摘要`);
                     },
                   }}
@@ -442,13 +461,14 @@ export function LogAnalysisPage({ bindingHandle, api, writeClipboard }: LogAnaly
                 error={state.correlationError}
                 result={state.correlation}
                 onRun={runCorrelation}
+                hits={correlationHits}
                 copy={state.correlation === null ? null : {
                   notice: copyNotice?.tab === "correlation" ? copyNotice : null,
                   onCopy: () => {
                     const result = state.correlation;
                     if (result === null) return;
                     void copyReport("correlation", () => buildLogCorrelationReport({
-                      sources: state.snapshot?.sources ?? [], result, copiedAt: new Date(),
+                      sources: state.snapshot?.sources ?? [], result, copiedAt: new Date(), hits: correlationHits?.hits,
                     }), `关联出的 ${result.entries.length} 条日志和威胁摘要`);
                   },
                 }}
@@ -481,6 +501,8 @@ export function LogAnalysisPage({ bindingHandle, api, writeClipboard }: LogAnaly
           </section>
         </div>
       )}
+      {rulesDialog !== null ? <LogRulesDialog api={api} returnFocus={rulesDialog.returnFocus}
+        onChanged={() => setRulesVersion((value) => value + 1)} onClose={() => setRulesDialog(null)} /> : null}
       {kept !== null && kept.binding === bindingHandle ? <FileEvidenceDialog
         key={`${kept.binding}:${kept.offer.pathHandle}`} api={api} binding={kept.binding}
         offer={kept.offer} returnFocus={kept.returnFocus} onClose={() => setKept(null)} /> : null}
@@ -570,7 +592,7 @@ export function LogResultCopy({ copy }: { copy: ResultCopy }) {
   );
 }
 
-function BrowseView({ source, onKeep, draftFilter, onDraftFilter, queryError, onApply, status, error, result, page, onPage, copy }: {
+function BrowseView({ source, onKeep, draftFilter, onDraftFilter, queryError, onApply, status, error, result, page, onPage, hits, copy }: {
   source: LogSource;
   /** Null when this source cannot be kept as a file: the journal, or a location shown cut short. */
   onKeep: ((returnFocus: HTMLElement | null) => void) | null;
@@ -583,6 +605,7 @@ function BrowseView({ source, onKeep, draftFilter, onDraftFilter, queryError, on
   result: LogSourceReadResult | null;
   page: number;
   onPage(page: number): void;
+  hits: LogRuleHits | null;
   copy: ResultCopy | null;
 }) {
   return (
@@ -636,7 +659,8 @@ function BrowseView({ source, onKeep, draftFilter, onDraftFilter, queryError, on
             <>
               {copy !== null ? <LogResultCopy copy={copy} /> : null}
               <LogThreatCards summary={result.threatSummary} />
-              <LogEntriesView entries={result.entries} empty="当前页没有匹配日志。" />
+              <LogRuleSummary hits={hits} />
+              <LogEntriesView entries={result.entries} hits={hits} empty="当前页没有匹配日志。" />
               <LogPagination page={page} result={result} busy={status === "loading"} onPage={onPage} />
               {result.truncated && <p className="log-analysis-warning" role="status">
                 本页文本已按大小上限截断。
@@ -647,12 +671,13 @@ function BrowseView({ source, onKeep, draftFilter, onDraftFilter, queryError, on
   );
 }
 
-function CorrelationView({ selected, status, error, result, onRun, copy }: {
+function CorrelationView({ selected, status, error, result, onRun, hits, copy }: {
   selected: readonly string[];
   status: LogAnalysisStatus;
   error: string | null;
   result: LogCorrelationResult | null;
   onRun(): void;
+  hits: LogRuleHits | null;
   copy: ResultCopy | null;
 }) {
   return (
@@ -689,7 +714,8 @@ function CorrelationView({ selected, status, error, result, onRun, copy }: {
               {copy !== null ? <LogResultCopy copy={copy} /> : null}
               <p className="log-analysis-coverage">已观察 {result.totalObserved} 条</p>
               <LogThreatCards summary={result.threatSummary} />
-              <LogEntriesView entries={result.entries} empty="没有可展示的关联日志。" />
+              <LogRuleSummary hits={hits} />
+              <LogEntriesView entries={result.entries} hits={hits} empty="没有可展示的关联日志。" />
               {result.truncated && <p className="log-analysis-warning" role="status">
                 关联结果不代表未读取范围。
               </p>}
@@ -832,21 +858,53 @@ export function logLineMeta(entry: PublicLogEntry): { kind: "time" | "level" | "
   return meta;
 }
 
-export function LogEntriesView({ entries, empty }: { entries: readonly PublicLogEntry[]; empty: string }) {
+/** How many of the shown lines the operator's own rules marked, said once above them. */
+export function LogRuleSummary({ hits }: { hits: LogRuleHits | null }) {
+  if (hits === null || (!hits.failed && hits.ruleCount === 0)) return null;
+  if (hits.failed) {
+    return <p className="log-analysis-rule-summary is-failed" role="status">没能用匹配规则比对这些行，下面的行没有规则标记。</p>;
+  }
+  const count = logRuleHitCount(hits);
+  return (
+    <p className="log-analysis-rule-summary" role="status" data-testid="log-analysis-rule-summary">
+      {count === 0
+        ? `这些行没有命中你的 ${hits.ruleCount} 条匹配规则。`
+        : `${count} 行命中你的匹配规则，已在行首标出。`}
+    </p>
+  );
+}
+
+export function LogEntriesView({ entries, empty, hits = null }: {
+  entries: readonly PublicLogEntry[];
+  empty: string;
+  /** The operator's rules, matched against these same lines, one answer per line. */
+  hits?: LogRuleHits | null;
+}) {
   if (entries.length === 0) {
     return <EmptyPanel title={empty} detail="空结果不代表未调查范围没有事件。" compact />;
   }
+  const lineClass = (entry: PublicLogEntry, index: number): string | undefined => {
+    const names = [entry.highlighted ? "is-abnormal" : "", hits?.hits[index] ? "has-rule" : ""].filter(Boolean);
+    return names.length === 0 ? undefined : names.join(" ");
+  };
   return (
     <div className="log-analysis-output">
       <span className="log-analysis-gutter" aria-hidden="true">
         {entries.map((entry, index) => <span key={`${entry.timestamp}\0${index}`}
-          className={entry.highlighted ? "is-abnormal" : undefined}>{index + 1}</span>)}
+          className={lineClass(entry, index)}>{index + 1}</span>)}
       </span>
       <div className="log-analysis-lines">
         {entries.map((entry, index) => {
           const meta = logLineMeta(entry);
+          const hit = hits?.hits[index] ?? null;
           return (
-            <p key={`${entry.timestamp}\0${index}`} className={entry.highlighted ? "is-abnormal" : undefined}>
+            <p key={`${entry.timestamp}\0${index}`} className={lineClass(entry, index)}>
+              {hit === null ? null : (
+                <span className={`log-analysis-rule-hit is-${hit.severity}`} data-testid="log-analysis-rule-hit"
+                  title={`命中你的规则「${hit.name}」，级别${logRuleSeverityLabel(hit.severity)}`}>
+                  {hit.name}
+                </span>
+              )}
               {meta.length === 0 ? null : (
                 <span className="log-analysis-line-meta">
                   {meta.map((item) => item.kind === "time"

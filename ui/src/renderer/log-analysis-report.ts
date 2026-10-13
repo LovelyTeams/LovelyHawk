@@ -8,6 +8,8 @@ import type {
 } from "../shared/log-analysis-read-contract";
 import { logSourceKindLabel, logThreatLevelLabel } from "./log-analysis-read-helpers";
 import type { LogReadFilter } from "./log-analysis-read-state";
+import type { LogRuleHit } from "../shared/log-rules-contract";
+import { logRuleSeverityLabel } from "./log-rule-hits";
 
 /**
  * The host takes at most this much on the clipboard (MAX_CLIPBOARD_BYTES in
@@ -77,12 +79,27 @@ function threatLines(summary: LogThreatSummary): string[] {
   ];
 }
 
-function entryLine(entry: PublicLogEntry, index: number): string {
+/** The operator's rules as matched against the same lines, one answer per line. */
+type RuleHits = readonly (LogRuleHit | null)[] | null | undefined;
+
+function entryLines(entries: readonly PublicLogEntry[], hits: RuleHits): string[] {
+  return entries.map((entry, index) => entryLine(entry, index, hits?.[index] ?? null));
+}
+
+/** A line saying how many lines the operator's rules marked, when there are rules to speak of. */
+function ruleHitLine(hits: RuleHits): string[] {
+  if (hits === null || hits === undefined) return [];
+  const count = hits.filter((hit) => hit !== null).length;
+  return count === 0 ? [] : [`匹配规则：${count} 行命中你的规则，已在行内标出`];
+}
+
+function entryLine(entry: PublicLogEntry, index: number, hit: LogRuleHit | null): string {
   const text = entry.rawText !== ""
     ? entry.rawText
     : [entry.timestamp, entry.level, entry.service, entry.message].filter((part) => part !== "").join(" ");
   const parts = [`${index + 1}.`];
   if (entry.highlighted) parts.push("[可疑]");
+  if (hit !== null) parts.push(`[规则：${plainReportText(hit.name)}（${logRuleSeverityLabel(hit.severity)}）]`);
   if (entry.sourceName !== null && entry.sourceName !== "") parts.push(`[${plainReportText(entry.sourceName)}]`);
   parts.push(plainReportText(text) || "—");
   if (entry.textTruncated) parts.push("（这一行已截断）");
@@ -122,6 +139,7 @@ export function buildLogReadReport(input: {
   filter: LogReadFilter;
   result: LogSourceReadResult;
   copiedAt: Date;
+  hits?: RuleHits;
 }): LogReport {
   const { source, filter, result } = input;
   const conditions = [
@@ -139,11 +157,12 @@ export function buildLogReadReport(input: {
     `读取条件：${conditions.join("；")}`,
     `范围：第 ${result.page} 页，每页最多 ${result.pageSize} 条；本页 ${result.entryCount} 条，` +
       `其中 ${result.highlightedCount} 条标为可疑；${result.hasMore ? "后面还有更多" : "这是最后一页"}`,
+    ...ruleHitLine(input.hits),
     ...(result.truncated ? ["注意：本页文本已按大小上限截断。"] : []),
     "",
     ...threatLines(result.threatSummary),
   ];
-  return assemble(head, "## 日志（本页）", result.entries.map(entryLine), [
+  return assemble(head, "## 日志（本页）", entryLines(result.entries, input.hits), [
     `${READ_ONLY_NOTE}这里只有本页读到的行，不代表这个日志的全部；没有读到的部分没有发现，不等于没有事件。`,
   ]);
 }
@@ -153,6 +172,7 @@ export function buildLogCorrelationReport(input: {
   sources: readonly LogSource[];
   result: LogCorrelationResult;
   copiedAt: Date;
+  hits?: RuleHits;
 }): LogReport {
   const { result } = input;
   const byHandle = new Map(input.sources.map((source) => [source.sourceHandle, source]));
@@ -163,11 +183,12 @@ export function buildLogCorrelationReport(input: {
     `日志源（${result.sourceHandles.length} 个）：` +
       result.sourceHandles.map((handle) => sourceLine(byHandle.get(handle), handle)).join("、"),
     `范围：每源最多观察 200 行，共观察 ${result.totalObserved} 条，列出 ${result.entries.length} 条`,
+    ...ruleHitLine(input.hits),
     ...(result.truncated ? ["注意：结果已截断。"] : []),
     "",
     ...threatLines(result.threatSummary),
   ];
-  return assemble(head, "## 关联日志", result.entries.map(entryLine), [
+  return assemble(head, "## 关联日志", entryLines(result.entries, input.hits), [
     `${READ_ONLY_NOTE}关联只覆盖每个日志源读到的那一段，不代表未读取的范围。`,
   ]);
 }

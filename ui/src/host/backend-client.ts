@@ -2,6 +2,7 @@ import { utf8ByteLength, type BackendTransport } from "./transport.js";
 import { BACKEND_ERROR_MESSAGES } from "./error-messages.js";
 import { isJavaHotUpdateRequest, matchesJavaHotUpdateResponse, type JavaHotUpdateRequest, type JavaHotUpdateResponse } from "../shared/java-hot-update-contract.js";
 import { isNginxRepairRequest, matchesNginxRepairResponse, type NginxRepairRequest, type NginxRepairResponse } from "../shared/nginx-repair-contract.js";
+import { isLogRulesRequest, matchesLogRulesResponse, type LogRulesRequest, type LogRulesResponse } from "../shared/log-rules-contract.js";
 import { isPostgresqlRuntimeRequest, matchesPostgresqlRuntimeResponse, type PostgresqlRuntimeRequest, type PostgresqlRuntimeResponse } from "../shared/postgresql-runtime-contract.js";
 import { isFileEvidenceRequest, matchesFileEvidenceResult, type FileEvidenceRequest, type FileEvidenceResult } from "../shared/file-evidence-contract.js";
 import { isPacketCaptureEvidenceRequest, matchesPacketCaptureEvidenceResult, type PacketCaptureEvidenceRequest, type PacketCaptureEvidenceResult } from "../shared/packet-capture-evidence-contract.js";
@@ -721,6 +722,13 @@ export class BackendClient {
     // (the backend allows 300 s); everything else reads.
     const response = await this.#request("java.hot-update", request, request.action === "execute" ? 330_000 : 180_000);
     if (!matchesJavaHotUpdateResponse(request, response)) throw new Error("Java 热更新返回了无法核实的结果，请重新扫描。");
+    return response;
+  }
+
+  async logRules(request: LogRulesRequest): Promise<LogRulesResponse> {
+    if (!isLogRulesRequest(request)) throw new Error("日志匹配规则请求无效。");
+    const response = await this.#request("log.rules", request);
+    if (!matchesLogRulesResponse(request, response)) throw new Error("日志匹配规则返回了无法核实的结果，请刷新规则列表。");
     return response;
   }
 

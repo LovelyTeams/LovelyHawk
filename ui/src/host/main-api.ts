@@ -7,6 +7,7 @@ import { isPacketCaptureEvidenceRequest, matchesPacketCaptureEvidenceResult, typ
 import { isPodFileEvidenceRequest, matchesPodFileEvidenceResult, type PodFileEvidenceRequest } from "../shared/pod-file-evidence-contract.js";
 import { isConfigVisualCopyResult, isConfigVisualProduct, isConfigVisualRequest, isConfigVisualSaveResult, isConfigVisualView } from "../shared/config-visual-contract.js";
 import { isNginxRepairRequest } from "../shared/nginx-repair-contract.js";
+import { isLogRulesRequest } from "../shared/log-rules-contract.js";
 import { isJavaClassStageResult, isJavaHandle, isJavaHotUpdateRequest } from "../shared/java-hot-update-contract.js";
 import { isPostgresqlRuntimeRequest } from "../shared/postgresql-runtime-contract.js";
 import { isThemeId } from "../shared/theme-contract.js";
@@ -232,6 +233,11 @@ export function createMainApi(transport: BackendTransport = hostBackendTransport
         refuse("Pod 文件留证响应与本次请求不一致。");
       }
       return result;
+    },
+    logRules: async (...values: unknown[]) => {
+      requireArity(values, 1, "日志匹配规则请求无效。");
+      if (!isLogRulesRequest(values[0])) refuse("日志匹配规则请求无效。");
+      return backend.logRules(values[0]);
     },
     nginxRepair: async (...values: unknown[]) => {
       requireArity(values, 1, "Nginx 修补请求无效。");

@@ -34,7 +34,7 @@ const port = 9300 + Math.floor(Math.random() * 500);
 const smokeNonce = randomUUID().replaceAll("-", "");
 const smokeRoot = path.join(os.tmpdir(), `lovelyhawk-smoke-${smokeNonce}`);
 
-const EXPECTED_API_METHODS = 164;
+const EXPECTED_API_METHODS = 165;
 const EXPECTED_PAGES = 15;
 const checks = [];
 function check(name, ok, detail = null) {
