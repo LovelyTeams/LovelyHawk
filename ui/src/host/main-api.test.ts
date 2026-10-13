@@ -225,10 +225,10 @@ describe("main window API", () => {
 
 describe("terminal-family window API", () => {
   it("never names a binding, a container or a local path", async () => {
-    const calls = recordingHost((command) => command === "terminal_open" ? { columns: 80, rows: 24 } : null);
+    const calls = recordingHost((command) => command === "terminal_open" ? { tab: "1", columns: 80, rows: 24 } : null);
     const api = createTerminalApi();
     expect(Object.isFrozen(api)).toBe(true);
-    await expect(api.open(80, 24)).resolves.toEqual({ columns: 80, rows: 24 });
+    await expect(api.open(80, 24)).resolves.toEqual({ tab: "1", columns: 80, rows: 24 });
     await api.listSftpDirectory("browser", "directory").catch(() => undefined);
     await api.downloadSftpEntry("browser", "file").catch(() => undefined);
     for (const call of calls) {
@@ -242,10 +242,43 @@ describe("terminal-family window API", () => {
     const calls = recordingHost((command) => command === "terminal_input" ? { acceptedBytes: 2 } : null);
     const api = createTerminalApi();
     await expect(api.open(0, 24)).rejects.toThrow("Invalid terminal open request.");
-    await expect(api.input("not base64!")).rejects.toThrow("Invalid terminal input request.");
+    await expect(api.input("1", "not base64!")).rejects.toThrow("Invalid terminal input request.");
     // Three bytes sent, two acknowledged: the answer does not match the request.
-    await expect(api.input("YWJj")).rejects.toThrow("response is invalid");
+    await expect(api.input("1", "YWJj")).rejects.toThrow("response is invalid");
     expect(calls.map((call) => call.command)).toEqual(["terminal_input"]);
+  });
+
+  it("names a tab only by the number the host gave it", async () => {
+    const calls = recordingHost((command) => {
+      if (command === "terminal_open_tab") return { tab: "2", columns: 80, rows: 24 };
+      if (command === "terminal_close_tab") return { closed: true };
+      if (command === "terminal_resize") return { columns: 90, rows: 30 };
+      return null;
+    });
+    const api = createTerminalApi();
+    // Anything but a short decimal number is refused before it reaches the host.
+    for (const tab of ["", "0", "01", "12345", "a", "1 ", "-1", "1\n", 2, null]) {
+      await expect(api.poll(tab as string, 1, 1), JSON.stringify(tab)).rejects.toThrow("Invalid terminal poll request.");
+      await expect(api.resize(tab as string, 80, 24)).rejects.toThrow("Invalid terminal resize request.");
+      await expect(api.search(tab as string, "x", false, false, 1)).rejects.toThrow("Invalid terminal search request.");
+      await expect(api.closeTab(tab as string)).rejects.toThrow("Invalid terminal close request.");
+    }
+    expect(calls).toEqual([]);
+
+    await expect(api.openTab(80, 24)).resolves.toEqual({ tab: "2", columns: 80, rows: 24 });
+    await expect(api.resize("2", 90, 30)).resolves.toEqual({ columns: 90, rows: 30 });
+    await expect(api.closeTab("2")).resolves.toEqual({ closed: true });
+    expect(calls).toEqual([
+      { command: "terminal_open_tab", args: { columns: 80, rows: 24 } },
+      { command: "terminal_resize", args: { tab: "2", columns: 90, rows: 30 } },
+      { command: "terminal_close_tab", args: { tab: "2" } },
+    ]);
+
+    // An answer naming a tab that is not a tab number is not taken.
+    recordingHost(() => ({ tab: "handle-abc", columns: 80, rows: 24 }));
+    await expect(api.openTab(80, 24)).rejects.toThrow("The terminal open response is invalid.");
+    recordingHost(() => ({ columns: 80, rows: 24 }));
+    await expect(api.open(80, 24)).rejects.toThrow("The terminal open response is invalid.");
   });
 
   it("opens a folder terminal by the browser's handles and a display name only", async () => {

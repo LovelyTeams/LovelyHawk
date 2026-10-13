@@ -255,13 +255,13 @@ impl Host {
         }
     }
 
-    /// Forgets a child window and closes the terminal it held.
+    /// Forgets a child window and closes every terminal it held, one per tab.
     pub async fn release_child<R: Runtime>(&self, app: &AppHandle<R>, label: &str, destroy: bool) {
-        let handle = self.children.lock().remove(label);
+        let handles = self.children.lock().remove(label).unwrap_or_default();
         if destroy && let Some(window) = app.get_webview_window(label) {
             let _ = window.destroy();
         }
-        if let Some(Some(terminal_handle)) = handle {
+        for terminal_handle in handles {
             let _ = self
                 .bridge
                 .call("terminal.close", json!({ "handle": terminal_handle }))

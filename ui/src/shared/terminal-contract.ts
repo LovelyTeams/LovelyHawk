@@ -19,9 +19,17 @@ export const TERMINAL_LIMITS = Object.freeze({
   maximumSearchMatchBytes: 4 * 1_024,
   maximumSearchResponseBytes: 128 * 1_024,
   maximumSelectionCopyBytes: 128 * 1_024,
+  // Mirrors MAXIMUM_TABS and MAXIMUM_TAB_NAME_BYTES in
+  // crates/lovelyhawk-desktop/src/child_windows.rs and child_commands.rs.
+  maximumTabs: 4,
+  maximumTabNameBytes: 4,
 } as const);
 
-export interface TerminalApi {
+/**
+ * One shell, as the terminal view and its controller use it. A window's tab
+ * is one of these; `terminalTabSession` builds it over the window's API.
+ */
+export interface TerminalSessionApi {
   open(columns: number, rows: number): Promise<TerminalWindowOpened>;
   poll(maximumEvents: number, maximumBytes: number): Promise<TerminalPoll>;
   input(bytesBase64: string): Promise<TerminalInputAcknowledgement>;
@@ -32,7 +40,33 @@ export interface TerminalApi {
     regex: boolean,
     maximumResults: number,
   ): Promise<TerminalSearch>;
+  close(): Promise<TerminalClosed>;
+}
+
+/**
+ * What a terminal-family window may call. Its shells are tabs, named by the
+ * number the host gave each when it opened; the page never sees the host's
+ * handle behind a tab, nor the target.
+ */
+export interface TerminalApi {
+  /** The window's first shell. Every terminal window opens one, once. */
+  open(columns: number, rows: number): Promise<TerminalTabOpened>;
+  /** Another shell beside the first. Only the host shell's window has tabs. */
+  openTab(columns: number, rows: number): Promise<TerminalTabOpened>;
+  poll(tab: string, maximumEvents: number, maximumBytes: number): Promise<TerminalPoll>;
+  input(tab: string, bytesBase64: string): Promise<TerminalInputAcknowledgement>;
+  resize(tab: string, columns: number, rows: number): Promise<TerminalResized>;
+  search(
+    tab: string,
+    query: string,
+    caseSensitive: boolean,
+    regex: boolean,
+    maximumResults: number,
+  ): Promise<TerminalSearch>;
   copySelection(text: string): Promise<void>;
+  /** Closes one tab's shell; the window stays. */
+  closeTab(tab: string): Promise<TerminalClosed>;
+  /** Closes the window and every shell in it. */
   close(): Promise<TerminalClosed>;
   /**
    * The read-only file browser for the same target. Main resolves which target
@@ -114,6 +148,11 @@ export interface TerminalWindowLaunchResult {
 export interface TerminalWindowOpened {
   columns: number;
   rows: number;
+}
+
+/** A shell the window opened, with the tab number the host gave it. */
+export interface TerminalTabOpened extends TerminalWindowOpened {
+  tab: string;
 }
 
 export interface TerminalSize {
@@ -381,6 +420,22 @@ export function isTerminalWindowOpened(value: unknown): value is TerminalWindowO
   return (
     isRecord(value) &&
     hasExactKeys(value, ["columns", "rows"]) &&
+    isTerminalSize(value.columns, value.rows)
+  );
+}
+
+/** A tab number as the host gives them out: short, decimal, never zero. */
+export function isTerminalTabName(value: unknown): value is string {
+  return typeof value === "string" &&
+    value.length <= TERMINAL_LIMITS.maximumTabNameBytes &&
+    /^[1-9][0-9]*$/u.test(value);
+}
+
+export function isTerminalTabOpened(value: unknown): value is TerminalTabOpened {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, ["tab", "columns", "rows"]) &&
+    isTerminalTabName(value.tab) &&
     isTerminalSize(value.columns, value.rows)
   );
 }

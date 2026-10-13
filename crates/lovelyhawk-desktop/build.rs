@@ -33,11 +33,13 @@ const COMMANDS: &[&str] = &[
     "renderer_ready",
     // Terminal, container-terminal and file-editor windows.
     "terminal_open",
+    "terminal_open_tab",
     "terminal_poll",
     "terminal_input",
     "terminal_resize",
     "terminal_search",
     "terminal_copy_selection",
+    "terminal_close_tab",
     "terminal_close",
     "sftp_open",
     "sftp_list",

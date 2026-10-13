@@ -11,7 +11,7 @@ use tauri::{AppHandle, Manager, Runtime, State, WebviewWindow};
 
 use crate::{
     backend_bridge::REFUSED_METHOD,
-    child_windows::{ChildKind, DirectoryScope, EditorScope},
+    child_windows::{ChildKind, DirectoryScope, EditorScope, MAXIMUM_TABS},
     host::{Host, WindowLaunch, is_child_label},
     local_files::{self, DialogKind},
 };
@@ -28,16 +28,19 @@ const MAXIMUM_SEARCH_QUERY_BYTES: usize = 1024;
 const MAXIMUM_SEARCH_RESULTS: u32 = 256;
 const MAXIMUM_SELECTION_COPY_BYTES: usize = 128 * 1024;
 
+// Mirrors TERMINAL_LIMITS.maximumTabNameBytes in ui/src/shared/terminal-contract.ts.
+const MAXIMUM_TAB_NAME_BYTES: usize = 4;
+
 const UNAVAILABLE: &str = "这个窗口所属的连接已经断开或关闭。";
 const TERMINAL_OPEN_FAILURE: &str = "Unable to open the bound SSH terminal.";
 const NO_TERMINAL: &str = "这个窗口还没有打开终端。";
+const NO_TAB: &str = "这个终端标签页已经关闭。";
 
 /// What a window is for, read under the lock and copied out.
 struct Scope {
     label: String,
     binding_handle: String,
     kind: ChildKind,
-    terminal_handle: Option<String>,
 }
 
 fn scope<R: Runtime>(window: &WebviewWindow<R>, host: &Host) -> CommandResult<Scope> {
@@ -54,28 +57,93 @@ fn scope<R: Runtime>(window: &WebviewWindow<R>, host: &Host) -> CommandResult<Sc
         label: label.to_owned(),
         binding_handle: context.binding_handle.clone(),
         kind: context.kind.clone(),
-        terminal_handle: context.terminal_handle.clone(),
     })
 }
 
-/// Whether the window still belongs to the same binding and still holds the
-/// same terminal as when the call started.
-fn still_current(host: &Host, scope: &Scope) -> bool {
+/// A tab name as the host gives them out: a short decimal number, no zero.
+fn valid_tab(tab: &str) -> bool {
+    !tab.is_empty()
+        && tab.len() <= MAXIMUM_TAB_NAME_BYTES
+        && tab.bytes().all(|byte| byte.is_ascii_digit())
+        && !tab.starts_with('0')
+}
+
+/// The backend handle behind one of the calling window's tabs. The page names
+/// the tab; the handle itself never reaches it.
+fn tab_handle(host: &Host, scope: &Scope, tab: &str) -> CommandResult<String> {
+    if !valid_tab(tab) {
+        return Err(NO_TAB.to_owned());
+    }
+    let current = host.current_binding();
+    let mut children = host.children.lock();
+    let context = children
+        .current(&scope.label, current.as_deref())
+        .filter(|context| context.binding_handle == scope.binding_handle)
+        .ok_or_else(|| UNAVAILABLE.to_owned())?;
+    context
+        .terminal(tab)
+        .map(str::to_owned)
+        .ok_or_else(|| NO_TAB.to_owned())
+}
+
+/// Whether the window still belongs to the same binding and the tab still
+/// holds the same terminal as when the call started.
+fn still_current(host: &Host, scope: &Scope, tab: &str, handle: &str) -> bool {
     let current = host.current_binding();
     let mut children = host.children.lock();
     children
         .current(&scope.label, current.as_deref())
         .is_some_and(|context| {
-            context.binding_handle == scope.binding_handle
-                && context.terminal_handle == scope.terminal_handle
+            context.binding_handle == scope.binding_handle && context.terminal(tab) == Some(handle)
         })
 }
 
-fn require_terminal(scope: &Scope) -> CommandResult<String> {
-    scope
-        .terminal_handle
-        .clone()
-        .ok_or_else(|| NO_TERMINAL.to_owned())
+/// Records a shell the backend just opened as the window's next tab. When the
+/// window moved on meanwhile (closed, rebound, or already full) the shell is
+/// closed again rather than left running with nothing to show it.
+async fn accept_terminal(
+    host: &Host,
+    scope: &Scope,
+    handle: String,
+    first: bool,
+) -> CommandResult<String> {
+    let tab = {
+        let current = host.current_binding();
+        let mut children = host.children.lock();
+        match children.current(&scope.label, current.as_deref()) {
+            Some(context)
+                if context.binding_handle == scope.binding_handle
+                    && (!first || context.terminal_count() == 0) =>
+            {
+                context.add_terminal(handle.clone())
+            }
+            _ => None,
+        }
+    };
+    if let Some(tab) = tab {
+        return Ok(tab);
+    }
+    let _ = host
+        .bridge
+        .call("terminal.close", json!({ "handle": handle }))
+        .await;
+    Err("The terminal launch context is no longer current.".to_owned())
+}
+
+fn opened_handle(opened: &Value) -> Option<String> {
+    opened
+        .get("handle")
+        .and_then(Value::as_str)
+        .filter(|handle| opaque(handle))
+        .map(str::to_owned)
+}
+
+fn opened_answer(opened: &Value, tab: String, columns: u32, rows: u32) -> Value {
+    json!({
+        "tab": tab,
+        "columns": opened.get("columns").cloned().unwrap_or(Value::from(columns)),
+        "rows": opened.get("rows").cloned().unwrap_or(Value::from(rows)),
+    })
 }
 
 fn valid_size(columns: u32, rows: u32) -> bool {
@@ -118,7 +186,7 @@ pub async fn terminal_open<R: Runtime>(
     rows: u32,
 ) -> CommandResult<Value> {
     let scope = scope(&window, &host)?;
-    if !valid_size(columns, rows) || scope.terminal_handle.is_some() {
+    if !valid_size(columns, rows) {
         return Err("Invalid terminal open request.".to_owned());
     }
     {
@@ -185,47 +253,97 @@ pub async fn terminal_open<R: Runtime>(
             return Err(error);
         }
     };
-    let Some(handle) = opened
-        .get("handle")
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-    else {
+    let Some(handle) = opened_handle(&opened) else {
         host.release_child(&app, &scope.label, true).await;
         return Err(TERMINAL_OPEN_FAILURE.to_owned());
     };
-    let accepted = {
+    let tab = accept_terminal(&host, &scope, handle, true).await?;
+    Ok(opened_answer(&opened, tab, columns, rows))
+}
+
+/// Another shell on the same host, as a tab beside the first.
+///
+/// Only the host shell's window has tabs: a container's, a pod's or a folder's
+/// window is one shell for one thing, and a second there would be a second
+/// thing. The first shell must have been opened (through `terminal_open`)
+/// before tabs follow it; the backend's own limit of four terminals per target
+/// still applies, and its refusal reaches the page like any open failure.
+#[tauri::command]
+pub async fn terminal_open_tab<R: Runtime>(
+    window: WebviewWindow<R>,
+    host: State<'_, Host>,
+    columns: u32,
+    rows: u32,
+) -> CommandResult<Value> {
+    let scope = scope(&window, &host)?;
+    if !matches!(scope.kind, ChildKind::Terminal) {
+        return Err(REFUSED_METHOD.to_owned());
+    }
+    if !valid_size(columns, rows) {
+        return Err("Invalid terminal open request.".to_owned());
+    }
+    {
         let current = host.current_binding();
         let mut children = host.children.lock();
-        match children.current(&scope.label, current.as_deref()) {
-            Some(context) if context.terminal_handle.is_none() => {
-                context.terminal_handle = Some(handle.clone());
-                true
-            }
-            _ => false,
+        let context = children
+            .current(&scope.label, current.as_deref())
+            .ok_or_else(|| UNAVAILABLE.to_owned())?;
+        if context.launch_available || context.terminal_count() >= MAXIMUM_TABS {
+            return Err("Invalid terminal open request.".to_owned());
         }
+    }
+    let opened = host
+        .bridge
+        .call(
+            "terminal.open",
+            json!({ "bindingHandle": scope.binding_handle, "columns": columns, "rows": rows }),
+        )
+        .await
+        .inspect_err(|error| tracing::warn!(%error, "terminal tab open failed"))?;
+    let handle = opened_handle(&opened).ok_or_else(|| TERMINAL_OPEN_FAILURE.to_owned())?;
+    let tab = accept_terminal(&host, &scope, handle, false).await?;
+    Ok(opened_answer(&opened, tab, columns, rows))
+}
+
+/// Closes one tab's shell. A tab already gone (its shell exited and the page
+/// closes it afterwards) is not an error; the window stays either way, and the
+/// page closes it when its last tab goes.
+#[tauri::command]
+pub async fn terminal_close_tab<R: Runtime>(
+    window: WebviewWindow<R>,
+    host: State<'_, Host>,
+    tab: String,
+) -> CommandResult<Value> {
+    let scope = scope(&window, &host)?;
+    if !valid_tab(&tab) {
+        return Err("Invalid terminal close request.".to_owned());
+    }
+    let handle = {
+        let current = host.current_binding();
+        let mut children = host.children.lock();
+        children
+            .current(&scope.label, current.as_deref())
+            .and_then(|context| context.remove_terminal(&tab))
     };
-    if !accepted {
+    if let Some(handle) = handle {
         let _ = host
             .bridge
             .call("terminal.close", json!({ "handle": handle }))
             .await;
-        return Err("The terminal launch context is no longer current.".to_owned());
     }
-    Ok(json!({
-        "columns": opened.get("columns").cloned().unwrap_or(Value::from(columns)),
-        "rows": opened.get("rows").cloned().unwrap_or(Value::from(rows)),
-    }))
+    Ok(json!({ "closed": true }))
 }
 
 #[tauri::command]
 pub async fn terminal_poll<R: Runtime>(
     window: WebviewWindow<R>,
     host: State<'_, Host>,
+    tab: String,
     maximum_events: u32,
     maximum_bytes: u32,
 ) -> CommandResult<Value> {
     let scope = scope(&window, &host)?;
-    let handle = require_terminal(&scope)?;
+    let handle = tab_handle(&host, &scope, &tab)?;
     if !(1..=MAXIMUM_POLL_EVENTS).contains(&maximum_events)
         || !(1..=MAXIMUM_POLL_BYTES).contains(&maximum_bytes)
     {
@@ -238,7 +356,7 @@ pub async fn terminal_poll<R: Runtime>(
             json!({ "handle": handle, "maximumEvents": maximum_events, "maximumBytes": maximum_bytes }),
         )
         .await?;
-    if !still_current(&host, &scope) {
+    if !still_current(&host, &scope, &tab, &handle) {
         return Err("The terminal poll context is no longer current.".to_owned());
     }
     Ok(result)
@@ -248,10 +366,11 @@ pub async fn terminal_poll<R: Runtime>(
 pub async fn terminal_input<R: Runtime>(
     window: WebviewWindow<R>,
     host: State<'_, Host>,
+    tab: String,
     bytes_base64: String,
 ) -> CommandResult<Value> {
     let scope = scope(&window, &host)?;
-    let handle = require_terminal(&scope)?;
+    let handle = tab_handle(&host, &scope, &tab)?;
     let decoded = base64_decoded_length(&bytes_base64, MAXIMUM_INPUT_BYTES)
         .ok_or_else(|| "Invalid terminal input request.".to_owned())?;
     let result = host
@@ -262,7 +381,7 @@ pub async fn terminal_input<R: Runtime>(
         )
         .await?;
     let accepted = result.get("acceptedBytes").and_then(Value::as_u64);
-    if !still_current(&host, &scope) || accepted != Some(decoded as u64) {
+    if !still_current(&host, &scope, &tab, &handle) || accepted != Some(decoded as u64) {
         return Err("The terminal input response is no longer current.".to_owned());
     }
     Ok(result)
@@ -272,11 +391,12 @@ pub async fn terminal_input<R: Runtime>(
 pub async fn terminal_resize<R: Runtime>(
     window: WebviewWindow<R>,
     host: State<'_, Host>,
+    tab: String,
     columns: u32,
     rows: u32,
 ) -> CommandResult<Value> {
     let scope = scope(&window, &host)?;
-    let handle = require_terminal(&scope)?;
+    let handle = tab_handle(&host, &scope, &tab)?;
     if !valid_size(columns, rows) {
         return Err("Invalid terminal resize request.".to_owned());
     }
@@ -287,7 +407,7 @@ pub async fn terminal_resize<R: Runtime>(
             json!({ "handle": handle, "columns": columns, "rows": rows }),
         )
         .await?;
-    if !still_current(&host, &scope) {
+    if !still_current(&host, &scope, &tab, &handle) {
         return Err("The terminal resize context is no longer current.".to_owned());
     }
     Ok(result)
@@ -297,13 +417,14 @@ pub async fn terminal_resize<R: Runtime>(
 pub async fn terminal_search<R: Runtime>(
     window: WebviewWindow<R>,
     host: State<'_, Host>,
+    tab: String,
     query: String,
     case_sensitive: bool,
     regex: bool,
     maximum_results: u32,
 ) -> CommandResult<Value> {
     let scope = scope(&window, &host)?;
-    let handle = require_terminal(&scope)?;
+    let handle = tab_handle(&host, &scope, &tab)?;
     if query.is_empty()
         || query.len() > MAXIMUM_SEARCH_QUERY_BYTES
         || query.chars().any(char::is_control)
@@ -324,7 +445,7 @@ pub async fn terminal_search<R: Runtime>(
             }),
         )
         .await?;
-    if !still_current(&host, &scope) {
+    if !still_current(&host, &scope, &tab, &handle) {
         return Err("The terminal search context is no longer current.".to_owned());
     }
     Ok(result)
@@ -338,7 +459,18 @@ pub fn terminal_copy_selection<R: Runtime>(
     text: String,
 ) -> CommandResult<()> {
     let scope = scope(&window, &host)?;
-    require_terminal(&scope)?;
+    // Copying needs a terminal to have been open in this window: any tab will
+    // do, since what is copied is the page's own selection, bounded below.
+    let has_terminal = {
+        let current = host.current_binding();
+        let mut children = host.children.lock();
+        children
+            .current(&scope.label, current.as_deref())
+            .is_some_and(|context| context.terminal_count() > 0)
+    };
+    if !has_terminal {
+        return Err(NO_TERMINAL.to_owned());
+    }
     if text.is_empty() || text.len() > MAXIMUM_SELECTION_COPY_BYTES {
         return Err("Invalid terminal selection copy request.".to_owned());
     }

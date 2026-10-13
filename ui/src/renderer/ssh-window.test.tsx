@@ -58,6 +58,19 @@ describe("terminal window kinds", () => {
     expect(render("directory")).toContain(">SSH · 文件夹<");
   });
 
+  it("offers more shells as tabs only in the SSH window", () => {
+    const ssh = render("terminal");
+    expect(ssh).toContain('data-testid="ssh-window-tab-add"');
+    expect(ssh).toContain('aria-label="新建终端标签页"');
+    // One tab, selected, a real tab control; nothing to close it by but the window.
+    expect(ssh.match(/role="tab"/gu)).toHaveLength(1);
+    expect(ssh).toContain('aria-selected="true"');
+    expect(ssh).not.toContain('data-testid="ssh-window-tab-close"');
+    for (const kind of ["container", "pod", "directory"] as const) {
+      expect(render(kind), kind).not.toContain('data-testid="ssh-window-tab-add"');
+    }
+  });
+
   it("does not claim a session before one is live", () => {
     const markup = render("directory");
     expect(markup).toMatch(/data-testid="ssh-window-session"><span class="ssh-window-tab-dot is-off" aria-hidden="true"><\/span>正在连接</u);
@@ -87,10 +100,11 @@ describe("SSH window shell", () => {
     // Every status field has a real source: a tick while the session is live,
     // the live grid, the session's own state, or a fact.
     expect(window).toContain('会话时间 {elapsed ?? "—"}');
-    expect(window).toContain('useElapsedTime(session === "connected")');
+    expect(window).toContain("useElapsedTime(active?.connectedAt ?? null, active?.endedAt ?? null)");
+    expect(window).toContain('connectedAt: state === "connected" ? tab.connectedAt ?? now : tab.connectedAt');
     expect(window).toContain("行 × ");
     expect(window).toContain("UTF-8");
-    expect(window).toContain("onSession={setSession}");
+    expect(window).toContain("onSession={(state) => onSession(tab.key, state)}");
     // 已连接 only for a live session; never a fixed claim.
     expect(window).not.toMatch(/aria-hidden="true" \/>已连接/u);
 
@@ -142,7 +156,9 @@ describe("SSH window shell", () => {
     // The window hands snippets to the terminal, which enqueues them like typed
     // input rather than invoking the channel directly.
     const window = source("TerminalWindow.tsx");
-    expect(window).toContain("setInsert((current) => ({ token: (current?.token ?? 0) + 1, text }))");
+    // Only the tab on screen gets it; each tab replays only its own.
+    expect(window).toContain("update(active.key, (tab) => ({ ...tab, insert: { token: (tab.insert?.token ?? 0) + 1, text } }))");
+    expect(window).toContain("insert={tab.insert}");
     expect(window).not.toContain("lovelyhawkTerminal.input");
     expect(source("TerminalSurface.tsx")).toContain("controllerRef.current?.enqueueText(insertText);");
   });

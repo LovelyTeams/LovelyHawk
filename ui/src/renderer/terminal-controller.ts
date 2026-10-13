@@ -11,7 +11,7 @@ import {
   isTerminalWindowOpened,
   terminalBase64DecodedLength,
   TERMINAL_LIMITS,
-  type TerminalApi,
+  type TerminalSessionApi,
   type TerminalPollEvent,
   type TerminalSearch,
   type TerminalSize,
@@ -217,7 +217,7 @@ export class TerminalController {
   private readonly inputQueue: BoundedSerialInputQueue;
 
   constructor(
-    private readonly api: TerminalApi,
+    private readonly api: TerminalSessionApi,
     private readonly sink: TerminalOutputSink,
     private readonly options: TerminalControllerOptions,
   ) {

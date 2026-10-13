@@ -37,18 +37,16 @@
 
 .ssh-window-tab {
   display: inline-flex;
-  max-width: 320px;
+  min-width: 0;
+  max-width: 260px;
+  flex: 0 1 auto;
   align-items: center;
-  gap: 7px;
-  padding: 5px 13px;
   border: 1px solid var(--chrome-border);
   border-bottom: 0;
   border-radius: 8px 8px 0 0;
   overflow: hidden;
   color: var(--chrome-muted);
   background: transparent;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: var(--font-small);
 }
 
@@ -56,6 +54,69 @@
   color: var(--chrome-text);
   background: var(--bg);
   font-weight: 650;
+}
+
+/* The tab itself is a button, so it is reachable and named for the keyboard;
+   it keeps the look the single tab had. */
+.ssh-window-tab-select {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 13px;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.ssh-window-tab-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ssh-window-tab-close,
+.ssh-window-tab-add {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  color: var(--chrome-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.ssh-window-tab-close {
+  width: 20px;
+  height: 20px;
+  margin-right: 6px;
+}
+
+.ssh-window-tab-add {
+  width: 26px;
+  height: 26px;
+}
+
+.ssh-window-tab-close:hover,
+.ssh-window-tab-add:hover:not(:disabled) {
+  color: var(--chrome-text);
+  background: var(--surface-hover);
+}
+
+.ssh-window-tab-add:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.ssh-window-tab-select:focus-visible,
+.ssh-window-tab-close:focus-visible,
+.ssh-window-tab-add:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
 }
 
 .ssh-window-tab-dot {
@@ -163,12 +224,26 @@
 }
 
 .ssh-window-terminal {
+  position: relative;
   min-height: 0;
   flex: 1;
   overflow: hidden;
   border: 1px solid var(--term-border);
   border-radius: 10px;
   background: var(--term-bg);
+}
+
+/* Every tab's terminal fills the same box, stacked. The ones behind are
+   hidden, not removed and not display:none: their shells keep running, and
+   their grids keep the size of the box, so nothing reflows when one comes to
+   the front. */
+.ssh-window-terminal-panel {
+  position: absolute;
+  inset: 0;
+}
+
+.ssh-window-terminal-panel.is-behind {
+  visibility: hidden;
 }
 
 .ssh-window-terminal .terminal-surface {

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-import type { TerminalApi } from "../shared/terminal-contract";
+import type { TerminalSessionApi } from "../shared/terminal-contract";
 import {
   copyBoundedTerminalSelection,
   disposeTerminalRuntime,
@@ -11,7 +11,8 @@ import {
   TerminalSurface,
 } from "./TerminalSurface";
 
-const api: TerminalApi = {
+/** One tab's shell, and the window's selection copy beside it. */
+const api: TerminalSessionApi & { copySelection(text: string): Promise<void> } = {
   open: vi.fn(async (columns, rows) => ({ columns, rows })),
   poll: vi.fn(async () => ({ events: [], rawBytes: 0, hasMore: false })),
   input: vi.fn(async () => ({ acceptedBytes: 1 })),
@@ -19,24 +20,6 @@ const api: TerminalApi = {
   search: vi.fn(async () => ({ matches: [], limited: false })),
   copySelection: vi.fn(async () => undefined),
   close: vi.fn(async () => ({ closed: true as const })),
-  openSftpBrowser: vi.fn(async () => ({})),
-  listSftpDirectory: vi.fn(async () => ({})),
-  readSftpText: vi.fn(async () => ({})),
-  downloadSftpEntry: vi.fn(async () => ({})),
-  planSftpOperation: vi.fn(async () => ({})),
-  confirmSftpOperation: vi.fn(async () => ({})),
-  executeSftpOperation: vi.fn(async () => ({})),
-  cancelSftpOperation: vi.fn(async () => ({})),
-  undoSftpOperation: vi.fn(async () => ({})),
-  cancelSftpTransfer: vi.fn(async () => ({ cancelled: 0 })),
-  stageSftpUpload: vi.fn(async () => ({})),
-  openLocalBrowser: vi.fn(async () => ({})),
-  listLocalDirectory: vi.fn(async () => ({})),
-  openFileEditor: vi.fn(async () => ({ opened: true, reused: false })),
-  openDirectoryTerminal: vi.fn(async () => ({ opened: true, reused: false })),
-  fileEditorTarget: vi.fn(async () => ({})),
-  setUnsavedChanges: vi.fn(async () => undefined),
-  onBeforeClose: vi.fn(() => () => undefined),
 };
 
 describe("standalone xterm surface", () => {

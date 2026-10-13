@@ -23,11 +23,13 @@ import {
   isTerminalSearchRequest,
   isTerminalSelectionCopyText,
   isTerminalSize,
+  isTerminalTabName,
+  isTerminalTabOpened,
   isTerminalWindowLaunchResult,
-  isTerminalWindowOpened,
   terminalBase64DecodedLength,
   TERMINAL_LIMITS,
   type TerminalApi,
+  type TerminalTabOpened,
 } from "../shared/terminal-contract.js";
 import { invokeHost } from "./transport.js";
 
@@ -70,53 +72,63 @@ async function checked<T>(
  * container and the file from what it recorded when it created this window.
  */
 export function createTerminalApi(): TerminalApi {
+  const opening = (command: string) => async (...values: unknown[]) => {
+    requireArity(values, 2, "Invalid terminal open request.");
+    const [columns, rows] = values;
+    if (!isTerminalSize(columns, rows)) refuse("Invalid terminal open request.");
+    return checked<TerminalTabOpened>(command, { columns, rows }, 60_000,
+      (value) => isTerminalTabOpened(value) && value.columns === columns && value.rows === rows,
+      "The terminal open response is invalid.");
+  };
   const api: TerminalApi = {
-    open: async (...values: unknown[]) => {
-      requireArity(values, 2, "Invalid terminal open request.");
-      const [columns, rows] = values;
-      if (!isTerminalSize(columns, rows)) refuse("Invalid terminal open request.");
-      return checked("terminal_open", { columns, rows }, 60_000,
-        (value) => isTerminalWindowOpened(value) && value.columns === columns && value.rows === rows,
-        "The terminal open response is invalid.");
-    },
+    open: opening("terminal_open"),
+    openTab: opening("terminal_open_tab"),
     poll: async (...values: unknown[]) => {
-      requireArity(values, 2, "Invalid terminal poll request.");
-      const [maximumEvents, maximumBytes] = values;
-      if (!isTerminalPollBounds(maximumEvents, maximumBytes)) refuse("Invalid terminal poll request.");
-      return checked("terminal_poll", { maximumEvents, maximumBytes }, TERMINAL_TIMEOUT_MS, isTerminalPoll,
+      requireArity(values, 3, "Invalid terminal poll request.");
+      const [tab, maximumEvents, maximumBytes] = values;
+      if (!isTerminalTabName(tab) || !isTerminalPollBounds(maximumEvents, maximumBytes)) {
+        refuse("Invalid terminal poll request.");
+      }
+      return checked("terminal_poll", { tab, maximumEvents, maximumBytes }, TERMINAL_TIMEOUT_MS, isTerminalPoll,
         "The terminal poll response is invalid.");
     },
     input: async (...values: unknown[]) => {
-      requireArity(values, 1, "Invalid terminal input request.");
-      const bytesBase64 = values[0];
+      requireArity(values, 2, "Invalid terminal input request.");
+      const [tab, bytesBase64] = values;
       const decoded = terminalBase64DecodedLength(bytesBase64, TERMINAL_LIMITS.maximumInputBytes, false);
-      if (decoded === null) refuse("Invalid terminal input request.");
-      return checked("terminal_input", { bytesBase64 }, TERMINAL_TIMEOUT_MS,
+      if (!isTerminalTabName(tab) || decoded === null) refuse("Invalid terminal input request.");
+      return checked("terminal_input", { tab, bytesBase64 }, TERMINAL_TIMEOUT_MS,
         (value) => isTerminalInputAcknowledgement(value) && value.acceptedBytes === decoded,
         "The terminal input response is invalid.");
     },
     resize: async (...values: unknown[]) => {
-      requireArity(values, 2, "Invalid terminal resize request.");
-      const [columns, rows] = values;
-      if (!isTerminalSize(columns, rows)) refuse("Invalid terminal resize request.");
-      return checked("terminal_resize", { columns, rows }, TERMINAL_TIMEOUT_MS,
+      requireArity(values, 3, "Invalid terminal resize request.");
+      const [tab, columns, rows] = values;
+      if (!isTerminalTabName(tab) || !isTerminalSize(columns, rows)) refuse("Invalid terminal resize request.");
+      return checked("terminal_resize", { tab, columns, rows }, TERMINAL_TIMEOUT_MS,
         (value) => isTerminalResized(value) && value.columns === columns && value.rows === rows,
         "The terminal resize response is invalid.");
     },
     search: async (...values: unknown[]) => {
-      requireArity(values, 4, "Invalid terminal search request.");
-      const [query, caseSensitive, regex, maximumResults] = values;
-      if (!isTerminalSearchRequest(query, maximumResults) || typeof caseSensitive !== "boolean" ||
-        typeof regex !== "boolean") {
+      requireArity(values, 5, "Invalid terminal search request.");
+      const [tab, query, caseSensitive, regex, maximumResults] = values;
+      if (!isTerminalTabName(tab) || !isTerminalSearchRequest(query, maximumResults) ||
+        typeof caseSensitive !== "boolean" || typeof regex !== "boolean") {
         refuse("Invalid terminal search request.");
       }
-      return checked("terminal_search", { query, caseSensitive, regex, maximumResults }, TERMINAL_TIMEOUT_MS,
+      return checked("terminal_search", { tab, query, caseSensitive, regex, maximumResults }, TERMINAL_TIMEOUT_MS,
         isTerminalSearch, "The terminal search response is invalid.");
     },
     copySelection: async (...values: unknown[]) => {
       requireArity(values, 1, "Invalid terminal selection copy request.");
       if (!isTerminalSelectionCopyText(values[0])) refuse("Invalid terminal selection copy request.");
       await invokeHost("terminal_copy_selection", { text: values[0] }, TERMINAL_TIMEOUT_MS);
+    },
+    closeTab: async (...values: unknown[]) => {
+      requireArity(values, 1, "Invalid terminal close request.");
+      if (!isTerminalTabName(values[0])) refuse("Invalid terminal close request.");
+      return checked("terminal_close_tab", { tab: values[0] }, TERMINAL_TIMEOUT_MS, isTerminalClosed,
+        "The terminal close response is invalid.");
     },
     close: async (...values: unknown[]) => {
       requireArity(values, 0, "Invalid terminal close request.");

@@ -78,17 +78,72 @@ impl ChildKind {
     }
 }
 
+/// Shells one window may hold as tabs. The backend allows four terminals per
+/// target in all, so a window can never usefully hold more.
+pub const MAXIMUM_TABS: usize = 4;
+
+/// One shell in a terminal window. The page names it by `tab`, a number the
+/// host gave it; the backend's handle never leaves the host.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TerminalTab {
+    pub tab: String,
+    pub handle: String,
+}
+
 #[derive(Debug)]
 pub struct ChildContext {
     pub key: String,
     pub binding_handle: String,
     pub kind: ChildKind,
-    /// Spent by the first terminal open; a window opens one terminal, once.
+    /// Spent by the first terminal open. Further shells are tabs, and only the
+    /// host shell's window may open them (`add_terminal`'s callers check).
     pub launch_available: bool,
-    pub terminal_handle: Option<String>,
+    /// The window's shells, in the order they were opened.
+    terminals: Vec<TerminalTab>,
+    /// Tab numbers are never reused within a window, so a late call naming a
+    /// closed tab cannot reach the shell that replaced it.
+    last_tab: u32,
     /// An editor window holding text that is not on the server yet.
     pub unsaved: bool,
     close: CloseRequests,
+}
+
+impl ChildContext {
+    /// Records a newly opened shell as the next tab, or refuses when the
+    /// window already holds as many as it may.
+    pub fn add_terminal(&mut self, handle: String) -> Option<String> {
+        if self.terminals.len() >= MAXIMUM_TABS {
+            return None;
+        }
+        self.last_tab += 1;
+        let tab = self.last_tab.to_string();
+        self.terminals.push(TerminalTab {
+            tab: tab.clone(),
+            handle,
+        });
+        Some(tab)
+    }
+
+    /// The backend handle behind a tab the page named.
+    pub fn terminal(&self, tab: &str) -> Option<&str> {
+        self.terminals
+            .iter()
+            .find(|terminal| terminal.tab == tab)
+            .map(|terminal| terminal.handle.as_str())
+    }
+
+    /// Forgets one tab and hands back its handle, for closing.
+    pub fn remove_terminal(&mut self, tab: &str) -> Option<String> {
+        let index = self
+            .terminals
+            .iter()
+            .position(|terminal| terminal.tab == tab)?;
+        Some(self.terminals.remove(index).handle)
+    }
+
+    pub fn terminal_count(&self) -> usize {
+        self.terminals.len()
+    }
 }
 
 /// Numbered close questions to one window, as the main window has: only the
@@ -153,7 +208,8 @@ impl ChildWindows {
                 binding_handle: binding_handle.to_owned(),
                 launch_available: !matches!(kind, ChildKind::Editor(_)),
                 kind,
-                terminal_handle: None,
+                terminals: Vec::new(),
+                last_tab: 0,
                 unsaved: false,
                 close: CloseRequests::default(),
             },
@@ -241,13 +297,19 @@ impl ChildWindows {
         Some(context)
     }
 
-    /// Forgets a window and hands back the terminal it held, for closing.
-    pub fn remove(&mut self, label: &str) -> Option<Option<String>> {
+    /// Forgets a window and hands back every terminal it held, for closing.
+    pub fn remove(&mut self, label: &str) -> Option<Vec<String>> {
         let context = self.by_label.remove(label)?;
         if self.label_by_key.get(&context.key).map(String::as_str) == Some(label) {
             self.label_by_key.remove(&context.key);
         }
-        Some(context.terminal_handle)
+        Some(
+            context
+                .terminals
+                .into_iter()
+                .map(|terminal| terminal.handle)
+                .collect(),
+        )
     }
 
     pub fn labels_for_binding(&self, binding_handle: &str) -> Vec<String> {
@@ -339,12 +401,17 @@ mod tests {
     }
 
     #[test]
-    fn removal_returns_the_terminal_to_close_and_frees_the_key() {
+    fn removal_returns_every_terminal_to_close_and_frees_the_key() {
         let mut windows = ChildWindows::default();
         let label = windows.register("b", ChildKind::Terminal);
-        windows.current(&label, Some("b")).unwrap().terminal_handle = Some("terminal-1".into());
+        let context = windows.current(&label, Some("b")).unwrap();
+        context.add_terminal("terminal-1".into());
+        context.add_terminal("terminal-2".into());
         assert_eq!(windows.labels_for_binding("b"), vec![label.clone()]);
-        assert_eq!(windows.remove(&label), Some(Some("terminal-1".into())));
+        assert_eq!(
+            windows.remove(&label),
+            Some(vec!["terminal-1".into(), "terminal-2".into()])
+        );
         assert_eq!(windows.remove(&label), None);
         assert!(
             windows
@@ -381,11 +448,11 @@ mod tests {
         );
         for label in [&shell, &first, &again] {
             let context = windows.current(label, Some("b")).unwrap();
-            assert!(context.launch_available && context.terminal_handle.is_none());
+            assert!(context.launch_available && context.terminal_count() == 0);
         }
         assert!(windows.current(&again, Some("other")).is_none());
         // Closing one leaves the others current.
-        assert_eq!(windows.remove(&first), Some(None));
+        assert_eq!(windows.remove(&first), Some(Vec::new()));
         assert!(windows.current(&again, Some("b")).is_some());
         assert!(windows.current(&shell, Some("b")).is_some());
     }
@@ -455,7 +522,38 @@ mod tests {
         );
         assert_ne!(host, first);
         let context = windows.current(&first, Some("b")).unwrap();
-        assert!(context.launch_available && context.terminal_handle.is_none());
+        assert!(context.launch_available && context.terminal_count() == 0);
         assert!(windows.current(&first, Some("c")).is_none());
+    }
+
+    #[test]
+    fn tabs_are_numbered_once_bounded_and_closed_one_at_a_time() {
+        let mut windows = ChildWindows::default();
+        let label = windows.register("b", ChildKind::Terminal);
+        let context = windows.current(&label, Some("b")).unwrap();
+        let tabs = (1..=MAXIMUM_TABS)
+            .map(|index| context.add_terminal(format!("terminal-{index}")).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(tabs, ["1", "2", "3", "4"]);
+        // A fifth is refused; the backend would refuse it too.
+        assert_eq!(context.add_terminal("terminal-5".into()), None);
+        assert_eq!(context.terminal("2"), Some("terminal-2"));
+
+        // Closing one leaves the others, and its number is not given again:
+        // a late call naming tab 2 must not reach the shell opened after it.
+        assert_eq!(context.remove_terminal("2"), Some("terminal-2".into()));
+        assert_eq!(context.remove_terminal("2"), None);
+        assert_eq!(context.terminal("2"), None);
+        assert_eq!(
+            context.add_terminal("terminal-6".into()).as_deref(),
+            Some("5")
+        );
+        assert_eq!(context.terminal("2"), None);
+        assert_eq!(context.terminal("5"), Some("terminal-6"));
+        assert_eq!(context.terminal_count(), MAXIMUM_TABS);
+        // Names that are not a tab of this window resolve to nothing.
+        for name in ["", "0", "9", "terminal-1", "1 "] {
+            assert_eq!(context.terminal(name), None);
+        }
     }
 }

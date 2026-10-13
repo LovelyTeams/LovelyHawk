@@ -124,6 +124,18 @@ try {
     }, { timeoutMs: 20_000, label: `output ${marker}` }).catch(() => null);
   }
 
+  // The shell's own locale first. A host whose SSH login gets no UTF-8 locale
+  // (the super arena: an empty /etc/default/locale, no AcceptEnv) runs
+  // readline in POSIX mode, which reads each byte above 0x7f as a Meta key —
+  // 中 arrived as Alt+8 then "-", eight dashes — however correctly the
+  // terminal sent it. What is checked here is the terminal, so the shell is
+  // put in a UTF-8 locale before anything is composed, and readline (which
+  // set itself up for the locale it started in) is told to take 8-bit input
+  // as text.
+  await keys("export LC_ALL=C.UTF-8; bind 'set convert-meta off'; bind 'set input-meta on'; bind 'set output-meta on'");
+  await enter();
+  await delay(400);
+
   // 1. A committed composition reaches the shell as UTF-8, once.
   const first = `M${randomUUID().slice(0, 6)}`;
   await keys(`printf '${first}%s\\n' "$(printf '%s' '`);

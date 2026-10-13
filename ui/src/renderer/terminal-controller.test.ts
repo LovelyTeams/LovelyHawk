@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type {
-  TerminalApi,
   TerminalPoll,
+  TerminalSessionApi,
   TerminalWindowOpened,
 } from "../shared/terminal-contract";
 import { TERMINAL_LIMITS } from "../shared/terminal-contract";
@@ -27,27 +27,9 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function createApi(overrides: Partial<TerminalApi> = {}): TerminalApi {
+function createApi(overrides: Partial<TerminalSessionApi> = {}): TerminalSessionApi {
   return {
     open: vi.fn(async (columns, rows) => ({ columns, rows })),
-  openSftpBrowser: vi.fn(async () => ({})),
-  listSftpDirectory: vi.fn(async () => ({})),
-  readSftpText: vi.fn(async () => ({})),
-    downloadSftpEntry: vi.fn(async () => ({})),
-    planSftpOperation: vi.fn(async () => ({})),
-    confirmSftpOperation: vi.fn(async () => ({})),
-    executeSftpOperation: vi.fn(async () => ({})),
-    cancelSftpOperation: vi.fn(async () => ({})),
-    undoSftpOperation: vi.fn(async () => ({})),
-    cancelSftpTransfer: vi.fn(async () => ({ cancelled: 0 })),
-    stageSftpUpload: vi.fn(async () => ({})),
-  openLocalBrowser: vi.fn(async () => ({})),
-  listLocalDirectory: vi.fn(async () => ({})),
-  openFileEditor: vi.fn(async () => ({ opened: true, reused: false })),
-  openDirectoryTerminal: vi.fn(async () => ({ opened: true, reused: false })),
-  fileEditorTarget: vi.fn(async () => ({})),
-  setUnsavedChanges: vi.fn(async () => undefined),
-  onBeforeClose: vi.fn(() => () => undefined),
     poll: vi.fn(async (): Promise<TerminalPoll> => ({
       events: [{ kind: "closed" as const, sequence: 1 }],
       rawBytes: 0,
@@ -56,7 +38,6 @@ function createApi(overrides: Partial<TerminalApi> = {}): TerminalApi {
     input: vi.fn(async (encoded) => ({ acceptedBytes: atob(encoded).length })),
     resize: vi.fn(async (columns, rows) => ({ columns, rows })),
     search: vi.fn(async () => ({ matches: [], limited: false })),
-    copySelection: vi.fn(async () => undefined),
     close: vi.fn(async () => ({ closed: true as const })),
     ...overrides,
   };

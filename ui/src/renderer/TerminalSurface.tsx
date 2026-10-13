@@ -2,13 +2,13 @@ import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 
 import {
   clampTerminalSize,
   isTerminalSearchRequest,
   TERMINAL_LIMITS,
-  type TerminalApi,
+  type TerminalSessionApi,
 } from "../shared/terminal-contract";
 import { TerminalController } from "./terminal-controller";
 import { terminalXtermTheme } from "./terminal-theme";
@@ -18,7 +18,7 @@ import "./terminal-surface.css";
 export type TerminalSessionState = "opening" | "connected" | "ended" | "failed";
 
 interface TerminalSurfaceProps {
-  api: TerminalApi;
+  api: TerminalSessionApi;
   initialColumns?: number;
   initialRows?: number;
   writeClipboard?: (text: string) => Promise<void>;
@@ -34,6 +34,14 @@ interface TerminalSurfaceProps {
   insert?: { token: number; text: string } | null;
   /** The window's own "could not open" sentence, when it has a better one. */
   openFailure?: string;
+  /**
+   * Whether this is the tab on screen. Only that one answers Ctrl+F, and it
+   * takes the keyboard when it comes to the front; the others keep their
+   * shells running behind it.
+   */
+  active?: boolean;
+  /** The shell process exited, so the window can close its tab. */
+  onExit?: () => void;
 }
 
 interface TerminalSelectionSource {
@@ -97,14 +105,20 @@ export function TerminalSurface({
   onSession,
   insert = null,
   openFailure,
+  active = true,
+  onExit,
 }: TerminalSurfaceProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const mountRef = useRef<HTMLDivElement>(null);
+  // A window holds one of these per tab, so the heading id must be its own.
+  const titleId = useId();
   // Held in refs so a changing callback never restarts the terminal.
   const onViewportRef = useRef(onViewport);
   onViewportRef.current = onViewport;
   const onSessionRef = useRef(onSession);
   onSessionRef.current = onSession;
+  const onExitRef = useRef(onExit);
+  onExitRef.current = onExit;
   const terminalRef = useRef<Terminal | null>(null);
   const controllerRef = useRef<TerminalController | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
@@ -179,6 +193,7 @@ export function TerminalSurface({
         if (!active) return;
         setStatus(exitCode === null ? "终端进程已退出。" : `终端进程已退出（${exitCode}）。`);
         onSessionRef.current?.("ended");
+        onExitRef.current?.();
       },
       closed: () => {
         if (!active) return;
@@ -243,6 +258,11 @@ export function TerminalSurface({
       });
       terminal.focus();
       resizeFrame = window.requestAnimationFrame(scheduleResize);
+      // Also on a timer: a window behind another, or not yet shown, gets no
+      // animation frames, and the fit on mount may have run before xterm had
+      // measured its cells. Either way the first prompt was drawn on the
+      // 80-column grid the shell was opened with, past the box's right edge.
+      scheduleResize();
     });
 
     return () => {
@@ -312,6 +332,7 @@ export function TerminalSurface({
    * Escape hands the keys back to the terminal.
    */
   useEffect(() => {
+    if (!active) return undefined;
     function onKeyDown(event: KeyboardEvent): void {
       if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "f") {
         event.preventDefault();
@@ -326,7 +347,12 @@ export function TerminalSurface({
     }
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [searchOpen]);
+  }, [active, searchOpen]);
+
+  // A tab brought to the front takes the keyboard, as its shell did when it opened.
+  useEffect(() => {
+    if (active) terminalRef.current?.focus();
+  }, [active]);
 
   useEffect(() => {
     if (searchOpen) searchInputRef.current?.focus();
@@ -338,8 +364,8 @@ export function TerminalSurface({
   }
 
   return (
-    <section className="terminal-surface" aria-labelledby="terminal-surface-title">
-      <h2 id="terminal-surface-title" className="terminal-sr-only">SSH 终端 · {title}</h2>
+    <section className="terminal-surface" aria-labelledby={titleId}>
+      <h2 id={titleId} className="terminal-sr-only">SSH 终端 · {title}</h2>
       <p className="terminal-sr-only">支持输入法组合输入、键盘操作、文本选择与搜索。</p>
 
       {searchOpen ? (
