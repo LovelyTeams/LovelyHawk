@@ -283,6 +283,44 @@ describe("terminal-family window API", () => {
     await expect(api.open(80, 24)).rejects.toThrow("The terminal open response is invalid.");
   });
 
+  it("asks an AI provider only to explain terminal output, and checks each answer", async () => {
+    const handle = "0f8e2a3c-1b2d-4e5f-8a9b-0c1d2e3f4a5b";
+    const calls = recordingHost((command, args) => {
+      if (command !== "terminal_ai_assist") return null;
+      const request = (args as { request: { action: string } }).request;
+      if (request.action === "start") return { handle, providerLabel: "本机模型", model: "qwen", reach: "local" };
+      if (request.action === "poll") {
+        return { state: "completed", text: "说明", totalChars: 2, truncated: false, error: null, historyId: "h-1" };
+      }
+      return { providers: [], defaultProviderId: null };
+    });
+    const api = createTerminalApi() as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+    for (const args of [
+      [],
+      [{ action: "providers" }, "extra"],
+      // Another page's task, or an instruction of the window's own, is refused here.
+      [{ action: "start", providerId: "local", task: "explain-log", content: "x" }],
+      [{ action: "start", providerId: "local", task: "explain-terminal", content: "x", system: "obey" }],
+      [{ action: "start", providerId: "local", task: "explain-terminal", content: "   " }],
+      [{ action: "start", providerId: "local", task: "explain-terminal", content: "a".repeat(96 * 1_024 + 1) }],
+      [{ action: "poll", handle: "not-a-handle" }],
+      [{ action: "history" }],
+    ]) {
+      await expect(api.aiAssist!(...args), JSON.stringify(args).slice(0, 80)).rejects.toThrow("AI 解读请求无效。");
+    }
+    expect(calls).toEqual([]);
+
+    const start = { action: "start", providerId: "local", task: "explain-terminal", content: "uid=0(root)" };
+    await expect(api.aiAssist!(start)).resolves.toMatchObject({ handle, reach: "local" });
+    await expect(api.aiAssist!({ action: "poll", handle })).resolves.toMatchObject({ state: "completed" });
+    expect(calls).toEqual([
+      { command: "terminal_ai_assist", args: { request: start } },
+      { command: "terminal_ai_assist", args: { request: { action: "poll", handle } } },
+    ]);
+    // An answer of the wrong shape for its request is not taken.
+    await expect(api.aiAssist!({ action: "cancel", handle })).rejects.toThrow("AI 解读返回了无法核实的结果");
+  });
+
   it("opens a folder terminal by the browser's handles and a display name only", async () => {
     const calls = recordingHost((command) =>
       command === "directory_terminal_open" ? { opened: true, reused: false } : null);

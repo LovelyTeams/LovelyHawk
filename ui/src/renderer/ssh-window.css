@@ -729,3 +729,49 @@
 .sftp-properties-list dt { color: var(--muted); font-size: var(--font-caption); }
 .sftp-properties-list dd { margin: 0; color: var(--text); font-family: "Cascadia Mono", monospace; font-size: var(--font-small); overflow-wrap: anywhere; white-space: pre-wrap; }
 .sftp-properties-flag { display: block; margin-top: 3px; color: var(--danger-text); font-family: inherit; font-size: var(--font-caption); font-style: normal; font-weight: 700; }
+
+/* Asking an AI provider to explain what is selected in the terminal. Always
+   offered, so it can be found; without a selection it says how to make one. */
+.ssh-window-ai {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  font-size: var(--font-caption);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ssh-window-ai:hover {
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.ssh-window-ai:focus-visible {
+  outline: 3px solid var(--console-accent);
+  outline-offset: 2px;
+}
+
+.ssh-window-ai-hint {
+  flex: none;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-caption);
+}
+
+/* The answer sits under the terminal and scrolls on its own, so the shell
+   keeps most of the window. */
+.ssh-window-ai-panel {
+  display: flex;
+  max-height: 45%;
+  min-height: 0;
+  flex: none;
+  flex-direction: column;
+  overflow: auto;
+}

@@ -1,3 +1,5 @@
+import type { AiAssistRequest, AiAssistResponse } from "./ai-assist-contract.js";
+
 export const TERMINAL_LIMITS = Object.freeze({
   maximumTerminals: 16,
   maximumTerminalsPerTarget: 2,
@@ -64,6 +66,11 @@ export interface TerminalApi {
     maximumResults: number,
   ): Promise<TerminalSearch>;
   copySelection(text: string): Promise<void>;
+  /**
+   * AI explanation of output the operator selected. The window may only ask
+   * for that one task; answers it did not start are not its to read.
+   */
+  aiAssist(request: AiAssistRequest): Promise<AiAssistResponse>;
   /** Closes one tab's shell; the window stays. */
   closeTab(tab: string): Promise<TerminalClosed>;
   /** Closes the window and every shell in it. */

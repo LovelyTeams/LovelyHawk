@@ -257,7 +257,11 @@ impl Host {
 
     /// Forgets a child window and closes every terminal it held, one per tab.
     pub async fn release_child<R: Runtime>(&self, app: &AppHandle<R>, label: &str, destroy: bool) {
-        let handles = self.children.lock().remove(label).unwrap_or_default();
+        let (handles, ai_streams) = {
+            let mut children = self.children.lock();
+            let ai_streams = children.take_ai_streams(label);
+            (children.remove(label).unwrap_or_default(), ai_streams)
+        };
         if destroy && let Some(window) = app.get_webview_window(label) {
             let _ = window.destroy();
         }
@@ -265,6 +269,13 @@ impl Host {
             let _ = self
                 .bridge
                 .call("terminal.close", json!({ "handle": terminal_handle }))
+                .await;
+        }
+        // An answer nobody will read stops costing the provider anything.
+        for stream in ai_streams {
+            let _ = self
+                .bridge
+                .call("ai.assist", json!({ "action": "cancel", "handle": stream }))
                 .await;
         }
     }

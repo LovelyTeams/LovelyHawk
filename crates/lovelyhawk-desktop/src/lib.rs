@@ -241,6 +241,7 @@ pub fn run() -> ExitCode {
             child_commands::terminal_resize,
             child_commands::terminal_search,
             child_commands::terminal_copy_selection,
+            child_commands::terminal_ai_assist,
             child_commands::terminal_close_tab,
             child_commands::terminal_close,
             child_commands::sftp_open,

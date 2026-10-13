@@ -82,9 +82,10 @@ describe("application shell inventory", () => {
     // that resolves its window is the correct kind of new command.
     const handlers = [...commands.matchAll(/#\[tauri::command\]\npub (?:async )?fn (?<name>[a-z_]+)/gu)]
       .map((match) => match.groups?.name);
-    expect(handlers).toHaveLength(27);
+    expect(handlers).toHaveLength(28);
     expect(handlers).toContain("terminal_open_tab");
     expect(handlers).toContain("terminal_close_tab");
+    expect(handlers).toContain("terminal_ai_assist");
     expect(handlers).toContain("directory_terminal_open");
     const bodies = commands.split("#[tauri::command]").slice(1);
     expect(bodies).toHaveLength(handlers.length);

@@ -22,6 +22,7 @@
     "allow-terminal-resize",
     "allow-terminal-search",
     "allow-terminal-copy-selection",
+    "allow-terminal-ai-assist",
     "allow-terminal-close-tab",
     "allow-terminal-close",
     "allow-sftp-open",

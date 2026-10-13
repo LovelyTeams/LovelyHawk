@@ -57,6 +57,8 @@ const SCROLL_LISTS: Record<string, string> = {
   ".java-dialog": ".java-dialog > *",
   // The saved log match rules, listed in their dialog.
   ".log-rules-list": ".log-rules-list li",
+  // The AI answer under a terminal, which scrolls rather than squeeze the shell.
+  ".ssh-window-ai-panel": ".ai-assist-panel",
 };
 
 function rule(css: string, selector: string): string {

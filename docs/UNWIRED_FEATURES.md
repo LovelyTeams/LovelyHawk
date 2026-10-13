@@ -466,6 +466,9 @@
   条目仍为 `Pending`：真实 SSH/PTY 的成功 resize/input/poll/search/copy/close、生产 keyed reuse/focus/disconnect、
   OpenSSH/Dropbear/auth/MFA、IME/CJK、网络故障及 packaged Windows/macOS/Linux 生命周期矩阵均为 `NOT_RUN`，
   tabs、completion、directory launch 和 AI parity 也尚未达成，不能据此宣布 SSH terminal 完成。
+  （2026-10-13 补记，Tauri 外壳）多标签页（`desktop-terminal-tabs-2026-10-13`）、文件夹终端和终端里的
+  “AI 解释选中内容”（`desktop-terminal-ai-2026-10-13`）已接线，并在 lab-super 的真实窗口里实测；命令补全仍未做，
+  SSH 兼容矩阵、打包生命周期以及容器/Pod/文件夹窗口里的 AI 控件仍为 `NOT_RUN`，条目仍为 `Pending`。
 
 - 通用 Middleware 远程编辑器仍为 `UNWIRED`；普通 Nginx 进程的三项有限修补已接线（2026-09-08）。本目录历史上记载的
   `middleware.discover`、`middleware.configuration.load`、`middleware.history.list` 及对应三个 preload

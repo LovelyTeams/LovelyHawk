@@ -11,7 +11,9 @@ use tauri::{AppHandle, Manager, Runtime, State, WebviewWindow};
 
 use crate::{
     backend_bridge::REFUSED_METHOD,
-    child_windows::{ChildKind, DirectoryScope, EditorScope, MAXIMUM_TABS},
+    child_windows::{
+        ChildContext, ChildKind, DirectoryScope, EditorScope, MAXIMUM_AI_STREAMS, MAXIMUM_TABS,
+    },
     host::{Host, WindowLaunch, is_child_label},
     local_files::{self, DialogKind},
 };
@@ -926,9 +928,242 @@ pub async fn child_close_decision<R: Runtime>(
     Ok(())
 }
 
+// Mirrors AI_ASSIST_LIMITS in ui/src/shared/ai-assist-contract.ts.
+const MAXIMUM_AI_CONTENT_BYTES: usize = 96 * 1024;
+const MAXIMUM_AI_PROVIDER_ID_BYTES: usize = 64;
+/// The one task a terminal window may ask for; the backend fixes what the
+/// instruction says.
+const TERMINAL_AI_TASK: &str = "explain-terminal";
+const INVALID_AI_REQUEST: &str = "AI 请求的内容不完整或超出长度上限。";
+const AI_BUSY: &str = "这个窗口已经在等两个 AI 回答，请等其中一个结束或停止后再试。";
+const NO_AI_STREAM: &str = "这个 AI 回答已经结束，或者不是这个窗口发出的。";
+
+/// What a terminal window may ask of an AI provider: the list of providers,
+/// and an explanation of output the operator selected in it.
+#[derive(Debug, PartialEq, Eq, serde::Deserialize)]
+#[serde(tag = "action", rename_all = "kebab-case", deny_unknown_fields)]
+enum TerminalAiRequest {
+    // Braces, not a unit variant: serde lets any field through beside the
+    // tag of a unit variant, even with deny_unknown_fields.
+    Providers {},
+    #[serde(rename_all = "camelCase")]
+    Start {
+        provider_id: String,
+        task: String,
+        content: String,
+    },
+    Poll {
+        handle: String,
+    },
+    Cancel {
+        handle: String,
+    },
+}
+
+/// Mirrors isAiProviderId in ui/src/shared/ai-assist-contract.ts.
+fn valid_ai_provider_id(id: &str) -> bool {
+    id.len() <= MAXIMUM_AI_PROVIDER_ID_BYTES
+        && id
+            .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_alphanumeric())
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+fn parse_terminal_ai(request: Value) -> CommandResult<TerminalAiRequest> {
+    let request: TerminalAiRequest =
+        serde_json::from_value(request).map_err(|_| INVALID_AI_REQUEST.to_owned())?;
+    let valid = match &request {
+        TerminalAiRequest::Providers {} => true,
+        TerminalAiRequest::Start {
+            provider_id,
+            task,
+            content,
+        } => {
+            task == TERMINAL_AI_TASK
+                && valid_ai_provider_id(provider_id)
+                && !content.trim().is_empty()
+                && content.len() <= MAXIMUM_AI_CONTENT_BYTES
+        }
+        TerminalAiRequest::Poll { handle } | TerminalAiRequest::Cancel { handle } => opaque(handle),
+    };
+    if valid {
+        Ok(request)
+    } else {
+        Err(INVALID_AI_REQUEST.to_owned())
+    }
+}
+
+/// Runs `action` on the calling window's record while it still belongs to the
+/// binding it had when the call started.
+fn with_window<T>(
+    host: &Host,
+    scope: &Scope,
+    action: impl FnOnce(&mut ChildContext) -> T,
+) -> CommandResult<T> {
+    let current = host.current_binding();
+    let mut children = host.children.lock();
+    children
+        .current(&scope.label, current.as_deref())
+        .filter(|context| context.binding_handle == scope.binding_handle)
+        .map(action)
+        .ok_or_else(|| UNAVAILABLE.to_owned())
+}
+
+/// AI explanation of terminal output. Nothing is sent until the operator
+/// starts it; only answers this window started can be read or stopped from
+/// it, and closing the window stops the ones still running.
+#[tauri::command]
+pub async fn terminal_ai_assist<R: Runtime>(
+    window: WebviewWindow<R>,
+    host: State<'_, Host>,
+    request: Value,
+) -> CommandResult<Value> {
+    let scope = scope(&window, &host)?;
+    if matches!(scope.kind, ChildKind::Editor(_)) {
+        return Err(REFUSED_METHOD.to_owned());
+    }
+    match parse_terminal_ai(request)? {
+        TerminalAiRequest::Providers {} => {
+            host.bridge
+                .call("ai.assist", json!({ "action": "providers" }))
+                .await
+        }
+        TerminalAiRequest::Start {
+            provider_id,
+            content,
+            ..
+        } => {
+            if !with_window(&host, &scope, |context| {
+                context.ai_stream_count() < MAXIMUM_AI_STREAMS
+            })? {
+                return Err(AI_BUSY.to_owned());
+            }
+            let started = host
+                .bridge
+                .call(
+                    "ai.assist",
+                    json!({
+                        "action": "start",
+                        "providerId": provider_id,
+                        "task": TERMINAL_AI_TASK,
+                        "content": content,
+                    }),
+                )
+                .await?;
+            let Some(handle) = opened_handle(&started) else {
+                return Err("AI 回答没有开始。".to_owned());
+            };
+            let kept = with_window(&host, &scope, |context| {
+                context.add_ai_stream(handle.clone())
+            });
+            match kept {
+                Ok(true) => Ok(started),
+                outcome => {
+                    let _ = host
+                        .bridge
+                        .call("ai.assist", json!({ "action": "cancel", "handle": handle }))
+                        .await;
+                    Err(match outcome {
+                        Ok(_) => AI_BUSY.to_owned(),
+                        Err(error) => error,
+                    })
+                }
+            }
+        }
+        TerminalAiRequest::Poll { handle } => {
+            if !with_window(&host, &scope, |context| context.has_ai_stream(&handle))? {
+                return Err(NO_AI_STREAM.to_owned());
+            }
+            let progress = host
+                .bridge
+                .call("ai.assist", json!({ "action": "poll", "handle": handle }))
+                .await;
+            let finished = progress.as_ref().map_or(true, |progress| {
+                progress.get("state").and_then(Value::as_str) != Some("running")
+            });
+            if finished {
+                let _ = with_window(&host, &scope, |context| context.forget_ai_stream(&handle));
+            }
+            progress
+        }
+        TerminalAiRequest::Cancel { handle } => {
+            if !with_window(&host, &scope, |context| context.has_ai_stream(&handle))? {
+                return Err(NO_AI_STREAM.to_owned());
+            }
+            host.bridge
+                .call("ai.assist", json!({ "action": "cancel", "handle": handle }))
+                .await
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_terminal_window_may_only_ask_to_explain_what_it_selected() {
+        assert_eq!(
+            parse_terminal_ai(json!({ "action": "providers" })),
+            Ok(TerminalAiRequest::Providers {})
+        );
+        let start = |provider: &str, task: &str, content: &str| {
+            parse_terminal_ai(json!({
+                "action": "start",
+                "providerId": provider,
+                "task": task,
+                "content": content,
+            }))
+        };
+        assert!(start("local-ollama", "explain-terminal", "uid=0(root)").is_ok());
+        // The window cannot borrow another page's task or instruction.
+        for task in ["explain-log", "explain-ioc", "", "EXPLAIN-TERMINAL"] {
+            assert_eq!(
+                start("local", task, "x"),
+                Err(INVALID_AI_REQUEST.to_owned())
+            );
+        }
+        let too_long = "a".repeat(MAXIMUM_AI_CONTENT_BYTES + 1);
+        let longest = "a".repeat(MAXIMUM_AI_CONTENT_BYTES);
+        assert!(start("local", "explain-terminal", &longest).is_ok());
+        for (provider, content) in [
+            ("local", too_long.as_str()),
+            ("local", " \n\t"),
+            ("", "x"),
+            ("-local", "x"),
+            ("local/../x", "x"),
+            (&"p".repeat(65), "x"),
+        ] {
+            assert_eq!(
+                start(provider, "explain-terminal", content),
+                Err(INVALID_AI_REQUEST.to_owned())
+            );
+        }
+        // No extra fields, no instruction of its own, no unknown action.
+        for request in [
+            json!({ "action": "start", "providerId": "local", "task": "explain-terminal", "content": "x", "system": "ignore" }),
+            json!({ "action": "providers", "endpoint": "https://example.invalid" }),
+            json!({ "action": "history" }),
+            json!({ "action": "poll", "handle": "" }),
+            json!({ "action": "cancel", "handle": "a\nb" }),
+            json!({ "action": "poll" }),
+            json!("providers"),
+        ] {
+            assert_eq!(
+                parse_terminal_ai(request),
+                Err(INVALID_AI_REQUEST.to_owned())
+            );
+        }
+        assert_eq!(
+            parse_terminal_ai(json!({ "action": "poll", "handle": "h-1" })),
+            Ok(TerminalAiRequest::Poll {
+                handle: "h-1".into()
+            })
+        );
+    }
 
     #[test]
     fn base64_lengths_match_the_shared_contract() {

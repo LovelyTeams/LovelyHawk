@@ -2,7 +2,7 @@
  * Asking a configured AI provider to read something a page already has.
  * Mirrors crates/lovelyhawk-backend/src/ai_assist_api.rs.
  */
-export type AiAssistTask = "explain-log" | "explain-ioc";
+export type AiAssistTask = "explain-log" | "explain-ioc" | "explain-terminal";
 export type AiReach = "local" | "internet";
 export type AiProtocol = "openai" | "anthropic";
 export type AiAssistState = "running" | "completed" | "cancelled" | "failed";
@@ -79,7 +79,7 @@ export function isAiProviderId(value: unknown): value is string {
 }
 
 export function isAiAssistTask(value: unknown): value is AiAssistTask {
-  return value === "explain-log" || value === "explain-ioc";
+  return value === "explain-log" || value === "explain-ioc" || value === "explain-terminal";
 }
 
 function isReach(value: unknown): value is AiReach {

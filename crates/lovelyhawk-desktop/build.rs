@@ -39,6 +39,7 @@ const COMMANDS: &[&str] = &[
     "terminal_resize",
     "terminal_search",
     "terminal_copy_selection",
+    "terminal_ai_assist",
     "terminal_close_tab",
     "terminal_close",
     "sftp_open",

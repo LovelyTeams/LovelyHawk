@@ -12,6 +12,7 @@ import {
 } from "../shared/ai-history-contract";
 import {
   aiHistoryCopyText,
+  aiHistorySourceLabel,
   formatAiHistoryTimestamp,
   nextAiHistoryModalFocus,
 } from "./ai-history-helpers";
@@ -249,7 +250,7 @@ export function AiHistoryPage({ api, writeClipboard }: AiHistoryPageProps) {
               {state.page?.items.map((item) => (
                 <button type="button" key={item.id} className={item.id === state.selectedId ? "ai-history-row active" : "ai-history-row"} onClick={() => dispatch({ type: "record-selected", id: item.id })}>
                   <span><strong>{item.provider} / {item.model}</strong><time>{formatAiHistoryTimestamp(item.timestamp)}</time></span>
-                  <small>{item.source}</small>
+                  <small>{aiHistorySourceLabel(item.source)}</small>
                   <p>问：{item.promptPreview}{item.promptTruncated ? "…" : ""}</p>
                   <p>答：{item.resultPreview}{item.resultTruncated ? "…" : ""}</p>
                 </button>
@@ -267,7 +268,7 @@ export function AiHistoryPage({ api, writeClipboard }: AiHistoryPageProps) {
             {state.detailStatus === "error" ? <div className="ai-history-detail-state error" role="alert">无法读取所选记录。</div> : null}
             {state.detailStatus === "ready" && state.record !== null ? (
               <>
-                <header><div><h2>{state.record.provider} / {state.record.model}</h2><p>{state.record.source} · {formatAiHistoryTimestamp(state.record.timestamp)}</p></div><div><button type="button" onClick={() => void copy("prompt")}>复制提示词</button><button type="button" onClick={() => void copy("result")}>复制回答</button><button type="button" className="danger" disabled={busy !== null} onClick={() => void requestRemove()}>永久删除</button></div></header>
+                <header><div><h2>{state.record.provider} / {state.record.model}</h2><p>{aiHistorySourceLabel(state.record.source)} · {formatAiHistoryTimestamp(state.record.timestamp)}</p></div><div><button type="button" onClick={() => void copy("prompt")}>复制提示词</button><button type="button" onClick={() => void copy("result")}>复制回答</button><button type="button" className="danger" disabled={busy !== null} onClick={() => void requestRemove()}>永久删除</button></div></header>
                 <div className="ai-history-text"><article><h3>提示词</h3><pre>{state.record.prompt}</pre></article><article><h3>AI 回答（纯文本）</h3><pre>{state.record.result}</pre></article></div>
               </>
             ) : null}

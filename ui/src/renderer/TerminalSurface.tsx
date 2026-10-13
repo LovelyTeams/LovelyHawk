@@ -42,6 +42,12 @@ interface TerminalSurfaceProps {
   active?: boolean;
   /** The shell process exited, so the window can close its tab. */
   onExit?: () => void;
+  /**
+   * Whether text is selected, and a way to read it when the window needs it
+   * (to have it explained). Reading it on demand keeps a large selection out
+   * of every render.
+   */
+  onSelection?: (read: (() => string) | null) => void;
 }
 
 interface TerminalSelectionSource {
@@ -107,6 +113,7 @@ export function TerminalSurface({
   openFailure,
   active = true,
   onExit,
+  onSelection,
 }: TerminalSurfaceProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const mountRef = useRef<HTMLDivElement>(null);
@@ -119,6 +126,8 @@ export function TerminalSurface({
   onSessionRef.current = onSession;
   const onExitRef = useRef(onExit);
   onExitRef.current = onExit;
+  const onSelectionRef = useRef(onSelection);
+  onSelectionRef.current = onSelection;
   const terminalRef = useRef<Terminal | null>(null);
   const controllerRef = useRef<TerminalController | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
@@ -181,6 +190,13 @@ export function TerminalSurface({
       });
     };
     host.addEventListener("copy", copyListener, true);
+    // One reader for the terminal's life, so the window's state only changes
+    // when a selection appears or goes, not on every step of a drag.
+    const readSelection = () => terminal.getSelection();
+    const selectionDisposable = terminal.onSelectionChange(() => {
+      if (!active) return;
+      onSelectionRef.current?.(terminal.hasSelection() ? readSelection : null);
+    });
     const controller = new TerminalController(api, {
       write: (bytes) => new Promise<void>((resolve) => terminal.write(bytes, resolve)),
       titleChanged: (nextTitle) => {
@@ -273,6 +289,8 @@ export function TerminalSurface({
       resizeObserver?.disconnect();
       if (resizeObserver === null) window.removeEventListener("resize", scheduleResize);
       inputDisposable?.dispose();
+      selectionDisposable.dispose();
+      onSelectionRef.current?.(null);
       host.removeEventListener("copy", copyListener, true);
       controllerRef.current = null;
       searchAddonRef.current = null;

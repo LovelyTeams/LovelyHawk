@@ -82,6 +82,10 @@ impl ChildKind {
 /// target in all, so a window can never usefully hold more.
 pub const MAXIMUM_TABS: usize = 4;
 
+/// AI answers one window may be waiting for at once. The backend keeps four
+/// in all, so one window cannot take every place.
+pub const MAXIMUM_AI_STREAMS: usize = 2;
+
 /// One shell in a terminal window. The page names it by `tab`, a number the
 /// host gave it; the backend's handle never leaves the host.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -105,6 +109,9 @@ pub struct ChildContext {
     last_tab: u32,
     /// An editor window holding text that is not on the server yet.
     pub unsaved: bool,
+    /// AI answers this window asked for and has not collected yet. Only these
+    /// may be polled or cancelled from it, and closing it cancels them.
+    ai_streams: Vec<String>,
     close: CloseRequests,
 }
 
@@ -143,6 +150,29 @@ impl ChildContext {
 
     pub fn terminal_count(&self) -> usize {
         self.terminals.len()
+    }
+
+    /// Records an AI answer the window started, or refuses when it already
+    /// waits for as many as it may.
+    pub fn add_ai_stream(&mut self, handle: String) -> bool {
+        if self.ai_streams.len() >= MAXIMUM_AI_STREAMS {
+            return false;
+        }
+        self.ai_streams.push(handle);
+        true
+    }
+
+    pub fn has_ai_stream(&self, handle: &str) -> bool {
+        self.ai_streams.iter().any(|stream| stream == handle)
+    }
+
+    /// Forgets an answer the window collected in full.
+    pub fn forget_ai_stream(&mut self, handle: &str) {
+        self.ai_streams.retain(|stream| stream != handle);
+    }
+
+    pub fn ai_stream_count(&self) -> usize {
+        self.ai_streams.len()
     }
 }
 
@@ -211,6 +241,7 @@ impl ChildWindows {
                 terminals: Vec::new(),
                 last_tab: 0,
                 unsaved: false,
+                ai_streams: Vec::new(),
                 close: CloseRequests::default(),
             },
         );
@@ -298,6 +329,14 @@ impl ChildWindows {
     }
 
     /// Forgets a window and hands back every terminal it held, for closing.
+    /// The AI answers a closing window was still waiting for, to cancel.
+    pub fn take_ai_streams(&mut self, label: &str) -> Vec<String> {
+        self.by_label
+            .get_mut(label)
+            .map(|context| std::mem::take(&mut context.ai_streams))
+            .unwrap_or_default()
+    }
+
     pub fn remove(&mut self, label: &str) -> Option<Vec<String>> {
         let context = self.by_label.remove(label)?;
         if self.label_by_key.get(&context.key).map(String::as_str) == Some(label) {
@@ -555,5 +594,41 @@ mod tests {
         for name in ["", "0", "9", "terminal-1", "1 "] {
             assert_eq!(context.terminal(name), None);
         }
+    }
+
+    #[test]
+    fn ai_answers_belong_to_the_window_that_asked_and_close_with_it() {
+        let mut windows = ChildWindows::default();
+        let asking = windows.register("b", ChildKind::Terminal);
+        let other = windows.register(
+            "b",
+            ChildKind::Container(ContainerScope {
+                snapshot_handle: "s".into(),
+                container_handle: "c".into(),
+                container_name: "web".into(),
+            }),
+        );
+        let context = windows.current(&asking, Some("b")).unwrap();
+        assert!(context.add_ai_stream("stream-1".into()));
+        assert!(context.add_ai_stream("stream-2".into()));
+        // A third waits for one of these to finish.
+        assert!(!context.add_ai_stream("stream-3".into()));
+        assert_eq!(context.ai_stream_count(), MAXIMUM_AI_STREAMS);
+        assert!(context.has_ai_stream("stream-1"));
+        context.forget_ai_stream("stream-1");
+        assert!(!context.has_ai_stream("stream-1"));
+        assert!(context.add_ai_stream("stream-3".into()));
+
+        // Another window of the same connection cannot reach them.
+        let neighbour = windows.current(&other, Some("b")).unwrap();
+        assert!(!neighbour.has_ai_stream("stream-2"));
+
+        // Closing hands back what is still running, once.
+        assert_eq!(
+            windows.take_ai_streams(&asking),
+            ["stream-2".to_owned(), "stream-3".to_owned()]
+        );
+        assert!(windows.take_ai_streams(&asking).is_empty());
+        assert!(windows.take_ai_streams("child-unknown").is_empty());
     }
 }

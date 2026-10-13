@@ -11,6 +11,7 @@ import {
   type AiProviderChoices,
 } from "../shared/ai-assist-contract";
 import { errorText } from "./error-text";
+import "./ai-assist-panel.css";
 
 export interface AiAssistApi {
   aiAssist(request: AiAssistRequest): Promise<AiAssistResponse>;
@@ -49,11 +50,15 @@ function protocolText(protocol: AiProviderChoice["protocol"]): string {
  * the text may leave this computer. The answer arrives as plain text, can be
  * stopped at any time, and is stopped when the panel goes away.
  */
-export function AiAssistPanel({ api, task, what, build, onClose }: {
+export function AiAssistPanel({ api, task, what, subject = "日志原文", unit = "条", build, onClose }: {
   api: AiAssistApi;
   task: AiAssistTask;
   /** What is being sent, said in a few words ("本页 12 条日志和威胁摘要"). */
   what: string;
+  /** The text that would leave the computer, as the consent names it. */
+  subject?: string;
+  /** What the omitted count counts: log entries, or terminal lines. */
+  unit?: string;
   build(maximumBytes: number): AiAssistContent;
   onClose(): void;
 }) {
@@ -167,7 +172,7 @@ export function AiAssistPanel({ api, task, what, build, onClose }: {
             </select>
           </label>
           <p data-testid="ai-assist-summary">
-            将发送{what}（约 {kilobytes} KB{preview.omitted > 0 ? `，超出上限的 ${preview.omitted} 条不发` : ""}）到
+            将发送{what}（约 {kilobytes} KB{preview.omitted > 0 ? `，超出上限的 ${preview.omitted} ${unit}不发` : ""}）到
             「{chosen?.label}」，{chosen === null ? "" : `${protocolText(chosen.protocol)}，${reachText(chosen)}`}。
             回答只作参考，结论要自己核实；完成后会存进 AI 历史。
           </p>
@@ -175,7 +180,7 @@ export function AiAssistPanel({ api, task, what, build, onClose }: {
             <label className="ai-assist-consent">
               <input type="checkbox" checked={consent} data-testid="ai-assist-consent"
                 onChange={(event) => setConsent(event.target.checked)} />
-              这个服务商在互联网上。日志原文会离开这台电脑，可能含口令、密钥等敏感信息；我确认可以发送。
+              这个服务商在互联网上。{subject}会离开这台电脑，可能含口令、密钥等敏感信息；我确认可以发送。
             </label>
           ) : (
             <p className="ai-assist-note">这个服务商在本机或局域网里，内容不会离开本地网络。</p>

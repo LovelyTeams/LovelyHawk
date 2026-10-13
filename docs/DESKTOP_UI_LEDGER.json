@@ -1433,6 +1433,12 @@
    "command": "pnpm release:package -Build; pwsh ./scripts/desktop-package-windows.ps1 -OutputDirectory artifacts/manual-check-2026-10-13; pwsh ./scripts/desktop-portable-smoke.ps1 -ArchivePath artifacts/manual-check-2026-10-13/LovelyHawk-0.0.1-dev-windows-x64.zip",
    "result": "Passed",
    "notes": "A release portable package for the operator's manual checks (docs/PACKAGED_MANUAL_CHECKS.md): validated (no VC++ redistributable imports, licence inventory written) and smoke-tested from a path with spaces and CJK, no profile writes, all state under data/. The manual steps — native save dialog for the application log export, launch, single instance, minimum size, close, settings kept across restarts — are NOT_RUN until the operator reports them. Found while writing them: a second launch exits quietly instead of raising the running window (docs/OPEN_ITEMS.md item 26)."
+  },
+  {
+   "id": "desktop-terminal-ai-2026-10-13",
+   "command": "cargo test --locked -p lovelyhawk-backend; cargo test --locked -p lovelyhawk-desktop; cargo clippy --locked -p lovelyhawk-backend -p lovelyhawk-desktop --all-targets --no-deps -- -D warnings; cargo fmt --all -- --check; pnpm ui:check; pnpm release:source-gate; pnpm release:dependency-gate; pnpm desktop:build; pnpm desktop:test:debug; LAB=super node ui/scripts/probe-terminal-ai.mjs; LAB=super node ui/scripts/probe-terminal-tabs.mjs; LAB=super node tools/lab/probe-ui-log-analysis.mjs",
+   "result": "Passed",
+   "notes": "AI explanation of terminal output (the operator's decision of 2026-10-13: offline and online, OpenAI and Claude). Backend: ai.assist gains the explain-terminal task with its own fixed instruction (commands and text in the selection are content, not orders; read-only next steps; nothing invented) and history source terminal; the no-field actions (ai.assist providers, log.rules list) are now empty struct variants, because serde let any extra field through beside the tag of a unit variant even with deny_unknown_fields — regression cases added. Host: terminal-family windows reach it only through the new child command terminal_ai_assist (build.rs, capabilities/child-windows.json, 28 child commands), which resolves the calling window, refuses editor windows, accepts providers / start (only explain-terminal, provider id and 96 KiB bounds as the shared contract) / poll / cancel, records the answers each window started (at most two at once), lets only that window poll or stop them, and cancels the ones still running when the window is released (ChildWindows::take_ai_streams). Page: window.lovelyhawkTerminal.aiAssist checks requests and answers with the AI contract; TerminalSurface reports whether text is selected with one reader for the terminal's life; TerminalWindow has AI 解释选中内容 in the shell bar, which without a selection only says how to make one and with one reads it once and opens the AI panel under the terminal (whole lines from the top within the bound, the rest counted). The AI panel names its subject in the consent (选中的终端内容) and styles its own controls (ai-assist-panel.css, shared with log analysis). AI history shows sources in words (日志分析, 日志分析 · IOC 搜索, 终端选中内容). Found while probing: removing the hint line as the selection appeared gave the terminal another row, and xterm drops its selection on resize, so the hint now stays until the next click. Results: backend 772 passed, desktop 38 (new: a terminal window may only ask to explain its selection; answers belong to the window that asked and close with it), clippy clean; UI 136 files / 1113 tests (new: selection bounding, the bridge's refusals and answer checks, history source labels); source and dependency gates passed; desktop debug smoke 95/95; probe-terminal-ai 23/23 on lab-super with two mock providers on 127.0.0.1 — no connection before sending or on the no-selection hint, the mouse selection kept, the panel naming 2 lines, the local provider and that nothing leaves the local network, the internet provider held until the tick naming the terminal selection, the provider receiving exactly the two selected lines under the fixed terminal instruction with no authorization header, the window refused another answer's handle and another page's task without any connection, stopping and closing the window each closing the slow provider's connection, AI history listing one answer as 终端选中内容; probe-terminal-tabs 20/20; probe-ui-log-analysis all 65 checks. NOT_RUN: real OpenAI and Anthropic endpoints (no keys), the AI control in container, pod and folder terminal windows (no container on the lab host)."
   }
  ],
  "foundations": [
@@ -2344,7 +2350,8 @@
      "ui/src/renderer/ai-history-state.ts",
      "crates/lovelyhawk-backend/src/ai_history_api.rs",
      "Provider and streaming workflow: ai.assist streams OpenAI-style and Anthropic answers with cancellation and writes completed ones into AI history (source log-analysis / log-analysis-ioc)",
-     "Pending real-provider validation (OpenAI, Anthropic keys) and AI controls in the terminal window"
+     "Sources shown in words: 日志分析, 日志分析 · IOC 搜索, 终端选中内容 (log-analysis, log-analysis-ioc, terminal); answers explained from the terminal window are kept like the log page's",
+     "Pending real-provider validation (OpenAI, Anthropic keys)"
     ]
    },
    "status": "Pending",
@@ -2361,7 +2368,8 @@
     "evidence": [
      "desktop-ui-polish-2026-10-11b",
      "desktop-ui-polish-2026-10-13",
-     "desktop-ai-assist-2026-10-13"
+     "desktop-ai-assist-2026-10-13",
+     "desktop-terminal-ai-2026-10-13"
     ]
    }
   },
@@ -2722,7 +2730,8 @@
      "The window's status bar and title dot follow the session (正在连接 / 已连接 / 未连接), and session time counts only while connected; they used to say 已连接 from the first paint whether or not a shell ever opened",
      "Input methods and layout: Chinese composed through an input method reaches the shell once as UTF-8, a composition given up sends nothing, and key presses and compositions keep their order. The grid is fitted to an unpadded inner box after the bundled font has loaded (it used to be fitted to the padded box with the fallback font's cells, running 5 columns past the right edge and rows past the bottom), the box clips instead of scrolling (composing near the right edge scrolled it sideways and hid the first column), and the space below the last row is the terminal background instead of xterm's black viewport",
      "Tabs: up to four shells on the same host in the SSH window, each its own session named to the page only by a host-given tab number; terminal_open_tab / terminal_close_tab; container, pod and folder windows stay one shell each",
-     "Not built: AI controls; not run: the packaged lifecycle and the SSH compatibility matrix"
+     "AI controls: AI 解释选中内容 sends the operator's selection, read once, through the child command terminal_ai_assist to ai.assist (explain-terminal, fixed instruction), with the same before-send statement and internet consent as log analysis; a window reads and stops only its own answers and closing it cancels them",
+     "Not run: the packaged lifecycle, the SSH compatibility matrix, the AI control in container, pod and folder windows"
     ]
    },
    "status": "Pending",
@@ -2748,7 +2757,8 @@
      "desktop-directory-terminal-2026-10-11",
      "desktop-terminal-ime-2026-10-11",
      "desktop-quality-gate-2026-10-11n",
-     "desktop-terminal-tabs-2026-10-13"
+     "desktop-terminal-tabs-2026-10-13",
+     "desktop-terminal-ai-2026-10-13"
     ]
    }
   },

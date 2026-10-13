@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import { TERMINAL_LIMITS, type TerminalApi } from "../shared/terminal-contract";
+import { AiAssistPanel } from "./AiAssistPanel";
 import { CommandAssistant } from "./CommandAssistant";
+import { SparkIcon } from "./emergency-command-icons";
 import { SftpBrowserPage } from "./SftpBrowserPage";
+import { terminalSelectionContent, terminalSelectionLines } from "./terminal-ai";
 import { TERMINAL_ERROR_MESSAGES } from "./terminal-controller";
 import { terminalTabSession, type TerminalTabSession } from "./terminal-tabs";
 import { TerminalSurface, type TerminalSessionState } from "./TerminalSurface";
@@ -26,7 +29,18 @@ interface ShellTab {
   insert: { token: number; text: string } | null;
   connectedAt: number | null;
   endedAt: number | null;
+  /** Reads what is selected in this tab's terminal, while something is. */
+  selection: (() => string) | null;
 }
+
+/** Output the operator chose to have explained, read once when they asked. */
+interface Explained {
+  token: number;
+  text: string;
+  lines: number;
+}
+
+const SELECT_FIRST = "先在终端里用鼠标拖选要解释的命令或输出，再点“AI 解释选中内容”。";
 
 function newTab(api: TerminalApi, key: number): ShellTab {
   return {
@@ -37,6 +51,7 @@ function newTab(api: TerminalApi, key: number): ShellTab {
     insert: null,
     connectedAt: null,
     endedAt: null,
+    selection: null,
   };
 }
 
@@ -67,6 +82,8 @@ export function TerminalWindow({ kind = "terminal" }: { kind?: TerminalWindowKin
   const active = tabs.find((tab) => tab.key === activeKey) ?? tabs[0];
   const elapsed = useElapsedTime(active?.connectedAt ?? null, active?.endedAt ?? null);
   const full = tabs.length >= TERMINAL_LIMITS.maximumTabs;
+  const [explained, setExplained] = useState<Explained | null>(null);
+  const [explainHint, setExplainHint] = useState<string | null>(null);
 
   function update(key: number, change: (tab: ShellTab) => ShellTab): void {
     setTabs((current) => current.map((tab) => (tab.key === key ? change(tab) : tab)));
@@ -111,6 +128,29 @@ export function TerminalWindow({ kind = "terminal" }: { kind?: TerminalWindowKin
       connectedAt: state === "connected" ? tab.connectedAt ?? now : tab.connectedAt,
       endedAt: state === "ended" && tab.connectedAt !== null ? tab.endedAt ?? now : tab.endedAt,
     }));
+  }
+
+  /**
+   * Reads the shown tab's selection once. The panel then shows exactly what
+   * would be sent, and selecting something else meanwhile does not change it;
+   * asking again starts over with the new selection.
+   */
+  function explainSelection(): void {
+    const selected = active?.selection?.() ?? "";
+    const lines = terminalSelectionLines(selected);
+    if (selected.trim() === "" || lines === 0) {
+      setExplained(null);
+      setExplainHint(SELECT_FIRST);
+      return;
+    }
+    setExplainHint(null);
+    setExplained((current) => ({ token: (current?.token ?? 0) + 1, text: selected, lines }));
+  }
+
+  // The hint stays while the operator selects: removing it would give the
+  // terminal another row, and xterm drops its selection when it resizes.
+  function onSelection(key: number, read: (() => string) | null): void {
+    update(key, (tab) => (tab.selection === read ? tab : { ...tab, selection: read }));
   }
 
   function selectByOffset(offset: number): void {
@@ -234,7 +274,20 @@ export function TerminalWindow({ kind = "terminal" }: { kind?: TerminalWindowKin
             ) : (
               <span className="ssh-window-files-note" data-testid="terminal-files-note">主机文件在 SSH 终端窗口的文件管理中</span>
             )}
+            <button
+              type="button"
+              className="ssh-window-ai"
+              data-testid="terminal-ai-explain"
+              title={active?.selection == null ? SELECT_FIRST : "把选中的内容发给 AI 服务商解释，发送前会先说明发到哪里"}
+              onClick={explainSelection}
+            >
+              <SparkIcon />
+              AI 解释选中内容
+            </button>
           </div>
+          {explainHint !== null ? (
+            <p className="ssh-window-ai-hint" role="status" data-testid="terminal-ai-hint">{explainHint}</p>
+          ) : null}
           <div className="ssh-window-terminal">
             {tabs.map((tab) => {
               const selected = tab.key === active?.key;
@@ -255,6 +308,7 @@ export function TerminalWindow({ kind = "terminal" }: { kind?: TerminalWindowKin
                     onViewport={(columns, rows) => update(tab.key, (current) => ({ ...current, viewport: { columns, rows } }))}
                     onSession={(state) => onSession(tab.key, state)}
                     onExit={() => closeTab(tab.key)}
+                    onSelection={(read) => onSelection(tab.key, read)}
                     insert={tab.insert}
                     {...(kind === "directory" ? { openFailure: TERMINAL_ERROR_MESSAGES.openFolder } : {})}
                   />
@@ -262,6 +316,20 @@ export function TerminalWindow({ kind = "terminal" }: { kind?: TerminalWindowKin
               );
             })}
           </div>
+          {explained !== null ? (
+            <div className="ssh-window-ai-panel" data-testid="terminal-ai-panel">
+              <AiAssistPanel
+                key={explained.token}
+                api={api}
+                task="explain-terminal"
+                what={`终端里选中的 ${explained.lines} 行内容`}
+                subject="选中的终端内容"
+                unit="行"
+                build={(maximumBytes) => terminalSelectionContent(explained.text, maximumBytes)}
+                onClose={() => setExplained(null)}
+              />
+            </div>
+          ) : null}
           <CommandAssistant
             onInsert={(text) => {
               if (active === undefined) return;

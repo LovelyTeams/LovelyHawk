@@ -1,5 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 
+import { isAiAssistRequest, matchesAiAssistResponse } from "../shared/ai-assist-contract.js";
 import { isLocalBrowserOpaqueHandle, isLocalDirectorySnapshot } from "../shared/local-browser-contract.js";
 import {
   isSftpBrowserOpaqueHandle,
@@ -37,6 +38,8 @@ const TERMINAL_TIMEOUT_MS = 15_000;
 /** The same event the main window's close question uses. */
 const BEFORE_CLOSE_EVENT = "lovelyhawk://before-close";
 const SFTP_BROWSER_TIMEOUT_MS = 30_000;
+/** Starting an answer may wait for the provider to accept the connection. */
+const AI_ASSIST_TIMEOUT_MS = 60_000;
 const SFTP_OPERATION_TIMEOUT_MS = 100_000;
 /** A dialog stays open as long as the operator needs; the transfer bound follows it. */
 const DIALOG_TIMEOUT_MS = 60 * 60 * 1_000;
@@ -123,6 +126,15 @@ export function createTerminalApi(): TerminalApi {
       requireArity(values, 1, "Invalid terminal selection copy request.");
       if (!isTerminalSelectionCopyText(values[0])) refuse("Invalid terminal selection copy request.");
       await invokeHost("terminal_copy_selection", { text: values[0] }, TERMINAL_TIMEOUT_MS);
+    },
+    aiAssist: async (...values: unknown[]) => {
+      requireArity(values, 1, "AI 解读请求无效。");
+      const request = values[0];
+      if (!isAiAssistRequest(request) || (request.action === "start" && request.task !== "explain-terminal")) {
+        refuse("AI 解读请求无效。");
+      }
+      return checked("terminal_ai_assist", { request }, AI_ASSIST_TIMEOUT_MS,
+        (value) => matchesAiAssistResponse(request, value), "AI 解读返回了无法核实的结果，请重试。");
     },
     closeTab: async (...values: unknown[]) => {
       requireArity(values, 1, "Invalid terminal close request.");

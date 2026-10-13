@@ -6893,6 +6893,10 @@ mod tests {
                 "invalid-params",
             ),
             (
+                serde_json::json!({ "action": "providers", "endpoint": "https://example.invalid" }),
+                "invalid-params",
+            ),
+            (
                 serde_json::json!({ "action": "poll", "handle": "not-a-session" }),
                 "ai-assist-not-found",
             ),
@@ -7076,6 +7080,10 @@ mod tests {
                 "invalid-params",
             ),
             (serde_json::json!({ "action": "export" }), "invalid-params"),
+            (
+                serde_json::json!({ "action": "list", "path": "/etc" }),
+                "invalid-params",
+            ),
             (
                 serde_json::json!({ "action": "match", "lines": vec!["x"; 501] }),
                 "invalid-params",

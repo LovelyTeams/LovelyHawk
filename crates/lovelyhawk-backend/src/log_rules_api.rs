@@ -25,7 +25,9 @@ use uuid::Uuid;
 #[derive(Debug, Deserialize)]
 #[serde(tag = "action", rename_all = "kebab-case", deny_unknown_fields)]
 pub(crate) enum LogRulesRequest {
-    List,
+    // Braces, not a unit variant: serde lets any field through beside the
+    // tag of a unit variant, even with deny_unknown_fields.
+    List {},
     Add {
         name: String,
         pattern: String,
@@ -165,7 +167,7 @@ impl LogRulesApi {
         request: LogRulesRequest,
     ) -> Result<Value, LogRulesApiError> {
         let value = match request {
-            LogRulesRequest::List => to_value(self.list(services)?),
+            LogRulesRequest::List {} => to_value(self.list(services)?),
             LogRulesRequest::Add {
                 name,
                 pattern,

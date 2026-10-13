@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AiHistoryApi, AiHistoryRecord } from "../shared/ai-history-contract";
 import {
   aiHistoryCopyText,
+  aiHistorySourceLabel,
   nextAiHistoryModalFocus,
 } from "./ai-history-helpers";
 import { AiHistoryPage } from "./AiHistoryPage";
@@ -44,5 +45,14 @@ describe("standalone AI history page", () => {
     expect(nextAiHistoryModalFocus(0, 2, true)).toBe(1);
     expect(nextAiHistoryModalFocus(1, 2, false)).toBe(0);
     expect(nextAiHistoryModalFocus(-1, 2, false)).toBe(0);
+  });
+
+  it("names where each answer was asked from in words", () => {
+    expect(aiHistorySourceLabel("log-analysis")).toBe("日志分析");
+    expect(aiHistorySourceLabel("log-analysis-ioc")).toBe("日志分析 · IOC 搜索");
+    expect(aiHistorySourceLabel("terminal")).toBe("终端选中内容");
+    // Not a key of the object's prototype, and an unknown source stays as stored.
+    expect(aiHistorySourceLabel("toString")).toBe("toString");
+    expect(aiHistorySourceLabel("imported")).toBe("imported");
   });
 });
