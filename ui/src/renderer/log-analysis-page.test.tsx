@@ -19,6 +19,7 @@ import {
   LogEntriesView,
   LogIocResultsView,
   LogPagination,
+  LogResultCopy,
   LogSourceBranch,
   logAnalysisFailureMessage,
   logDiscoveryGap,
@@ -360,5 +361,24 @@ describe("a discovery that came back partly", () => {
     expect(logDiscoveryGap([{ kind: "file" }, { kind: "file" }])).toContain("没有读到 journal");
     expect(logDiscoveryGap([{ kind: "journal" }])).toContain("没能列出日志文件");
     expect(logDiscoveryGap([])).toContain("下面不是全部");
+  });
+});
+
+describe("copying a log result", () => {
+  it("offers a named button and says what the copy did, failures as alerts", () => {
+    const idle = renderToStaticMarkup(<LogResultCopy copy={{ notice: null, onCopy: () => undefined }} />);
+    expect(idle).toContain('data-testid="log-analysis-copy"');
+    expect(idle).toContain("复制分析结果");
+    expect(idle).not.toContain('role="status"');
+    const done = renderToStaticMarkup(<LogResultCopy copy={{
+      notice: { tab: "browse", text: "已复制本页 2 条日志和威胁摘要（纯文本）。", failed: false },
+      onCopy: () => undefined,
+    }} />);
+    expect(done).toMatch(/role="status">已复制本页 2 条日志和威胁摘要（纯文本）。</u);
+    const failed = renderToStaticMarkup(<LogResultCopy copy={{
+      notice: { tab: "ioc", text: "复制失败，请再试一次。", failed: true },
+      onCopy: () => undefined,
+    }} />);
+    expect(failed).toMatch(/class="is-failed" role="alert">复制失败/u);
   });
 });

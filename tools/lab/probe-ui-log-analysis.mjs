@@ -136,7 +136,7 @@ try {
 
   // Keeping the application log as evidence asks the host for a folder once;
   // the debug build answers it with this run's own directory.
-  app = await startDesktop({ dataRoot, port, dialogAnswers: [keptRoot] });
+  app = await startDesktop({ dataRoot, port, dialogAnswers: [keptRoot], clipboard: true });
   session = app.session;
   await waitFor(session, "document.querySelector('.connection-card') !== null", "the connection list");
   await session.evaluate(`(() => { const c = document.querySelector('.connection-card'); c?.querySelector('button')?.click() ?? c?.click(); return true; })()`);
@@ -330,6 +330,21 @@ try {
   check("the match is the planted one", searched.text.includes("api_key"));
   await shot(session, "log-search");
 
+  // Copying the result: a plain-text report of what was read, from where,
+  // under which conditions and when, through the host clipboard.
+  app.clearClipboard();
+  await session.evaluate("document.querySelector('[data-testid=\"log-analysis-copy\"]').click(), true");
+  await waitFor(session, "document.querySelector('.log-analysis-result-actions p')?.textContent.includes('已复制') === true", "the copy notice");
+  const copied = app.readClipboard() ?? "";
+  console.log(`  copied report: ${JSON.stringify(copied.slice(0, 300))}`);
+  check("the copy is a report of the browse view", copied.startsWith("# LovelyHawk 日志分析 · 日志浏览"));
+  check("it names the time with its zone", /复制时间：\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}（本机时间，UTC[+-]\d{2}:\d{2}）/u.test(copied));
+  check("it names the conditions the page was read under", copied.includes("关键词 “api_key”") && copied.includes("第 1 页"));
+  check("it carries the matching line", copied.split("\n").some((line) => /^1\. .*api_key/u.test(line)));
+  check("it says the read changed nothing and covers only this page", copied.includes("只读读取，没有改动目标机。") && copied.includes("不代表这个日志的全部"));
+  check("the notice says what was copied", await session.evaluate("document.querySelector('.log-analysis-result-actions p').textContent"),
+    "已复制本页 1 条日志和威胁摘要（纯文本）。");
+
   // Keeping the open log as evidence: the whole file, byte for byte, with
   // where it came from — through the same file-evidence dialog the command
   // workbench uses, by the handle discovery gave this source.
@@ -367,6 +382,69 @@ try {
   await session.evaluate(`(() => { [...document.querySelectorAll('.file-evidence-dialog footer button')].find(b => b.textContent.trim() === '关闭')?.click(); return true; })()`);
   await waitFor(session, "document.querySelector('.file-evidence-dialog') === null", "the evidence dialog to close");
   check("closing returns focus to the keep button", await session.evaluate("document.activeElement?.dataset.testid ?? ''"), "log-analysis-keep");
+
+  // --- the analysis views: several sources at once, and their copies.
+  const selectView = (label) => session.evaluate(`(() => {
+    const button = [...document.querySelectorAll('.log-analysis-views button')].find(b => b.textContent.trim() === ${JSON.stringify(label)});
+    button?.click();
+    return button !== undefined;
+  })()`);
+  // The source rows are the buttons in the tree that carry a source body.
+  const SOURCES = "[...document.querySelectorAll('aside button')].filter(b => b.querySelector('.log-analysis-source-body') !== null)";
+  const pick = (location) => session.evaluate(`(() => {
+    const button = ${SOURCES}.find(b => b.textContent.includes(${JSON.stringify(location)}));
+    if (button === undefined || button.disabled) return false;
+    if (button.getAttribute('aria-pressed') !== 'true') button.click();
+    return true;
+  })()`);
+  check("the correlation view opens", await selectView("多源关联"));
+  // Start from nothing chosen, so the run covers exactly the two named here.
+  await session.evaluate(`(() => { for (const button of ${SOURCES}) if (button.getAttribute('aria-pressed') === 'true') button.click(); return true; })()`);
+  const picked = [await pick("/opt/probe-app/logs/app.log"), await pick("/www/wwwlogs/site.com.log")];
+  if (picked.includes(false)) {
+    console.log(`  sources: ${JSON.stringify(await session.evaluate(`${SOURCES}.map(b => [b.textContent.slice(0, 60), b.getAttribute('aria-pressed'), b.disabled])`))}`);
+  }
+  check("two planted logs can be chosen for it", picked.every(Boolean));
+  await session.evaluate("document.querySelector('.log-analysis-run').click(), true");
+  await waitFor(session, "document.querySelector('.log-analysis-coverage') !== null || document.querySelector('.log-analysis-detail [role=alert]') !== null", "the correlation", 240);
+  const correlated = await session.evaluate(`(() => ({
+    coverage: document.querySelector('.log-analysis-coverage')?.textContent ?? null,
+    lines: document.querySelectorAll('.log-analysis-lines p').length,
+    error: document.querySelector('.log-analysis-detail [role=alert]')?.textContent ?? null,
+  }))()`);
+  console.log(`  correlation: ${JSON.stringify(correlated)}`);
+  check("the two logs are read together", correlated.coverage !== null && correlated.lines > 0);
+  app.clearClipboard();
+  await session.evaluate("document.querySelector('[data-testid=\"log-analysis-copy\"]').click(), true");
+  await waitFor(session, "document.querySelector('.log-analysis-result-actions p')?.textContent.includes('已复制') === true", "the correlation copy");
+  const correlationCopy = app.readClipboard() ?? "";
+  check("its copy names both sources and its bound",
+    correlationCopy.startsWith("# LovelyHawk 日志分析 · 多源关联") &&
+      correlationCopy.includes("日志源（2 个）：") && correlationCopy.includes("/opt/probe-app/logs/app.log") &&
+      correlationCopy.includes("/www/wwwlogs/site.com.log") && correlationCopy.includes("每源最多观察 200 行"));
+  await shot(session, "log-correlation");
+
+  check("the IOC view opens", await selectView("IOC 搜索"));
+  // The selection carries over from the correlation view; the IOC search
+  // runs over the same two logs.
+  await session.evaluate(`(() => {
+    const area = document.querySelector('.log-analysis-ioc-input textarea');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+    setter.call(area, 'api_key\\n198.51.100.254');
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  })()`);
+  await session.evaluate("document.querySelector('.log-analysis-run').click(), true");
+  await waitFor(session, "document.querySelector('.log-analysis-ioc-results') !== null || document.querySelector('.log-analysis-detail [role=alert]') !== null", "the IOC search", 240);
+  app.clearClipboard();
+  await session.evaluate("document.querySelector('[data-testid=\"log-analysis-copy\"]').click(), true");
+  await waitFor(session, "document.querySelector('.log-analysis-result-actions p')?.textContent.includes('已复制') === true", "the IOC copy");
+  const iocCopy = app.readClipboard() ?? "";
+  console.log(`  IOC copy: ${JSON.stringify(iocCopy.slice(0, 400))}`);
+  check("the IOC copy lists what was searched", iocCopy.startsWith("# LovelyHawk 日志分析 · IOC 搜索") && iocCopy.includes("IOC（2 个）：api_key、198.51.100.254"));
+  check("it shows where the planted indicator was found", /- api_key @ [^\n]*app\.log[^\n]*：\d+ 次/u.test(iocCopy));
+  check("and names the one found nowhere", iocCopy.includes("没有命中：198.51.100.254"));
+  await shot(session, "log-ioc");
 } catch (error) {
   console.log(`FAILED: ${error.message}`);
   failures += 1;

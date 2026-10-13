@@ -738,6 +738,33 @@
   font-size: var(--font-small);
 }
 
+/* Copying a result: a quiet action above it, with what the last copy did. */
+.log-analysis-result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+
+.log-analysis-copy {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.log-analysis-result-actions p {
+  min-width: 0;
+  margin: 0;
+  color: var(--success-text);
+  font-size: var(--font-small);
+}
+
+.log-analysis-result-actions p.is-failed {
+  color: var(--danger-text);
+}
+
 .log-analysis-muted {
   margin: 0;
   color: var(--muted);

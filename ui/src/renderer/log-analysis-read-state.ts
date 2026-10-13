@@ -62,6 +62,8 @@ export interface LogAnalysisReadState {
   iocStatus: LogAnalysisStatus;
   iocRequest: IocRequest | null;
   ioc: LogIocSearchResult | null;
+  /** What the shown IOC result searched for, so a copy can name the ones that matched nothing. */
+  iocIndicators: string[];
   iocError: string | null;
 }
 
@@ -91,6 +93,7 @@ export function createLogAnalysisReadState(): LogAnalysisReadState {
     iocStatus: "idle",
     iocRequest: null,
     ioc: null,
+    iocIndicators: [],
     iocError: null,
   };
 }
@@ -211,16 +214,19 @@ export function logAnalysisReadReducer(
     case "ioc-started":
       if (!sameAnalysisTarget(state, action.scope, action.request) || action.request.sourceHandles.length < 1 ||
         action.request.indicators.length < 1) return state;
-      return { ...state, iocStatus: "loading", iocRequest: action.request, ioc: null, iocError: null };
+      return { ...state, iocStatus: "loading", iocRequest: action.request, ioc: null, iocIndicators: [], iocError: null };
     case "ioc-loaded":
       if (!sameIocRequest(state, action.scope, action.request) ||
         action.result.snapshotHandle !== action.request.snapshotHandle ||
         action.result.results.some((item) => !action.request.sourceHandles.includes(item.sourceHandle) ||
           !action.request.indicators.includes(item.indicator))) return state;
-      return { ...state, iocStatus: "ready", iocRequest: null, ioc: action.result, iocError: null };
+      return {
+        ...state, iocStatus: "ready", iocRequest: null, ioc: action.result,
+        iocIndicators: [...action.request.indicators], iocError: null,
+      };
     case "ioc-failed":
       if (!sameIocRequest(state, action.scope, action.request)) return state;
-      return { ...state, iocStatus: "error", iocRequest: null, ioc: null, iocError: action.error };
+      return { ...state, iocStatus: "error", iocRequest: null, ioc: null, iocIndicators: [], iocError: action.error };
   }
 }
 
@@ -245,6 +251,7 @@ function resetAnalysisResults(state: LogAnalysisReadState): LogAnalysisReadState
     iocStatus: "idle",
     iocRequest: null,
     ioc: null,
+    iocIndicators: [],
     iocError: null,
   };
 }

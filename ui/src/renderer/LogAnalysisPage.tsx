@@ -46,7 +46,14 @@ import {
   SearchIcon,
   TagIcon,
 } from "./emergency-command-icons";
+import { CopyIcon } from "./file-icons";
 import { LogSourceIcon } from "./log-source-icon";
+import {
+  buildLogCorrelationReport,
+  buildLogIocReport,
+  buildLogReadReport,
+  type LogReport,
+} from "./log-analysis-report";
 import {
   createLogAnalysisReadState,
   logAnalysisReadReducer,
@@ -101,6 +108,15 @@ export interface LogAnalysisPageProps {
   bindingHandle: string | null;
   /** A listed log file can be kept as evidence, so the file evidence API comes too. */
   api: LogAnalysisReadApi & FileEvidenceApi;
+  /** Where a copied report goes: the app clipboard, or a test's own. */
+  writeClipboard?: (text: string) => Promise<void>;
+}
+
+/** What the last copy of a result did, shown beside the button that made it. */
+interface CopyNotice {
+  tab: LogAnalysisTab;
+  text: string;
+  failed: boolean;
 }
 
 /** The log file being kept, bound to the connection it was listed on. */
@@ -113,8 +129,9 @@ interface KeptLog {
 const tabs: readonly LogAnalysisTab[] = ["browse", "correlation", "ioc"];
 const initialFilter: LogReadFilter = { keyword: "", date: "", journalUnit: "" };
 
-export function LogAnalysisPage({ bindingHandle, api }: LogAnalysisPageProps) {
+export function LogAnalysisPage({ bindingHandle, api, writeClipboard }: LogAnalysisPageProps) {
   const [state, dispatch] = useReducer(logAnalysisReadReducer, undefined, createLogAnalysisReadState);
+  const [copyNotice, setCopyNotice] = useState<CopyNotice | null>(null);
   const [snapshotVersion, setSnapshotVersion] = useState(0);
   const [readVersion, setReadVersion] = useState(0);
   const [draftFilter, setDraftFilter] = useState<LogReadFilter>(initialFilter);
@@ -137,6 +154,32 @@ export function LogAnalysisPage({ bindingHandle, api }: LogAnalysisPageProps) {
     setIocInputError(null);
     setKept(null);
   }, [scope]);
+
+  // A notice about a copy belongs to the result it copied.
+  useEffect(() => {
+    setCopyNotice(null);
+  }, [scope, state.read, state.correlation, state.ioc]);
+
+  /**
+   * Copies one result as a plain-text report. The report is built from what
+   * the page holds, so it says exactly what was read and under which
+   * conditions, and when it does not all fit it says how much was left out.
+   */
+  async function copyReport(tab: LogAnalysisTab, build: () => LogReport, what: string): Promise<void> {
+    try {
+      const report = build();
+      await (writeClipboard ?? ((value) => window.lovelyhawk.writeClipboard(value)))(report.text);
+      setCopyNotice({
+        tab,
+        failed: false,
+        text: report.omitted > 0
+          ? `已复制${what}；还有 ${report.omitted} 条超出剪贴板上限，没有复制。`
+          : `已复制${what}（纯文本）。`,
+      });
+    } catch {
+      setCopyNotice({ tab, failed: true, text: "复制失败，请再试一次。" });
+    }
+  }
 
   useEffect(() => () => {
     activeScopeRef.current = null;
@@ -380,6 +423,16 @@ export function LogAnalysisPage({ bindingHandle, api }: LogAnalysisPageProps) {
                   result={state.read}
                   page={state.page}
                   onPage={(page) => dispatch({ type: "page-selected", page })}
+                  copy={state.read === null || state.read.sourceHandle !== selectedSource.sourceHandle ? null : {
+                    notice: copyNotice?.tab === "browse" ? copyNotice : null,
+                    onCopy: () => {
+                      const result = state.read;
+                      if (result === null) return;
+                      void copyReport("browse", () => buildLogReadReport({
+                        source: selectedSource, filter: state.appliedFilter, result, copiedAt: new Date(),
+                      }), `本页 ${result.entries.length} 条日志和威胁摘要`);
+                    },
+                  }}
                 />
               )
             ) : state.tab === "correlation" ? (
@@ -389,6 +442,16 @@ export function LogAnalysisPage({ bindingHandle, api }: LogAnalysisPageProps) {
                 error={state.correlationError}
                 result={state.correlation}
                 onRun={runCorrelation}
+                copy={state.correlation === null ? null : {
+                  notice: copyNotice?.tab === "correlation" ? copyNotice : null,
+                  onCopy: () => {
+                    const result = state.correlation;
+                    if (result === null) return;
+                    void copyReport("correlation", () => buildLogCorrelationReport({
+                      sources: state.snapshot?.sources ?? [], result, copiedAt: new Date(),
+                    }), `关联出的 ${result.entries.length} 条日志和威胁摘要`);
+                  },
+                }}
               />
             ) : (
               <IocView
@@ -400,6 +463,19 @@ export function LogAnalysisPage({ bindingHandle, api }: LogAnalysisPageProps) {
                 error={state.iocError}
                 result={state.ioc}
                 onRun={runIocSearch}
+                copy={state.ioc === null ? null : {
+                  notice: copyNotice?.tab === "ioc" ? copyNotice : null,
+                  onCopy: () => {
+                    const result = state.ioc;
+                    if (result === null) return;
+                    // Changing the selection clears the result, so the
+                    // sources selected now are the ones it searched.
+                    void copyReport("ioc", () => buildLogIocReport({
+                      sources: state.snapshot?.sources ?? [], indicators: state.iocIndicators,
+                      sourceHandles: state.analysisSourceHandles, result, copiedAt: new Date(),
+                    }), `这次 ${state.iocIndicators.length} 个 IOC 的搜索结果`);
+                  },
+                }}
               />
             )}
           </section>
@@ -470,7 +546,31 @@ export function LogSourceBranch({ group, collapsed, selecting, selectedHandle, c
   );
 }
 
-function BrowseView({ source, onKeep, draftFilter, onDraftFilter, queryError, onApply, status, error, result, page, onPage }: {
+/** Copying a shown result: null while there is nothing to copy. */
+interface ResultCopy {
+  notice: CopyNotice | null;
+  onCopy(): void;
+}
+
+/** The copy button above a result, and what its last copy did. */
+export function LogResultCopy({ copy }: { copy: ResultCopy }) {
+  return (
+    <div className="log-analysis-result-actions">
+      <button type="button" className="log-analysis-copy" data-testid="log-analysis-copy"
+        title="把这次的结果连同来源、条件和时间复制成纯文本，可以贴进笔记或报告"
+        onClick={copy.onCopy}>
+        <CopyIcon />复制分析结果
+      </button>
+      {copy.notice !== null ? (
+        <p className={copy.notice.failed ? "is-failed" : undefined} role={copy.notice.failed ? "alert" : "status"}>
+          {copy.notice.text}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function BrowseView({ source, onKeep, draftFilter, onDraftFilter, queryError, onApply, status, error, result, page, onPage, copy }: {
   source: LogSource;
   /** Null when this source cannot be kept as a file: the journal, or a location shown cut short. */
   onKeep: ((returnFocus: HTMLElement | null) => void) | null;
@@ -483,6 +583,7 @@ function BrowseView({ source, onKeep, draftFilter, onDraftFilter, queryError, on
   result: LogSourceReadResult | null;
   page: number;
   onPage(page: number): void;
+  copy: ResultCopy | null;
 }) {
   return (
     <>
@@ -533,6 +634,7 @@ function BrowseView({ source, onKeep, draftFilter, onDraftFilter, queryError, on
         status === "error" ? <ErrorPanel message={error ?? "日志读取失败。"} compact /> : result === null ?
           <EmptyPanel title="尚未读取" detail="结果将在这里以纯文本逐行显示。" compact /> : (
             <>
+              {copy !== null ? <LogResultCopy copy={copy} /> : null}
               <LogThreatCards summary={result.threatSummary} />
               <LogEntriesView entries={result.entries} empty="当前页没有匹配日志。" />
               <LogPagination page={page} result={result} busy={status === "loading"} onPage={onPage} />
@@ -545,12 +647,13 @@ function BrowseView({ source, onKeep, draftFilter, onDraftFilter, queryError, on
   );
 }
 
-function CorrelationView({ selected, status, error, result, onRun }: {
+function CorrelationView({ selected, status, error, result, onRun, copy }: {
   selected: readonly string[];
   status: LogAnalysisStatus;
   error: string | null;
   result: LogCorrelationResult | null;
   onRun(): void;
+  copy: ResultCopy | null;
 }) {
   return (
     <>
@@ -583,6 +686,7 @@ function CorrelationView({ selected, status, error, result, onRun }: {
         <ErrorPanel message={error ?? "多源关联失败。"} compact /> : result === null ?
           <EmptyPanel title="尚未运行关联" detail="在左侧勾选至少两个文件日志源后运行。" compact /> : (
             <>
+              {copy !== null ? <LogResultCopy copy={copy} /> : null}
               <p className="log-analysis-coverage">已观察 {result.totalObserved} 条</p>
               <LogThreatCards summary={result.threatSummary} />
               <LogEntriesView entries={result.entries} empty="没有可展示的关联日志。" />
@@ -595,7 +699,7 @@ function CorrelationView({ selected, status, error, result, onRun }: {
   );
 }
 
-function IocView({ selected, draft, onDraft, inputError, status, error, result, onRun }: {
+function IocView({ selected, draft, onDraft, inputError, status, error, result, onRun, copy }: {
   selected: readonly string[];
   draft: string;
   onDraft(value: string): void;
@@ -604,6 +708,7 @@ function IocView({ selected, draft, onDraft, inputError, status, error, result, 
   error: string | null;
   result: LogIocSearchResult | null;
   onRun(): void;
+  copy: ResultCopy | null;
 }) {
   return (
     <>
@@ -638,8 +743,12 @@ function IocView({ selected, draft, onDraft, inputError, status, error, result, 
       </button>
       {status === "loading" ? <StatusPanel label="正在搜索 IOC…" /> : status === "error" ?
         <ErrorPanel message={error ?? "IOC 搜索失败。"} compact /> : result === null ?
-          <EmptyPanel title="尚未搜索 IOC" detail="输入 IOC 并在左侧勾选至少一个文件日志源。" compact /> :
-          <LogIocResultsView result={result} />}
+          <EmptyPanel title="尚未搜索 IOC" detail="输入 IOC 并在左侧勾选至少一个文件日志源。" compact /> : (
+            <>
+              {copy !== null ? <LogResultCopy copy={copy} /> : null}
+              <LogIocResultsView result={result} />
+            </>
+          )}
     </>
   );
 }
