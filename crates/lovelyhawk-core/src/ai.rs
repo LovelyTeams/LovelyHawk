@@ -1439,6 +1439,174 @@ fn parse_model_list_bounded(
     Ok(models)
 }
 
+/// Raw bodies kept for the non-streaming fallback stop growing here.
+const MAX_FALLBACK_BODY_BYTES: usize = 1_048_576;
+
+/// What a provider's stream said, read out of its server-sent events.
+///
+/// The stream task hands on the response body as it arrives, unparsed. This
+/// turns it into the text a person reads, for both protocols the providers
+/// speak: an OpenAI-style `chat/completions` stream (`choices[].delta.content`,
+/// ended by `data: [DONE]`) and an Anthropic `messages` stream
+/// (`content_block_delta` events carrying `delta.text`, and an `error` event).
+/// A server that ignored `stream` and answered with one JSON body is read the
+/// same way once the body has ended.
+#[derive(Debug, Default)]
+pub struct AiStreamTextParser {
+    line: String,
+    data: Vec<String>,
+    saw_data: bool,
+    body: String,
+    failure: Option<String>,
+    done: bool,
+}
+
+impl AiStreamTextParser {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Feeds one chunk of the body and returns the text it completed.
+    pub fn push(&mut self, chunk: &str) -> String {
+        let mut text = String::new();
+        if !self.saw_data && self.body.len() < MAX_FALLBACK_BODY_BYTES {
+            let room = MAX_FALLBACK_BODY_BYTES - self.body.len();
+            let mut end = chunk.len().min(room);
+            while !chunk.is_char_boundary(end) {
+                end -= 1;
+            }
+            self.body.push_str(&chunk[..end]);
+        }
+        for character in chunk.chars() {
+            if character == '\n' {
+                let line = std::mem::take(&mut self.line);
+                self.line_ended(line.strip_suffix('\r').unwrap_or(&line), &mut text);
+            } else {
+                self.line.push(character);
+            }
+        }
+        text
+    }
+
+    /// Ends the body: a last event without its blank line, or a whole JSON
+    /// answer from a server that did not stream.
+    pub fn finish(&mut self) -> String {
+        let mut text = String::new();
+        if !self.line.is_empty() {
+            let line = std::mem::take(&mut self.line);
+            self.line_ended(line.strip_suffix('\r').unwrap_or(&line), &mut text);
+        }
+        self.dispatch(&mut text);
+        if !self.saw_data
+            && let Ok(value) = serde_json::from_str::<Value>(self.body.trim())
+        {
+            self.read_whole_answer(&value, &mut text);
+        }
+        text
+    }
+
+    /// The provider's own error, when the stream carried one.
+    pub fn failure(&self) -> Option<&str> {
+        self.failure.as_deref()
+    }
+
+    /// Whether the stream said it was done (`[DONE]` or `message_stop`).
+    pub fn is_done(&self) -> bool {
+        self.done
+    }
+
+    fn line_ended(&mut self, line: &str, text: &mut String) {
+        if line.is_empty() {
+            self.dispatch(text);
+        } else if let Some(value) = line.strip_prefix("data:") {
+            self.saw_data = true;
+            self.body.clear();
+            self.data
+                .push(value.strip_prefix(' ').unwrap_or(value).to_owned());
+        }
+        // `event:`, `id:`, `retry:` and comments carry nothing to read: the
+        // JSON names its own type.
+    }
+
+    fn dispatch(&mut self, text: &mut String) {
+        if self.data.is_empty() {
+            return;
+        }
+        let data = std::mem::take(&mut self.data).join("\n");
+        if data.trim() == "[DONE]" {
+            self.done = true;
+            return;
+        }
+        let Ok(value) = serde_json::from_str::<Value>(&data) else {
+            return;
+        };
+        match value.get("type").and_then(Value::as_str) {
+            Some("content_block_delta") => {
+                if let Some(delta) = value.pointer("/delta/text").and_then(Value::as_str) {
+                    text.push_str(delta);
+                }
+            }
+            Some("message_stop") => self.done = true,
+            Some("error") => self.fail(&value),
+            _ => {
+                if value.get("error").is_some() {
+                    self.fail(&value);
+                }
+                for choice in value
+                    .get("choices")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                {
+                    if let Some(content) = choice.pointer("/delta/content").and_then(Value::as_str)
+                    {
+                        text.push_str(content);
+                    }
+                }
+            }
+        }
+    }
+
+    fn read_whole_answer(&mut self, value: &Value, text: &mut String) {
+        if value.get("error").is_some() {
+            self.fail(value);
+            return;
+        }
+        for choice in value
+            .get("choices")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if let Some(content) = choice.pointer("/message/content").and_then(Value::as_str) {
+                text.push_str(content);
+            }
+        }
+        for block in value
+            .get("content")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if block.get("type").and_then(Value::as_str) == Some("text")
+                && let Some(content) = block.get("text").and_then(Value::as_str)
+            {
+                text.push_str(content);
+            }
+        }
+        self.done = true;
+    }
+
+    fn fail(&mut self, value: &Value) {
+        let message = value
+            .pointer("/error/message")
+            .and_then(Value::as_str)
+            .or_else(|| value.get("error").and_then(Value::as_str))
+            .unwrap_or("the provider reported an error");
+        self.failure = Some(message.chars().take(MAX_REMOTE_ERROR_CHARS).collect());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -1453,6 +1621,83 @@ mod tests {
     use crate::PortableStore;
     use crate::crypto::{CryptoVault, SecretValue};
     use crate::settings::{AiProviderSettings, AppSettings};
+
+    /// Feeds a body in pieces of `size` bytes, as a network might cut it.
+    fn parse_in_pieces(body: &str, size: usize) -> (String, AiStreamTextParser) {
+        let mut parser = AiStreamTextParser::new();
+        let mut text = String::new();
+        let mut rest = body;
+        while !rest.is_empty() {
+            let mut end = size.min(rest.len());
+            while !rest.is_char_boundary(end) {
+                end += 1;
+            }
+            text.push_str(&parser.push(&rest[..end]));
+            rest = &rest[end..];
+        }
+        text.push_str(&parser.finish());
+        (text, parser)
+    }
+
+    #[test]
+    fn stream_text_reads_an_openai_stream_however_it_is_cut() {
+        let body = concat!(
+            "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"可疑的\"}}]}\n\n",
+            ": keep-alive comment\n\n",
+            "data:{\"choices\":[{\"delta\":{\"content\":\" webshell\\n\"}}]}\r\n\r\n",
+            "data: [DONE]\n\n",
+        );
+        for size in [1, 2, 3, 7, 64, body.len()] {
+            let (text, parser) = parse_in_pieces(body, size);
+            assert_eq!(text, "可疑的 webshell\n", "cut every {size} bytes");
+            assert!(parser.is_done());
+            assert_eq!(parser.failure(), None);
+        }
+    }
+
+    #[test]
+    fn stream_text_reads_an_anthropic_stream_and_its_error() {
+        let body = concat!(
+            "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"m\"}}\n\n",
+            "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0}\n\n",
+            "event: ping\ndata: {\"type\":\"ping\"}\n\n",
+            "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"第一行\"}}\n\n",
+            "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"，第二段\"}}\n\n",
+            "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+        );
+        for size in [1, 5, body.len()] {
+            let (text, parser) = parse_in_pieces(body, size);
+            assert_eq!(text, "第一行，第二段");
+            assert!(parser.is_done());
+        }
+        let failed = "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n\n";
+        let (text, parser) = parse_in_pieces(failed, 4);
+        assert_eq!(text, "");
+        assert_eq!(parser.failure(), Some("Overloaded"));
+    }
+
+    #[test]
+    fn stream_text_reads_a_server_that_did_not_stream() {
+        let (openai, parser) = parse_in_pieces(
+            r#"{"choices":[{"message":{"role":"assistant","content":"整段回答"}}]}"#,
+            3,
+        );
+        assert_eq!(openai, "整段回答");
+        assert!(parser.is_done());
+        let (anthropic, _) = parse_in_pieces(
+            r#"{"content":[{"type":"text","text":"Claude 的"},{"type":"tool_use"},{"type":"text","text":"回答"}]}"#,
+            2,
+        );
+        assert_eq!(anthropic, "Claude 的回答");
+        let (nothing, parser) = parse_in_pieces(r#"{"error":{"message":"model not found"}}"#, 8);
+        assert_eq!(nothing, "");
+        assert_eq!(parser.failure(), Some("model not found"));
+        // Not JSON, not events: nothing is made up from it.
+        let (garbage, parser) = parse_in_pieces("<html>502 Bad Gateway</html>", 5);
+        assert_eq!(garbage, "");
+        assert!(!parser.is_done());
+    }
 
     #[derive(Debug)]
     struct TestRoot(PathBuf);

@@ -1,6 +1,7 @@
 import type { JavaClassStageResult, JavaHotUpdateRequest, JavaHotUpdateResponse } from "./java-hot-update-contract.js";
 import type { NginxRepairRequest, NginxRepairResponse } from "./nginx-repair-contract.js";
 import type { LogRulesRequest, LogRulesResponse } from "./log-rules-contract.js";
+import type { AiAssistRequest, AiAssistResponse } from "./ai-assist-contract.js";
 import type { PostgresqlRuntimeRequest, PostgresqlRuntimeResponse } from "./postgresql-runtime-contract.js";
 import type { FileEvidenceRequest, FileEvidenceResult } from "./file-evidence-contract.js";
 import type { PacketCaptureEvidenceRequest, PacketCaptureEvidenceResult } from "./packet-capture-evidence-contract.js";
@@ -474,6 +475,8 @@ export interface LovelyHawkApi {
   nginxRepair(request: NginxRepairRequest): Promise<NginxRepairResponse>;
   /** The operator's own log match rules; local only, nothing reaches a target. */
   logRules(request: LogRulesRequest): Promise<LogRulesResponse>;
+  /** Asks a configured AI provider to read what a page holds; only on the operator's request. */
+  aiAssist(request: AiAssistRequest): Promise<AiAssistResponse>;
   javaHotUpdate(request: JavaHotUpdateRequest): Promise<JavaHotUpdateResponse>;
   stageJavaClass(bindingHandle: string): Promise<JavaClassStageResult>;
   bootstrap(): Promise<BootstrapResult>;

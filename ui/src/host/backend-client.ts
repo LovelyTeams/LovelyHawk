@@ -3,6 +3,7 @@ import { BACKEND_ERROR_MESSAGES } from "./error-messages.js";
 import { isJavaHotUpdateRequest, matchesJavaHotUpdateResponse, type JavaHotUpdateRequest, type JavaHotUpdateResponse } from "../shared/java-hot-update-contract.js";
 import { isNginxRepairRequest, matchesNginxRepairResponse, type NginxRepairRequest, type NginxRepairResponse } from "../shared/nginx-repair-contract.js";
 import { isLogRulesRequest, matchesLogRulesResponse, type LogRulesRequest, type LogRulesResponse } from "../shared/log-rules-contract.js";
+import { isAiAssistRequest, matchesAiAssistResponse, type AiAssistRequest, type AiAssistResponse } from "../shared/ai-assist-contract.js";
 import { isPostgresqlRuntimeRequest, matchesPostgresqlRuntimeResponse, type PostgresqlRuntimeRequest, type PostgresqlRuntimeResponse } from "../shared/postgresql-runtime-contract.js";
 import { isFileEvidenceRequest, matchesFileEvidenceResult, type FileEvidenceRequest, type FileEvidenceResult } from "../shared/file-evidence-contract.js";
 import { isPacketCaptureEvidenceRequest, matchesPacketCaptureEvidenceResult, type PacketCaptureEvidenceRequest, type PacketCaptureEvidenceResult } from "../shared/packet-capture-evidence-contract.js";
@@ -722,6 +723,13 @@ export class BackendClient {
     // (the backend allows 300 s); everything else reads.
     const response = await this.#request("java.hot-update", request, request.action === "execute" ? 330_000 : 180_000);
     if (!matchesJavaHotUpdateResponse(request, response)) throw new Error("Java 热更新返回了无法核实的结果，请重新扫描。");
+    return response;
+  }
+
+  async aiAssist(request: AiAssistRequest): Promise<AiAssistResponse> {
+    if (!isAiAssistRequest(request)) throw new Error("AI 解读请求无效。");
+    const response = await this.#request("ai.assist", request);
+    if (!matchesAiAssistResponse(request, response)) throw new Error("AI 解读返回了无法核实的结果，请重试。");
     return response;
   }
 

@@ -110,7 +110,9 @@ function entryLine(entry: PublicLogEntry, index: number, hit: LogRuleHit | null)
  * Joins a report: the head and the closing note always whole, as many of the
  * body lines as the clipboard takes, and a line saying how many it did not.
  */
-function assemble(head: string[], bodyTitle: string, body: string[], tail: string[]): LogReport {
+function assemble(
+  head: string[], bodyTitle: string, body: string[], tail: string[], maximumBytes = LOG_REPORT_MAXIMUM_BYTES,
+): LogReport {
   const headText = `${head.join("\n")}\n\n${bodyTitle}\n\n`;
   const tailText = `\n\n${tail.join("\n")}\n`;
   // Room for the line that says what was left out.
@@ -119,7 +121,7 @@ function assemble(head: string[], bodyTitle: string, body: string[], tail: strin
   const kept: string[] = [];
   for (const line of body) {
     const size = bytes(line) + 1;
-    if (used + size > LOG_REPORT_MAXIMUM_BYTES) break;
+    if (used + size > maximumBytes) break;
     kept.push(line);
     used += size;
   }
@@ -140,6 +142,7 @@ export function buildLogReadReport(input: {
   result: LogSourceReadResult;
   copiedAt: Date;
   hits?: RuleHits;
+  maximumBytes?: number;
 }): LogReport {
   const { source, filter, result } = input;
   const conditions = [
@@ -164,7 +167,7 @@ export function buildLogReadReport(input: {
   ];
   return assemble(head, "## 日志（本页）", entryLines(result.entries, input.hits), [
     `${READ_ONLY_NOTE}这里只有本页读到的行，不代表这个日志的全部；没有读到的部分没有发现，不等于没有事件。`,
-  ]);
+  ], input.maximumBytes);
 }
 
 /** The correlation view: several sources read side by side, each to its bound. */
@@ -173,6 +176,7 @@ export function buildLogCorrelationReport(input: {
   result: LogCorrelationResult;
   copiedAt: Date;
   hits?: RuleHits;
+  maximumBytes?: number;
 }): LogReport {
   const { result } = input;
   const byHandle = new Map(input.sources.map((source) => [source.sourceHandle, source]));
@@ -190,7 +194,7 @@ export function buildLogCorrelationReport(input: {
   ];
   return assemble(head, "## 关联日志", entryLines(result.entries, input.hits), [
     `${READ_ONLY_NOTE}关联只覆盖每个日志源读到的那一段，不代表未读取的范围。`,
-  ]);
+  ], input.maximumBytes);
 }
 
 /** The IOC view: which indicators were found where, and which were not found at all. */
@@ -200,6 +204,8 @@ export function buildLogIocReport(input: {
   result: LogIocSearchResult;
   sourceHandles: readonly string[];
   copiedAt: Date;
+  /** A smaller bound than the clipboard's, for what is sent to an AI provider. */
+  maximumBytes?: number;
 }): LogReport {
   const { result } = input;
   const byHandle = new Map(input.sources.map((source) => [source.sourceHandle, source]));
@@ -224,5 +230,5 @@ export function buildLogIocReport(input: {
   }
   return assemble(head, "## 命中", body, [
     `${READ_ONLY_NOTE}没有命中只说明在所选日志源里没找到，不代表其他地方没有。`,
-  ]);
+  ], input.maximumBytes);
 }

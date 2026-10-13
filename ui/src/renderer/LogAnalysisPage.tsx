@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 
 import { targetFailureMessage } from "./target-lost";
 
@@ -44,9 +44,12 @@ import {
   PlayIcon,
   RefreshIcon,
   SearchIcon,
+  SparkIcon,
   TagIcon,
 } from "./emergency-command-icons";
 import { CopyIcon } from "./file-icons";
+import { AiAssistPanel, type AiAssistApi } from "./AiAssistPanel";
+import type { AiAssistTask } from "../shared/ai-assist-contract";
 import { LogRulesDialog } from "./LogRulesDialog";
 import {
   logRuleHitCount,
@@ -115,7 +118,7 @@ export function logAnalysisFailureMessage(reason: unknown, fallback: string): st
 export interface LogAnalysisPageProps {
   bindingHandle: string | null;
   /** A listed log file can be kept as evidence, so the file evidence API comes too. */
-  api: LogAnalysisReadApi & FileEvidenceApi & LogRulesApi;
+  api: LogAnalysisReadApi & FileEvidenceApi & LogRulesApi & AiAssistApi;
   /** Where a copied report goes: the app clipboard, or a test's own. */
   writeClipboard?: (text: string) => Promise<void>;
 }
@@ -140,6 +143,8 @@ const initialFilter: LogReadFilter = { keyword: "", date: "", journalUnit: "" };
 export function LogAnalysisPage({ bindingHandle, api, writeClipboard }: LogAnalysisPageProps) {
   const [state, dispatch] = useReducer(logAnalysisReadReducer, undefined, createLogAnalysisReadState);
   const [copyNotice, setCopyNotice] = useState<CopyNotice | null>(null);
+  // Which view's result the AI panel is open for; it closes when that result changes.
+  const [aiTab, setAiTab] = useState<LogAnalysisTab | null>(null);
   // The saved match rules: their dialog, and a version that changes with them.
   const [rulesDialog, setRulesDialog] = useState<{ returnFocus: HTMLElement | null } | null>(null);
   const [rulesVersion, setRulesVersion] = useState(0);
@@ -171,7 +176,22 @@ export function LogAnalysisPage({ bindingHandle, api, writeClipboard }: LogAnaly
   // A notice about a copy belongs to the result it copied.
   useEffect(() => {
     setCopyNotice(null);
+    setAiTab(null);
   }, [scope, state.read, state.correlation, state.ioc]);
+
+  /**
+   * The AI reading of one view's result: the same report the copy makes,
+   * within the provider's bound, built only when the panel is opened.
+   */
+  function aiFor(
+    tab: LogAnalysisTab, task: AiAssistTask, what: string, build: (maximumBytes: number) => LogReport,
+  ): NonNullable<ResultCopy["ai"]> {
+    return {
+      open: aiTab === tab,
+      onToggle: () => setAiTab((current) => (current === tab ? null : tab)),
+      panel: <AiAssistPanel api={api} task={task} what={what} build={build} onClose={() => setAiTab(null)} />,
+    };
+  }
 
   /**
    * Copies one result as a plain-text report. The report is built from what
@@ -451,6 +471,11 @@ export function LogAnalysisPage({ bindingHandle, api, writeClipboard }: LogAnaly
                         source: selectedSource, filter: state.appliedFilter, result, copiedAt: new Date(), hits: readHits?.hits,
                       }), `本页 ${result.entries.length} 条日志和威胁摘要`);
                     },
+                    ai: aiFor("browse", "explain-log", `本页 ${state.read.entries.length} 条日志和威胁摘要`, (maximumBytes) =>
+                      buildLogReadReport({
+                        source: selectedSource, filter: state.appliedFilter, result: state.read!, copiedAt: new Date(),
+                        hits: readHits?.hits, maximumBytes,
+                      })),
                   }}
                 />
               )
@@ -471,6 +496,11 @@ export function LogAnalysisPage({ bindingHandle, api, writeClipboard }: LogAnaly
                       sources: state.snapshot?.sources ?? [], result, copiedAt: new Date(), hits: correlationHits?.hits,
                     }), `关联出的 ${result.entries.length} 条日志和威胁摘要`);
                   },
+                  ai: aiFor("correlation", "explain-log", `关联出的 ${state.correlation.entries.length} 条日志和威胁摘要`,
+                    (maximumBytes) => buildLogCorrelationReport({
+                      sources: state.snapshot?.sources ?? [], result: state.correlation!, copiedAt: new Date(),
+                      hits: correlationHits?.hits, maximumBytes,
+                    })),
                 }}
               />
             ) : (
@@ -495,6 +525,11 @@ export function LogAnalysisPage({ bindingHandle, api, writeClipboard }: LogAnaly
                       sourceHandles: state.analysisSourceHandles, result, copiedAt: new Date(),
                     }), `这次 ${state.iocIndicators.length} 个 IOC 的搜索结果`);
                   },
+                  ai: aiFor("ioc", "explain-ioc", `这次 ${state.iocIndicators.length} 个 IOC 的搜索结果`,
+                    (maximumBytes) => buildLogIocReport({
+                      sources: state.snapshot?.sources ?? [], indicators: state.iocIndicators,
+                      sourceHandles: state.analysisSourceHandles, result: state.ioc!, copiedAt: new Date(), maximumBytes,
+                    })),
                 }}
               />
             )}
@@ -572,23 +607,40 @@ export function LogSourceBranch({ group, collapsed, selecting, selectedHandle, c
 interface ResultCopy {
   notice: CopyNotice | null;
   onCopy(): void;
+  /** Asking an AI provider about the same result; absent where it is not offered. */
+  ai?: {
+    open: boolean;
+    onToggle(): void;
+    panel: ReactNode;
+  };
 }
 
-/** The copy button above a result, and what its last copy did. */
+/** The copy button above a result, what its last copy did, and the AI reading of it. */
 export function LogResultCopy({ copy }: { copy: ResultCopy }) {
   return (
-    <div className="log-analysis-result-actions">
-      <button type="button" className="log-analysis-copy" data-testid="log-analysis-copy"
-        title="把这次的结果连同来源、条件和时间复制成纯文本，可以贴进笔记或报告"
-        onClick={copy.onCopy}>
-        <CopyIcon />复制分析结果
-      </button>
-      {copy.notice !== null ? (
-        <p className={copy.notice.failed ? "is-failed" : undefined} role={copy.notice.failed ? "alert" : "status"}>
-          {copy.notice.text}
-        </p>
-      ) : null}
-    </div>
+    <>
+      <div className="log-analysis-result-actions">
+        <button type="button" className="log-analysis-copy" data-testid="log-analysis-copy"
+          title="把这次的结果连同来源、条件和时间复制成纯文本，可以贴进笔记或报告"
+          onClick={copy.onCopy}>
+          <CopyIcon />复制分析结果
+        </button>
+        {copy.ai !== undefined ? (
+          <button type="button" className="log-analysis-ai" data-testid="log-analysis-ai"
+            aria-expanded={copy.ai.open}
+            title="把这次的结果发给你在设置里配置的 AI 服务商解读；发送前会说明发什么、发到哪"
+            onClick={copy.ai.onToggle}>
+            <SparkIcon />AI 解读
+          </button>
+        ) : null}
+        {copy.notice !== null ? (
+          <p className={copy.notice.failed ? "is-failed" : undefined} role={copy.notice.failed ? "alert" : "status"}>
+            {copy.notice.text}
+          </p>
+        ) : null}
+      </div>
+      {copy.ai?.open ? copy.ai.panel : null}
+    </>
   );
 }
 

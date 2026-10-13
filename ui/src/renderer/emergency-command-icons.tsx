@@ -168,3 +168,13 @@ export function LockIcon() {
     </svg>
   );
 }
+
+/** Asking an AI provider: the sparkle the AI history page uses. */
+export function SparkIcon() {
+  return (
+    <svg {...ICON_PROPS} width={13} height={13}>
+      <path d="M7.4 1.8 8.6 5.6l3.8 1.2-3.8 1.2-1.2 3.8L6.2 8 2.4 6.8l3.8-1.2Z" />
+      <path d="M12.4 10.4v3.2M10.8 12h3.2" />
+    </svg>
+  );
+}

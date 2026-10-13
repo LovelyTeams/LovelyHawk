@@ -698,12 +698,17 @@ export const SettingsPanel = forwardRef<SettingsPanelHandle, SettingsPanelProps>
                         }}
                       />
                       <TextField label="显示名称" value={selectedProvider.label} maximumLength={128} onChange={(value) => updateProvider((provider) => { provider.label = value; })} />
-                      <TextField label="接口地址" value={selectedProvider.endpoint} maximumLength={2_048} onChange={(value) => updateProvider((provider) => { provider.endpoint = value; })} />
+                      <TextField label="接口地址" value={selectedProvider.endpoint} maximumLength={2_048}
+                        hint={selectedProvider.kind === "anthropic"
+                          ? "Claude：https://api.anthropic.com/v1/messages（在互联网上，需要 API Key）。"
+                          : "离线：本机 Ollama 填 http://127.0.0.1:11434/v1/chat/completions，不用 API Key；"
+                            + "在线：OpenAI 填 https://api.openai.com/v1/chat/completions。"}
+                        onChange={(value) => updateProvider((provider) => { provider.endpoint = value; })} />
                       <TextField label="模型" value={selectedProvider.model} maximumLength={256} onChange={(value) => updateProvider((provider) => { provider.model = value; })} />
                       <SelectField
                         label="类型"
                         value={selectedProvider.kind}
-                        options={[["open-ai-compatible", "OpenAI 兼容接口"], ["anthropic", "Anthropic"], ["gemini", "Gemini"]]}
+                        options={[["open-ai-compatible", "OpenAI 兼容接口（OpenAI、Ollama 等）"], ["anthropic", "Anthropic（Claude）"], ["gemini", "Gemini"]]}
                         onChange={(value) => updateProvider((provider) => { provider.kind = value as SettingsAiProvider["kind"]; })}
                       />
                       <div className="settings-credential-editor">
@@ -966,18 +971,22 @@ function TextField({
   value,
   maximumLength,
   disabled = false,
+  hint,
   onChange,
 }: {
   label: string;
   value: string;
   maximumLength: number;
   disabled?: boolean;
+  /** A line under the field saying what to put there. */
+  hint?: string;
   onChange: (value: string) => void;
 }) {
   return (
     <label className="settings-field">
       <span>{label}</span>
       <input type="text" value={value} maxLength={maximumLength} disabled={disabled} onChange={(event) => onChange(event.target.value)} />
+      {hint === undefined ? null : <small className="settings-field-hint">{hint}</small>}
     </label>
   );
 }

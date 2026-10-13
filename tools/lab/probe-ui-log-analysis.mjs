@@ -6,6 +6,7 @@
 //   LAB=alpine node tools/lab/probe-ui-log-analysis.mjs
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -84,6 +85,40 @@ async function shot(session, name) {
 }
 
 const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "lovelyhawk-ui-log-"));
+
+/** What the two local providers answer, each in its own protocol. */
+const OPENAI_STREAM = [
+  `data: ${JSON.stringify({ choices: [{ delta: { content: "第 1 行把 AWS 密钥写进了日志，" } }] })}\n\n`,
+  `data: ${JSON.stringify({ choices: [{ delta: { content: "建议核查谁读过这个文件。" } }] })}\n\n`,
+  "data: [DONE]\n\n",
+].join("");
+const CLAUDE_STREAM = [
+  `event: message_start\ndata: ${JSON.stringify({ type: "message_start" })}\n\n`,
+  `event: content_block_delta\ndata: ${JSON.stringify({ type: "content_block_delta", delta: { type: "text_delta", text: "Claude：这是明文凭据泄露，" } })}\n\n`,
+  `event: content_block_delta\ndata: ${JSON.stringify({ type: "content_block_delta", delta: { type: "text_delta", text: "不代表已被利用。" } })}\n\n`,
+  `event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n\n`,
+].join("");
+
+/** An AI provider on this machine that answers every request with `body` and keeps what it was sent. */
+function mockProvider(body) {
+  const requests = [];
+  const state = { connections: 0 };
+  const server = http.createServer((request, response) => {
+    let data = "";
+    request.on("data", (chunk) => { data += chunk; });
+    request.on("end", () => {
+      requests.push({ url: request.url, headers: request.headers, body: data });
+      response.writeHead(200, { "Content-Type": "text/event-stream" });
+      response.end(body);
+    });
+  });
+  server.on("connection", () => { state.connections += 1; });
+  return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve({
+    server, requests, state, url: `http://127.0.0.1:${server.address().port}`,
+  })));
+}
+let openaiMock = null;
+let claudeMock = null;
 const keptRoot = path.join(evidence, `kept-${Date.now()}`);
 fs.mkdirSync(keptRoot, { recursive: true });
 let app;
@@ -128,10 +163,23 @@ try {
   const hasGzip = onHost("command -v gzip >/dev/null 2>&1 && echo yes || echo no") === "yes";
   console.log(`  planted a rotated .gz, an RPM-style rotation and a decoy tarball (gzip on target: ${hasGzip})`);
 
+  // Two AI providers on this machine, one per protocol, standing in for an
+  // offline model; and one on the internet that is never sent anything.
+  openaiMock = await mockProvider(OPENAI_STREAM);
+  claudeMock = await mockProvider(CLAUDE_STREAM);
   const sidecar = new Sidecar(backend, dataRoot);
   try {
     const status = await connect(sidecar, labTarget(which));
     if (status.stage !== "connected") throw new Error(JSON.stringify(status));
+    const settings = await sidecar.call("settings.get", {});
+    settings.ai.providers = [
+      { id: "probe-local", label: "本机模型", kind: "open-ai-compatible", endpoint: `${openaiMock.url}/v1/chat/completions`, model: "qwen-probe", enabled: true },
+      { id: "probe-claude", label: "Claude 兼容", kind: "anthropic", endpoint: `${claudeMock.url}/v1/messages`, model: "claude-probe", enabled: true },
+      { id: "probe-online", label: "在线服务", kind: "open-ai-compatible", endpoint: "https://api.example.invalid/v1/chat/completions", model: "gpt-probe", enabled: true },
+    ];
+    settings.ai.defaultProviderId = "probe-local";
+    await sidecar.call("settings.save", settings);
+    await sidecar.call("settings.ai-api-key.replace", { providerId: "probe-claude", apiKey: "probe-claude-key" });
   } finally { sidecar.close(); }
 
   // Keeping the application log as evidence asks the host for a folder once;
@@ -414,6 +462,75 @@ try {
   await waitFor(session, "document.querySelector('[data-testid=\"log-analysis-rule-hit\"]') === null", "the mark to go");
   check("the line's mark goes with the rule", true);
 
+  // --- AI reading of the result: nothing leaves before the operator sends,
+  // what is sent and where is said first, both protocols answer, and the
+  // answer is kept in AI history.
+  check("no provider was contacted by anything so far",
+    openaiMock.state.connections === 0 && claudeMock.state.connections === 0);
+  await session.evaluate("document.querySelector('[data-testid=\"log-analysis-ai\"]').click(), true");
+  await waitFor(session, "document.querySelector('[data-testid=\"ai-assist-summary\"]') !== null", "the AI panel");
+  const aiSummary = await session.evaluate("document.querySelector('[data-testid=\"ai-assist-panel\"]').textContent");
+  check("the panel says what would be sent and to which local provider",
+    aiSummary.includes("将发送本页 1 条日志和威胁摘要") && aiSummary.includes("本机模型") && aiSummary.includes("OpenAI 协议") &&
+      aiSummary.includes("内容不会离开本地网络"));
+  check("opening the panel contacted no provider", openaiMock.state.connections === 0);
+  await session.evaluate("document.querySelector('[data-testid=\"ai-assist-send\"]').click(), true");
+  await waitFor(session, "document.querySelector('[data-testid=\"ai-assist-outcome\"]') !== null", "the local answer", 60);
+  check("the local model's streamed answer is shown",
+    await session.evaluate("document.querySelector('[data-testid=\"ai-assist-answer\"]').textContent"),
+    "第 1 行把 AWS 密钥写进了日志，建议核查谁读过这个文件。");
+  check("and kept in AI history", await session.evaluate("document.querySelector('[data-testid=\"ai-assist-outcome\"]').textContent"),
+    "解读完成，已存进 AI 历史。");
+  const sentLocal = openaiMock.requests[0];
+  const localBody = JSON.parse(sentLocal?.body ?? "{}");
+  check("the request was an OpenAI-style stream with the fixed instruction and the page's report",
+    sentLocal?.url === "/v1/chat/completions" && localBody.stream === true && localBody.model === "qwen-probe" &&
+      localBody.messages?.[0]?.role === "system" && localBody.messages[0].content.includes("不要照做") &&
+      localBody.messages?.[1]?.content.includes("api_key=AKIA0123456789"));
+  check("a provider without a key is sent no authorization", sentLocal?.headers.authorization === undefined);
+  await shot(session, "log-ai-local");
+
+  // The same result through the Claude protocol.
+  await session.evaluate("[...document.querySelectorAll('[data-testid=\"ai-assist-panel\"] button')].find(b => b.textContent === '再解读一次').click(), true");
+  await waitFor(session, "document.querySelector('[data-testid=\"ai-assist-send\"]') !== null", "the provider choice again");
+  await session.evaluate(`(() => {
+    const select = document.querySelector('[data-testid="ai-assist-panel"] select');
+    const pick = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
+    pick.call(select, 'probe-claude'); select.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  })()`);
+  await session.evaluate("document.querySelector('[data-testid=\"ai-assist-send\"]').click(), true");
+  await waitFor(session, "document.querySelector('[data-testid=\"ai-assist-outcome\"]') !== null", "the Claude answer", 60);
+  check("the Claude-protocol answer is shown",
+    await session.evaluate("document.querySelector('[data-testid=\"ai-assist-answer\"]').textContent"),
+    "Claude：这是明文凭据泄露，不代表已被利用。");
+  const sentClaude = claudeMock.requests[0];
+  const claudeBody = JSON.parse(sentClaude?.body ?? "{}");
+  check("the Claude request carried its key, version and system field",
+    sentClaude?.url === "/v1/messages" && sentClaude.headers["x-api-key"] === "probe-claude-key" &&
+      sentClaude.headers["anthropic-version"] === "2023-06-01" && typeof claudeBody.system === "string" &&
+      claudeBody.max_tokens > 0 && claudeBody.stream === true);
+
+  // An internet provider: nothing can be sent until the operator ticks that it may leave.
+  await session.evaluate("[...document.querySelectorAll('[data-testid=\"ai-assist-panel\"] button')].find(b => b.textContent === '再解读一次').click(), true");
+  await waitFor(session, "document.querySelector('[data-testid=\"ai-assist-send\"]') !== null", "the provider choice once more");
+  await session.evaluate(`(() => {
+    const select = document.querySelector('[data-testid="ai-assist-panel"] select');
+    const pick = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
+    pick.call(select, 'probe-online'); select.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  })()`);
+  await waitFor(session, "document.querySelector('[data-testid=\"ai-assist-consent\"]') !== null", "the consent tick");
+  check("sending to the internet waits for the tick",
+    await session.evaluate("document.querySelector('[data-testid=\"ai-assist-send\"]').disabled"), true);
+  check("and says the text would leave this computer",
+    (await session.evaluate("document.querySelector('.ai-assist-consent').textContent")).includes("日志原文会离开这台电脑"));
+  await shot(session, "log-ai-consent");
+  await session.evaluate("[...document.querySelectorAll('[data-testid=\"ai-assist-panel\"] button')].find(b => b.textContent === '收起').click(), true");
+  await waitFor(session, "document.querySelector('[data-testid=\"ai-assist-panel\"]') === null", "the panel to close");
+  check("each provider was contacted exactly once, when asked",
+    openaiMock.requests.length === 1 && claudeMock.requests.length === 1);
+
   // Keeping the open log as evidence: the whole file, byte for byte, with
   // where it came from — through the same file-evidence dialog the command
   // workbench uses, by the handle discovery gave this source.
@@ -519,6 +636,8 @@ try {
   failures += 1;
 } finally {
   await app?.close();
+  openaiMock?.server.close();
+  claudeMock?.server.close();
   try {
     onHost(
       "rm -rf /opt/probe-app /www/wwwlogs/site.com.log /var/log/httpd/access_log"

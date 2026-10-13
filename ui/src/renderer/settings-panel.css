@@ -112,6 +112,7 @@
 }
 
 .settings-field input:disabled { color: var(--faint); background: var(--surface-inset); }
+.settings-field-hint { color: var(--muted); font-size: var(--font-caption); font-weight: 400; line-height: 1.5; }
 .settings-toggle { display: flex; align-items: center; gap: 10px; min-height: 40px; cursor: pointer; }
 .settings-toggle > input { position: absolute; opacity: 0; pointer-events: none; }
 .settings-toggle-track { width: 38px; height: 22px; padding: 3px; box-sizing: border-box; border-radius: 999px; background: var(--border-strong); transition: background .15s ease; }

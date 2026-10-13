@@ -1421,6 +1421,18 @@
    "command": "cargo test --locked -p lovelyhawk-backend; cargo test --locked -p lovelyhawk-desktop; cargo clippy --locked -p lovelyhawk-backend --all-targets --no-deps -- -D warnings; pnpm ui:check; pnpm release:source-gate; pnpm desktop:build; pnpm desktop:test:debug; LAB=super node tools/lab/probe-ui-log-analysis.mjs",
    "result": "Passed",
    "notes": "Log analysis phase 2 rules, as the GPUI page's 规则 tab had them, over core's existing LogAnalysisService rules (list_rules, add_rule, match_rules, plan_remove_rule / execute_remove_rule). New backend method log.rules (crates/lovelyhawk-backend/src/log_rules_api.rs): list, add, match, plan-remove, confirm-remove, cancel-remove; local only, nothing reaches a target. Matching is core's, on the lines a page already read, with the same case-insensitive regex engine that validated each pattern, at most 500 lines of 16 KiB per call; removal is permanent and runs through a plan the operator confirms, five-minute expiry, journalled and read back. Each refusal has its own code and a Chinese reason (invalid or duplicate name, pattern that does not compile, 128 rules, plan used or expired, rule gone). Wired through the main-window allowlist, ui/src/shared/log-rules-contract.ts (exact request shapes, answers checked against each request, one match per line asked), BackendClient.logRules and window.lovelyhawk.logRules (165 methods). The page: 匹配规则 in the toolbar opens a dialog listing the rules with their level and pattern, a form to add one, and 删除… through the in-app confirmation showing the plan; lines on the browse and correlation views are matched once read and whenever the rules change, a matched line carries the rule's name coloured by level, a line above says how many matched, and copied reports mark them. Results: backend 768 tests (new: the whole RPC flow and every refusal code), desktop 36, clippy clean; UI 134 files / 1106 tests (new: contract shapes and byte bounds, rule marks and summary, report marks); desktop debug smoke 95/95 with 165 methods; probe-ui-log-analysis all checks passed on lab-super — a rule saved, an uncompilable pattern refused with its reason, focus back on the toolbar button, the line already on the page marked case-insensitively without reading it again, the copy carrying the mark, the removal confirmation naming the rule, its pattern, that it cannot be undone and the five-minute window, the rule removed and checked gone, and the line's mark gone with it. NOT_RUN: AI analysis is not built; journald, permission-denied sources and VMs remain."
+  },
+  {
+   "id": "desktop-ai-assist-2026-10-13",
+   "command": "cargo test --locked -p lovelyhawk-core --lib; cargo test --locked -p lovelyhawk-backend; cargo test --locked -p lovelyhawk-desktop; cargo clippy --locked -p lovelyhawk-core -p lovelyhawk-backend --all-targets --no-deps -- -D warnings; pnpm ui:check; pnpm release:source-gate; pnpm desktop:build; pnpm desktop:test:debug; node ui/scripts/probe-settings.mjs; LAB=super node tools/lab/probe-ui-log-analysis.mjs",
+   "result": "Passed",
+   "notes": "AI reading of log analysis results, offline and online, OpenAI and Claude protocols (the operator's decision of 2026-10-13). Core: AiStreamTextParser reads the raw stream core's AiService hands on — OpenAI chat-completions events (choices[].delta.content, [DONE]), Anthropic messages events (content_block_delta text, message_stop, error) and a server that answered with one JSON body — however the body is cut; net_guard::is_local_endpoint tells loopback, RFC1918, IPv6 unique-local and localhost from the internet. Backend: ai.assist (providers, start, poll, cancel) in crates/lovelyhawk-backend/src/ai_assist_api.rs; providers reads local settings only (enabled ones, with protocol and reach, no secrets); start sends one request with an instruction fixed per task (explain-log, explain-ioc) and the page's report (at most 96 KiB), the stream is read in a background task, polled by the page, cancellable, bounded to 64K characters; a completed answer is kept in AI history with what was asked, a cancelled or failed one is not. Wired through the main-window allowlist, ui/src/shared/ai-assist-contract.ts (exact requests, answers checked per request: history only for a completed answer, an error only for a failed one) and window.lovelyhawk.aiAssist (166 methods). Page: AI 解读 beside 复制分析结果 in all three log views opens a panel that says what will be sent, how much, to which provider, by which protocol, and whether it stays local; an internet provider needs a tick that the text may leave this computer; the answer streams in as plain text and can be stopped; leaving the panel cancels it. Settings: the provider kinds read OpenAI 兼容接口（OpenAI、Ollama 等） and Anthropic（Claude）, and the endpoint field says which full URL to enter for offline Ollama, OpenAI and Claude. Results: core 1227 passed (new: both protocols cut at every size, an error event, a non-streaming body, garbage), backend 772 passed (new: silence until asked — a provider listing and seven refusals made zero connections to two local mock providers; both protocols answered and kept in history, Claude's key, version and system field sent; a cancelled stream kept nothing), desktop 36, clippy clean; UI 135 files / 1108 tests (new: contract); desktop debug smoke 95/95 with 166 methods; probe-settings 18/18; probe-ui-log-analysis all checks passed on lab-super with two mock providers on 127.0.0.1 — no connection before the operator sent, the panel naming the local provider and that nothing leaves the local network, the OpenAI-style and Claude-style answers shown and kept, the request bodies and headers as each protocol wants them, no authorization for a provider without a key, sending to an internet provider held until the tick, each provider contacted exactly once. NOT_RUN: real OpenAI and Anthropic endpoints (no keys here), AI controls in the terminal window."
+  },
+  {
+   "id": "desktop-packaged-manual-prepared-2026-10-13",
+   "command": "pnpm release:package -Build; pwsh ./scripts/desktop-package-windows.ps1 -OutputDirectory artifacts/manual-check-2026-10-13; pwsh ./scripts/desktop-portable-smoke.ps1 -ArchivePath artifacts/manual-check-2026-10-13/LovelyHawk-0.0.1-dev-windows-x64.zip",
+   "result": "Passed",
+   "notes": "A release portable package for the operator's manual checks (docs/PACKAGED_MANUAL_CHECKS.md): validated (no VC++ redistributable imports, licence inventory written) and smoke-tested from a path with spaces and CJK, no profile writes, all state under data/. The manual steps — native save dialog for the application log export, launch, single instance, minimum size, close, settings kept across restarts — are NOT_RUN until the operator reports them. Found while writing them: a second launch exits quietly instead of raising the running window (docs/OPEN_ITEMS.md item 26)."
   }
  ],
  "foundations": [
@@ -1952,7 +1964,8 @@
      "Keeping a listed log file as evidence: discovery offers each file whose shown location is its whole path through the shared path offers (PathOfferSource::LogAnalysis), and 留存这个日志文件 opens the same file-evidence dialog the command workbench uses (raw bytes, source host, time, SHA-256, case link). No handle for the journal or a location cut short.",
      "Export of analysis results: 复制分析结果 in the browse, correlation and IOC views copies a plain-text report (source, conditions, bounds, threat summary, lines, IOC misses, truncation) through the host clipboard",
      "Match rules: log.rules (list, add, match, plan-remove, confirm-remove, cancel-remove) over core's rule store; 匹配规则 dialog, matched lines marked with the rule on the browse and correlation views and in copied reports, removal through a confirmed plan",
-     "Pending: AI analysis; journal sources have not been read on a host that runs journald"
+     "AI analysis: AI 解读 on the browse, correlation and IOC views through ai.assist, offline (local OpenAI-compatible such as Ollama) or online (OpenAI, Anthropic Claude), consent before text leaves the computer, answers kept in AI history",
+     "Pending: journal sources have not been read on a host that runs journald; real online providers not exercised"
     ]
    },
    "status": "Pending",
@@ -1985,7 +1998,8 @@
      "desktop-ui-polish-2026-10-11",
      "desktop-ui-polish-2026-10-13",
      "desktop-log-analysis-copy-2026-10-13",
-     "desktop-log-rules-2026-10-13"
+     "desktop-log-rules-2026-10-13",
+     "desktop-ai-assist-2026-10-13"
     ]
    }
   },
@@ -2329,7 +2343,8 @@
      "ui/src/renderer/AiHistoryPage.tsx",
      "ui/src/renderer/ai-history-state.ts",
      "crates/lovelyhawk-backend/src/ai_history_api.rs",
-     "Pending provider/streaming workflow parity and real-provider validation"
+     "Provider and streaming workflow: ai.assist streams OpenAI-style and Anthropic answers with cancellation and writes completed ones into AI history (source log-analysis / log-analysis-ioc)",
+     "Pending real-provider validation (OpenAI, Anthropic keys) and AI controls in the terminal window"
     ]
    },
    "status": "Pending",
@@ -2345,7 +2360,8 @@
     ],
     "evidence": [
      "desktop-ui-polish-2026-10-11b",
-     "desktop-ui-polish-2026-10-13"
+     "desktop-ui-polish-2026-10-13",
+     "desktop-ai-assist-2026-10-13"
     ]
    }
   },
@@ -2677,7 +2693,8 @@
     "evidence": [
      "electron-cdp-smoke-2026-08-24",
      "desktop-system-info-layout-2026-10-13",
-     "desktop-ui-polish-2026-10-13"
+     "desktop-ui-polish-2026-10-13",
+     "desktop-packaged-manual-prepared-2026-10-13"
     ]
    }
   },
@@ -2995,7 +3012,8 @@
      "desktop-quality-gate-2026-10-11b",
      "desktop-application-log-2026-10-11",
      "desktop-application-log-2026-10-11b",
-     "desktop-quality-gate-2026-10-11m"
+     "desktop-quality-gate-2026-10-11m",
+     "desktop-packaged-manual-prepared-2026-10-13"
     ]
    }
   },

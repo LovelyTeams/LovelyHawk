@@ -81,6 +81,29 @@ pub fn validate_outbound_url(raw: &str) -> CoreResult<Url> {
     Ok(parsed)
 }
 
+/// Whether an endpoint is on this machine or the local network (loopback,
+/// RFC1918, IPv6 unique-local, `localhost`) rather than out on the internet.
+///
+/// Said to the operator before anything is sent: a local model keeps the
+/// text offline, an internet one receives it. A name other than `localhost`
+/// counts as the internet, since nothing here resolves it to check.
+pub fn is_local_endpoint(raw: &str) -> bool {
+    let Ok(parsed) = raw.parse::<Url>() else {
+        return false;
+    };
+    match parsed.host() {
+        Some(Host::Domain(name)) => {
+            let name = name.to_ascii_lowercase();
+            name == "localhost" || name.ends_with(".localhost")
+        }
+        Some(Host::Ipv4(address)) => address.is_loopback() || address.is_private(),
+        Some(Host::Ipv6(address)) => {
+            address.is_loopback() || (address.segments()[0] & 0xfe00) == 0xfc00
+        }
+        None => false,
+    }
+}
+
 /// Retain only provider headers. Invalid names/values are reported as dropped.
 pub fn filter_headers(headers: &HashMap<String, String>) -> (Vec<(String, String)>, Vec<String>) {
     let mut kept = Vec::new();

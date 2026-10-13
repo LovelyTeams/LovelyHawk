@@ -13,6 +13,7 @@ import type {
 import type { FileEvidenceApi } from "../shared/file-evidence-contract";
 import { logEvidenceOffer } from "./log-analysis-read-helpers";
 import type { LogRulesApi } from "./log-rule-hits";
+import type { AiAssistApi } from "./AiAssistPanel";
 import {
   EmptyPanel,
   ErrorPanel,
@@ -31,13 +32,14 @@ import {
 } from "./LogAnalysisPage";
 
 const hostile = "</pre><script>steal()</script><img src=x onerror=steal()>";
-const api: LogAnalysisReadApi & FileEvidenceApi & LogRulesApi = {
+const api: LogAnalysisReadApi & FileEvidenceApi & LogRulesApi & AiAssistApi = {
   discoverLogSources: async () => { throw new Error(); },
   readLogSource: async () => { throw new Error(); },
   correlateLogSources: async () => { throw new Error(); },
   searchLogIocs: async () => { throw new Error(); },
   fileEvidence: async () => { throw new Error(); },
   logRules: async () => { throw new Error(); },
+  aiAssist: async () => { throw new Error(); },
 };
 
 const entry: PublicLogEntry = {

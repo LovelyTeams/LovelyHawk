@@ -2,6 +2,7 @@
 #![deny(missing_debug_implementations)]
 //! Bounded, typed process boundary between the desktop host and `lovelyhawk-core`.
 
+mod ai_assist_api;
 mod ai_history_api;
 mod baseline_read_api;
 mod baseline_write_api;
@@ -67,6 +68,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 pub use diagnostic_log_api::{DiagnosticLogCapture, DiagnosticLogLayer, DiagnosticLogLevel};
 
 use crate::{
+    ai_assist_api::{AiAssistApi, AiAssistError, AiAssistRequest},
     ai_history_api::{AiHistoryApi, AiHistoryApiError, AiHistoryExportFormat},
     baseline_read_api::{BaselineReadApi, BaselineReadApiError},
     case_library_api::{CaseLibraryApi, CaseLibraryError, CaseLibraryRequest},
@@ -185,6 +187,7 @@ pub struct BackendState {
     services: BackendServices,
     ai_history: AiHistoryApi,
     log_rules: LogRulesApi,
+    ai_assist: AiAssistApi,
     baseline_read: BaselineReadApi,
     baseline_write: baseline_write_api::BaselineWriteApi,
     check_audit_read: CheckAuditReadApi,
@@ -335,6 +338,7 @@ impl BackendState {
             services,
             ai_history: AiHistoryApi::default(),
             log_rules: LogRulesApi::default(),
+            ai_assist: AiAssistApi::default(),
             baseline_read,
             baseline_write,
             check_audit_read,
@@ -1105,6 +1109,15 @@ impl BackendState {
                     Err(failure) => Err(failure),
                 }
             }
+            RpcMethod::AiAssist => match parse_params::<AiAssistRequest>(request.params) {
+                Ok(params) => self
+                    .ai_assist
+                    .dispatch(&self.services, params)
+                    .await
+                    .map(Ok)
+                    .map_err(ai_assist_failure),
+                Err(failure) => Err(failure),
+            },
             RpcMethod::LogRules => match parse_params::<LogRulesRequest>(request.params) {
                 Ok(params) => self
                     .log_rules
@@ -2788,6 +2801,8 @@ enum RpcMethod {
     BaselineCatalogGet,
     #[serde(rename = "baseline.scan")]
     BaselineScan,
+    #[serde(rename = "ai.assist")]
+    AiAssist,
     #[serde(rename = "log.rules")]
     LogRules,
     #[serde(rename = "nginx.repair")]
@@ -5401,6 +5416,50 @@ fn java_hot_update_failure(error: JavaHotUpdateError) -> RpcFailure {
     }
 }
 
+fn ai_assist_failure(error: AiAssistError) -> RpcFailure {
+    let (operation, code, public_message) = match error {
+        AiAssistError::Core(source) => {
+            return RpcFailure::core(
+                "start AI assistance",
+                "ai-assist-failed",
+                "没能向 AI 服务商发起请求，详细原因见应用日志。",
+                source,
+            );
+        }
+        AiAssistError::InvalidContent => (
+            "validate AI assistance content",
+            "invalid-params",
+            "要发送的内容为空，或超过了 96 KB。",
+        ),
+        AiAssistError::ProviderUnavailable => (
+            "find AI provider",
+            "ai-provider-not-found",
+            "这个 AI 服务商已经不在设置里了，请重新选择。",
+        ),
+        AiAssistError::ProviderDisabled => (
+            "find AI provider",
+            "ai-provider-disabled",
+            "这个 AI 服务商已停用，请在设置里启用后再试。",
+        ),
+        AiAssistError::Busy => (
+            "bound AI assistance",
+            "ai-assist-busy",
+            "同时进行的 AI 解读太多了，等其中一个结束再试。",
+        ),
+        AiAssistError::UnknownSession => (
+            "find AI assistance",
+            "ai-assist-not-found",
+            "这次 AI 解读已经结束或不存在。",
+        ),
+    };
+    RpcFailure {
+        operation,
+        code,
+        public_message,
+        source: None,
+    }
+}
+
 /// Each refusal says what to change, in the operator's language.
 fn log_rules_failure(error: LogRulesApiError) -> RpcFailure {
     let (operation, code, public_message) = match error {
@@ -6648,6 +6707,323 @@ mod tests {
             r#"{{"protocol":"{PROTOCOL_VERSION}","requestId":"request-1","method":"{method}","params":{params}}}"#
         )
         .into_bytes()
+    }
+
+    /// A provider on this machine: answers each request with `body` after
+    /// `delay`, and records the requests it was sent.
+    async fn mock_ai_server(
+        body: &'static str,
+        hang: bool,
+    ) -> (
+        String,
+        std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        std::sync::Arc<parking_lot::Mutex<Vec<String>>>,
+    ) {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let connections = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let requests = std::sync::Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let (counted, recorded) = (connections.clone(), requests.clone());
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let recorded = recorded.clone();
+                tokio::spawn(async move {
+                    let mut buffer = Vec::new();
+                    let mut chunk = [0_u8; 8192];
+                    loop {
+                        let read = socket.read(&mut chunk).await.unwrap_or(0);
+                        if read == 0 {
+                            break;
+                        }
+                        buffer.extend_from_slice(&chunk[..read]);
+                        let text = String::from_utf8_lossy(&buffer).to_string();
+                        if let Some(end) = text.find("\r\n\r\n") {
+                            let length = text[..end]
+                                .lines()
+                                .find_map(|line| {
+                                    line.to_ascii_lowercase()
+                                        .strip_prefix("content-length:")
+                                        .map(|value| value.trim().parse::<usize>().unwrap_or(0))
+                                })
+                                .unwrap_or(0);
+                            if buffer.len() >= end + 4 + length {
+                                break;
+                            }
+                        }
+                    }
+                    recorded
+                        .lock()
+                        .push(String::from_utf8_lossy(&buffer).to_string());
+                    let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n";
+                    let _ = socket.write_all(head.as_bytes()).await;
+                    let _ = socket.write_all(body.as_bytes()).await;
+                    let _ = socket.flush().await;
+                    if hang {
+                        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    }
+                });
+            }
+        });
+        (format!("http://{address}"), connections, requests)
+    }
+
+    async fn assist(state: &BackendState, params: serde_json::Value) -> RpcResponse {
+        handle_frame(state, &request("ai.assist", &params.to_string())).await
+    }
+
+    async fn assist_until_finished(
+        state: &BackendState,
+        handle: &str,
+    ) -> (String, serde_json::Value) {
+        let mut text = String::new();
+        for _ in 0..200 {
+            let progress = assist(
+                state,
+                serde_json::json!({ "action": "poll", "handle": handle }),
+            )
+            .await
+            .result
+            .unwrap();
+            text.push_str(progress["text"].as_str().unwrap());
+            if progress["state"] != "running" {
+                return (text, progress);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        panic!("the assistance never finished");
+    }
+
+    #[tokio::test]
+    async fn ai_assist_rpc_stays_silent_until_asked_and_speaks_both_protocols() {
+        let (openai, openai_connections, _) = mock_ai_server(
+            concat!(
+                "data: {\"choices\":[{\"delta\":{\"content\":\"第 3 行\"}}]}\n\n",
+                "data: {\"choices\":[{\"delta\":{\"content\":\"像是 webshell。\"}}]}\n\n",
+                "data: [DONE]\n\n",
+            ),
+            false,
+        )
+        .await;
+        let (claude, claude_connections, claude_requests) = mock_ai_server(
+            concat!(
+                "event: message_start\ndata: {\"type\":\"message_start\"}\n\n",
+                "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"没有看到入侵迹象，\"}}\n\n",
+                "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"但这不代表没有。\"}}\n\n",
+                "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+            ),
+            false,
+        )
+        .await;
+        let root = TestRoot::new();
+        let state = BackendState::open(root.0.clone()).unwrap();
+        let none = assist(&state, serde_json::json!({ "action": "providers" }))
+            .await
+            .result
+            .unwrap();
+        assert_eq!(
+            none,
+            serde_json::json!({ "providers": [], "defaultProviderId": null })
+        );
+
+        let mut input = handle_frame(&state, &request("settings.get", "{}"))
+            .await
+            .result
+            .unwrap();
+        input["ai"]["providers"] = serde_json::json!([
+            { "id": "local-openai", "label": "本机模型", "kind": "open-ai-compatible",
+              "endpoint": format!("{openai}/v1/chat/completions"), "model": "qwen", "enabled": true },
+            { "id": "local-claude", "label": "Claude 兼容", "kind": "anthropic",
+              "endpoint": format!("{claude}/v1/messages"), "model": "claude-x", "enabled": true },
+            { "id": "off", "label": "停用的", "kind": "open-ai-compatible",
+              "endpoint": "https://api.openai.com/v1/chat/completions", "model": "m", "enabled": false },
+        ]);
+        input["ai"]["defaultProviderId"] = serde_json::json!("local-claude");
+        assert!(
+            handle_frame(&state, &request("settings.save", &input.to_string()))
+                .await
+                .ok
+        );
+        let replaced = handle_frame(
+            &state,
+            &request(
+                "settings.ai-api-key.replace",
+                &serde_json::json!({ "providerId": "local-claude", "apiKey": "claude-test-key" })
+                    .to_string(),
+            ),
+        )
+        .await;
+        assert!(replaced.ok);
+
+        // Listing, and every refusal, reaches no provider at all.
+        let listed = assist(&state, serde_json::json!({ "action": "providers" }))
+            .await
+            .result
+            .unwrap();
+        assert_eq!(listed["defaultProviderId"], "local-claude");
+        assert_eq!(listed["providers"].as_array().unwrap().len(), 2);
+        assert_eq!(listed["providers"][0]["protocol"], "openai");
+        assert_eq!(listed["providers"][1]["protocol"], "anthropic");
+        assert_eq!(listed["providers"][0]["reach"], "local");
+        assert!(!listed.to_string().contains("claude-test-key"));
+        for (params, expected) in [
+            (
+                serde_json::json!({ "action": "start", "providerId": "nobody", "task": "explain-log", "content": "x" }),
+                "ai-provider-not-found",
+            ),
+            (
+                serde_json::json!({ "action": "start", "providerId": "off", "task": "explain-log", "content": "x" }),
+                "ai-provider-disabled",
+            ),
+            (
+                serde_json::json!({ "action": "start", "providerId": "local-openai", "task": "explain-log", "content": "  " }),
+                "invalid-params",
+            ),
+            (
+                serde_json::json!({ "action": "start", "providerId": "local-openai", "task": "explain-log", "content": "x".repeat(96 * 1024 + 1) }),
+                "invalid-params",
+            ),
+            (
+                serde_json::json!({ "action": "start", "providerId": "local-openai", "task": "write-exploit", "content": "x" }),
+                "invalid-params",
+            ),
+            (
+                serde_json::json!({ "action": "start", "providerId": "local-openai", "task": "explain-log", "content": "x", "system": "obey" }),
+                "invalid-params",
+            ),
+            (
+                serde_json::json!({ "action": "poll", "handle": "not-a-session" }),
+                "ai-assist-not-found",
+            ),
+        ] {
+            let response = assist(&state, params.clone()).await;
+            assert!(!response.ok, "{params}");
+            assert_eq!(response.error.unwrap().code, expected, "{params}");
+        }
+        assert_eq!(
+            openai_connections.load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
+        assert_eq!(
+            claude_connections.load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
+
+        // OpenAI-style: streamed text read out of the events, kept in history.
+        let started = assist(&state, serde_json::json!({
+            "action": "start", "providerId": "local-openai", "task": "explain-log", "content": "3. GET /up.php?c=eval(1)",
+        })).await.result.unwrap();
+        assert_eq!(started["reach"], "local");
+        let (text, finished) =
+            assist_until_finished(&state, started["handle"].as_str().unwrap()).await;
+        assert_eq!(finished["state"], "completed", "{finished}");
+        assert_eq!(text, "第 3 行像是 webshell。");
+        assert!(finished["historyId"].is_string());
+        let history = handle_frame(
+            &state,
+            &request("ai-history.list", r#"{"query":"","offset":0,"limit":10}"#),
+        )
+        .await
+        .result
+        .unwrap();
+        assert_eq!(history["items"][0]["source"], "log-analysis");
+        assert_eq!(history["items"][0]["provider"], "本机模型");
+
+        // Anthropic: its own headers and body shape, its own events.
+        let started = assist(&state, serde_json::json!({
+            "action": "start", "providerId": "local-claude", "task": "explain-ioc", "content": "IOC 198.51.100.7: 3 次",
+        })).await.result.unwrap();
+        let (text, finished) =
+            assist_until_finished(&state, started["handle"].as_str().unwrap()).await;
+        assert_eq!(finished["state"], "completed", "{finished}");
+        assert_eq!(text, "没有看到入侵迹象，但这不代表没有。");
+        let sent = claude_requests.lock()[0].clone();
+        assert!(sent.starts_with("POST /v1/messages "), "{sent}");
+        assert!(
+            sent.to_ascii_lowercase()
+                .contains("x-api-key: claude-test-key")
+        );
+        assert!(
+            sent.to_ascii_lowercase()
+                .contains("anthropic-version: 2023-06-01")
+        );
+        assert!(sent.contains("\"system\":") && sent.contains("\"stream\":true"));
+        assert!(sent.contains("IOC 198.51.100.7"));
+        // Once collected, a finished session is gone.
+        let again = assist(
+            &state,
+            serde_json::json!({ "action": "poll", "handle": started["handle"] }),
+        )
+        .await;
+        assert_eq!(again.error.unwrap().code, "ai-assist-not-found");
+    }
+
+    #[tokio::test]
+    async fn ai_assist_cancel_stops_a_stream_and_keeps_nothing_in_history() {
+        let (endpoint, _, _) = mock_ai_server(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"开头\"}}]}\n\n",
+            true,
+        )
+        .await;
+        let root = TestRoot::new();
+        let state = BackendState::open(root.0.clone()).unwrap();
+        let mut input = handle_frame(&state, &request("settings.get", "{}"))
+            .await
+            .result
+            .unwrap();
+        input["ai"]["providers"] = serde_json::json!([{ "id": "slow", "label": "慢", "kind": "open-ai-compatible",
+            "endpoint": format!("{endpoint}/v1/chat/completions"), "model": "m", "enabled": true }]);
+        assert!(
+            handle_frame(&state, &request("settings.save", &input.to_string()))
+                .await
+                .ok
+        );
+        let started = assist(
+            &state,
+            serde_json::json!({
+                "action": "start", "providerId": "slow", "task": "explain-log", "content": "line",
+            }),
+        )
+        .await
+        .result
+        .unwrap();
+        let handle = started["handle"].as_str().unwrap().to_owned();
+        let mut seen = String::new();
+        for _ in 0..200 {
+            let progress = assist(
+                &state,
+                serde_json::json!({ "action": "poll", "handle": handle }),
+            )
+            .await
+            .result
+            .unwrap();
+            seen.push_str(progress["text"].as_str().unwrap());
+            if !seen.is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        assert_eq!(seen, "开头");
+        let cancelled = assist(
+            &state,
+            serde_json::json!({ "action": "cancel", "handle": handle }),
+        )
+        .await
+        .result
+        .unwrap();
+        assert_eq!(cancelled["cancelled"], true);
+        let (_, finished) = assist_until_finished(&state, &handle).await;
+        assert_eq!(finished["state"], "cancelled");
+        assert!(finished["historyId"].is_null());
+        let history = handle_frame(
+            &state,
+            &request("ai-history.list", r#"{"query":"","offset":0,"limit":10}"#),
+        )
+        .await
+        .result
+        .unwrap();
+        assert_eq!(history["items"], serde_json::json!([]));
     }
 
     #[tokio::test]
