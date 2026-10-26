@@ -23,7 +23,7 @@ export interface WinIrSnapshots {
 }
 
 export type CollectionTab = keyof WinIrSnapshots;
-export type WindowsIncidentTab = CollectionTab | "timeline" | "console" | "desktop";
+export type WindowsIncidentTab = CollectionTab | "timeline" | "console" | "desktop" | "playbooks";
 export type CollectedAt = Partial<Record<CollectionTab, string>>;
 
 export const WIN_IR_MODULES: ReadonlyArray<{
@@ -34,6 +34,7 @@ export const WIN_IR_MODULES: ReadonlyArray<{
   action: string;
 }> = [
   { key: "overview", label: "主机总览", group: "调查", description: "先了解目标与防护状态，再沿着风险线索深入排查。", action: "刷新主机概况" },
+  { key: "playbooks", label: "响应方案", group: "调查", description: "按事件类型推进留证、排查、处置与独立复核。", action: "查看方案" },
   { key: "baseline", label: "基线配置", group: "配置", description: "对照当前值和建议值核查配置，查看每项检查的依据与建议。", action: "核查安全基线" },
   { key: "timeline", label: "调查时间线", group: "取证", description: "按时间对照已采集的事件、进程启动和文件修改记录。", action: "采集核心模块" },
   { key: "processes", label: "进程分析", group: "调查", description: "从父子关系、执行路径和命令行定位可疑活动。", action: "刷新进程" },

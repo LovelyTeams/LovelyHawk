@@ -11,6 +11,8 @@
 
 UI 预设清单位于 `ui/src/renderer/win-ir-presets.ts` 和 `win-ir-command-presets.ts`；文件诊断沿 core `file_access.ps1` → backend → shared DTO → 原有宿主固定白名单 → 页面接线。未引入在线资源或第二套 UI。预设导航和命令清单不代表已经采集或排除了相关威胁。
 
+“响应方案”现将这些预设接入 14 类常见事件的四阶段调查流程，包含证据清单、来源与能力缺口，见 [Windows 响应方案](WINDOWS_RESPONSE_PLAYBOOKS.md)。从方案进入命令检查台会先保留当前草稿，用户明确替换后仍须确认执行；没有新增自动强删、提权或驱动卸载能力。
+
 本机 Windows 11 10.0.26200 x64 / PowerShell 5.1 的实际只读文件诊断通过，目标是本次测试独占创建的文件（名称含引号、反引号与字面命令替换标记），读取后原文件保持不变。取得 4 条 ACL，未取得同路径进程/服务；这不替代真实恶意程序或内核驱动样本验证。记录：`target/windows-redesign-4233e2fe-0252-49e1-bf01-caaa46ff1dec/file-access-readonly.json`。
 
 ## 案件工作台移除

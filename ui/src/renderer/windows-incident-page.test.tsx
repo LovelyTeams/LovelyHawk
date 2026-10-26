@@ -49,6 +49,7 @@ describe("WindowsIncidentPage", () => {
     expect(html).toContain('data-testid="windows-reveal-agent"');
     expect(html).not.toContain("win-ir-target-card");
     expect(html).toContain("主机总览");
+    expect(html).toContain("响应方案");
     expect(html).toContain("基线配置");
     expect(html).toContain("进程分析");
     expect(html).toContain("网络连接");

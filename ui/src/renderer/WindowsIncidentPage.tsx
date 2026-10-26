@@ -18,6 +18,9 @@ import { WinIrFileManager } from "./WinIrFileManager";
 import { WinIrIcon } from "./WinIrIcon";
 import { ModuleHeader } from "./WinIrKit";
 import { WinIrOverview } from "./WinIrOverview";
+import { WinIrPlaybooks } from "./WinIrPlaybooks";
+import type { PlaybookAction } from "./win-ir-playbooks";
+import { FILE_PLACES, REGISTRY_PLACES } from "./win-ir-presets";
 import { WinIrRegistry } from "./WinIrRegistry";
 import { WinIrSetup } from "./WinIrSetup";
 import { formatBytes, parentPath } from "./win-ir-helpers";
@@ -55,6 +58,7 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOp
   }, []);
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [dockTab, setDockTab] = useState<WindowsDockTab>("tasks");
+  const [commandSuggestion, setCommandSuggestion] = useState<{ id: string; request: number } | null>(null);
   function openDock(tab: WindowsDockTab) { setDockTab(tab); setConsoleOpen(true); }
   useEffect(() => { if (channelOpenRequest > 0) setConsoleOpen((open) => !open); }, [channelOpenRequest]);
   const [setupOpen, setSetupOpen] = useState(false);
@@ -69,7 +73,7 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOp
   useEffect(() => { onBusyChange?.(busy); return () => onBusyChange?.(false); }, [busy, onBusyChange]);
   const host = data.snapshots.overview?.hostname ?? null;
   const hasSnapshots = Object.keys(data.snapshots).length > 0;
-  const showWorkspace = connected || hasSnapshots || activeTab === "desktop";
+  const showWorkspace = connected || hasSnapshots || activeTab === "desktop" || activeTab === "playbooks";
   const setupView = !showWorkspace || setupOpen;
   const activeModule = WIN_IR_MODULES.find((module) => module.key === activeTab)!;
   const groups = ["调查", "取证", "配置"];
@@ -77,10 +81,10 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOp
 
   useEffect(() => { onConnectionChange?.(connected, host); }, [connected, host, onConnectionChange]);
   // The guide opens by itself only before anything was collected; after a disconnect the old records stay in view.
-  useEffect(() => { if (!connected && !hasSnapshots && activeTab !== "desktop") setSetupOpen(true); }, [connected, hasSnapshots, activeTab]);
+  useEffect(() => { if (!connected && !hasSnapshots && activeTab !== "desktop" && activeTab !== "playbooks") setSetupOpen(true); }, [connected, hasSnapshots, activeTab]);
   useEffect(() => () => onConnectionChange?.(false, null), [onConnectionChange]);
   useEffect(() => {
-    if (!connected || busy) return;
+    if (!connected || busy || activeTab === "playbooks") return;
     const overviewKey = `${data.epoch}:overview`;
     const tab = !data.snapshots.overview && !attempted.current.has(overviewKey) ? "overview" : activeTab;
     if (tab === "console" || tab === "timeline" || tab === "desktop") return;
@@ -93,6 +97,7 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOp
 
   function navigate(tab: WindowsIncidentTab, crossLink = false) {
     if (tab === "console") { openDock("command"); return; }
+    if (tab === "playbooks") setSetupOpen(false);
     setConsoleOpen(false);
     setReturnTo(crossLink && tab !== activeTab ? { from: activeTab, to: tab } : null);
     setActiveTab(tab);
@@ -127,8 +132,29 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOp
   }
   const related: RelatedContext = { snapshots: data.snapshots, collectedAt: data.collectedAt, onGo: goTo };
   const back = returnTo && returnTo.to === activeTab ? returnTo : null;
+  function openPlaybookAction(action: PlaybookAction) {
+    if (action.kind === "command") {
+      setCommandSuggestion({ id: action.preset, request: ++requestId.current });
+      openDock("command");
+      return;
+    }
+    if (!connected || busy) return;
+    setFocus(null);
+    if (action.kind === "module") { navigate(action.tab, true); return; }
+    if (action.kind === "files") {
+      const place = FILE_PLACES.find((item) => item.label === action.preset);
+      if (place) { navigate("files", true); void data.collect("files", place.path); }
+    } else if (action.kind === "registry") {
+      const place = REGISTRY_PLACES.find((item) => item.label === action.preset);
+      if (place) locateRegistry(place.keyPath);
+    } else {
+      setFocus({ target: { tab: "logs", query: "" }, request: ++requestId.current });
+      navigate("logs", true);
+      void data.collect("logs", action.category);
+    }
+  }
   function collectCurrent() {
-    if (activeTab === "desktop") return;
+    if (activeTab === "desktop" || activeTab === "playbooks") return;
     if (activeTab === "console") void data.refresh().catch((reason: unknown) => data.setError(errorText(reason, "状态读取失败。")));
     else if (activeTab === "timeline") void data.collectAll();
     else void data.collect(activeTab);
@@ -254,7 +280,7 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOp
           if (input) { event.preventDefault(); input.focus(); input.select(); }
         }
       }}>
-        {showWorkspace && !connected && !setupView && activeTab !== "desktop" ? <div className="wir-session-bar is-disconnected" role="status">
+        {showWorkspace && !connected && !setupView && activeTab !== "desktop" && activeTab !== "playbooks" ? <div className="wir-session-bar is-disconnected" role="status">
           <span className="status-dot idle" aria-hidden="true" /><strong>连接已断开</strong><span className="wir-session-host">{host || "主机名称待采集"}</span><span className="wir-session-hint">旧快照仅供查看，远程操作已暂停</span>
           <button type="button" className="win-ir-btn" onClick={() => setSetupOpen(true)}>重新接入</button>
         </div> : null}
@@ -275,7 +301,7 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOp
         </section> : null}
         {/* The modules stay mounted behind the setup view so their selections and filters survive it. */}
         {showWorkspace ? <div className="wir-workspace" hidden={setupView}>
-          {activeTab !== "desktop" ? <ModuleHeader title={activeModule.label} description={activeModule.description} collectedAt={collectedTime(data.collectedAt[activeTab as CollectionTab])} busy={busy || !connected} actionLabel={activeModule.action} onCollect={collectCurrent}
+          {activeTab !== "desktop" && activeTab !== "playbooks" ? <ModuleHeader title={activeModule.label} description={activeModule.description} collectedAt={collectedTime(data.collectedAt[activeTab as CollectionTab])} busy={busy || !connected} actionLabel={activeModule.action} onCollect={collectCurrent}
             extra={<>
               {back ? <button type="button" className="win-ir-btn wir-back-link" onClick={() => navigate(back.from)}>← 返回{moduleLabel(back.from)}</button> : null}
               {activeTab === "files" ? <button type="button" className="win-ir-btn" onClick={() => openDock("files")}>接收与保存</button> : null}
@@ -283,7 +309,8 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOp
             </>}
           /> : null}
           {data.collectionErrors[activeTab as CollectionTab] ? <details className="wir-collection-warnings"><summary>上次采集未完成 · 查看原因与重试</summary><span>上次采集未完成：{data.collectionErrors[activeTab as CollectionTab]}{data.snapshots[activeTab as CollectionTab] ? " 下面保留上一次成功采集的结果。" : ""}</span><button type="button" className="win-ir-btn" disabled={busy || !connected} onClick={collectCurrent}>重试</button></details> : null}
-          {WIN_IR_MODULES.filter((module) => visited.has(module.key)).map(({ key }) => <Activity key={`${data.snapshotKey}:${key}`} mode={key === activeTab ? "visible" : "hidden"}>
+          {WIN_IR_MODULES.filter((module) => visited.has(module.key)).map(({ key }) => <Activity key={key === "playbooks" ? key : `${data.snapshotKey}:${key}`} mode={key === activeTab ? "visible" : "hidden"}>
+            {key === "playbooks" ? <WinIrPlaybooks connected={connected} busy={busy} onAction={openPlaybookAction} onCopy={(text) => void copy(text)} /> : null}
             {key === "desktop" ? <WinIrDesktop api={api.windowsRdp} covered={covered || setupOpen} /> : null}
             {key === "overview" ? <WinIrOverview snapshots={data.snapshots} collectedAt={data.collectedAt} busy={busy || !connected} onNavigate={(tab) => navigate(tab, true)} onGo={goTo} onCollectAll={() => void data.collectAll()} /> : null}
             {key === "baseline" ? <WinIrBaseline snapshot={data.snapshots.baseline ?? null} focus={focusFor(focus, "baseline")} busy={busy} connected={connected} onCopy={(text) => void copy(text)} onRemediate={(item) => configureBaseline([item.id])} onConfigure={() => configureBaseline((data.snapshots.baseline?.items ?? []).filter((item) => item.remediationAvailable && item.status === "fail").map((item) => item.id))} /> : null}
@@ -300,7 +327,7 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOp
         </div> : null}
       </div>
       <WinIrDock data={data} expanded={consoleOpen} tab={dockTab} onTab={openDock} onToggle={() => setConsoleOpen(!consoleOpen)}>
-        <WinIrConsole panel={dockTab} status={data.status} busy={busy} sessionKey={data.sessionKey} hostname={host || "当前远程会话"} output={data.commandOutput} savedFiles={data.savedFiles} canSave={api.saveWindowsFile !== undefined} onSave={(fileId) => void data.saveFile(fileId)} onCopy={(text) => void copy(text)} onSend={data.sendChat} onRun={data.runCommand} onUnregister={() => void local("unregister-plugin", "正在移除插件注册…", "当前用户的插件注册已移除。")} />
+        <WinIrConsole suggestion={commandSuggestion} panel={dockTab} status={data.status} busy={busy} sessionKey={data.sessionKey} hostname={host || "当前远程会话"} output={data.commandOutput} savedFiles={data.savedFiles} canSave={api.saveWindowsFile !== undefined} onSave={(fileId) => void data.saveFile(fileId)} onCopy={(text) => void copy(text)} onSend={data.sendChat} onRun={data.runCommand} onUnregister={() => void local("unregister-plugin", "正在移除插件注册…", "当前用户的插件注册已移除。")} />
       </WinIrDock>
       {baselineSelection ? <WinIrBaselineChanges items={data.snapshots.baseline?.items ?? []} initialIds={baselineSelection.ids} session={baselineSelection.session} currentSession={data.sessionKey} onRequest={data.baselineRequest} onClose={() => setBaselineSelection(null)} onRefresh={() => void data.collect("baseline")} /> : null}
       {confirm.dialog ? <DialogHost dialog={confirm.dialog} scrollMessage onResolve={confirm.resolve} /> : null}

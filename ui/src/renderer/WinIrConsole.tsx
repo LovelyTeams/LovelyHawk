@@ -8,19 +8,22 @@ import { WINDOWS_COMMAND_PRESETS } from "./win-ir-command-presets";
 
 export type WindowsDockTab = "tasks" | "files" | "command" | "logs";
 
-export function WinIrConsole({ panel, status, busy, sessionKey, hostname, output, savedFiles, canSave, onCopy, onSend, onRun, onSave, onUnregister }: {
+export function WinIrConsole({ panel, status, busy, sessionKey, hostname, output, savedFiles, canSave, onCopy, onSend, onRun, onSave, onUnregister, suggestion }: {
   panel: WindowsDockTab;
   status: DvcRuntimeStatus | null; busy: boolean; sessionKey: string | null; hostname: string;
   output: { command: string; output: string; time: string } | null;
   savedFiles: ReadonlySet<string>; canSave: boolean; onSave: (fileId: string) => void;
   onCopy: (text: string) => void; onSend: (text: string) => Promise<boolean>;
   onRun: (command: string, expectedSession: string) => Promise<void>; onUnregister: () => void;
+  suggestion?: { id: string; request: number } | null;
 }) {
   const [message, setMessage] = useState("");
   const [command, setCommand] = useState("whoami /all");
   const [presetGroup, setPresetGroup] = useState("服务与驱动");
   const [presetId, setPresetId] = useState<string | null>(null);
   const selectedPreset = WINDOWS_COMMAND_PRESETS.find((preset) => preset.id === presetId);
+  const [handledSuggestion, setHandledSuggestion] = useState<number | null>(null);
+  const proposed = suggestion && suggestion.request !== handledSuggestion ? WINDOWS_COMMAND_PRESETS.find((preset) => preset.id === suggestion.id) : undefined;
   const confirm = useConfirmDialog();
   const available = !busy && sessionKey !== null;
   async function execute() {
@@ -37,6 +40,10 @@ export function WinIrConsole({ panel, status, busy, sessionKey, hostname, output
         <section className="wir-panel">
           <header><div><h2>命令检查台</h2><p>选择常用查询，或输入需要执行的完整命令</p></div></header>
           <div className="wir-console-content">
+            {proposed && suggestion ? <section className="wir-command-suggestion" aria-label="响应方案推荐查询">
+              <strong>方案推荐：{proposed.label}</strong><p>{proposed.hint}。现有命令草稿仍保留；填入后需再次核对目标并确认执行。</p><pre>{proposed.command}</pre>
+              <div className="wir-toolbar"><button type="button" className="win-ir-btn" onClick={() => { setCommand(proposed.command); setPresetId(proposed.id); setPresetGroup(proposed.group); setHandledSuggestion(suggestion.request); }}>替换草稿为此查询</button><button type="button" className="win-ir-btn" onClick={() => setHandledSuggestion(suggestion.request)}>保留草稿</button></div>
+            </section> : null}
             <div className="wir-command-presets">
               <label>排查预设（{WINDOWS_COMMAND_PRESETS.length} 项）<select className="win-ir-input" aria-label="命令预设类别" value={presetGroup} onChange={(event) => setPresetGroup(event.target.value)}>{[...new Set(WINDOWS_COMMAND_PRESETS.map((preset) => preset.group))].map((group) => <option key={group}>{group}</option>)}</select></label>
               <div className="wir-chips" role="group" aria-label="填入常用查询">{WINDOWS_COMMAND_PRESETS.filter((preset) => preset.group === presetGroup).map((preset) => <button type="button" className="wir-chip" key={preset.id} aria-pressed={preset.id === presetId} title={preset.hint} onClick={() => { setCommand(preset.command); setPresetId(preset.id); }}>{preset.label}</button>)}</div>

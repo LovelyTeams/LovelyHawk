@@ -2,6 +2,7 @@ import type { WindowsIncidentTab } from "./win-ir-model";
 
 const paths: Record<WindowsIncidentTab, string> = {
   overview: "M3 4h18v12H3z M8 21h8 M12 16v5 M7 12l3-3 3 2 4-5",
+  playbooks: "M4 3h16v18H4z M8 7h8 M8 12h3 M8 17h3 M14 12l2 2 3-4 M14 18h3",
   baseline: "M12 3l8 3v6c0 4-4 7-8 9-4-2-8-5-8-9V6z M8 12l3 3 5-6",
   timeline: "M6 3v18 M6 6h13 M6 12h10 M6 18h13 M3 6h6 M3 12h6 M3 18h6",
   processes: "M8 3h8v5H8z M3 16h7v5H3z M14 16h7v5h-7z M12 8v4 M6 16v-4h12v4",

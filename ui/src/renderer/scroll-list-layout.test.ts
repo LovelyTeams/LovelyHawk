@@ -62,6 +62,7 @@ const SCROLL_LISTS: Record<string, string> = {
   ".wir-places": ".wir-places > *",
   // The event log's quick queries and log locations beside the results.
   ".wir-log-rail": ".wir-log-rail > *",
+  ".wir-playbooks-rail": ".wir-playbooks-rail > *",
   ".wir-setup-view": ".wir-setup-view > *",
   // Module chrome stays readable; the process module explicitly grows into the remaining space.
   ".wir-workspace": ".wir-workspace > *",
