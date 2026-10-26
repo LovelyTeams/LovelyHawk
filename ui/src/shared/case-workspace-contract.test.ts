@@ -9,11 +9,11 @@ describe("case workspace closed contract", () => {
     const registry = source.split("fn page_descriptors() -> Vec<PageDescriptor> {")[1]?.split("\n}\n")[0];
     expect(registry).toBeDefined();
     const ids = [...registry!.matchAll(/id: "([^"]+)"/gu)].map((match) => match[1]!);
-    expect(ids).toContain("case-workspace");
+    expect(ids).not.toContain("case-workspace");
     const payload = { productName: "LovelyHawk", appVersion: "test", protocolVersion: BACKEND_PROTOCOL, securityReferenceFavoriteIds: [],
       pages: ids.map((id) => ({ id, title: id, icon: "", summary: "", primaryAction: "", group: "investigation", capability: "connected-target", migrationState: "ready", sections: [] })) };
     expect(isBootstrapResult(payload)).toBe(true);
-    expect(isBootstrapResult({ ...payload, pages: payload.pages.filter((page) => page.id !== "case-workspace") })).toBe(false);
+    expect(isBootstrapResult({ ...payload, pages: payload.pages.filter((page) => page.id !== "notes") })).toBe(false);
   });
   it("rejects injected identity, provenance and paths and bounds Unicode input", () => {
     const note = { action: "note", bindingHandle: "binding", caseId: "case", title: "调查", content: "😀".repeat(4096) };

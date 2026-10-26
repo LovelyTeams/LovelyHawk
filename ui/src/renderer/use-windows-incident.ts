@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type {
-  DvcRuntimeStatus, WindowsProcessInspection, WindowsFilePreview, WindowsIncidentApi, WindowsRemoteIntent, WindowsIncidentResponse,
+  DvcRuntimeStatus, WindowsProcessInspection, WindowsFileAccess, WindowsFilePreview, WindowsIncidentApi, WindowsRemoteIntent, WindowsIncidentResponse,
 } from "../shared/windows-incident-contract";
 import { errorText } from "./error-text";
 import { CORE_COLLECTION, DEFAULT_FILE_PATH, DEFAULT_REGISTRY_PATH, WIN_IR_MODULES, type CollectedAt, type CollectionTab, type WinIrSnapshots } from "./win-ir-model";
@@ -277,6 +277,12 @@ export function useWindowsIncident(api: WindowsIncidentApi) {
     } finally { finish(); }
   }, [finish, remote, start]);
 
+  const inspectFileAccess = useCallback(async (path: string): Promise<WindowsFileAccess> => {
+    if (!start("正在只读查询文件权限、进程与服务 / 驱动路径…")) throw new Error("另一项查询正在进行。");
+    try { const response = await remote({ action: "inspect-file-access", path }, epochRef.current); if (response.kind !== "file-access") throw new Error("文件诊断结果无效。"); return response.inspection; }
+    finally { finish(); }
+  }, [finish, remote, start]);
+
   const inspectProcess = useCallback(async (pid: number, startTime: string): Promise<WindowsProcessInspection> => {
     if (!start("正在核对进程身份并读取网络、服务与 DLL…")) throw new Error("另一项查询正在进行。");
     try {
@@ -364,9 +370,19 @@ export function useWindowsIncident(api: WindowsIncidentApi) {
     } finally { finish(); }
   }, [acceptCollection, finish, remote, start]);
 
+  const baselineRequest = useCallback(async (request: WindowsRemoteIntent, expectedSession: string, label?: string) => {
+    if (windowsSessionKey(statusRef.current) !== expectedSession) throw new Error("连接已变化，请重新读取并预览计划。");
+    if (label && !start(label)) throw new Error("当前任务尚未结束。");
+    try {
+      const response = await remote(request, epochRef.current);
+      if (response.kind === "baseline-change-error") throw new Error(response.message);
+      return response;
+    } finally { if (label) finish(); }
+  }, [finish, remote, start]);
+
   return {
-    status, filelessScript, snapshots, collectedAt, collectionErrors, busy, error, statusError, notice, epoch, snapshotKey, batch, commandOutput, savedFiles, saveFile,
-    sessionKey: windowsSessionKey(status), reconnect, retryReconnect, discardPrevious, dismissReconnect, collect, collectAll, refresh, localAction, previewFile, inspectProcess, pullFile, sendChat, runCommand, dispose,
+    status, filelessScript, snapshots, collectedAt, collectionErrors, busy, error, statusError, notice, epoch, snapshotKey, batch, commandOutput, savedFiles, saveFile, baselineRequest,
+    sessionKey: windowsSessionKey(status), reconnect, retryReconnect, discardPrevious, dismissReconnect, collect, collectAll, refresh, localAction, previewFile, inspectFileAccess, inspectProcess, pullFile, sendChat, runCommand, dispose,
     cancelBatch: () => { stopBatch.current = true; setBatch((previous) => previous ? { ...previous, stopping: true } : null); },
     setNotice, setError, dismissNotice: () => setNotice(null), dismissError: () => setError(null),
   };

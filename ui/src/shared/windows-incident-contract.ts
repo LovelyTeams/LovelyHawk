@@ -22,8 +22,12 @@ export type WindowsRemoteIntent =
   | { action: "inspect-process"; pid: number; startTime: string }
   | { action: "collect-files"; path: string }
   | { action: "preview-file"; path: string }
+  | { action: "inspect-file-access"; path: string }
   | { action: "collect-registry"; keyPath: string }
-  | { action: "remediate-baseline"; ruleId: string }
+  | { action: "plan-baseline"; ruleIds: string[] }
+  | { action: "apply-baseline-plan" | "discard-baseline-plan" | "cancel-baseline-plan" | "baseline-plan-progress"; planId: string }
+  | { action: "baseline-history" }
+  | { action: "plan-baseline-restore"; recordId: string }
   | { action: "kill-process"; pid: number; startTime: string }
   | { action: "remove-startup"; sourceType: string; name: string; location: string }
   | { action: "disable-account"; name: string; sid: string }
@@ -254,6 +258,7 @@ export interface WindowsFilesSnapshot {
 }
 
 /** The first bytes of one remote file, base64-encoded, for the preview pane. */
+export interface WindowsFileAccess { path: string; observedAt: string; attributes: string; owner: string; accessRules: { identity: string; rights: string; access: "Allow" | "Deny"; inherited: boolean }[]; processes: { pid: number; name: string }[]; services: { name: string; displayName: string; state: string; startMode: string; path: string; kind: "driver" | "service" }[]; warnings: string[] }
 export interface WindowsFilePreview {
   fullPath: string;
   sizeBytes: number;
@@ -279,7 +284,19 @@ export interface WindowsRegistrySnapshot {
   warnings: string[];
 }
 
+export const WINDOWS_BASELINE_CHANGE_IDS = ["rdp-nla", "rdp-encryption", "rdp-security-layer", "wdigest", "uac", "uac-prompt", "uac-secure-desktop", "uac-filter-admin", "blank-password", "anonymous", "anonymous-sam", "ntlm", "lm-hash", "winrm-basic", "winrm-cleartext", "installer-machine", "installer-user", "autorun", "ps-scriptblock-logging"] as const;
+export interface WindowsBaselinePlanItem { id: string; title: string; location: string; currentValue: string; expectedValue: string; impact: string }
+export interface WindowsBaselineChangePlan { id: string; target: string; expiresAt: number; restoring: boolean; items: WindowsBaselinePlanItem[]; notes: string[] }
+export type WindowsBaselineChangeState = "pending" | "applying" | "verified" | "restored" | "refused" | "uncertain" | "skipped";
+export interface WindowsBaselineChangeReport { id: string; target: string; createdAt: number; restoring: boolean; finished: boolean; recoveryAvailable: boolean; items: { id: string; title: string; state: WindowsBaselineChangeState }[]; message: string }
+
 export type WindowsIncidentResponse =
+  | { kind: "baseline-plan"; plan: WindowsBaselineChangePlan }
+  | { kind: "baseline-change"; report: WindowsBaselineChangeReport }
+  | { kind: "baseline-progress"; report: WindowsBaselineChangeReport | null }
+  | { kind: "baseline-history"; records: WindowsBaselineChangeReport[] }
+  | { kind: "baseline-acknowledged"; accepted: boolean }
+  | { kind: "baseline-change-error"; message: string }
   | { kind: "status"; status: DvcRuntimeStatus; filelessScript: string }
   | { kind: "command-output"; output: string; status: DvcRuntimeStatus }
   | { kind: "overview"; snapshot: WindowsOverviewSnapshot }
@@ -292,6 +309,7 @@ export type WindowsIncidentResponse =
   | { kind: "logs"; snapshot: WindowsLogsSnapshot }
   | { kind: "files"; snapshot: WindowsFilesSnapshot }
   | { kind: "file-preview"; preview: WindowsFilePreview }
+  | { kind: "file-access"; inspection: WindowsFileAccess }
   | { kind: "registry"; snapshot: WindowsRegistrySnapshot };
 
 export interface WindowsIncidentApi {
@@ -357,6 +375,12 @@ export function isWindowsIncidentRequest(value: unknown): value is WindowsIncide
     case "collect-startup":
     case "collect-accounts":
       return keys();
+    case "plan-baseline":
+      return keys("ruleIds") && Array.isArray(value.ruleIds) && value.ruleIds.length>0 && value.ruleIds.length<=19 && new Set(value.ruleIds).size===value.ruleIds.length && value.ruleIds.every(isBaselineChangeId);
+    case "apply-baseline-plan": case "discard-baseline-plan": case "cancel-baseline-plan": case "baseline-plan-progress":
+      return keys("planId") && isWindowsFileId(value.planId);
+    case "plan-baseline-restore": return keys("recordId") && isWindowsFileId(value.recordId);
+    case "baseline-history": return keys();
     case "inspect-process":
       return keys("pid", "startTime") && Number.isInteger(value.pid) && (value.pid as number) > 0 && (value.pid as number) <= 4294967295 &&
         typeof value.startTime === "string" && value.startTime.length <= 64 && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)$/u.test(value.startTime) && Number.isFinite(Date.parse(value.startTime));
@@ -381,6 +405,7 @@ export function isWindowsIncidentRequest(value: unknown): value is WindowsIncide
         !value.path.includes("\n") &&
         !value.path.includes("\r")
       );
+    case "inspect-file-access":
     case "preview-file":
       return (
         keys("path") &&
@@ -394,13 +419,6 @@ export function isWindowsIncidentRequest(value: unknown): value is WindowsIncide
         isBoundedText(value.keyPath, 1024) &&
         !value.keyPath.includes("\n") &&
         !value.keyPath.includes("\r")
-      );
-    case "remediate-baseline":
-      return (
-        keys("ruleId") &&
-        isBoundedText(value.ruleId, 128) &&
-        /^[a-z0-9-]+$/u.test(value.ruleId) &&
-        value.ruleId !== "defender-tamper"
       );
     case "kill-process":
       return (
@@ -499,7 +517,7 @@ const checkBaseline: Check = (value) => {
   const counts = { pass: snapshot.passedCount, fail: snapshot.failedCount, warn: snapshot.warningCount, unknown: snapshot.unknownCount, "not-applicable": snapshot.notApplicableCount };
   return ids.size === snapshot.items.length && snapshot.totalChecks === snapshot.items.length &&
     Object.entries(counts).every(([status, count]) => snapshot.items.filter((item) => item.status === status).length === count) &&
-    snapshot.items.every((item) => !item.remediationAvailable || item.status === "fail" || item.status === "warn");
+    snapshot.items.every((item) => !item.remediationAvailable || (isBaselineChangeId(item.id) && (item.status === "fail" || item.status === "warn")));
 };
 const checkProcesses = object({
   totalCount: uint, suspiciousCount: uint,
@@ -582,7 +600,15 @@ export function matchesWindowsIncidentResponse(
   value: unknown,
 ): value is WindowsIncidentResponse {
   if (!isRecord(value) || typeof value.kind !== "string") return false;
+  if (["plan-baseline", "apply-baseline-plan", "discard-baseline-plan", "cancel-baseline-plan", "baseline-plan-progress", "baseline-history", "plan-baseline-restore"].includes(request.action) && value.kind === "baseline-change-error") return exactKeys(value,["kind","message"]) && isBoundedText(value.message,2048);
   switch (request.action) {
+    case "inspect-file-access": return value.kind === "file-access" && exactKeys(value,["kind","inspection"]) && object({ path: shortText, observedAt: shortText, attributes: shortText, owner: shortText, accessRules: list(object({identity:shortText,rights:shortText,access:(v)=>v==="Allow"||v==="Deny",inherited:boolean}),64), processes:list(object({pid:uint,name:shortText}),256), services:list(object({name:shortText,displayName:shortText,state:shortText,startMode:shortText,path:text,kind:(v)=>v==="driver"||v==="service"}),256),warnings:list(shortText,16)})(value.inspection);
+    case "plan-baseline": case "plan-baseline-restore":
+      return value.kind === "baseline-plan" && exactKeys(value,["kind","plan"]) && isBaselineChangePlan(value.plan) && value.plan.restoring === (request.action === "plan-baseline-restore") && (request.action !== "plan-baseline" || value.plan.items.every((item) => request.ruleIds.includes(item.id)));
+    case "apply-baseline-plan": return value.kind === "baseline-change" && exactKeys(value,["kind","report"]) && isBaselineChangeReport(value.report) && value.report.id === request.planId && value.report.finished;
+    case "baseline-plan-progress": return value.kind === "baseline-progress" && exactKeys(value,["kind","report"]) && (value.report === null || (isBaselineChangeReport(value.report) && value.report.id === request.planId));
+    case "baseline-history": return value.kind === "baseline-history" && exactKeys(value,["kind","records"]) && Array.isArray(value.records) && value.records.length<=100 && value.records.every(isBaselineChangeReport) && new Set(value.records.map((r) => r.id)).size === value.records.length;
+    case "discard-baseline-plan": case "cancel-baseline-plan": return value.kind === "baseline-acknowledged" && exactKeys(value,["kind","accepted"]) && typeof value.accepted === "boolean";
     case "status":
     case "register-plugin":
     case "unregister-plugin":
@@ -607,7 +633,6 @@ export function matchesWindowsIncidentResponse(
     case "collect-overview":
       return snapshotResponse(value, "overview", checkOverview);
     case "collect-baseline":
-    case "remediate-baseline":
       return snapshotResponse(value, "baseline", checkBaseline);
     case "collect-processes":
     case "kill-process":
@@ -639,4 +664,14 @@ export function matchesWindowsIncidentResponse(
     case "delete-registry-value":
       return snapshotResponse(value, "registry", checkRegistry);
   }
+}
+
+function isBaselineChangeId(value: unknown): value is string { return typeof value === "string" && (WINDOWS_BASELINE_CHANGE_IDS as readonly string[]).includes(value); }
+function isEpoch(value: unknown): value is number { return typeof value === "number" && Number.isSafeInteger(value) && value>0; }
+function isBaselineChangePlan(value: unknown): value is WindowsBaselineChangePlan {
+  return isRecord(value) && exactKeys(value,["id","target","expiresAt","restoring","items","notes"]) && isWindowsFileId(value.id) && isBoundedText(value.target,255) && isEpoch(value.expiresAt) && typeof value.restoring === "boolean" && Array.isArray(value.notes) && value.notes.length<=10 && value.notes.every((v) => isBoundedText(v,2048)) && Array.isArray(value.items) && value.items.length<=19 && value.items.every((item) => isRecord(item) && exactKeys(item,["id","title","location","currentValue","expectedValue","impact"]) && isBaselineChangeId(item.id) && isBoundedText(item.title,256) && isBoundedText(item.location,1024) && isBoundedText(item.currentValue,256) && isBoundedText(item.expectedValue,256) && isBoundedText(item.impact,2048)) && new Set(value.items.map((v) => v.id)).size===value.items.length;
+}
+function isBaselineChangeReport(value: unknown): value is WindowsBaselineChangeReport {
+  if (!isRecord(value) || !exactKeys(value,["id","target","createdAt","restoring","finished","recoveryAvailable","items","message"]) || !isWindowsFileId(value.id) || !isBoundedText(value.target,255) || !isEpoch(value.createdAt) || typeof value.restoring!=="boolean" || typeof value.finished!=="boolean" || typeof value.recoveryAvailable!=="boolean" || !isBoundedText(value.message,2048) || !Array.isArray(value.items) || value.items.length<1 || value.items.length>19) return false;
+  return value.items.every((item) => isRecord(item) && exactKeys(item,["id","title","state"]) && isBaselineChangeId(item.id) && isBoundedText(item.title,256) && typeof item.state==="string" && ["pending","applying","verified","restored","refused","uncertain","skipped"].includes(item.state) && (!value.finished || !["pending","applying"].includes(item.state))) && new Set(value.items.map((v) => v.id)).size===value.items.length && value.recoveryAvailable===(!value.restoring && value.items.some((v) => v.state==="verified"));
 }

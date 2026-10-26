@@ -85,12 +85,6 @@ const ICONS: Record<string, () => ReactElement> = {
       <path d="M9.2 2.2v3.6h3.6M5.6 9h4.8M5.6 11.6h3" />
     </svg>
   ),
-  "case-workspace": () => (
-    <svg {...ICON_PROPS}>
-      <rect x="1.8" y="4.6" width="12.4" height="9" rx="1.4" />
-      <path d="M5.6 4.6V3.2a.8.8 0 0 1 .8-.8h3.2a.8.8 0 0 1 .8.8v1.4M1.8 8.4h12.4M7 8.4v1.4h2V8.4" />
-    </svg>
-  ),
   database: () => (
     <svg {...ICON_PROPS}>
       <ellipse cx="8" cy="3.8" rx="5.2" ry="1.8" />

@@ -28,7 +28,6 @@ const IN_TERMINAL_WINDOW = ["SftpBrowserPage"];
  * page; each half is still a page component of its own.
  */
 const HOSTED_BY: Record<string, string> = {
-  CaseWorkspacePage: "CasesPage",
   BaselinePage: "ConfigurationPage",
   ConfigGeneratorPage: "ConfigurationPage",
   NginxRepairPage: "ConfigurationPage",

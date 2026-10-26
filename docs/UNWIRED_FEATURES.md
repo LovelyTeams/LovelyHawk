@@ -1,5 +1,12 @@
 # 原生功能接线与限制清单
 
+## 2026-10-26 Windows 排查与配置增量
+
+案件工作台的入口和页面已按用户要求移除，旧案件/证据存储与其他模块的留证数据保留；下文较早的案件页面接线描述为历史记录。文件与注册表按确认草案改为底部详情，新增 32 个目录、37 个注册表预设、28 个只读命令预设，以及文件 ACL / 进程 / 服务 / 驱动路径诊断，见 [Windows 排查预设](WINDOWS_IR_PRESETS.md)。
+
+69 项基线检测保留，19 项固定注册表策略已接通一键选择、原值备份、一次性计划、逐项回读、取消后续与有并发保护的恢复，旧无备份直接修复路径移除，见 [Windows 基线变更](WINDOWS_BASELINE_CHANGES.md)。实际 Windows 管理员目标写入/恢复和业务连接仍为实验性 / NOT_RUN；域成员和域控自动配置拒绝。口令/审计批量修补、其他用户策略、驱动卸载/强制删除、离线恢复、完整 Windows 版本与 RDP 矩阵保持待办，不以界面合成数据关闭。
+
+
 本清单记录尚未中央接线的模块，以及虽已中央接线但因安全契约、完整 parity 或实机证据不足而继续保持 Pending 的能力。清单建立于 Electron 迁移期。
 
 桌面壳现已从 Electron 换成 Tauri 2：后端 `crates/lovelyhawk-backend` 以库的形式链接进桌面进程；原 Electron main/preload 的职责由 `crates/lovelyhawk-desktop` 宿主（窗口、系统对话框、剪贴板、导出、主窗口方法白名单与子窗口目标绑定）和 `ui/src/host` 页面桥接层（`window.lovelyhawk` / `window.lovelyhawkTerminal`，用 shared 契约校验请求与响应）承担；页面与契约位于 `ui/src/renderer`、`ui/src/shared`。下文带日期的接线记录、API 计数（如 `exact112`）、测试计数、`target/electron-debug/...` 证据，以及其中的 main/preload/IPC、sidecar、`LovelyResApi` 描述都是 Electron 时期的事实，保留为历史；代码路径已改为当前位置，已删除模块的路径保持原样。

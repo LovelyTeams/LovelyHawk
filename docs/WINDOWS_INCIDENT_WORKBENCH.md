@@ -8,8 +8,9 @@ Windows 工作区使用 LovelyHawk 的全局主题，初期参考 LovelySpark �
 - 总览与基线：主机、防护和资源概况，检查依据、当前/建议值、通过/警告/失败筛选与优先关注项。未核查不会显示为通过。
 - 进程、网络、启动项、账户：搜索、风险/类别筛选、排序、分页、侧边详情与复制。进程支持列表/可折叠树；按 PID 关联网络，定位文件和注册表来源。列表间按 PID 跳转仍只是线索；新增的进程关联读取在前后核对 PID 与启动时间，读取账户、服务、TCP/UDP 与已加载 DLL。
 - 日志与时间线：保留真实事件 RecordId、原始时间、详情和截断标记；权限与通道读取缺口单独显示。时间线汇总已取得且有时间的事件、进程、文件和账户记录，支持来源、日期筛选与 CSV 复制。
-- 文件管理器：快速访问、地址栏、面包屑、前进/后退/上一级、目录优先排序、属性和 SHA256、文本/十六进制预览、PE 基本信息、文件拉取与另存。
-- 注册表：常用位置、键路径、上一级、按需展开的注册表树、值筛选与详情，右侧集中常见排查位置。默认值保留空名称；环境变量保持原始内容；二进制按十六进制显示。
+- 文件管理器：左侧 32 个常用目录与目录树、宽列表、可调整高度的底部详情；地址历史、搜索、属性和 SHA256、文本/十六进制预览、PE 信息、文件拉取与另存。新增文件 ACL、同路径进程/服务/驱动的按需只读诊断。
+- 注册表：左侧 37 个常用位置与完整键树、宽列表和底部值详情；前进/后退、上一级、值筛选及完整显示已返回内容。默认值保留空名称；环境变量保持原始内容；二进制按十六进制显示。
+- 基线配置：69 项检测中有 19 项支持固定配置计划、差异预览、原值备份、独立回读、取消后续及历史恢复；真实管理员正向写入尚待验证，当前明确标记为实验性。
 - 底部面板：任务、接收文件、命令检查台、通信日志。任务显示当前采集与模块读取结果；命令执行仍需确认目标和完整文本。
 
 核心模块批量读取显示进度，可以停止后续采集；当前读取结束后才停止。切换模块保留查询、选择与编辑内容。失败保留上一份成功数据，并提供重试。
@@ -178,3 +179,32 @@ Windows 桌面探针核对 1440×960、1280×800、960×780 布局、浅色/深�
 编译阶段的失败保留为 `ui-optional-prop-failed.log` 和 `clippy-existing-bool-failed.log`，分别修正精确可选属性传递和已有布尔表达式后复测通过，没有放宽类型或 lint 规则。首次规则计数测试误写为 72，失败后按实际 37 条新增目录更正为 69，保留字段边界、缺口与权限断言，最终结果见 `core-tests.log`。
 
 本轮不生成正式便携发布包；实际只读环境为 Windows 11 专业版 10.0.26200 x64 / PowerShell 5.1。Windows Server、域控制器、ARM64、管理员审计正向路径、受限 PowerShell 和真实 RDP 回传保持待验证；UI 合成数据与本机读取不得替代这些矩阵。修补、恢复和案件留证缺口继续保持开放。
+
+## 2026-10-26 文件 / 注册表改造与一键配置
+
+在基线扩展提交 `ffb5970` 后按用户确认的两张草案开发：文件和注册表改为左导航、宽列表、可调整高度的底部详情，保留复制、搜索、跨模块定位和受确认约束的既有处置。补充 32 个目录、37 个注册表位置及 28 个只读命令预设（含 CIM、WMIC、服务、内核/过滤驱动和 WMI 永久事件）。详细范围与文件访问诊断见 [排查预设](WINDOWS_IR_PRESETS.md)。
+
+19 项固定基线配置接通选择、差异预览、原值备份、执行、逐项独立回读、取消后续及历史恢复。直接修复旧接口已移除；缺失键的多项配置保留各自原值，共享本次已核实的新键 ACL，同时拒绝外部修改。新计划让键盘焦点进入差异阅读区，按回车不会确认写入。计划/取消/恢复边界见 [基线变更](WINDOWS_BASELINE_CHANGES.md)。
+
+案件工作台的入口、页面和页面控制器按用户要求移除，保留原有案件数据、core 能力和其他模块的留证流程。当前主页面目录为 14 项，历史账本不重写。Pod 文件留证探针改为核查留存记录的文件来源和 SHA256，本轮仅静态核对及语法检查，未重跑 Kubernetes 实验室。
+
+### 实际验证
+
+| 检查 | 结果 / 证据 |
+| --- | --- |
+| `pnpm ui:check` | 类型、138 个测试文件 / 1,158 项和构建通过；`target/windows-redesign-ui-final.log`，保留共享 chunk 超过 500 kB 的提示 |
+| `cargo test --locked --package lovelyhawk-core windows_incident` | 32 项通过，包含 10 项固定配置计划/恢复边界回归及已有本机读取；`target/windows-redesign-core-final.log` |
+| backend 全包测试 | 355 项单元和 419 项集成测试通过；`target/windows-redesign-native-tests-final.log` |
+| `cargo test --locked --package lovelyhawk-desktop --lib` | 39 项通过，增加主队列繁忙时 Windows 状态/进度/取消及时响应断言；`target/windows-redesign-host-final.log` |
+| Clippy | core、backend、desktop 全目标无警告；`target/windows-redesign-clippy-final.log` |
+| 调试宿主构建 | 通过；`target/windows-redesign-build-final.log` |
+| Windows 工作区真实 WebView2 | **107/107**，控制台错误 0、正常退出；`target/desktop-debug/windows-workspace-27a898dc-2d45-4ced-8d68-ce7bb089fc1e/evidence/` |
+| 整应用真实 WebView2 | **92/92**，网络/控制台错误 0、正常退出；`target/desktop-debug/3778709d-b0bb-4a23-8955-b5c30e2b2f58/evidence/`。案件页面移除，相应三项逐页检查同步移除 |
+| source / dependency / 普通 ledger 门禁 | 通过；`target/windows-redesign-source-gate-final.log`、`windows-redesign-dependency-gate.log`、`windows-redesign-ledger-gate.log`。ledger 仍为 24/53，未宣称 strict 完成 |
+| 本机 PowerShell 5.1 | 文件诊断只读检查，以及策略读取 / 故意身份不匹配的零写入拒绝通过；证据见以上两份专项说明 |
+
+人工检查文件内容预览、注册表值详情、文件访问/驱动关联和基线差异截图；底部详情、左侧预设和宽列表保持同时可达。最后新增的两项键盘断言核查焦点位置及回车不执行。失败的初次 Windows 巡检保留在 `target/desktop-debug/windows-workspace-f49dde9f-8b4c-4b2d-97c9-428cea967587/evidence/`：旧命令预设选择断言已按新分组更新，未放宽确认前零执行的检查。
+
+最终调试程序：`target/debug/lovelyhawk.exe`，SHA256 `0fe7241073e86b19221aa7a8e6e554b1fdeb60dd887acd873935a360729385c1`。汇总见 `target/windows-redesign-verification-20261026.json`。没有覆盖仓库根目录已有的开发程序或用户案件数据，没有创建正式发布包。
+
+**验收限制：** 桌面已连接场景均为明确的合成数据，不是 Windows Server/RDP 实测。非管理员本机读取与内存测试不能代替管理员正向写入、真实故障恢复和业务验证；基线配置保持实验性。强制删除、驱动卸载、自动提权、离线处置、其他 Windows 版本/架构和域策略矩阵仍待完成，不能据本轮宣称 Windows 应急全覆盖。

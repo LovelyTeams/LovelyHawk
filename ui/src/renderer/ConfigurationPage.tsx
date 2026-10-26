@@ -18,7 +18,7 @@ export type ConfigurationMode = "inspect" | "generate" | "visual" | "repair";
 export interface ConfigurationPageProps {
   bindingHandle: string | null;
   api: BaselineReadApi & NginxRepairApi & ConfigVisualApi;
-  onOpenCase?: ((caseId: string) => void) | undefined;
+
   onCopyRecord?: ((text: string) => Promise<unknown>) | undefined;
 }
 
@@ -66,7 +66,7 @@ const MODES: { mode: ConfigurationMode; label: string; hint: string }[] = [
  * learned once.
  */
 export const ConfigurationPage = forwardRef<ConfigurationPageHandle, ConfigurationPageProps>(
-function ConfigurationPage({ bindingHandle, api, onOpenCase, onCopyRecord }, ref) {
+function ConfigurationPage({ bindingHandle, api, onCopyRecord }, ref) {
   const [mode, setMode] = useState<ConfigurationMode>("inspect");
   const [openedVisual, setOpenedVisual] = useState<ConfigVisualView | null>(null);
   /** How a document opened from the goal search starts: unsaved, and with a parameter to find. */
@@ -155,7 +155,7 @@ function ConfigurationPage({ bindingHandle, api, onOpenCase, onCopyRecord }, ref
       {mode === "inspect" ? (
         <BaselinePage bindingHandle={bindingHandle} api={api} embedded modeSwitch={modeSwitch} />
       ) : mode === "repair" ? (
-        <NginxRepairPage ref={repairRef} bindingHandle={bindingHandle} api={api} modeSwitch={modeSwitch} onOpenCase={onOpenCase} onCopyRecord={onCopyRecord} />
+        <NginxRepairPage ref={repairRef} bindingHandle={bindingHandle} api={api} modeSwitch={modeSwitch} onCopyRecord={onCopyRecord} />
       ) : mode === "visual" ? (
         <ConfigVisualEditor ref={visualRef} api={api} initialView={openedVisual} modeSwitch={modeSwitch}
           initialDirty={openedFocus?.dirty ?? false} initialParameterKey={openedFocus?.parameterKey ?? null} />

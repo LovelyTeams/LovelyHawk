@@ -729,7 +729,8 @@ export class BackendClient {
 
   async windowsIncident(request: WindowsIncidentRequest): Promise<WindowsIncidentResponse> {
     if (!isWindowsIncidentRequest(request)) throw new Error("Windows 应急响应请求无效。");
-    const response = await this.#request("windows.incident", request, 60_000);
+    const timeout = request.action === "apply-baseline-plan" ? 600_000 : request.action === "plan-baseline" || request.action === "plan-baseline-restore" ? 240_000 : 60_000;
+    const response = await this.#request("windows.incident", request, timeout);
     if (!matchesWindowsIncidentResponse(request, response)) throw new Error("Windows 应急响应返回了无法核实的结果，请重试。");
     return response;
   }

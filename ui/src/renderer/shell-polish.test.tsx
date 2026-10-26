@@ -56,7 +56,7 @@ describe("interface settings", () => {
 
 describe("navigation", () => {
   it("draws an icon for every page the backend registers", () => {
-    expect(pageIds).toHaveLength(15);
+    expect(pageIds).toHaveLength(14);
     for (const id of pageIds) expect(hasNavIcon(id), id).toBe(true);
     expect(renderToStaticMarkup(<NavIcon pageId="docker" glyph="▣" />)).toContain("<svg");
     // An unknown page still shows its registry glyph, as plain text.
@@ -169,7 +169,7 @@ describe("target status and connecting", () => {
 describe("welcome view", () => {
   it("starts with connecting and offers the tools that need no target as small buttons", () => {
     const offline = [
-      { id: "case-workspace", title: "案件工作台", summary: "整理案件。", icon: "▤" },
+      { id: "notes", title: "笔记", summary: "记录笔记。", icon: "▤" },
       { id: "security-reference", title: "安全速查", summary: "离线速查。", icon: "◇" },
     ] as PageDescriptor[];
     const markup = renderToStaticMarkup(
@@ -179,10 +179,10 @@ describe("welcome view", () => {
     expect(markup).toContain("开始一次应急响应");
     // The start screen keeps to the start: no step-by-step route under it.
     expect(markup).not.toContain("welcome-flow");
-    expect(markup).toContain('data-testid="welcome-tool-case-workspace"');
+    expect(markup).toContain('data-testid="welcome-tool-notes"');
     // A tool is a name and an icon; what it does is its tooltip.
-    expect(markup).toContain('title="整理案件。"');
-    expect(markup).not.toContain("<small>整理案件。</small>");
+    expect(markup).toContain('title="记录笔记。"');
+    expect(markup).not.toContain("<small>记录笔记。</small>");
     expect(markup).toContain('data-testid="welcome-open-connections"');
     // One "新建连接" button: the empty list points at it instead of repeating it.
     expect(markup.match(/class="welcome-create-button"/gu)).toHaveLength(1);

@@ -5,8 +5,9 @@ use std::fmt;
 use lovelyhawk_core::{
     BackendServices,
     windows_incident::{
-        DvcRuntimeStatus, WindowsAccountsSnapshot, WindowsBaselineSnapshot, WindowsFilePreview,
-        WindowsFilesSnapshot, WindowsLogsSnapshot, WindowsNetworkSnapshot, WindowsOverviewSnapshot,
+        BaselineChangePlan, BaselineChangeReport, DvcRuntimeStatus, WindowsAccountsSnapshot,
+        WindowsBaselineSnapshot, WindowsFileAccess, WindowsFilePreview, WindowsFilesSnapshot,
+        WindowsLogsSnapshot, WindowsNetworkSnapshot, WindowsOverviewSnapshot,
         WindowsProcessInspection, WindowsProcessesSnapshot, WindowsRegistrySnapshot,
         WindowsStartupSnapshot, fileless_powershell_script,
     },
@@ -77,6 +78,10 @@ pub(crate) enum WindowsIncidentRequest {
         path: String,
         session_id: String,
     },
+    InspectFileAccess {
+        path: String,
+        session_id: String,
+    },
     PreviewFile {
         path: String,
         session_id: String,
@@ -85,8 +90,31 @@ pub(crate) enum WindowsIncidentRequest {
         key_path: String,
         session_id: String,
     },
-    RemediateBaseline {
-        rule_id: String,
+    PlanBaseline {
+        rule_ids: Vec<String>,
+        session_id: String,
+    },
+    ApplyBaselinePlan {
+        plan_id: String,
+        session_id: String,
+    },
+    DiscardBaselinePlan {
+        plan_id: String,
+        session_id: String,
+    },
+    CancelBaselinePlan {
+        plan_id: String,
+        session_id: String,
+    },
+    BaselinePlanProgress {
+        plan_id: String,
+        session_id: String,
+    },
+    BaselineHistory {
+        session_id: String,
+    },
+    PlanBaselineRestore {
+        record_id: String,
         session_id: String,
     },
     KillProcess {
@@ -132,9 +160,16 @@ impl WindowsIncidentRequest {
             | Self::CollectAccounts { session_id }
             | Self::CollectLogs { session_id, .. }
             | Self::CollectFiles { session_id, .. }
+            | Self::InspectFileAccess { session_id, .. }
             | Self::PreviewFile { session_id, .. }
             | Self::CollectRegistry { session_id, .. }
-            | Self::RemediateBaseline { session_id, .. }
+            | Self::PlanBaseline { session_id, .. }
+            | Self::ApplyBaselinePlan { session_id, .. }
+            | Self::DiscardBaselinePlan { session_id, .. }
+            | Self::CancelBaselinePlan { session_id, .. }
+            | Self::BaselinePlanProgress { session_id, .. }
+            | Self::BaselineHistory { session_id }
+            | Self::PlanBaselineRestore { session_id, .. }
             | Self::KillProcess { session_id, .. }
             | Self::RemoveStartup { session_id, .. }
             | Self::DisableAccount { session_id, .. }
@@ -163,6 +198,24 @@ pub(crate) enum WindowsIncidentResponse {
     Overview {
         snapshot: WindowsOverviewSnapshot,
     },
+    BaselinePlan {
+        plan: BaselineChangePlan,
+    },
+    BaselineChange {
+        report: BaselineChangeReport,
+    },
+    BaselineProgress {
+        report: Option<BaselineChangeReport>,
+    },
+    BaselineHistory {
+        records: Vec<BaselineChangeReport>,
+    },
+    BaselineAcknowledged {
+        accepted: bool,
+    },
+    BaselineChangeError {
+        message: String,
+    },
     Baseline {
         snapshot: WindowsBaselineSnapshot,
     },
@@ -186,6 +239,9 @@ pub(crate) enum WindowsIncidentResponse {
     },
     Files {
         snapshot: WindowsFilesSnapshot,
+    },
+    FileAccess {
+        inspection: WindowsFileAccess,
     },
     FilePreview {
         preview: WindowsFilePreview,
@@ -356,6 +412,109 @@ impl WindowsIncidentApi {
                         .map_err(|_| WindowsIncidentError::Failed)?;
                 Ok(WindowsIncidentResponse::Overview { snapshot })
             }
+            WindowsIncidentRequest::PlanBaseline {
+                rule_ids,
+                session_id,
+            } => {
+                if rule_ids.is_empty()
+                    || rule_ids.len() > 19
+                    || rule_ids
+                        .iter()
+                        .any(|id| !lovelyhawk_core::windows_incident::baseline_change_supported(id))
+                    || rule_ids
+                        .iter()
+                        .collect::<std::collections::HashSet<_>>()
+                        .len()
+                        != rule_ids.len()
+                {
+                    return Err(WindowsIncidentError::Invalid);
+                }
+                let result = tokio::task::spawn_blocking(move || {
+                    svc.plan_baseline_changes(&rule_ids, &session_id)
+                })
+                .await
+                .map_err(|_| WindowsIncidentError::Failed)?;
+                Ok(match result {
+                    Ok(plan) => WindowsIncidentResponse::BaselinePlan { plan },
+                    Err(error) => baseline_change_error(error),
+                })
+            }
+            WindowsIncidentRequest::ApplyBaselinePlan {
+                plan_id,
+                session_id,
+            } => {
+                if uuid::Uuid::parse_str(&plan_id).is_err() || plan_id.len() != 36 {
+                    return Err(WindowsIncidentError::Invalid);
+                }
+                let result = tokio::task::spawn_blocking(move || {
+                    svc.apply_baseline_plan(&plan_id, &session_id)
+                })
+                .await
+                .map_err(|_| WindowsIncidentError::Failed)?;
+                Ok(match result {
+                    Ok(report) => WindowsIncidentResponse::BaselineChange { report },
+                    Err(error) => baseline_change_error(error),
+                })
+            }
+            WindowsIncidentRequest::PlanBaselineRestore {
+                record_id,
+                session_id,
+            } => {
+                if uuid::Uuid::parse_str(&record_id).is_err() || record_id.len() != 36 {
+                    return Err(WindowsIncidentError::Invalid);
+                }
+                let result = tokio::task::spawn_blocking(move || {
+                    svc.plan_baseline_restore(&record_id, &session_id)
+                })
+                .await
+                .map_err(|_| WindowsIncidentError::Failed)?;
+                Ok(match result {
+                    Ok(plan) => WindowsIncidentResponse::BaselinePlan { plan },
+                    Err(error) => baseline_change_error(error),
+                })
+            }
+            WindowsIncidentRequest::DiscardBaselinePlan {
+                plan_id,
+                session_id,
+            } => {
+                if uuid::Uuid::parse_str(&plan_id).is_err() || plan_id.len() != 36 {
+                    return Err(WindowsIncidentError::Invalid);
+                }
+                svc.discard_baseline_plan(&plan_id, &session_id);
+                Ok(WindowsIncidentResponse::BaselineAcknowledged { accepted: true })
+            }
+            WindowsIncidentRequest::CancelBaselinePlan {
+                plan_id,
+                session_id,
+            } => {
+                if uuid::Uuid::parse_str(&plan_id).is_err() || plan_id.len() != 36 {
+                    return Err(WindowsIncidentError::Invalid);
+                }
+                Ok(WindowsIncidentResponse::BaselineAcknowledged {
+                    accepted: svc.cancel_baseline_changes(&plan_id, &session_id),
+                })
+            }
+            WindowsIncidentRequest::BaselinePlanProgress {
+                plan_id,
+                session_id,
+            } => {
+                if uuid::Uuid::parse_str(&plan_id).is_err() || plan_id.len() != 36 {
+                    return Err(WindowsIncidentError::Invalid);
+                }
+                Ok(WindowsIncidentResponse::BaselineProgress {
+                    report: svc.baseline_change_progress(&plan_id, &session_id),
+                })
+            }
+            WindowsIncidentRequest::BaselineHistory { session_id } => {
+                let result =
+                    tokio::task::spawn_blocking(move || svc.baseline_change_history(&session_id))
+                        .await
+                        .map_err(|_| WindowsIncidentError::Failed)?;
+                Ok(match result {
+                    Ok(records) => WindowsIncidentResponse::BaselineHistory { records },
+                    Err(error) => baseline_change_error(error),
+                })
+            }
             WindowsIncidentRequest::CollectBaseline { session_id } => {
                 let snapshot =
                     tokio::task::spawn_blocking(move || svc.collect_baseline(&session_id))
@@ -456,6 +615,18 @@ impl WindowsIncidentApi {
                         .map_err(|_| WindowsIncidentError::Failed)?;
                 Ok(WindowsIncidentResponse::Files { snapshot })
             }
+            WindowsIncidentRequest::InspectFileAccess { path, session_id } => {
+                if path.is_empty() || path.len() > 1024 || path.contains(['\0', '\r', '\n']) {
+                    return Err(WindowsIncidentError::Invalid);
+                }
+                let inspection = tokio::task::spawn_blocking(move || {
+                    svc.inspect_file_access(&path, &session_id)
+                })
+                .await
+                .map_err(|_| WindowsIncidentError::Failed)?
+                .map_err(|_| WindowsIncidentError::Failed)?;
+                Ok(WindowsIncidentResponse::FileAccess { inspection })
+            }
             WindowsIncidentRequest::PreviewFile { path, session_id } => {
                 if path.trim().is_empty() || path.len() > 1024 || path.contains(['\0', '\r', '\n'])
                 {
@@ -485,23 +656,6 @@ impl WindowsIncidentApi {
                 .map_err(|_| WindowsIncidentError::Failed)?
                 .map_err(|_| WindowsIncidentError::Failed)?;
                 Ok(WindowsIncidentResponse::Registry { snapshot })
-            }
-            WindowsIncidentRequest::RemediateBaseline {
-                rule_id,
-                session_id,
-            } => {
-                if lovelyhawk_core::windows_incident::baseline_remediation_script(&rule_id)
-                    .is_none()
-                {
-                    return Err(WindowsIncidentError::Invalid);
-                }
-                let snapshot = tokio::task::spawn_blocking(move || {
-                    svc.remediate_baseline(&rule_id, &session_id)
-                })
-                .await
-                .map_err(|_| WindowsIncidentError::Failed)?
-                .map_err(|_| WindowsIncidentError::Failed)?;
-                Ok(WindowsIncidentResponse::Baseline { snapshot })
             }
             WindowsIncidentRequest::KillProcess {
                 pid,
@@ -605,8 +759,32 @@ impl WindowsIncidentApi {
     }
 }
 
+fn baseline_change_error(error: lovelyhawk_core::CoreError) -> WindowsIncidentResponse {
+    let message=match error {
+        lovelyhawk_core::CoreError::Validation { subject:"windows baseline plan", message } => message,
+        _ => "配置计划或历史保存失败。请核对便携数据目录的可写性与连接状态；如已开始执行，请先查看历史并复核目标，不要重复旧计划。".to_owned(),
+    };
+    WindowsIncidentResponse::BaselineChangeError { message }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn fixed_baseline_plans_and_file_diagnosis_reject_injected_parameters() {
+        let session = "00000000-0000-4000-8000-000000000001";
+        for action in [
+            "plan-baseline",
+            "apply-baseline-plan",
+            "plan-baseline-restore",
+            "inspect-file-access",
+        ] {
+            assert!(serde_json::from_value::<super::WindowsIncidentRequest>(serde_json::json!({"action":action,"sessionId":session,"path":"injected","desired":0})).is_err());
+        }
+        assert!(serde_json::from_value::<super::WindowsIncidentRequest>(serde_json::json!({"action":"remediate-baseline","sessionId":session,"ruleId":"wdigest"})).is_err());
+        assert!(serde_json::from_value::<super::WindowsIncidentRequest>(serde_json::json!({"action":"apply-baseline-plan","sessionId":session,"planId":session})).is_ok());
+        assert!(serde_json::from_value::<super::WindowsIncidentRequest>(serde_json::json!({"action":"inspect-file-access","sessionId":session,"path":"C:\\sample.txt"})).is_ok());
+    }
+
     use super::WindowsIncidentRequest;
     #[test]
     fn local_intents_and_process_inspection_reject_extra_fields() {

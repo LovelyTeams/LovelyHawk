@@ -3,7 +3,7 @@ import type { WindowsRdpRequest, WindowsRdpStatus } from "../src/shared/windows-
 // CDP in an isolated native window. It is never imported by the application.
 import { createRoot } from "react-dom/client";
 import { WindowsIncidentPage } from "../src/renderer/WindowsIncidentPage";
-import { matchesWindowsIncidentResponse, type DvcRuntimeStatus, type WindowsIncidentApi, type WindowsIncidentRequest, type WindowsIncidentResponse, type WindowsProcessEntry } from "../src/shared/windows-incident-contract";
+import { matchesWindowsIncidentResponse, type WindowsBaselineChangePlan, type WindowsBaselineChangeReport, type DvcRuntimeStatus, type WindowsIncidentApi, type WindowsIncidentRequest, type WindowsIncidentResponse, type WindowsProcessEntry } from "../src/shared/windows-incident-contract";
 import type { WinIrSnapshots } from "../src/renderer/win-ir-model";
 
 const firstSession = "00000000-0000-4000-8000-000000000001";
@@ -94,6 +94,8 @@ export function mount() {
   let failAction = "";
   let delayAction = "";
   let release: (() => void) | undefined;
+  const baselinePlans = new Map<string, WindowsBaselineChangePlan>();
+  const baselineHistory: WindowsBaselineChangeReport[] = [];
   const api: WindowsIncidentApi = {
     async windowsIncident(request) {
       calls.push(structuredClone(request));
@@ -105,6 +107,7 @@ export function mount() {
         case "collect-files":
           if (request.path.includes("denied")) throw new Error("访问被拒绝，原目录结果保留。");
           response = { kind: "files", snapshot: files(request.path) }; break;
+        case "inspect-file-access": response = { kind: "file-access", inspection: { path: request.path, observedAt: stamp, attributes: "ReadOnly", owner: "NT AUTHORITY\\SYSTEM", accessRules: [{ identity: "BUILTIN\\Users", rights: "ReadAndExecute", access: "Allow", inherited: true }], processes: [], services: [{ name: "FixtureDriver", displayName: "合成驱动关联", state: "Running", startMode: "Boot", path: request.path, kind: "driver" }], warnings: ["合成数据；不代表真实文件占用。"] } }; break;
         case "preview-file": {
           let bytes = new TextEncoder().encode("data");
           const executable = request.path.endsWith(".exe");
@@ -131,14 +134,22 @@ export function mount() {
         }
         case "collect-overview": response = { kind: "overview", snapshot: snapshots.overview }; break;
         case "collect-baseline": response = { kind: "baseline", snapshot: snapshots.baseline }; break;
-        case "remediate-baseline":
-          snapshots.baseline = {
-            ...snapshots.baseline,
-            items: snapshots.baseline.items.map((item) => item.id === request.ruleId ? { ...item, status: "pass", severity: "normal", currentValue: item.expectedValue, remediationAvailable: false } : item),
-            passedCount: snapshots.baseline.passedCount + 1,
-            failedCount: Math.max(0, snapshots.baseline.failedCount - 1),
-          };
-          response = { kind: "baseline", snapshot: snapshots.baseline }; break;
+        case "plan-baseline": case "plan-baseline-restore": {
+          const ids = request.action === "plan-baseline" ? request.ruleIds : baselineHistory.find((record) => record.id === request.recordId)?.items.map((item) => item.id) ?? [];
+          const plan: WindowsBaselineChangePlan = { id: crypto.randomUUID(), target: "UI-FIXTURE", expiresAt: Math.floor(Date.now()/1000)+300, restoring: request.action === "plan-baseline-restore", notes: ["合成 UI 测试；执行前保存原值，失败停止并恢复已核实的修改，不修改实际主机。"], items: ids.map((id) => { const item = snapshots.baseline.items.find((value) => value.id === id)!; return { id, title: item.title, location: `HKLM\\Fixture\\${id}`, currentValue: item.currentValue, expectedValue: item.expectedValue, impact: "需重启与业务复核，当前仅验证配置回读。" }; }) };
+          baselinePlans.set(plan.id, plan); response = { kind: "baseline-plan", plan }; break;
+        }
+        case "discard-baseline-plan": baselinePlans.delete(request.planId); response = { kind: "baseline-acknowledged", accepted: true }; break;
+        case "cancel-baseline-plan": response = { kind: "baseline-acknowledged", accepted: true }; break;
+        case "baseline-plan-progress": response = { kind: "baseline-progress", report: baselineHistory.find((record) => record.id === request.planId) ?? null }; break;
+        case "baseline-history": response = { kind: "baseline-history", records: baselineHistory }; break;
+        case "apply-baseline-plan": {
+          const plan = baselinePlans.get(request.planId); if (!plan) throw new Error("测试计划已使用"); baselinePlans.delete(request.planId);
+          const report: WindowsBaselineChangeReport = { id: plan.id, target: plan.target, createdAt: Math.floor(Date.now()/1000), restoring: plan.restoring, finished: true, recoveryAvailable: !plan.restoring, items: plan.items.map((item) => ({ id: item.id, title: item.title, state: plan.restoring ? "restored" : "verified" })), message: "所选配置已回读复核，仍需运行状态与业务验证。" };
+          baselineHistory.push(report);
+          if (!plan.restoring) { snapshots.baseline.items = snapshots.baseline.items.map((item) => plan.items.some((entry) => entry.id === item.id) ? { ...item, status: "pass", severity: "normal", remediationAvailable: false, currentValue: item.expectedValue } : item); snapshots.baseline.passedCount = snapshots.baseline.items.filter((i) => i.status === "pass").length; snapshots.baseline.failedCount = snapshots.baseline.items.filter((i) => i.status === "fail").length; }
+          response = { kind: "baseline-change", report }; break;
+        }
         case "inspect-process": response = { kind: "process-inspection", inspection: {
           pid: request.pid, startTime: request.startTime, observedAt: stamp, user: "fixture\\analyst",
           services: [{ name: "FixtureSvc", displayName: "Fixture service", state: "Running", startMode: "Auto", path: "C:\\fixture.exe", account: "LocalSystem" }],

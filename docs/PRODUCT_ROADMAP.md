@@ -1,5 +1,12 @@
 # LovelyHawk 长期产品与验证进度
 
+## 2026-10-26 Windows 排查与配置增量
+
+案件工作台的入口和页面已按用户要求移除，旧案件/证据存储与其他模块的留证数据保留；下文较早的案件页面接线描述为历史记录。文件与注册表按确认草案改为底部详情，新增 32 个目录、37 个注册表预设、28 个只读命令预设，以及文件 ACL / 进程 / 服务 / 驱动路径诊断，见 [Windows 排查预设](WINDOWS_IR_PRESETS.md)。
+
+69 项基线检测保留，19 项固定注册表策略已接通一键选择、原值备份、一次性计划、逐项回读、取消后续与有并发保护的恢复，旧无备份直接修复路径移除，见 [Windows 基线变更](WINDOWS_BASELINE_CHANGES.md)。实际 Windows 管理员目标写入/恢复和业务连接仍为实验性 / NOT_RUN；域成员和域控自动配置拒绝。口令/审计批量修补、其他用户策略、驱动卸载/强制删除、离线恢复、完整 Windows 版本与 RDP 矩阵保持待办，不以界面合成数据关闭。
+
+
 本表承接根目录 `AGENTS.md` 的全部产品范围。应急响应是主线，通用运维、Docker/Kubernetes 与系统/中间件/数据库基线都持续建设。状态描述具体已获得的证据，不以有限覆盖代替国内外全产品的兼容目标。
 
 产品已由 LovelyRes 改名为 LovelyHawk，桌面壳已从 Electron 换成 Tauri 2（宿主 `crates/lovelyhawk-desktop`，前端 `ui/`，后端 `crates/lovelyhawk-backend` 以库的形式链接进桌面进程）。下文 2026-09-07 起的工作基线、证据表、测试计数与命令都是 Electron 时期的记录：其中的 `pnpm electron:*`、`lovelyres-core`、`lovelyres-electron-backend`、`scripts/electron-*.ps1` 和 `target/electron-debug/...` 是当时实际运行的命令与证据，保留不改。现行对应入口为 `pnpm ui:check`、`pnpm desktop:build`、`pnpm desktop:test:debug`、`cargo test --locked --package lovelyhawk-core` / `lovelyhawk-backend` / `lovelyhawk-desktop` 及 `pnpm release:*`。Tauri 桌面壳上的界面与原生验收不能由这里的 Electron 结果代替。

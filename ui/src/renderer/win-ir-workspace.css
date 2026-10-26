@@ -601,3 +601,66 @@ button.wir-stat:hover { color: var(--text); border-color: var(--accent-soft-bord
   .wir-console-panels .wir-transfer-list article { grid-template-columns: 24px minmax(0, 1fr) auto; }
   .wir-console-panels .wir-transfer-list article > .win-ir-btn { grid-column: 2 / -1; justify-self: end; }
 }
+
+/* Explorer readers keep navigation and the full-width result list visible. */
+.wir-file-explorer, .wir-registry-explorer { height: max(590px, calc(100dvh - 225px)); }
+.wir-file-explorer .wir-explorer-body, .wir-registry-explorer .wir-explorer-body { min-height: 0; }
+.wir-file-explorer .wir-explorer-main, .wir-registry-explorer .wir-explorer-main { min-height: 0; overflow: auto; }
+.wir-file-explorer .wir-master, .wir-registry-explorer .wir-master { min-height: 150px; overflow: auto; }
+.wir-file-explorer .wir-table, .wir-registry-explorer .wir-table { max-height: none; }
+.wir-file-explorer .wir-places, .wir-registry-explorer .wir-places { min-height: 0; max-height: none; overflow: auto; }
+.wir-places > .wir-search { margin: 6px 8px; width: auto; min-width: 0; }
+.wir-places .wir-detail-tabs { padding: 0 4px; }
+.wir-places .wir-detail-tabs button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-text); border-bottom-color: var(--accent); }
+.wir-current-key-tree { margin-top: 12px; border-top: 1px solid var(--border); }
+.wir-preset-note { display: block; padding: 8px 12px; color: var(--muted); line-height: 1.6; }
+.wir-inspector { display: flex; flex-direction: column; flex: none; min-height: 200px; max-height: 60dvh; min-width: 0; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); overflow: hidden; }
+.wir-inspector > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 12px; background: var(--surface-alt); }
+.wir-inspector > header > strong { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--font-small); }
+.wir-inspector-content { min-height: 0; overflow: auto; flex: 1; }
+.wir-row-resizer { flex: none; height: 7px; cursor: ns-resize; touch-action: none; background: var(--surface-alt); }
+.wir-row-resizer::after { content: ""; display: block; height: 3px; width: 28px; margin: 2px auto; border-radius: 2px; background: var(--border-strong); }
+.wir-row-resizer:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.wir-inspector-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(230px, 32%); min-height: 100%; }
+.wir-inspector-split > :last-child { border-left: 1px solid var(--border-subtle); }
+.wir-inspector .wir-preview { padding: 12px; min-width: 0; }
+.wir-inspector .wir-preview-body { max-height: none; min-height: 90px; }
+.wir-inspector .wir-preview-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.wir-reader-fields { display: grid; gap: 8px; padding: 12px; margin: 0; font-size: var(--font-small); }
+.wir-reader-fields > div { display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 8px; }
+.wir-reader-fields dt { color: var(--muted); }
+.wir-reader-fields dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.wir-file-properties { min-width: 0; padding-bottom: 12px; }
+.wir-file-properties > button { margin-inline: 12px; }
+.wir-reader-warning { margin: 8px 12px; padding: 8px 10px; border: 1px solid var(--warning-border); color: var(--warning-text); background: var(--warning-soft); border-radius: 5px; font-size: var(--font-small); overflow-wrap: anywhere; line-height: 1.6; }
+.wir-value-reader { padding: 12px; min-width: 0; }
+.wir-value-reader .wir-reader-warning { margin: 0 0 10px; }
+.wir-registry-data { margin: 0 0 14px; padding: 14px; min-height: 80px; border: 1px solid var(--border); background: var(--surface-inset); color: var(--text); font: var(--font-small)/1.7 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.wir-access-guide { padding: 0 16px; color: var(--text-secondary); font-size: var(--font-small); line-height: 1.8; }
+.wir-access-guide li { padding-block: 4px; }
+@container (max-width: 900px) {
+  .wir-inspector-split { grid-template-columns: minmax(0, 1fr); }
+  .wir-inspector-split > :last-child { border-left: 0; border-top: 1px solid var(--border-subtle); }
+}
+@container (max-width: 760px) {
+  .wir-file-explorer, .wir-registry-explorer { height: auto; }
+  .wir-file-explorer .wir-places, .wir-registry-explorer .wir-places { max-height: 230px; border-bottom: 1px solid var(--border); }
+  .wir-file-explorer .wir-master, .wir-registry-explorer .wir-master { max-height: 330px; }
+}
+
+.wir-command-presets > label { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.wir-command-presets select { width: auto; }
+.wir-baseline-selection > label { display: flex; align-items: flex-start; gap: 12px; padding: 10px; border-bottom: 1px solid var(--border-subtle); }
+.wir-baseline-selection > label > span { display: grid; gap: 4px; }
+.wir-baseline-selection small { color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+.wir-baseline-plan, .wir-baseline-history, .wir-baseline-report, .wir-baseline-selection { color: var(--text); font-size: var(--font-small); line-height: 1.7; }
+.wir-baseline-plan article, .wir-baseline-history article { padding: 12px; margin: 10px 0; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-alt); }
+.wir-baseline-plan code { display: block; color: var(--muted); overflow-wrap: anywhere; }
+.wir-baseline-plan p, .wir-baseline-history p { margin: 6px 0; overflow-wrap: anywhere; }
+.wir-baseline-report ul { padding: 0; list-style: none; }
+.wir-baseline-report li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--border-subtle); padding: 8px; }
+
+.wir-registry-navigation > .wir-detail-tabs { display: grid; grid-template-columns: 1fr 1fr; overflow: visible; }
+.wir-registry-navigation > .wir-detail-tabs button { width: auto; min-width: 0; padding: 8px 4px; justify-content: center; }
+.wir-access-guide article { padding: 10px; border: 1px solid var(--border); border-radius: 6px; margin-block: 8px; }
+.wir-access-guide code { display: block; overflow-wrap: anywhere; }

@@ -2,7 +2,7 @@ import { WinIrDesktop } from "./WinIrDesktop";
 import { Activity, useEffect, useRef, useState } from "react";
 
 import type {
-  WindowsAccountEntry, WindowsBaselineItem, WindowsFileEntry, WindowsIncidentApi,
+  WindowsAccountEntry, WindowsFileEntry, WindowsIncidentApi,
   WindowsProcessEntry, WindowsRegistryValue, WindowsStartupEntry,
 } from "../shared/windows-incident-contract";
 import { DialogHost } from "./DialogHost";
@@ -13,6 +13,7 @@ import { WinIrAccounts, WinIrBaseline, WinIrStartup } from "./WinIrChecks";
 import { WinIrDock } from "./WinIrDock";
 import { WinIrConsole, type WindowsDockTab } from "./WinIrConsole";
 import { WinIrLogs, WinIrTimeline } from "./WinIrEvents";
+import { WinIrBaselineChanges } from "./WinIrBaselineChanges";
 import { WinIrFileManager } from "./WinIrFileManager";
 import { WinIrIcon } from "./WinIrIcon";
 import { ModuleHeader } from "./WinIrKit";
@@ -35,12 +36,14 @@ export interface WindowsIncidentPageProps {
   onOpenSettings?: (returnFocus: HTMLElement) => void;
   channelOpenRequest?: number;
   covered?: boolean;
+  onBusyChange?: (busy: boolean) => void;
   onConnectionChange?: (connected: boolean, hostname: string | null) => void;
 }
 
-export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOpenSettings, onConnectionChange, channelOpenRequest = 0, covered = false }: WindowsIncidentPageProps) {
+export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOpenSettings, onConnectionChange, onBusyChange, channelOpenRequest = 0, covered = false }: WindowsIncidentPageProps) {
   const data = useWindowsIncident(api);
   const confirm = useConfirmDialog();
+  const [baselineSelection, setBaselineSelection] = useState<{ ids: string[]; session: string } | null>(null);
   const [activeTab, setActiveTab] = useState<WindowsIncidentTab>("overview");
   const [visited, setVisited] = useState<ReadonlySet<WindowsIncidentTab>>(new Set(["overview"]));
   const [rail, setRail] = useState(false);
@@ -63,6 +66,7 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOp
   const attempted = useRef(new Set<string>());
   const connected = data.sessionKey !== null;
   const busy = data.busy !== null;
+  useEffect(() => { onBusyChange?.(busy); return () => onBusyChange?.(false); }, [busy, onBusyChange]);
   const host = data.snapshots.overview?.hostname ?? null;
   const hasSnapshots = Object.keys(data.snapshots).length > 0;
   const showWorkspace = connected || hasSnapshots || activeTab === "desktop";
@@ -143,17 +147,7 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOp
   }
   const local = data.localAction;
   const targetHost = host || "当前远程会话";
-  async function remediateBaseline(item: WindowsBaselineItem) {
-    const capturedSession = data.sessionKey;
-    if (!capturedSession || busy) return;
-    if (await confirm.ask(
-      "确认快速修复基线项",
-      `目标主机：${targetHost}\n检查项：${item.title} (${item.id})\n当前值：${item.currentValue}\n修复目标值：${item.expectedValue}\n\n将通过当前远程会话修改对应注册表、服务或安全策略，并立即重新采集基线以独立复核。部分策略（如 UAC、LSA 受保护进程）需重启系统后完全生效。`,
-      "确认修复并复核",
-    )) {
-      await data.dispose("baseline", { action: "remediate-baseline", ruleId: item.id }, capturedSession, `正在修复「${item.title}」并复核基线…`, `已完成「${item.title}」修复操作并刷新基线复核结果。`);
-    }
-  }
+  function configureBaseline(ids: string[] = []) { if (data.sessionKey && !busy) setBaselineSelection({ ids, session: data.sessionKey }); }
   async function killProcess(process: WindowsProcessEntry) {
     const capturedSession = data.sessionKey;
     if (!capturedSession || busy) return;
@@ -292,14 +286,14 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOp
           {WIN_IR_MODULES.filter((module) => visited.has(module.key)).map(({ key }) => <Activity key={`${data.snapshotKey}:${key}`} mode={key === activeTab ? "visible" : "hidden"}>
             {key === "desktop" ? <WinIrDesktop api={api.windowsRdp} covered={covered || setupOpen} /> : null}
             {key === "overview" ? <WinIrOverview snapshots={data.snapshots} collectedAt={data.collectedAt} busy={busy || !connected} onNavigate={(tab) => navigate(tab, true)} onGo={goTo} onCollectAll={() => void data.collectAll()} /> : null}
-            {key === "baseline" ? <WinIrBaseline snapshot={data.snapshots.baseline ?? null} focus={focusFor(focus, "baseline")} busy={busy} connected={connected} onCopy={(text) => void copy(text)} onRemediate={(item) => void remediateBaseline(item)} /> : null}
+            {key === "baseline" ? <WinIrBaseline snapshot={data.snapshots.baseline ?? null} focus={focusFor(focus, "baseline")} busy={busy} connected={connected} onCopy={(text) => void copy(text)} onRemediate={(item) => configureBaseline([item.id])} onConfigure={() => configureBaseline((data.snapshots.baseline?.items ?? []).filter((item) => item.remediationAvailable && item.status === "fail").map((item) => item.id))} /> : null}
             {key === "processes" ? <WinIrProcesses busy={busy} connected={connected} onInspect={data.inspectProcess} onKill={(process) => void killProcess(process)} snapshot={data.snapshots.processes ?? null} network={data.snapshots.network ?? null} focus={focusFor(focus, "processes")} related={related} onCopy={(text) => void copy(text)} onFile={locateFile} onNetwork={(pid) => goTo({ tab: "network", pid })} /> : null}
             {key === "network" ? <WinIrNetwork snapshot={data.snapshots.network ?? null} processes={data.snapshots.processes ?? null} busy={busy} connected={connected} focus={focusFor(focus, "network")} related={related} onCopy={(text) => void copy(text)} onProcess={(pid) => goTo({ tab: "processes", pid })} onFile={locateFile} onKillProcess={(process) => void killProcess(process)} /> : null}
             {key === "startup" ? <WinIrStartup snapshot={data.snapshots.startup ?? null} busy={busy} connected={connected} focus={focusFor(focus, "startup")} related={related} onCopy={(text) => void copy(text)} onFile={locateFile} onRegistry={locateRegistry} onRemove={(entry) => void removeStartup(entry)} /> : null}
             {key === "accounts" ? <WinIrAccounts snapshot={data.snapshots.accounts ?? null} busy={busy} connected={connected} focus={focusFor(focus, "accounts")} related={related} onCopy={(text) => void copy(text)} onLogs={(query) => goTo({ tab: "logs", query })} onDisable={(entry) => void disableAccount(entry)} /> : null}
             {key === "logs" ? <WinIrLogs onDirectory={(path) => { if (!busy && connected) { navigate("files", true); void data.collect("files", path); } }} snapshot={data.snapshots.logs ?? null} busy={busy || !connected} category={data.snapshots.logs?.categoryFilter ?? "all"} onCategory={(category) => void data.collect("logs", category)} focus={focusFor(focus, "logs")} onCopy={(text) => void copy(text)} /> : null}
             {key === "timeline" ? <WinIrTimeline snapshots={data.snapshots} onCopy={(text) => void copy(text)} onGo={goTo} /> : null}
-            {key === "files" ? <WinIrFileManager snapshot={data.snapshots.files ?? null} busy={busy} connected={connected} revealPath={focus?.target.tab === "files" ? focus.target.path : null} related={related} onNavigate={(path) => void data.collect("files", path)} onPreview={data.previewFile} onPull={(path) => void data.pullFile(path).then((received) => { if (received) openDock("files"); })} onDelete={(entry) => void deleteFile(entry)} onCopy={(text) => void copy(text)} /> : null}
+            {key === "files" ? <WinIrFileManager snapshot={data.snapshots.files ?? null} busy={busy} connected={connected} revealPath={focus?.target.tab === "files" ? focus.target.path : null} related={related} onNavigate={(path) => void data.collect("files", path)} onPreview={data.previewFile} onInspectAccess={data.inspectFileAccess} onCommands={() => openDock("command")} onPull={(path) => void data.pullFile(path).then((received) => { if (received) openDock("files"); })} onDelete={(entry) => void deleteFile(entry)} onCopy={(text) => void copy(text)} /> : null}
             {key === "registry" ? <WinIrRegistry snapshot={data.snapshots.registry ?? null} busy={busy} connected={connected} focus={focusFor(focus, "registry")} related={related} onNavigate={(path) => void data.collect("registry", path)} onDeleteValue={(keyPath, value) => void deleteRegistryValue(keyPath, value)} onCopy={(text) => void copy(text)} /> : null}
 
           </Activity>)}
@@ -308,6 +302,7 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOp
       <WinIrDock data={data} expanded={consoleOpen} tab={dockTab} onTab={openDock} onToggle={() => setConsoleOpen(!consoleOpen)}>
         <WinIrConsole panel={dockTab} status={data.status} busy={busy} sessionKey={data.sessionKey} hostname={host || "当前远程会话"} output={data.commandOutput} savedFiles={data.savedFiles} canSave={api.saveWindowsFile !== undefined} onSave={(fileId) => void data.saveFile(fileId)} onCopy={(text) => void copy(text)} onSend={data.sendChat} onRun={data.runCommand} onUnregister={() => void local("unregister-plugin", "正在移除插件注册…", "当前用户的插件注册已移除。")} />
       </WinIrDock>
+      {baselineSelection ? <WinIrBaselineChanges items={data.snapshots.baseline?.items ?? []} initialIds={baselineSelection.ids} session={baselineSelection.session} currentSession={data.sessionKey} onRequest={data.baselineRequest} onClose={() => setBaselineSelection(null)} onRefresh={() => void data.collect("baseline")} /> : null}
       {confirm.dialog ? <DialogHost dialog={confirm.dialog} scrollMessage onResolve={confirm.resolve} /> : null}
     </section>
   );

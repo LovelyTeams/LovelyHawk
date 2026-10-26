@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
-import type { WindowsFileEntry, WindowsFilePreview, WindowsFilesSnapshot } from "../shared/windows-incident-contract";
+import type { WindowsFileAccess, WindowsFileEntry, WindowsFilePreview, WindowsFilesSnapshot } from "../shared/windows-incident-contract";
+import { FILE_PLACES } from "./win-ir-presets";
+import { WinIrFileAccessPanel } from "./WinIrFileAccessPanel";
+import { WinIrInspector } from "./WinIrInspector";
 import { WinIrTree } from "./WinIrTree";
-import { ColumnResizer, DataTable, DetailPane, FilterChips, RiskBadge, RiskCell, SearchBox, SourceTime, WinIrModal, riskSort, type Column } from "./WinIrKit";
+import { ColumnResizer, DataTable, FilterChips, RiskCell, SearchBox, SourceTime, riskSort, type Column } from "./WinIrKit";
 import { WinIrRelated, type RelatedContext } from "./WinIrRelated";
 import { RELATED_ID } from "./win-ir-links";
 import {
@@ -19,19 +22,6 @@ import {
   pathSegments,
   type FileKind,
 } from "./win-ir-helpers";
-
-const QUICK_PLACES: ReadonlyArray<{ label: string; path: string; hint: string }> = [
-  { label: "系统盘", path: "C:\\", hint: "C 盘根目录" },
-  { label: "用户目录", path: "C:\\Users", hint: "所有用户的配置文件" },
-  { label: "公共目录", path: "C:\\Users\\Public", hint: "所有用户可写，常见落地位置" },
-  { label: "当前用户临时目录", path: "%TEMP%", hint: "落地执行的高发位置" },
-  { label: "系统临时目录", path: "C:\\Windows\\Temp", hint: "服务与系统账户的临时文件" },
-  { label: "全局启动目录", path: "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\StartUp", hint: "所有用户登录时运行" },
-  { label: "ProgramData", path: "C:\\ProgramData", hint: "隐藏目录，常被用于驻留" },
-  { label: "计划任务目录", path: "C:\\Windows\\System32\\Tasks", hint: "计划任务定义文件" },
-  { label: "IIS 站点目录", path: "C:\\inetpub\\wwwroot", hint: "排查网页后门" },
-  { label: "Prefetch", path: "C:\\Windows\\Prefetch", hint: "程序执行痕迹" },
-];
 
 type KindFilter = "all" | "folder" | "executable" | "script" | "web" | "hidden" | "risky";
 
@@ -61,6 +51,8 @@ export interface FileManagerProps {
   revealPath?: string | null;
   related?: RelatedContext;
   onNavigate: (path: string) => void;
+  onInspectAccess: (path: string) => Promise<WindowsFileAccess>;
+  onCommands: () => void;
   onPreview: (path: string) => Promise<WindowsFilePreview>;
   onPull: (path: string) => void;
   onDelete?: (entry: WindowsFileEntry) => void;
@@ -72,7 +64,7 @@ export interface FileManagerProps {
  * an address bar with history, a sortable listing and a properties / preview
  * pane. Preview reads the first 16 KB only; deleting a file requires confirmation.
  */
-export function WinIrFileManager({ snapshot, busy, connected, revealPath, related, onNavigate, onPreview, onPull, onDelete, onCopy }: FileManagerProps) {
+export function WinIrFileManager({ snapshot, busy, connected, revealPath, related, onNavigate, onPreview, onInspectAccess, onCommands, onPull, onDelete, onCopy }: FileManagerProps) {
   const [trail, setTrail] = useState<{ items: string[]; index: number }>({ items: [], index: -1 });
   const travellingRef = useRef<number | null>(null);
   const history = trail.items;
@@ -82,8 +74,10 @@ export function WinIrFileManager({ snapshot, busy, connected, revealPath, relate
   const [placesWidth, setPlacesWidth] = useState(240);
   const addressRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
+  const [placeQuery, setPlaceQuery] = useState("");
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
   const [selected, setSelected] = useState<string | null>(null);
+  const [previewTabRequest, setPreviewTabRequest] = useState(0);
   const [preview, setPreview] = useState<{ path: string; data: WindowsFilePreview | null; error: string | null; loading: boolean; mode: "text" | "hex" } | null>(null);
   const previousPath = useRef<string | null>(null);
   const previewRequest = useRef(0);
@@ -156,6 +150,7 @@ export function WinIrFileManager({ snapshot, busy, connected, revealPath, relate
   async function loadPreview(path: string) {
     if (!connected || busy) return;
     const request = ++previewRequest.current;
+    setSelected(path); setShowDetails(true); setPreviewTabRequest((before) => before + 1);
     setPreview({ path, data: null, error: null, loading: true, mode: "text" });
     try {
       const data = await onPreview(path);
@@ -246,20 +241,12 @@ export function WinIrFileManager({ snapshot, busy, connected, revealPath, relate
             currentPath={currentPath} ancestors={currentPath ? pathSegments(currentPath) : []}
             children={entries.filter((entry) => entry.entryType === "dir").map((entry) => ({ label: entry.name, path: entry.fullPath }))}
             disabled={busy || !connected} onNavigate={onNavigate} />
-          <p>快速访问</p>
-          {QUICK_PLACES.map((place) => (
-            <button
-              key={place.path}
-              type="button"
-              title={`${place.hint}\n${place.path}`}
-              className={currentPath !== null && currentPath.toLowerCase() === place.path.toLowerCase() ? "is-active" : undefined}
-              disabled={busy || !connected}
-              onClick={() => onNavigate(place.path)}
-            >
-              <FileIcon kind="folder" />
-              <span>{place.label}</span>
-            </button>
-          ))}
+          <p>排查预设 · {FILE_PLACES.length}</p>
+          <SearchBox value={placeQuery} onChange={setPlaceQuery} placeholder="搜索目录预设" />
+          {[...new Set(FILE_PLACES.map((place) => place.group))].map((group) => <div key={group} className="wir-places-group">
+            <p>{group}</p>{FILE_PLACES.filter((place) => place.group === group && matchesQuery(placeQuery, place.label, place.path, place.hint)).map((place) => <button key={place.path} type="button" title={`${place.hint}\n${place.path}`} disabled={busy || !connected} onClick={() => onNavigate(place.path)}><FileIcon kind="folder" /><span>{place.label}</span></button>)}
+          </div>)}
+          <small className="wir-preset-note">预设不保证目录存在；用户目录对应采集账户，重定向位置需按实际路径查找。</small>
         </nav>
 
         <section className="wir-explorer-main" aria-label="目录内容">
@@ -284,7 +271,7 @@ export function WinIrFileManager({ snapshot, busy, connected, revealPath, relate
               { value: "risky", label: "可疑", count: counts.risky, tone: "high" },
             ]}
           />
-          <div className={selectedEntry && showDetails ? "wir-master is-split" : "wir-master"}>
+          <div className="wir-master">
             <DataTable
               label="目录内容"
               columns={columns}
@@ -301,36 +288,24 @@ export function WinIrFileManager({ snapshot, busy, connected, revealPath, relate
               defaultSort={{ key: "name", descending: false }}
               empty={snapshot === null ? "从左侧选择一个位置，或在地址栏输入目录后点「转到」。" : entries.length === 0 ? "本次目录读取没有返回项目。" : "没有符合筛选条件的项目。"}
             />
-            {selectedEntry && showDetails ? (
-              <DetailPane
-                title={selectedEntry.name}
-                subtitle={selectedEntry.entryType === "dir" ? "文件夹" : `${FILE_KIND_LABEL[fileKind(selectedEntry.name, false)]} · ${formatBytes(selectedEntry.sizeBytes)}`}
-                risk={selectedEntry.riskLevel}
-                reasons={selectedEntry.riskReason ? [selectedEntry.riskReason] : []}
-                onClose={() => setSelected(null)}
-                onCopy={onCopy}
-                fields={[
-                  { label: "完整路径", value: selectedEntry.fullPath, mono: true },
-                  { label: "修改时间", value: selectedEntry.lastWriteTime, mono: true },
-                  ...(selectedEntry.entryType === "dir" ? [] : [{ label: "大小", value: `${formatBytes(selectedEntry.sizeBytes)}（${selectedEntry.sizeBytes} 字节）` }]),
-                  { label: "属性", value: [selectedEntry.hidden ? "隐藏" : "", selectedEntry.system ? "系统" : ""].filter(Boolean).join("、") || "常规" },
-                  ...(selectedEntry.sha256 ? [{ label: "SHA256", value: selectedEntry.sha256, mono: true }] : []),
-                ]}
-                actions={selectedEntry.entryType === "dir" ? (
-                  <button type="button" className="win-ir-btn is-primary" disabled={busy || !connected} onClick={() => onNavigate(selectedEntry.fullPath)}>打开文件夹</button>
-                ) : (
-                  <>
-                    <button type="button" className="win-ir-btn" onClick={() => onCopy(selectedEntry.fullPath)}>复制路径</button>
-                    <button type="button" className="win-ir-btn" disabled={busy || !connected || preview?.loading === true} onClick={() => void loadPreview(selectedEntry.fullPath)}>预览前 16 KB</button>
-                    <button type="button" className="win-ir-btn is-primary" disabled={busy || !connected || selectedEntry.sizeBytes > 8 * 1024 * 1024} title="拉取到会话缓存并校验 SHA256；单个文件上限 8 MB，尚未保存到磁盘" onClick={() => onPull(selectedEntry.fullPath)}>取证拉取（≤ 8 MB）</button>
-                    {onDelete ? <button type="button" className="win-ir-btn is-danger" disabled={busy || !connected} onClick={() => onDelete(selectedEntry)}>删除文件</button> : null}
-                  </>
-                )}
-              >
-                {related && selectedEntry.entryType !== "dir" ? <WinIrRelated key={selectedEntry.fullPath} context={related} query={{ paths: [selectedEntry.fullPath], exclude: RELATED_ID.file(selectedEntry.fullPath) }} /> : null}
-              </DetailPane>
-            ) : null}
           </div>
+          {selectedEntry && showDetails ? <WinIrInspector key={selectedEntry.fullPath} title={selectedEntry.name} reveal={{ id: "preview", request: previewTabRequest }} onClose={() => setShowDetails(false)} tabs={[
+            { id: "preview", label: "内容预览", content: <div className="wir-inspector-split"><div className="wir-preview">
+              {selectedEntry.entryType === "dir" ? <p className="wir-empty">这是文件夹。双击列表项或点击「打开文件夹」查看内容。</p> : preview === null ? <div className="wir-empty"><p>按需读取前 16 KB，不执行文件。读取可能影响访问时间和审计记录。</p><button type="button" className="win-ir-btn is-primary" disabled={busy || !connected} onClick={() => void loadPreview(selectedEntry.fullPath)}>预览前 16 KB</button></div> : <>
+                {preview.loading ? <p role="status">正在读取文件开头…</p> : null}
+                {preview.error ? <div role="alert"><p className="wir-preview-error">{preview.error}</p><button type="button" className="win-ir-btn" disabled={busy || !connected} onClick={() => void loadPreview(selectedEntry.fullPath)}>重试预览</button></div> : null}
+                {preview.data && previewBytes ? <>
+                  <div className="wir-preview-head"><span>已读取 {formatBytes(preview.data.previewBytes)}{preview.data.truncated ? `，共 ${formatBytes(preview.data.sizeBytes)}，只显示开头` : "（完整内容）"}</span>
+                    <FilterChips<"text" | "hex"> label="预览方式" value={text === null ? "hex" : preview.mode} onChange={(mode) => setPreview((current) => current === null ? current : { ...current, mode })} options={text === null ? [{ value: "hex", label: "十六进制" }] : [{ value: "text", label: `文本（${text.encoding}）` }, { value: "hex", label: "十六进制" }]} />
+                    <button type="button" className="wir-link" onClick={() => onCopy(text !== null && preview.mode === "text" ? text.text : hexDump(previewBytes))}>复制预览内容</button></div>
+                  <pre className="wir-preview-body">{text !== null && preview.mode === "text" ? text.text : hexDump(previewBytes)}</pre>
+                </> : null}
+              </>}
+            </div><FileProperties entry={selectedEntry} onCopy={onCopy} /></div> },
+            { id: "properties", label: "属性", content: <><FileProperties entry={selectedEntry} onCopy={onCopy} />{pe ? <dl className="wir-reader-fields"><div><dt>PE 头观察</dt><dd>{pe.kind} · {pe.machine} · {pe.subsystem}</dd></div><div><dt>编译时间（可伪造）</dt><dd>{pe.compiledAt ?? "未记录"}</dd></div><div><dt>节区</dt><dd>{pe.sections.join("  ") || "未在预览范围内"}</dd></div></dl> : null}</> },
+            ...(related && selectedEntry.entryType !== "dir" ? [{ id: "related", label: "关联线索", content: <WinIrRelated context={related} query={{ paths: [selectedEntry.fullPath], exclude: RELATED_ID.file(selectedEntry.fullPath) }} /> }] : []),
+            { id: "access", label: "权限与占用排查", content: <WinIrFileAccessPanel key={selectedEntry.fullPath} path={selectedEntry.fullPath} busy={busy} connected={connected} onInspect={onInspectAccess} onCopy={onCopy} onCommands={onCommands} /> },
+          ]} /> : null}
           <footer className="wir-explorer-status">
             <span>{snapshot ? `${snapshot.truncated ? "至少 " : ""}${snapshot.totalEntries} 个项目${snapshot.truncated ? `，本次只列出 ${entries.length} 个` : ""}` : "未打开文件夹"}</span>
             <span>文件夹 {counts.folder} · 文件 {counts.all - counts.folder} · 隐藏 {counts.hidden}</span>
@@ -339,40 +314,18 @@ export function WinIrFileManager({ snapshot, busy, connected, revealPath, relate
           </footer>
         </section>
       </div>
-      {preview !== null ? (
-        <WinIrModal wide title={preview.path.split(/[\\/]/u).at(-1) || preview.path} subtitle={preview.path} onClose={() => { previewRequest.current += 1; setPreview(null); }}
-          actions={<>
-            <button type="button" className="win-ir-btn" onClick={() => onCopy(preview.path)}>复制路径</button>
-            {selectedEntry && selectedEntry.fullPath === preview.path ? <button type="button" className="win-ir-btn is-primary" disabled={busy || !connected || selectedEntry.sizeBytes > 8 * 1024 * 1024} title="拉取到会话缓存并校验 SHA256；单个文件上限 8 MB，尚未保存到磁盘" onClick={() => onPull(selectedEntry.fullPath)}>取证拉取（≤ 8 MB）</button> : null}
-          </>}>
-          <div className="wir-preview">
-            {preview.loading ? <p className="wir-muted">正在读取文件开头…</p> : null}
-            {preview.error ? <p className="wir-preview-error" role="alert">{preview.error}</p> : null}
-            {preview.data && previewBytes ? (
-              <>
-                <div className="wir-preview-head">
-                  <span>已读取 {formatBytes(preview.data.previewBytes)}{preview.data.truncated ? `，共 ${formatBytes(preview.data.sizeBytes)}，只显示开头` : "（完整内容）"}</span>
-                  <FilterChips<"text" | "hex">
-                    label="预览方式"
-                    value={text === null ? "hex" : preview.mode}
-                    onChange={(mode) => setPreview((current) => current === null ? current : { ...current, mode })}
-                    options={text === null ? [{ value: "hex", label: "十六进制" }] : [{ value: "text", label: `文本（${text.encoding}）` }, { value: "hex", label: "十六进制" }]}
-                  />
-                </div>
-                {pe ? (
-                  <dl className="wir-pe">
-                    <div><dt>文件类型</dt><dd>{pe.kind} · {pe.machine}</dd></div>
-                    <div><dt>子系统</dt><dd>{pe.subsystem}</dd></div>
-                    <div><dt>编译时间</dt><dd className="is-mono">{pe.compiledAt ?? "未记录"}（可被伪造）</dd></div>
-                    <div><dt>节区</dt><dd className="is-mono">{pe.sections.join("  ") || "未在预览范围内"}</dd></div>
-                  </dl>
-                ) : null}
-                <pre className="wir-preview-body">{text !== null && preview.mode === "text" ? text.text : hexDump(previewBytes)}</pre>
-              </>
-            ) : null}
-          </div>
-        </WinIrModal>
-      ) : null}
+
     </div>
   );
+}
+
+function FileProperties({ entry, onCopy }: { entry: WindowsFileEntry; onCopy: (text: string) => void }) {
+  return <div className="wir-file-properties"><dl className="wir-reader-fields">
+    <div><dt>完整路径</dt><dd>{entry.fullPath}</dd></div>
+    <div><dt>类型</dt><dd>{FILE_KIND_LABEL[fileKind(entry.name, entry.entryType === "dir")]}</dd></div>
+    <div><dt>大小</dt><dd>{entry.entryType === "dir" ? "文件夹" : `${formatBytes(entry.sizeBytes)}（${entry.sizeBytes} 字节）`}</dd></div>
+    <div><dt>修改时间</dt><dd>{entry.lastWriteTime || "未取得"}</dd></div>
+    <div><dt>属性</dt><dd>{[entry.hidden ? "隐藏" : "", entry.system ? "系统" : ""].filter(Boolean).join("、") || "常规"}</dd></div>
+    <div><dt>SHA256</dt><dd>{entry.sha256 || "未计算；取证拉取后校验接收内容"}</dd></div>
+  </dl>{entry.riskReason ? <p className="wir-reader-warning">{entry.riskReason}</p> : null}<button type="button" className="win-ir-btn" onClick={() => onCopy(entry.fullPath)}>复制路径</button></div>;
 }

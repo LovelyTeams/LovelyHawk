@@ -16,9 +16,9 @@ function outcome(row: NginxTlsObservation): string {
 }
 function endpointLabel(address: string, port: number): string { return `${address.includes(":") ? `[${address}]` : address}:${port}`; }
 
-export function NginxConnectivityPanel({ controller, state, blocked, onOpenCase, onCopyRecord, onDiscard }: {
+export function NginxConnectivityPanel({ controller, state, blocked, onCopyRecord, onDiscard }: {
   controller: NginxRepairController; state: NginxRepairState; blocked: boolean;
-  onOpenCase?: ((caseId: string) => void) | undefined; onCopyRecord?: ((text: string) => Promise<unknown>) | undefined;
+ onCopyRecord?: ((text: string) => Promise<unknown>) | undefined;
   onDiscard(): void;
 }) {
   const id = useId();
@@ -62,7 +62,6 @@ export function NginxConnectivityPanel({ controller, state, blocked, onOpenCase,
         {connectivity.retention.state === "unsaved" ? <p>当前结果仍可查看和复制。未保存记录仅在本次连接中暂存，5 分钟无操作后可能失效；请先处理，再开始新操作。</p> : null}
         {connectivity.retention.state === "unsaved" && connectivity.retention.canRetry && connectivity.retention.caseId === null ? <p>本次尚未确定归属案件。重试保存时使用届时的当前案件；没有当前案件时新建。</p> : null}
         <div className="nginx-retention-actions">
-          {connectivity.retention.state === "saved" && onOpenCase && connectivity.retention.caseId ? <button type="button" disabled={state.reading !== null} onClick={() => onOpenCase(connectivity.retention.caseId!)}>查看留证案件</button> : null}
           {onCopyRecord && connectivity.recordText !== null ? <button type="button" onClick={() => {
             const recordText = connectivity.recordText!;
             const generation = ++copyGeneration.current;

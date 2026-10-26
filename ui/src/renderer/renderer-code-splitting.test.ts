@@ -9,7 +9,6 @@ const PAGES = [
   "SecurityReference", "Notes", "ConfigurationPage", "SystemInfoPage", "AiHistoryPage",
   "CheckAuditPage", "IntegrityPage", "LogAnalysisPage", "PacketCapturePage",
   "KubernetesPage", "DockerPage", "EmergencyCommandsPage",
-  "CasesPage",
 ];
 
 /**

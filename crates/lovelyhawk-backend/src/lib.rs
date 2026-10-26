@@ -6428,17 +6428,6 @@ fn page_descriptors() -> Vec<PageDescriptor> {
             migration_state: Pending,
         },
         PageDescriptor {
-            id: "case-workspace",
-            group: Investigation,
-            title: "案件工作台",
-            icon: "▤",
-            capability: LocalWorkspace,
-            summary: "整理案件、证据与时间线，离线查看和归档本机案件。",
-            primary_action: "新建案件",
-            sections: &["案件", "证据", "调查线索", "时间线"],
-            migration_state: Ready,
-        },
-        PageDescriptor {
             id: "database",
             group: Operations,
             title: "数据库",
@@ -7644,7 +7633,7 @@ mod tests {
         assert!(response.ok);
         let result = response.result.unwrap();
         assert_eq!(result["protocolVersion"], PROTOCOL_VERSION);
-        assert_eq!(result["pages"].as_array().unwrap().len(), 15);
+        assert_eq!(result["pages"].as_array().unwrap().len(), 14);
         assert!(result.get("dataRoot").is_none());
         assert_eq!(
             result["pages"]
@@ -7653,7 +7642,7 @@ mod tests {
                 .iter()
                 .filter(|page| page["migrationState"] == "ready")
                 .count(),
-            2
+            1
         );
     }
 

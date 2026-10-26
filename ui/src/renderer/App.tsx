@@ -28,7 +28,6 @@ import {
   type DisposalReportOverlayHandle,
 } from "./DisposalReportOverlay";
 import type { NotesHandle } from "./Notes";
-import type { CaseWorkspaceHandle } from "./CaseWorkspacePage";
 import type { DisposalReportSnapshot } from "../shared/disposal-report-contract";
 import {
   ApplicationLogOverlay,
@@ -63,7 +62,6 @@ import { NotificationStack } from "./NotificationStack";
 const DatabasePage = lazy(async () => ({ default: (await import("./DatabasePage")).DatabasePage }));
 const SecurityReference = lazy(async () => ({ default: (await import("./SecurityReference")).SecurityReference }));
 const Notes = lazy(async () => ({ default: (await import("./Notes")).Notes }));
-const CasesPage = lazy(async () => ({ default: (await import("./CasesPage")).CasesPage }));
 const ConfigurationPage = lazy(async () => ({ default: (await import("./ConfigurationPage")).ConfigurationPage }));
 const SystemInfoPage = lazy(async () => ({ default: (await import("./SystemInfoPage")).SystemInfoPage }));
 const AiHistoryPage = lazy(async () => ({ default: (await import("./AiHistoryPage")).AiHistoryPage }));
@@ -137,7 +135,6 @@ export function App() {
   // Landing state: without an SSH target every page is a "connect first" prompt,
   // so the app opens on the welcome view until a target is bound.
   const [activePageId, setActivePageId] = useState(WELCOME_PAGE_ID);
-  const [initialCaseId, setInitialCaseId] = useState<string | undefined>(undefined);
   const [historyRerun, setHistoryRerun] = useState<{ historyId: string; key: number } | null>(null);
   const historyRerunKeyRef = useRef(0);
   const [investigateTarget, setInvestigateTarget] =
@@ -161,6 +158,8 @@ export function App() {
   const [navigationBusy, setNavigationBusy] = useState(false);
   const [railPreferred, setRailPreferred] = useState(false);
   const [activeTarget, setActiveTarget] = useState<ActiveSshTarget | null>(null);
+  const windowsBusy = useRef(false);
+  const acceptWindowsBusy = useCallback((busy: boolean) => { windowsBusy.current = busy; }, []);
   const [windowsChannelRequest, setWindowsChannelRequest] = useState(0);
   const [windowsTarget, setWindowsTarget] = useState<{ connected: boolean; hostname: string | null }>({ connected: false, hostname: null });
   const acceptWindowsTarget = useCallback((connected: boolean, hostname: string | null) => {
@@ -178,7 +177,6 @@ export function App() {
   const databaseRef = useRef<DatabasePageHandle>(null);
   const configurationRef = useRef<ConfigurationPageHandle>(null);
   const notesRef = useRef<NotesHandle>(null);
-  const caseWorkspaceRef = useRef<CaseWorkspaceHandle>(null);
   const settingsPanelRef = useRef<SettingsPanelHandle>(null);
   const commandHistoryPanelRef = useRef<CommandHistoryPanelHandle>(null);
   const disposalReportOverlayRef = useRef<DisposalReportOverlayHandle>(null);
@@ -228,6 +226,7 @@ export function App() {
   }, []);
 
   useEffect(() => window.lovelyhawk.onBeforeClose(async ({ unsavedEditors }) => {
+    if (windowsBusy.current) { setError("Windows 任务尚未结束。请等待当前项返回，或先中止后续项并核对结果，再关闭窗口。"); return false; }
     if (unsavedEditors > 0 && !(await unsavedEditorsConfirm.ask(
       "放弃编辑窗口里未保存的修改？",
       `还有 ${unsavedEditors} 个文件编辑窗口有没保存到服务器的修改。关闭 LovelyHawk 会一并关闭它们，这些修改会丢失。`,
@@ -241,9 +240,6 @@ export function App() {
     }
     if (activePageId === "notes") {
       return notesRef.current?.beforeDeactivate() ?? true;
-    }
-    if (activePageId === "case-workspace") {
-      return caseWorkspaceRef.current?.beforeDeactivate() ?? true;
     }
     if (activePageId === "database") return databaseRef.current?.beforeDeactivate() ?? true;
     if (activePageId === "config-generator") {
@@ -342,7 +338,8 @@ export function App() {
   }
 
   /** Resolves true once the page is shown, false when something kept it from leaving. */
-  async function navigateTo(pageId: string, caseId?: string): Promise<boolean> {
+  async function navigateTo(pageId: string): Promise<boolean> {
+    if (windowsBusy.current) { setError("Windows 任务尚未结束，请先等待当前项返回或中止后续项。"); return false; }
     if (navigationPendingRef.current || pageId === activePageId) return false;
     navigationPendingRef.current = true;
     setNavigationBusy(true);
@@ -357,12 +354,10 @@ export function App() {
         if (!canDeactivate) return false;
       }
       if (activePageId === "database" && !(await databaseRef.current?.beforeDeactivate() ?? true)) return false;
-      if (activePageId === "case-workspace" && !(await caseWorkspaceRef.current?.beforeDeactivate() ?? true)) return false;
       if (activePageId === "config-generator") {
         const canDeactivate = await configurationRef.current?.beforeDeactivate() ?? true;
         if (!canDeactivate) return false;
       }
-      setInitialCaseId(pageId === "case-workspace" ? caseId : undefined);
       setActivePageId(pageId);
       return true;
     } finally {
@@ -413,7 +408,6 @@ export function App() {
         "放弃修改并断开",
       ))) return;
       if (activePageId === "database" && !(await databaseRef.current?.beforeDeactivate() ?? true)) return;
-      if (activePageId === "case-workspace" && !(await caseWorkspaceRef.current?.beforeDeactivate() ?? true)) return;
       if (activePageId === "config-generator" && !(await configurationRef.current?.beforeDeactivate() ?? true)) return;
       if (commandHistoryOpen) await closeCommandHistory();
       if (disposalReportOpen) await closeDisposalReport();
@@ -454,7 +448,6 @@ export function App() {
     returnFocus: HTMLElement,
   ) {
     if (activePageId === "database" && !(await databaseRef.current?.beforeDeactivate() ?? true)) return;
-    if (activePageId === "case-workspace" && !(await caseWorkspaceRef.current?.beforeDeactivate() ?? true)) return;
     if (activePageId === "config-generator" && !(await configurationRef.current?.beforeDeactivate() ?? true)) return;
     if (settingsOpen || commandHistoryOpen || disposalReportOpen || applicationLogOpen) return;
     connectionManagerReturnFocusRef.current = returnFocus;
@@ -670,19 +663,12 @@ export function App() {
             <SecurityReference favoriteIds={favoriteIds} onFavoriteIdsChange={saveFavoriteIds} />
           ) : activePage.id === "notes" ? (
             <Notes ref={notesRef} />
-          ) : activePage.id === "case-workspace" ? (
-            <CasesPage ref={caseWorkspaceRef} bindingHandle={activeTarget?.bindingHandle ?? null}
-              initialCaseId={initialCaseId}
-              targetLabel={activeTarget === null ? "未连接主机" : `${activeTarget.target.username}@${activeTarget.target.host}:${activeTarget.target.port}`}
-              api={window.lovelyhawk}
-              onReport={(report, button, binding) => { if (activeTarget?.bindingHandle === binding) openDisposalReport(button, report); }} />
           ) : activePage.id === "database" ? (
             <DatabasePage ref={databaseRef} api={window.lovelyhawk} bindingHandle={activeTarget?.bindingHandle ?? null}
               targetLabel={activeTarget === null ? "未连接主机" : `${activeTarget.target.username}@${activeTarget.target.host}:${activeTarget.target.port}`} />
           ) : activePage.id === "config-generator" ? (
             <ConfigurationPage
               ref={configurationRef}
-              onOpenCase={(caseId) => { void navigateTo("case-workspace", caseId); }}
               onCopyRecord={window.lovelyhawk.writeClipboard}
               bindingHandle={activeTarget?.bindingHandle ?? null}
               api={window.lovelyhawk}
@@ -745,7 +731,7 @@ export function App() {
               api={window.lovelyhawk}
             />
           ) : activePage.id === "windows-incident" ? (
-            <WindowsIncidentPage onOpenSettings={openSettings} covered={overlayOpen || pageModalOpen} channelOpenRequest={windowsChannelRequest}
+            <WindowsIncidentPage onBusyChange={acceptWindowsBusy} onOpenSettings={openSettings} covered={overlayOpen || pageModalOpen} channelOpenRequest={windowsChannelRequest}
               api={window.lovelyhawk}
               writeClipboard={window.lovelyhawk.writeClipboard}
               onConnectionChange={acceptWindowsTarget}

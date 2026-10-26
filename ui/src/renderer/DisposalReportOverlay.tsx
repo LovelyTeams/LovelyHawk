@@ -145,7 +145,7 @@ export const DisposalReportOverlay = forwardRef<
         return;
       }
       dispatch({ type: "report-loaded", scope: currentScope, request: requestId, report: result });
-      setNotice(fixedReport !== null ? "已汇总所查看的案件快照和此主机的处置记录。需更新案件内容时，请返回案件工作台刷新后重新生成。" : result.incidentIncluded ? "已汇总当前主机的处置记录和当前案件。" : "已汇总当前主机的处置记录。");
+      setNotice(fixedReport !== null ? "已汇总所查看的案件快照和此主机的处置记录。此报告使用固定快照，后续记录不会自动加入。" : result.incidentIncluded ? "已汇总当前主机的处置记录和当前案件。" : "已汇总当前主机的处置记录。");
     }).catch(() => {
       if (generation !== lifecycleRef.current || scopeRef.current !== currentScope ||
         latestReportRequest.current !== requestId) return;

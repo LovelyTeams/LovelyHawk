@@ -12,7 +12,7 @@ describe("windows-incident contract", () => {
     const base = { category: "测试", title: "检查项", currentValue: "未取得", expectedValue: "启用", severity: "low", description: "读取范围", recommendation: "核对权限", remediationAvailable: false };
     const snapshot = { totalChecks: 4, passedCount: 1, failedCount: 1, warningCount: 0, unknownCount: 1, notApplicableCount: 1, items: [
       { ...base, id: "pass", status: "pass" },
-      { ...base, id: "fail", status: "fail", remediationAvailable: true },
+      { ...base, id: "wdigest", status: "fail", remediationAvailable: true },
       { ...base, id: "unknown", status: "unknown" },
       { ...base, id: "na", status: "not-applicable" },
     ] };
@@ -123,8 +123,8 @@ describe("windows-incident contract", () => {
     expect(isWindowsIncidentRequest({ action: "collect-logs", category: "powershell", sessionId })).toBe(true);
     expect(isWindowsIncidentRequest({ action: "run-command", command: "whoami" })).toBe(false);
     expect(isWindowsIncidentRequest({ action: "run-command", command: "whoami", sessionId: "changed" })).toBe(false);
-    expect(isWindowsIncidentRequest({ action: "remediate-baseline", ruleId: "wdigest", sessionId })).toBe(true);
-    expect(isWindowsIncidentRequest({ action: "remediate-baseline", ruleId: "defender-tamper", sessionId })).toBe(false);
+    expect(isWindowsIncidentRequest({ action: "plan-baseline", ruleIds: ["wdigest"], sessionId })).toBe(true);
+    expect(isWindowsIncidentRequest({ action: "plan-baseline", ruleIds: ["defender-tamper"], sessionId })).toBe(false);
     expect(isWindowsIncidentRequest({ action: "kill-process", pid: 900, startTime: "2026-10-24T10:00:00Z", sessionId })).toBe(true);
     expect(isWindowsIncidentRequest({ action: "kill-process", pid: 4, startTime: "2026-10-24T10:00:00Z", sessionId })).toBe(false);
     expect(isWindowsIncidentRequest({ action: "remove-startup", sourceType: "registry", name: "Updater", location: "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", sessionId })).toBe(true);
@@ -134,4 +134,38 @@ describe("windows-incident contract", () => {
     expect(isWindowsIncidentRequest({ action: "delete-registry-value", keyPath: "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", valueName: "Updater", sessionId })).toBe(true);
     expect(isWindowsIncidentRequest({ action: "delete-registry-value", keyPath: "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", valueName: "", sessionId })).toBe(false);
   });
+});
+
+
+describe("Windows baseline immutable plan contract", () => {
+  const planId = "00000000-0000-4000-8000-000000000011";
+  const request = { action: "plan-baseline", sessionId, ruleIds: ["wdigest"] } as const;
+  const plan = { id: planId, target: "LAB", expiresAt: 1790000300, restoring: false, items: [{ id: "wdigest", title: "WDigest", location: "HKLM\\fixed", currentValue: "DWORD 1", expectedValue: "DWORD 0", impact: "需要重启复核" }], notes: ["原值将持久保存"] };
+  it("rejects arbitrary paths, duplicate rules and the former direct write", () => {
+    expect(isWindowsIncidentRequest(request)).toBe(true);
+    for (const value of [{ ...request, ruleIds: [] }, { ...request, ruleIds: ["wdigest", "wdigest"] }, { ...request, ruleIds: ["unknown"] }, { ...request, path: "HKLM\\Other" }, { ...request, value: 0 }, { action: "remediate-baseline", sessionId, ruleId: "wdigest" }, { action: "apply-baseline-plan", sessionId, planId, ruleIds: ["uac"] }]) expect(isWindowsIncidentRequest(value)).toBe(false);
+  });
+  it("accepts only the planned subset without identities or backup contents", () => {
+    const req = { ...request, ruleIds: [...request.ruleIds] };
+    expect(matchesWindowsIncidentResponse(req, { kind: "baseline-plan", plan })).toBe(true);
+    for (const value of [{ ...plan, items: [...plan.items, ...plan.items] }, { ...plan, machine: "private" }, { ...plan, restoring: true }, { ...plan, items: [{ ...plan.items[0], id: "uac" }] }, { ...plan, items: [{ ...plan.items[0], backupPath: "D:/data" }] }]) expect(matchesWindowsIncidentResponse(req, { kind: "baseline-plan", plan: value })).toBe(false);
+  });
+  it("requires a finished, matching report and honest recovery capability", () => {
+    const req = { action: "apply-baseline-plan", sessionId, planId } as const;
+    const report = { id: planId, target: "LAB", createdAt: 1790000000, restoring: false, finished: true, recoveryAvailable: true, items: [{ id: "wdigest", title: "WDigest", state: "verified" }], message: "仅配置回读通过" };
+    expect(matchesWindowsIncidentResponse(req, { kind: "baseline-change", report })).toBe(true);
+    for (const value of [{ ...report, id: sessionId }, { ...report, finished: false }, { ...report, recoveryAvailable: false }, { ...report, items: [{ ...report.items[0], state: "applying" }] }]) expect(matchesWindowsIncidentResponse(req, { kind: "baseline-change", report: value })).toBe(false);
+    expect(matchesWindowsIncidentResponse(req, { kind: "baseline-change", report: { ...report, recoveryAvailable: false, items: [{ ...report.items[0], state: "uncertain" }] } })).toBe(true);
+  });
+});
+
+
+it("bounds file diagnosis and rejects injected effect parameters", () => {
+  const request = { action: "inspect-file-access", sessionId, path: "C:\\sample.txt" } as const;
+  expect(isWindowsIncidentRequest(request)).toBe(true);
+  expect(isWindowsIncidentRequest({ ...request, elevate: true })).toBe(false);
+  expect(isWindowsIncidentRequest({ ...request, path: "C:\\x\nwhoami" })).toBe(false);
+  const inspection = { path: request.path, observedAt: "2026-10-26T01:00:00Z", attributes: "ReadOnly", owner: "SYSTEM", accessRules: [{ identity: "Users", rights: "ReadAndExecute", access: "Allow", inherited: true }], processes: [], services: [{ name: "driver", displayName: "Driver", state: "Running", startMode: "Boot", path: request.path, kind: "driver" }], warnings: ["权限观察不代表有效删除权限"] };
+  expect(matchesWindowsIncidentResponse(request, { kind: "file-access", inspection })).toBe(true);
+  for (const changed of [{ ...inspection, services: Array(257).fill(inspection.services[0]) }, { ...inspection, accessRules: Array(65).fill(inspection.accessRules[0]) }, { ...inspection, deleted: true }, { ...inspection, services: [{ ...inspection.services[0], kind: "kernel-exploit" }] }]) expect(matchesWindowsIncidentResponse(request, { kind: "file-access", inspection: changed })).toBe(false);
 });

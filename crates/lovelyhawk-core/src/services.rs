@@ -129,7 +129,7 @@ impl BackendServices {
         );
         let settings = SettingsRepository::new(store.clone(), crypto.clone());
         let ai = runtime.map(|runtime| AiService::new(runtime, settings.clone()));
-        let windows_incident = WindowsIncidentService::new();
+        let windows_incident = WindowsIncidentService::with_store(store.clone());
         Ok(Self {
             inner: Arc::new(BackendServicesInner {
                 target,

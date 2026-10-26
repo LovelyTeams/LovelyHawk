@@ -18,9 +18,9 @@ function MissingFocus({ show, what }: { show: boolean; what: string }) {
   return show ? <p className="wir-footnote" role="status">当前快照中没有要定位的{what}，记录可能已变化或快照较旧，请刷新后再查找。</p> : null;
 }
 
-export function WinIrBaseline({ snapshot, focus, busy = false, connected = false, onCopy, onRemediate }: {
+export function WinIrBaseline({ snapshot, focus, busy = false, connected = false, onCopy, onRemediate, onConfigure }:  {
   snapshot: WindowsBaselineSnapshot | null; focus?: Target<"baseline">; busy?: boolean; connected?: boolean;
-  onCopy: (text: string) => void; onRemediate?: (item: WindowsBaselineItem) => void;
+  onCopy: (text: string) => void; onRemediate?: (item: WindowsBaselineItem) => void; onConfigure?: () => void;
 }) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");
@@ -57,6 +57,7 @@ export function WinIrBaseline({ snapshot, focus, busy = false, connected = false
       <p className="wir-query-scope">{snapshot ? `当前返回 ${categories.length} 类检查。` : "核查后可按类别与结果筛选。"}口令策略限定本地账户，审计与防护按本次采集权限读取；“无法判断”和“不适用”均不计入通过。</p>
       <details className="wir-collection-warnings"><summary>检查范围与采集影响</summary><p>检查读取系统策略、日志通道和防护状态，不修改这些配置，也不自动提权。查询可能产生 PowerShell/.NET 临时编译文件及系统审计记录。口令策略不读取口令，日志检查只读取通道配置；容量建议不等于实际留存天数。缺少组件、权限或适用条件时保留缺口。</p></details>
       <div className="wir-toolbar">
+        {onConfigure ? <button type="button" className="win-ir-btn is-primary" disabled={busy || !connected || !snapshot} onClick={onConfigure}>一键配置…</button> : null}
         <SearchBox value={query} onChange={setQuery} placeholder="搜索检查项、配置值或加固建议" />
         <select className="win-ir-input wir-select" aria-label="基线类别" value={category} onChange={(event) => setCategory(event.target.value)}>
           <option value="all">全部类别</option>{categories.map((value) => <option key={value}>{value}</option>)}
@@ -90,7 +91,7 @@ export function WinIrBaseline({ snapshot, focus, busy = false, connected = false
             disabled={busy || !connected}
             onClick={() => onRemediate(current)}
           >
-            快速修复
+            预览配置差异
           </button>
         ) : undefined}>
           {!current.remediationAvailable && current.status !== "pass" ? <p className="wir-footnote">{current.status === "unknown" ? "先补齐采集与适用条件，再制定变更计划。" : current.status === "not-applicable" ? "当前条件下不执行此项修复。" : "此项提供检查与建议，尚未提供自动修复；请按适用范围人工复核。"}</p> : null}

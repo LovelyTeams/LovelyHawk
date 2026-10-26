@@ -35,7 +35,7 @@ const smokeNonce = randomUUID().replaceAll("-", "");
 const smokeRoot = path.join(os.tmpdir(), `lovelyhawk-smoke-${smokeNonce}`);
 
 const EXPECTED_API_METHODS = 169;
-const EXPECTED_PAGES = 15;
+const EXPECTED_PAGES = 14;
 const checks = [];
 function check(name, ok, detail = null) {
   checks.push({ name, ok: Boolean(ok), detail });

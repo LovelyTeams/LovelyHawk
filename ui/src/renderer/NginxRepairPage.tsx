@@ -9,11 +9,11 @@ import "./nginx-repair-page.css";
 
 export interface NginxRepairPageHandle { beforeDeactivate(): Promise<boolean> }
 export interface NginxRepairPageProps { api: NginxRepairApi; bindingHandle: string | null; modeSwitch?: ReactNode;
-  onOpenCase?: ((caseId: string) => void) | undefined; onCopyRecord?: ((text: string) => Promise<unknown>) | undefined }
+ onCopyRecord?: ((text: string) => Promise<unknown>) | undefined }
 const STATES = { applied: "已应用", restored: "已还原", pending: "待核实", "restore-failed": "恢复待处理" } as const;
 
 export const NginxRepairPage = forwardRef<NginxRepairPageHandle, NginxRepairPageProps>(
-function NginxRepairPage({ api, bindingHandle, modeSwitch, onOpenCase, onCopyRecord }, ref) {
+function NginxRepairPage({ api, bindingHandle, modeSwitch, onCopyRecord }, ref) {
   const controller = useMemo(() => new NginxRepairController(api, bindingHandle), [api, bindingHandle]);
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   const [query, setQuery] = useState("");
@@ -83,7 +83,7 @@ function NginxRepairPage({ api, bindingHandle, modeSwitch, onOpenCase, onCopyRec
             </li>)}</ul>}
         </section> : null}
         {state.selectedInstance ? <NginxConnectivityPanel key={state.selectedInstance} controller={controller} state={state} blocked={blocked}
-          onOpenCase={onOpenCase} onCopyRecord={onCopyRecord} onDiscard={() => { void discardObservation(); }} /> : null}
+          onCopyRecord={onCopyRecord} onDiscard={() => { void discardObservation(); }} /> : null}
         {history ? <section className="nginx-repair-history" aria-label="修补历史">
           <h3>修补历史 <span>{history.totalRecords}</span></h3>
           <p className="nginx-repair-note">按最近操作排列。恢复前会核对实例和当前文件；后续修改不会被旧备份覆盖。</p>

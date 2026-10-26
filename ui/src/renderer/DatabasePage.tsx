@@ -96,7 +96,7 @@ export const DatabasePage = forwardRef<DatabasePageHandle, DatabasePageProps>(fu
     if (activeController.current !== controller) return false;
     if (!(await leaveEditor())) return false;
     const leave = await controller.prepareToLeave(reason => reason === "uncertain"
-      ? dialog.ask("读取状态尚未核实", "未能确认当前读取是否结束。可以取消离开并再次尝试停止；继续离开后，如选择了留证，请到案件工作台核对是否保存，避免把状态未知当作成功或未执行。", "继续离开")
+      ? dialog.ask("读取状态尚未核实", "未能确认当前读取是否结束。可以取消离开并再次尝试停止；继续离开后，如选择了留证，请保留本次反馈并核对本机留证记录，避免把状态未知当作成功或未执行。", "继续离开")
       : dialog.ask("放弃未保存的检查摘要？", "本次摘要尚未进入案件。可以取消后重试留证，或先展开记录并复制。放弃后，再次读取会产生新的观察，不能替代本次记录。", "放弃本次未保存摘要"));
     return activeController.current === controller && leave;
   } }));

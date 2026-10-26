@@ -4,6 +4,7 @@ import type { DvcRuntimeStatus } from "../shared/windows-incident-contract";
 import { DialogHost } from "./DialogHost";
 import { useConfirmDialog } from "./use-confirm-dialog";
 import { formatBytes } from "./win-ir-helpers";
+import { WINDOWS_COMMAND_PRESETS } from "./win-ir-command-presets";
 
 export type WindowsDockTab = "tasks" | "files" | "command" | "logs";
 
@@ -17,6 +18,9 @@ export function WinIrConsole({ panel, status, busy, sessionKey, hostname, output
 }) {
   const [message, setMessage] = useState("");
   const [command, setCommand] = useState("whoami /all");
+  const [presetGroup, setPresetGroup] = useState("服务与驱动");
+  const [presetId, setPresetId] = useState<string | null>(null);
+  const selectedPreset = WINDOWS_COMMAND_PRESETS.find((preset) => preset.id === presetId);
   const confirm = useConfirmDialog();
   const available = !busy && sessionKey !== null;
   async function execute() {
@@ -33,7 +37,11 @@ export function WinIrConsole({ panel, status, busy, sessionKey, hostname, output
         <section className="wir-panel">
           <header><div><h2>命令检查台</h2><p>选择常用查询，或输入需要执行的完整命令</p></div></header>
           <div className="wir-console-content">
-            <div className="wir-chips" role="group" aria-label="填入常用查询">{["whoami /all", "systeminfo", "netstat -ano", "tasklist /v"].map((value) => <button type="button" className="wir-chip" key={value} onClick={() => setCommand(value)}>{value}</button>)}</div>
+            <div className="wir-command-presets">
+              <label>排查预设（{WINDOWS_COMMAND_PRESETS.length} 项）<select className="win-ir-input" aria-label="命令预设类别" value={presetGroup} onChange={(event) => setPresetGroup(event.target.value)}>{[...new Set(WINDOWS_COMMAND_PRESETS.map((preset) => preset.group))].map((group) => <option key={group}>{group}</option>)}</select></label>
+              <div className="wir-chips" role="group" aria-label="填入常用查询">{WINDOWS_COMMAND_PRESETS.filter((preset) => preset.group === presetGroup).map((preset) => <button type="button" className="wir-chip" key={preset.id} aria-pressed={preset.id === presetId} title={preset.hint} onClick={() => { setCommand(preset.command); setPresetId(preset.id); }}>{preset.label}</button>)}</div>
+              <p className="wir-footnote">{selectedPreset?.hint ?? "点击预设只填入命令，核对目标后再执行。"} 优先使用 CIM；新版系统可能没有 WMIC。预设只读，不自动安装工具、提权或卸载驱动。</p>
+            </div>
             <label className="wir-command-label">远程命令<textarea value={command} onChange={(event) => setCommand(event.target.value)} spellCheck={false} maxLength={16384} rows={3} /></label>
             <div className="wir-toolbar"><span className="wir-muted">提交前确认目标与完整命令</span><button type="button" className="win-ir-btn is-primary" disabled={!available || !command.trim()} onClick={() => void execute()}>确认并执行</button></div>
             {output ? <div className="wir-command-result"><header><span>返回于 {output.time}</span><button type="button" className="wir-link" onClick={() => onCopy(`${output.command}\n${output.output}`)}>复制输出</button></header><pre>{`> ${output.command}\n\n${output.output}`}</pre></div> : <div className="wir-empty">命令返回的原始输出将显示在这里。</div>}

@@ -19,6 +19,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::{CoreError, CoreResult};
 mod baseline;
+mod baseline_change;
+pub use baseline_change::{
+    BaselineChangeItem, BaselineChangePlan, BaselineChangeReport, BaselineChangeState,
+    BaselinePlanItem, baseline_change_supported,
+};
 
 const DEFAULT_COLLECTION_TIMEOUT: Duration = Duration::from_secs(45);
 pub const WINDOWS_EVIDENCE_PART_BYTES: usize = 256 * 1024;
@@ -356,15 +361,61 @@ pub struct WindowsRegistrySnapshot {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WindowsFileAccessRule {
+    pub identity: String,
+    pub rights: String,
+    pub access: String,
+    pub inherited: bool,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WindowsFileProcess {
+    pub pid: u32,
+    pub name: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WindowsFileService {
+    pub name: String,
+    pub display_name: String,
+    pub state: String,
+    pub start_mode: String,
+    pub path: String,
+    pub kind: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WindowsFileAccess {
+    pub path: String,
+    pub observed_at: String,
+    pub attributes: String,
+    pub owner: String,
+    pub access_rules: Vec<WindowsFileAccessRule>,
+    pub processes: Vec<WindowsFileProcess>,
+    pub services: Vec<WindowsFileService>,
+    pub warnings: Vec<String>,
+}
+
 /// High-level service owned by `BackendServices`.
 #[derive(Debug, Clone, Default)]
 pub struct WindowsIncidentService {
     hub: DvcHub,
+    baseline_store: Option<crate::store::PortableStore>,
+    baseline_changes: std::sync::Arc<baseline_change::BaselineChanges>,
 }
 
 impl WindowsIncidentService {
     pub fn new() -> Self {
-        Self { hub: DvcHub::new() }
+        Self::default()
+    }
+
+    pub fn with_store(store: crate::store::PortableStore) -> Self {
+        Self {
+            baseline_store: Some(store),
+            ..Self::new()
+        }
     }
 
     pub fn status(&self) -> DvcRuntimeStatus {
@@ -756,6 +807,59 @@ impl WindowsIncidentService {
         parse_file_preview_json(&json_str)
     }
 
+    pub fn inspect_file_access(
+        &self,
+        path: &str,
+        session_id: &str,
+    ) -> CoreResult<WindowsFileAccess> {
+        if path.is_empty() || path.len() > 1024 || path.contains(['\0', '\r', '\n']) {
+            return Err(CoreError::validation("windows file access", "文件路径无效"));
+        }
+        let script = include_str!("windows_incident/file_access.ps1")
+            .replace("__PATH__", &BASE64.encode(path.as_bytes()));
+        let raw = self
+            .hub
+            .execute_command_for_session(
+                &encode_powershell_command(&script),
+                DEFAULT_COLLECTION_TIMEOUT,
+                session_id,
+            )
+            .map_err(|_| CoreError::validation("windows file access", "文件访问诊断未完成"))?;
+        let output = strip_exit_prefix(&raw)?;
+        if output.len() > 512 * 1024 {
+            return Err(CoreError::validation("windows file access", "诊断返回超限"));
+        }
+        let result: WindowsFileAccess = serde_json::from_str(&output)
+            .map_err(|_| CoreError::validation("windows file access", "文件访问诊断返回不完整"))?;
+        if result.path.len() > 4096
+            || result.owner.len() > 4096
+            || result.attributes.len() > 4096
+            || result.observed_at.len() > 64
+            || result.access_rules.len() > 64
+            || result.processes.len() > 256
+            || result.services.len() > 256
+            || result.warnings.len() > 16
+            || result.warnings.iter().any(|v| v.len() > 4096)
+            || result.access_rules.iter().any(|v| {
+                v.identity.len() > 4096
+                    || v.rights.len() > 4096
+                    || !matches!(v.access.as_str(), "Allow" | "Deny")
+            })
+            || result.processes.iter().any(|v| v.name.len() > 4096)
+            || result.services.iter().any(|v| {
+                v.name.len() > 4096
+                    || v.display_name.len() > 4096
+                    || v.path.len() > 32768
+                    || v.state.len() > 64
+                    || v.start_mode.len() > 64
+                    || !matches!(v.kind.as_str(), "driver" | "service")
+            })
+        {
+            return Err(CoreError::validation("windows file access", "诊断范围超限"));
+        }
+        Ok(result)
+    }
+
     pub fn collect_registry(
         &self,
         key_path: &str,
@@ -793,21 +897,6 @@ impl WindowsIncidentService {
             ));
         }
         Ok(cleaned)
-    }
-
-    pub fn remediate_baseline(
-        &self,
-        rule_id: &str,
-        session_id: &str,
-    ) -> CoreResult<WindowsBaselineSnapshot> {
-        let script = baseline_remediation_script(rule_id).ok_or_else(|| {
-            CoreError::validation(
-                "windows_incident.baseline_remediate",
-                "该基线项不支持自动脚本修补，请结合说明在系统安全设置中手动调整",
-            )
-        })?;
-        self.run_ps_mutation(script, session_id)?;
-        self.collect_baseline(session_id)
     }
 
     pub fn kill_process(
@@ -888,105 +977,6 @@ impl WindowsIncidentService {
             })?;
         self.run_ps_mutation(&script, session_id)?;
         self.collect_registry(key_path, session_id)
-    }
-}
-
-pub fn baseline_remediation_script(rule_id: &str) -> Option<&'static str> {
-    match rule_id {
-        "rdp-nla" => Some(
-            "New-ItemProperty -LiteralPath 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp' -Name 'UserAuthentication' -PropertyType DWord -Value 1 -Force | Out-Null",
-        ),
-        "rdp-encryption" => Some(
-            "New-ItemProperty -LiteralPath 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp' -Name 'MinEncryptionLevel' -PropertyType DWord -Value 3 -Force | Out-Null",
-        ),
-        "rdp-security-layer" => Some(
-            "New-ItemProperty -LiteralPath 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp' -Name 'SecurityLayer' -PropertyType DWord -Value 2 -Force | Out-Null",
-        ),
-        "wdigest" => Some(
-            "$p = 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\SecurityProviders\\WDigest'; if (-not (Test-Path -LiteralPath $p)) { New-Item -Path $p -Force | Out-Null }; New-ItemProperty -LiteralPath $p -Name 'UseLogonCredential' -PropertyType DWord -Value 0 -Force | Out-Null",
-        ),
-        "lsass-ppl" => Some(
-            "New-ItemProperty -LiteralPath 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa' -Name 'RunAsPPL' -PropertyType DWord -Value 1 -Force | Out-Null",
-        ),
-        "uac" => Some(
-            "New-ItemProperty -LiteralPath 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System' -Name 'EnableLUA' -PropertyType DWord -Value 1 -Force | Out-Null",
-        ),
-        "uac-prompt" => Some(
-            "New-ItemProperty -LiteralPath 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System' -Name 'ConsentPromptBehaviorAdmin' -PropertyType DWord -Value 2 -Force | Out-Null",
-        ),
-        "uac-secure-desktop" => Some(
-            "New-ItemProperty -LiteralPath 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System' -Name 'PromptOnSecureDesktop' -PropertyType DWord -Value 1 -Force | Out-Null",
-        ),
-        "uac-filter-admin" => Some(
-            "New-ItemProperty -LiteralPath 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System' -Name 'FilterAdministratorToken' -PropertyType DWord -Value 1 -Force | Out-Null",
-        ),
-        "guest" => Some(
-            "$g = Get-LocalUser | Where-Object { $_.SID.Value -match '-501$' } | Select-Object -First 1; if (-not $g) { throw '未找到内置 Guest (RID 501) 账户' }; Disable-LocalUser -SID $g.SID -ErrorAction Stop",
-        ),
-        "auto-logon" => Some(
-            "New-ItemProperty -LiteralPath 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon' -Name 'AutoAdminLogon' -PropertyType String -Value '0' -Force | Out-Null",
-        ),
-        "smb1" => {
-            Some("Set-SmbServerConfiguration -EnableSMB1Protocol $false -Force -ErrorAction Stop")
-        }
-        "smb-server-sign" => Some(
-            "Set-SmbServerConfiguration -RequireSecuritySignature $true -Force -ErrorAction Stop",
-        ),
-        "smb-client-sign" => Some(
-            "Set-SmbClientConfiguration -RequireSecuritySignature $true -Force -ErrorAction Stop",
-        ),
-        "smb-insecure-guest" => Some(
-            "Set-SmbClientConfiguration -EnableInsecureGuestLogons $false -Force -ErrorAction Stop",
-        ),
-        "defender-rt" => {
-            Some("Set-MpPreference -DisableRealtimeMonitoring $false -ErrorAction Stop")
-        }
-        "firewall" => Some(
-            "Set-NetFirewallProfile -Profile Domain,Private,Public -Enabled True -ErrorAction Stop",
-        ),
-        "ps-scriptblock-logging" => Some(
-            "$p = 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\PowerShell\\ScriptBlockLogging'; if (-not (Test-Path -LiteralPath $p)) { New-Item -Path $p -Force | Out-Null }; New-ItemProperty -LiteralPath $p -Name 'EnableScriptBlockLogging' -PropertyType DWord -Value 1 -Force | Out-Null",
-        ),
-        "ps-module-logging" => Some(
-            "$p = 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\PowerShell\\ModuleLogging'; if (-not (Test-Path -LiteralPath $p)) { New-Item -Path $p -Force | Out-Null }; New-ItemProperty -LiteralPath $p -Name 'EnableModuleLogging' -PropertyType DWord -Value 1 -Force | Out-Null",
-        ),
-        "ps-transcription" => Some(
-            "$p = 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\PowerShell\\Transcription'; if (-not (Test-Path -LiteralPath $p)) { New-Item -Path $p -Force | Out-Null }; New-ItemProperty -LiteralPath $p -Name 'EnableTranscripting' -PropertyType DWord -Value 1 -Force | Out-Null",
-        ),
-        "blank-password" => Some(
-            "New-ItemProperty -LiteralPath 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa' -Name 'LimitBlankPasswordUse' -PropertyType DWord -Value 1 -Force | Out-Null",
-        ),
-        "anonymous" => Some(
-            "New-ItemProperty -LiteralPath 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa' -Name 'RestrictAnonymous' -PropertyType DWord -Value 1 -Force | Out-Null",
-        ),
-        "anonymous-sam" => Some(
-            "New-ItemProperty -LiteralPath 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa' -Name 'RestrictAnonymousSAM' -PropertyType DWord -Value 1 -Force | Out-Null",
-        ),
-        "ntlm" => Some(
-            "New-ItemProperty -LiteralPath 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa' -Name 'LmCompatibilityLevel' -PropertyType DWord -Value 5 -Force | Out-Null",
-        ),
-        "lm-hash" => Some(
-            "New-ItemProperty -LiteralPath 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa' -Name 'NoLMHash' -PropertyType DWord -Value 1 -Force | Out-Null",
-        ),
-        "winrm-basic" => Some(
-            "$p = 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WinRM\\Service'; if (-not (Test-Path -LiteralPath $p)) { New-Item -Path $p -Force | Out-Null }; New-ItemProperty -LiteralPath $p -Name 'AllowBasic' -PropertyType DWord -Value 0 -Force | Out-Null",
-        ),
-        "winrm-cleartext" => Some(
-            "$p = 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WinRM\\Service'; if (-not (Test-Path -LiteralPath $p)) { New-Item -Path $p -Force | Out-Null }; New-ItemProperty -LiteralPath $p -Name 'AllowUnencryptedTraffic' -PropertyType DWord -Value 0 -Force | Out-Null",
-        ),
-        "remote-registry" => Some(
-            "Stop-Service -Name 'RemoteRegistry' -Force -ErrorAction SilentlyContinue; Set-Service -Name 'RemoteRegistry' -StartupType Disabled -ErrorAction Stop",
-        ),
-        "installer-machine" => Some(
-            "$p = 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Installer'; if (-not (Test-Path -LiteralPath $p)) { New-Item -Path $p -Force | Out-Null }; New-ItemProperty -LiteralPath $p -Name 'AlwaysInstallElevated' -PropertyType DWord -Value 0 -Force | Out-Null",
-        ),
-        "installer-user" => Some(
-            "$p = 'HKCU:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Installer'; if (-not (Test-Path -LiteralPath $p)) { New-Item -Path $p -Force | Out-Null }; New-ItemProperty -LiteralPath $p -Name 'AlwaysInstallElevated' -PropertyType DWord -Value 0 -Force | Out-Null",
-        ),
-        "autorun" => Some(
-            "$p = 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer'; if (-not (Test-Path -LiteralPath $p)) { New-Item -Path $p -Force | Out-Null }; New-ItemProperty -LiteralPath $p -Name 'NoDriveTypeAutoRun' -PropertyType DWord -Value 255 -Force | Out-Null",
-        ),
-        _ => None,
     }
 }
 
@@ -1232,9 +1222,8 @@ pub fn build_delete_file_ps_script(file_path: &str, dir_path: &str) -> Option<St
         return None;
     }
     let bytes = f.as_bytes();
-    let absolute_path = bytes[0].is_ascii_alphabetic()
-        && bytes[1] == b':'
-        && matches!(bytes[2], b'\\' | b'/');
+    let absolute_path =
+        bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && matches!(bytes[2], b'\\' | b'/');
     if !(absolute_path || f.starts_with('%')) {
         return None;
     }
@@ -2042,7 +2031,7 @@ pub fn parse_baseline_json(json_str: &str) -> CoreResult<WindowsBaselineSnapshot
             severity: if unknown { WindowsRiskLevel::Low } else if pass { WindowsRiskLevel::Normal } else if matches!(*id, "wdigest" | "smb1" | "guest" | "auto-logon" | "defender-rt") { WindowsRiskLevel::High } else { WindowsRiskLevel::Medium },
             description: (*description).to_owned(),
             recommendation: if unknown { "先核对当前系统版本、组件、读取权限及缺失配置的默认行为；未读取到的值不能算通过。" } else { "结合系统版本和业务依赖确认适用性，保留原配置后制定变更计划，并独立验证实际生效情况。" }.to_owned(),
-            remediation_available: !unknown && !pass && baseline_remediation_script(id).is_some(),
+            remediation_available: !unknown && !pass && baseline_change_supported(id),
         }
     }).collect();
     baseline::append_checks(&raw, &mut items);
@@ -3321,10 +3310,10 @@ mod tests {
 
     #[test]
     fn disposal_builders_enforce_identity_and_safety_boundaries() {
-        assert!(baseline_remediation_script("wdigest").is_some());
-        assert!(baseline_remediation_script("rdp-nla").is_some());
-        assert!(baseline_remediation_script("defender-tamper").is_none());
-        assert!(baseline_remediation_script("unknown-rule").is_none());
+        assert!(baseline_change_supported("wdigest"));
+        assert!(baseline_change_supported("rdp-nla"));
+        assert!(!baseline_change_supported("defender-tamper"));
+        assert!(!baseline_change_supported("unknown-rule"));
 
         assert!(build_kill_process_ps_script(0, "2026-10-24T09:30:00Z").is_none());
         assert!(build_kill_process_ps_script(4, "2026-10-24T09:30:00Z").is_none());

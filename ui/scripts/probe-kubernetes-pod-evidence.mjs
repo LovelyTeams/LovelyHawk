@@ -7,8 +7,8 @@
 // (scripted in this debug build, as for the other evidence probes); the panel
 // follows the copy to 已保存为证据 with a digest that matches the one kubectl
 // computes inside the pod and the bytes saved locally; the host's copy is
-// gone; a dismissed folder dialog starts nothing; the case lists the evidence
-// with its file. The namespace is deleted at the end after its label is checked.
+// gone; a dismissed folder dialog starts nothing; the retained case store records
+// the evidence file and digest. The namespace is deleted after its label is checked.
 //
 //   node ui/scripts/probe-kubernetes-pod-evidence.mjs
 import { createHash, randomUUID } from "node:crypto";
@@ -139,13 +139,10 @@ try {
   await main.evaluate("[...document.querySelectorAll('[data-testid=\"pod-file-dialog\"] footer button')].find((button) => button.textContent === '关闭')?.click(), true");
   await waitFor(() => main.evaluate("document.querySelector('[data-testid=\"pod-file-dialog\"]') === null"), { label: "the closed file dialog" });
 
-  // --- The case lists it.
-  await navigate("案件工作台");
-  await waitFor(() => main.evaluate("document.querySelector('.case-list-item') !== null"), { timeoutMs: 30_000, label: "the case list" });
-  await main.evaluate("document.querySelector('.case-list-item').click(), true");
-  const listed = await waitFor(() => main.evaluate(`document.body.textContent.includes('Pod 文件留证') && document.body.textContent.includes(${JSON.stringify(`${done?.folder}/pod-file.bin`)})`), { timeoutMs: 30_000, label: "the case evidence" }).catch(() => false);
-  check("the case lists the pod file as evidence with its file", listed === true);
-  await main.screenshot(path.join(evidence, "kubernetes-pod-evidence-case.png"));
+  // The case page was retired; verify persisted provenance rather than navigating a removed entry.
+  const caseDocument = JSON.parse(fs.readFileSync(path.join(runRoot, "data", "cases.json"), "utf8"));
+  const recorded = caseDocument.data.cases.flatMap((item) => item.evidence).find((entry) => entry.locator?.endsWith(`${done?.folder}/pod-file.bin`) && entry.sha256 === podDigest);
+  check("the retained case store records the pod file location and digest", Boolean(recorded));
 
   check("no console errors in the main window", errors.length === 0, errors.slice(0, 3));
   await main.evaluate("document.querySelector('[data-testid=\"sidebar-disconnect-target\"]').click(), true");

@@ -16,7 +16,7 @@ describe("Nginx repair presentation", () => {
     fixture.state.connectivity = { kind: "connectivity", observationHandle: "observation-1", recordText: "原始完整记录 <img>",
       retention: { state: "unsaved", caseId: "original", caseTitle: "原案件", evidenceId: null, sha256: null, detail: "案件保存失败", canRetry: true },
       endpointHandle: "e", serverName: "a.test", path: "/", checkedAt: "2026-09-08T12:00:00Z", report: { clientVersion: "OpenSSL test", rows: (["TLSv1", "TLSv1_1", "TLSv1_2", "TLSv1_3"] as const).map((version) => ({ version, outcome: "inconclusive", detail: "timeout", certificateSha256: null, httpOutcome: "not-sent", httpStatus: null })) } };
-    const markup = renderToStaticMarkup(<NginxRepairPage api={api} bindingHandle="b" onCopyRecord={vi.fn()} onOpenCase={vi.fn()} />);
+    const markup = renderToStaticMarkup(<NginxRepairPage api={api} bindingHandle="b" onCopyRecord={vi.fn()} />);
     for (const text of ["本次观察尚未留证", "重试保存本次观察", "复制完整记录", "放弃未保存结果", "5 分钟", "未能判断"]) expect(markup).toContain(text);
     expect(markup).not.toContain("已留存到案件"); expect(markup).not.toContain("查看留证案件");
     expect(markup).toContain('disabled="">识别 Nginx 实例'); expect(markup).not.toContain("案件记录 SHA-256");

@@ -8,8 +8,8 @@
 //! the system dialog and write the file here, so no page ever holds a local
 //! path or a full export.
 //!
-//! Calls run one at a time in arrival order within each of three lanes: the
-//! terminal windows' shells, their file manager, and everything else. With a
+//! Calls run one at a time in arrival order within each of four lanes: the
+//! terminal windows' shells, their file manager, bounded task controls, and everything else. With a
 //! single queue, a 30-second scan in the main window held back every keystroke
 //! and output poll of an open terminal until the page gave up on them. The
 //! terminal and file APIs re-check their binding and target after every await,
@@ -204,7 +204,7 @@ enum Lane {
     Main = 0,
     Terminal = 1,
     Files = 2,
-    /// Stopping a transfer: it must not wait behind the transfer it stops.
+    /// Task status and cancellation must not wait behind the operation they control.
     Control = 3,
 }
 
@@ -220,6 +220,21 @@ fn lane_for(method: &str) -> Lane {
         Lane::Files
     } else {
         Lane::Main
+    }
+}
+
+fn lane_for_request(method: &str, params: &Value) -> Lane {
+    // Only in-memory status/cancel actions bypass the main queue. The backend
+    // still validates the complete request and its session; writes stay queued.
+    if method == "windows.incident"
+        && matches!(
+            params.get("action").and_then(Value::as_str),
+            Some("status" | "baseline-plan-progress" | "cancel-baseline-plan")
+        )
+    {
+        Lane::Control
+    } else {
+        lane_for(method)
     }
 }
 
@@ -259,7 +274,7 @@ impl BackendBridge {
         params: Value,
     ) -> Result<Value, (&'static str, &'static str)> {
         let state = Arc::clone(&self.state);
-        let queue = Arc::clone(&self.lanes[lane_for(method) as usize]);
+        let queue = Arc::clone(&self.lanes[lane_for_request(method, &params) as usize]);
         let method = method.to_owned();
         let task = tokio::spawn(async move {
             let _turn = queue.lock().await;
@@ -431,6 +446,24 @@ mod tests {
         }
         // A cancel cannot queue behind the transfer it is meant to stop.
         assert_eq!(lane_for("sftp-browser.transfer.cancel"), Lane::Control);
+        for action in ["status", "baseline-plan-progress", "cancel-baseline-plan"] {
+            assert_eq!(
+                lane_for_request("windows.incident", &json!({"action":action})),
+                Lane::Control
+            );
+        }
+        for action in [
+            "apply-baseline-plan",
+            "plan-baseline",
+            "run-command",
+            "baseline-history",
+            "cancel-everything",
+        ] {
+            assert_eq!(
+                lane_for_request("windows.incident", &json!({"action":action})),
+                Lane::Main
+            );
+        }
         for method in [
             "emergency-command.run",
             "ssh.binding.disconnect",
@@ -465,6 +498,13 @@ mod tests {
             )
             .await;
             assert!(matches!(terminal, Ok(Err(_))), "{terminal:?}");
+            for action in ["status", "baseline-plan-progress", "cancel-baseline-plan"] {
+                let params = if action == "status" { json!({"action":action}) } else {
+                    json!({"action":action,"planId":"00000000-0000-4000-8000-000000000001","sessionId":"00000000-0000-4000-8000-000000000002"})
+                };
+                let response = tokio::time::timeout(deadline, bridge.call("windows.incident", params)).await;
+                assert!(matches!(response, Ok(Ok(_))), "{action}: {response:?}");
+            }
             // The main lane really is held: its own call waits.
             let main = tokio::time::timeout(
                 std::time::Duration::from_millis(300),
