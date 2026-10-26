@@ -1,18 +1,17 @@
 import { WinIrDesktop } from "./WinIrDesktop";
-import { Activity, useEffect, useRef, useState, type ReactElement } from "react";
+import { Activity, useEffect, useRef, useState } from "react";
 
-import type { PageGroup } from "../shared/contract";
 import type {
   WindowsAccountEntry, WindowsBaselineItem, WindowsFileEntry, WindowsIncidentApi,
   WindowsProcessEntry, WindowsRegistryValue, WindowsStartupEntry,
 } from "../shared/windows-incident-contract";
 import { DialogHost } from "./DialogHost";
-import { ChevronIcon, NavGroupIcon, SearchIcon } from "./SidebarNav";
 import { errorText } from "./error-text";
 import { useConfirmDialog } from "./use-confirm-dialog";
 import { WinIrProcesses, WinIrNetwork } from "./WinIrActivity";
 import { WinIrAccounts, WinIrBaseline, WinIrStartup } from "./WinIrChecks";
-import { WinIrConsole } from "./WinIrConsole";
+import { WinIrDock } from "./WinIrDock";
+import { WinIrConsole, type WindowsDockTab } from "./WinIrConsole";
 import { WinIrLogs, WinIrTimeline } from "./WinIrEvents";
 import { WinIrFileManager } from "./WinIrFileManager";
 import { WinIrIcon } from "./WinIrIcon";
@@ -20,7 +19,7 @@ import { ModuleHeader } from "./WinIrKit";
 import { WinIrOverview } from "./WinIrOverview";
 import { WinIrRegistry } from "./WinIrRegistry";
 import { WinIrSetup } from "./WinIrSetup";
-import { formatBytes, matchesQuery, parentPath } from "./win-ir-helpers";
+import { formatBytes, parentPath } from "./win-ir-helpers";
 import { collectedTime, focusFor, moduleLabel, WIN_IR_MODULES, type CollectionTab, type FocusTarget, type InvestigationFocus, type WindowsIncidentTab } from "./win-ir-model";
 import type { RelatedContext } from "./WinIrRelated";
 import { useWindowsIncident } from "./use-windows-incident";
@@ -29,40 +28,31 @@ import "./win-ir-workspace.css";
 
 export type { WindowsIncidentTab } from "./win-ir-model";
 
-function EvidenceIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M4 1.8h5.6L12.6 5v9.2H4Z" /><path d="M9.4 1.8V5h3.2" /><path d="m6.2 9.4 1.6 1.6 2.6-3" />
-    </svg>
-  );
-}
-
-/** Each module group takes the colour and icon of the matching group in the main navigation. */
-const NAV_GROUP_LOOK: Record<string, { tone: PageGroup; icon: ReactElement }> = {
-  研判: { tone: "triage", icon: <NavGroupIcon group="triage" /> },
-  排查: { tone: "investigation", icon: <NavGroupIcon group="investigation" /> },
-  取证: { tone: "intelligence", icon: <EvidenceIcon /> },
-  连接: { tone: "target", icon: <NavGroupIcon group="target" /> },
-};
-
 export interface WindowsIncidentPageProps {
   api: WindowsIncidentApi;
   writeClipboard?: (text: string) => Promise<void>;
   onBackToWelcome?: () => void;
+  onOpenSettings?: (returnFocus: HTMLElement) => void;
   channelOpenRequest?: number;
   covered?: boolean;
   onConnectionChange?: (connected: boolean, hostname: string | null) => void;
 }
 
-export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onConnectionChange, channelOpenRequest = 0, covered = false }: WindowsIncidentPageProps) {
+export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOpenSettings, onConnectionChange, channelOpenRequest = 0, covered = false }: WindowsIncidentPageProps) {
   const data = useWindowsIncident(api);
   const confirm = useConfirmDialog();
   const [activeTab, setActiveTab] = useState<WindowsIncidentTab>("overview");
   const [visited, setVisited] = useState<ReadonlySet<WindowsIncidentTab>>(new Set(["overview"]));
-  const [navigationQuery, setNavigationQuery] = useState("");
   const [rail, setRail] = useState(false);
-  const [closedGroups, setClosedGroups] = useState<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    const narrow = window.matchMedia("(max-width: 1100px)");
+    const update = () => setRail(narrow.matches);
+    update(); narrow.addEventListener("change", update);
+    return () => narrow.removeEventListener("change", update);
+  }, []);
   const [consoleOpen, setConsoleOpen] = useState(false);
+  const [dockTab, setDockTab] = useState<WindowsDockTab>("tasks");
+  function openDock(tab: WindowsDockTab) { setDockTab(tab); setConsoleOpen(true); }
   useEffect(() => { if (channelOpenRequest > 0) setConsoleOpen((open) => !open); }, [channelOpenRequest]);
   const [setupOpen, setSetupOpen] = useState(false);
   const [focus, setFocus] = useState<InvestigationFocus | null>(null);
@@ -78,7 +68,8 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onCo
   const showWorkspace = connected || hasSnapshots || activeTab === "desktop";
   const setupView = !showWorkspace || setupOpen;
   const activeModule = WIN_IR_MODULES.find((module) => module.key === activeTab)!;
-  const groups = [...new Set(WIN_IR_MODULES.map((module) => module.group))];
+  const groups = ["调查", "取证", "配置"];
+  const unsavedCount = data.status?.receivedFiles.filter((file) => !data.savedFiles.has(file.fileId)).length ?? 0;
 
   useEffect(() => { onConnectionChange?.(connected, host); }, [connected, host, onConnectionChange]);
   // The guide opens by itself only before anything was collected; after a disconnect the old records stay in view.
@@ -97,16 +88,11 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onCo
   useEffect(() => { if (connected) setSetupOpen(false); }, [connected]);
 
   function navigate(tab: WindowsIncidentTab, crossLink = false) {
-    if (tab === "console") { setConsoleOpen(true); return; }
+    if (tab === "console") { openDock("command"); return; }
     setConsoleOpen(false);
     setReturnTo(crossLink && tab !== activeTab ? { from: activeTab, to: tab } : null);
     setActiveTab(tab);
     setVisited((before) => new Set([...before, tab]));
-    setClosedGroups((before) => {
-      const next = new Set(before);
-      next.delete(WIN_IR_MODULES.find((module) => module.key === tab)!.group);
-      return next;
-    });
   }
   async function copy(text: string) {
     if (!writeClipboard) { data.setError("当前窗口无法访问剪贴板。"); return; }
@@ -235,70 +221,36 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onCo
 
   return (
     <section className={`page windows-incident-page${rail ? " is-rail" : ""}`} data-testid="windows-incident-page">
+      <header className="wir-host-bar" aria-label="当前被检主机">
+        <span className="wir-host-icon"><WinIrIcon name="overview" size={20} /></span>
+        <strong title={host ?? undefined}>{host || (connected ? "主机名称待采集" : "等待连接被检主机")}</strong>
+        {data.snapshots.overview ? <><span className="wir-host-system" title={data.snapshots.overview.osCaption}>{data.snapshots.overview.osCaption}</span><span className="wir-host-permission">{data.snapshots.overview.isElevated ? "管理员权限" : "普通用户权限"}</span></> : null}
+        <span className={`wir-host-connection${connected && !data.statusError ? "" : " is-offline"}`} role="status"><i className={connected && !data.statusError ? "status-dot" : "status-dot idle"} aria-hidden="true" />{data.statusError ? "连接状态待核实" : connected ? "采集通道已连接" : hasSnapshots ? "已断连 · 查看旧快照" : "采集通道未连接"}</span>
+        <div className="wir-host-actions">
+          {unsavedCount > 0 ? <button type="button" className="wir-unsaved-link" onClick={() => openDock("files")}>{unsavedCount} 个文件待保存</button> : null}
+          <button type="button" className="win-ir-btn" aria-label="远程桌面" aria-current={activeTab === "desktop" ? "page" : undefined} onClick={() => { navigate("desktop"); setSetupOpen(false); }}><WinIrIcon name="desktop" size={14} />远程桌面</button>
+        </div>
+      </header>
       <aside className={`sidebar win-ir-sidebar${rail ? " is-rail" : ""}`} aria-label="Windows 应急响应边栏">
-        {rail ? null : <div className={`sidebar-target${connected ? "" : " is-idle"}`}>
-          <span className="sidebar-target-state"><span className={connected ? "status-dot" : "status-dot idle"} aria-hidden="true" />{connected ? "已连接被检会话" : hasSnapshots ? "连接已断开" : "等待连接被检主机"}</span>
-          {connected || hasSnapshots ? <strong title={host ?? undefined}>{host || "主机名称待采集"}</strong> : null}
-          <p>{connected ? "经远程桌面通道只读采集。" : hasSnapshots ? "旧快照仅供查看，远程操作已暂停。" : "完成三步接入后开始调查。"}</p>
-          {connected ? <div className="sidebar-target-actions">
-            <button type="button" aria-expanded={setupOpen} onClick={() => setSetupOpen(!setupOpen)}>{setupOpen ? "收起接入说明" : "接入管理"}</button>
-            <button type="button" aria-current={activeTab === "desktop" ? "page" : undefined} onClick={() => navigate("desktop")}>远程桌面</button>
-          </div> : <button type="button" className="sidebar-target-primary" aria-expanded={setupOpen} onClick={() => setSetupOpen(!setupOpen)}>{setupOpen ? "收起接入说明" : "重新接入"}</button>}
-        </div>}
-        {onBackToWelcome ? <div className="nav-switch-row">
-          <button type="button" className="nav-item nav-switch" data-testid="windows-back-welcome" disabled={busy} title="返回模块选择 / 切换至 Linux" aria-label="返回模块选择 / 切换至 Linux" onClick={onBackToWelcome}>
-            <span className="nav-icon" aria-hidden="true">←</span><strong>切换至 Linux 工作台</strong>
-          </button>
-        </div> : null}
-        {rail ? null : <div className="sidebar-search">
-          <SearchIcon />
-          <input type="search" value={navigationQuery} aria-label="查找排查模块" placeholder="查找排查模块" autoComplete="off" spellCheck={false}
-            onChange={(event) => setNavigationQuery(event.target.value)}
-            onKeyDown={(event) => { if (event.key === "Escape" && navigationQuery !== "") { event.preventDefault(); event.stopPropagation(); setNavigationQuery(""); } }} />
-          {navigationQuery ? <button type="button" className="sidebar-search-clear" aria-label="清除查找" title="清除查找" onClick={() => setNavigationQuery("")}>×</button> : null}
-        </div>}
         <nav aria-label="Windows 应急响应模块">
-          {groups.map((group) => {
-            const modules = WIN_IR_MODULES.filter((module) => module.key !== "console" && module.group === group && (rail || matchesQuery(navigationQuery, module.label, module.description)));
-            if (!modules.length) return null;
-            const open = rail || navigationQuery !== "" || !closedGroups.has(group);
-            const look = NAV_GROUP_LOOK[group] ?? NAV_GROUP_LOOK["连接"]!;
-            return <section className={`nav-group nav-group--${look.tone}${open ? " is-open" : ""}`} key={group} aria-label={group}>
-              {rail ? null : <button type="button" className="nav-group-row" aria-expanded={open} disabled={navigationQuery !== ""} onClick={() => setClosedGroups((before) => { const next = new Set(before); if (next.has(group)) next.delete(group); else next.add(group); return next; })}>
-                <span className="nav-group-icon">{look.icon}</span>
-                <span className="nav-group-label">{group}</span>
-                <span className="nav-group-count" aria-label={`${modules.length} 个模块`}>{modules.length}</span>
-                <ChevronIcon />
-              </button>}
-              <div className="nav-group-items" inert={open ? undefined : true}>
-                <div className="nav-group-items-inner">
-                  {modules.map((module) => {
-                    const count = attentionCount(module.key);
-                    const active = activeTab === module.key;
-                    const waiting = !connected && module.key !== "desktop" && !data.snapshots[module.key as CollectionTab];
-                    return <button key={module.key} type="button" className={["nav-item", "win-ir-nav-item", active ? "active" : "", waiting ? "needs-target" : ""].filter(Boolean).join(" ")}
-                      aria-label={module.label} aria-current={active ? "page" : undefined} title={rail ? module.label : module.description} onClick={() => navigate(module.key)}>
-                      <span className="nav-icon"><WinIrIcon name={module.key} size={16} /></span>
-                      <strong>{module.label}</strong>
-                      {count ? <em className="win-ir-nav-count" aria-label={`${count} 条待关注线索`}>{count > 99 ? "99+" : count}</em> : waiting ? <i className="nav-needs-target" aria-label="需要连接被检主机" /> : <i aria-hidden="true" />}
-                    </button>;
-                  })}
-                </div>
-              </div>
-            </section>;
-          })}
-          {!rail && !WIN_IR_MODULES.some((module) => matchesQuery(navigationQuery, module.label, module.description)) ? <p className="nav-empty" role="status">没有名称或说明包含“{navigationQuery.trim()}”的模块。</p> : null}
+          {groups.map((group) => <section className="wir-nav-group" key={group} aria-label={group}>
+            <h2>{group}</h2>
+            {WIN_IR_MODULES.filter((module) => module.group === group).map((module) => {
+              const count = attentionCount(module.key);
+              const active = activeTab === module.key && !setupView;
+              return <button key={module.key} type="button" className={`nav-item win-ir-nav-item${active ? " active" : ""}`} aria-label={module.label} aria-current={active ? "page" : undefined} title={module.label} onClick={() => { navigate(module.key); if (showWorkspace) setSetupOpen(false); }}>
+                <span className="nav-icon"><WinIrIcon name={module.key} size={18} /></span><strong>{module.label}</strong>
+                {count ? <em className="win-ir-nav-count" aria-label={`${count} 条待关注线索`}>{count > 99 ? "99+" : count}</em> : null}
+              </button>;
+            })}
+          </section>)}
         </nav>
         <div className="sidebar-rail-toggle win-ir-sidebar-foot">
-          <button type="button" aria-label="通道与传输" aria-expanded={consoleOpen} title="通道与传输" onClick={() => setConsoleOpen(!consoleOpen)}>
-            <WinIrIcon name="console" size={14} />{rail ? null : <span>通道与传输</span>}
-          </button>
-          <button type="button" aria-label={rail ? "展开导航" : "收起导航"} aria-pressed={rail} title={rail ? "展开导航" : "收起为图标栏"} onClick={() => setRail(!rail)}>
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <rect x="1.8" y="2.4" width="12.4" height="11.2" rx="2" /><path d="M6 2.4v11.2" /><path d={rail ? "m9 6.2 1.8 1.8L9 9.8" : "m10.8 6.2-1.8 1.8 1.8 1.8"} />
-            </svg>
-            {rail ? null : <span>收起导航</span>}
-          </button>
+          <button type="button" aria-label="接入管理" aria-expanded={setupView} title="接入管理" onClick={() => setSetupOpen(!setupOpen)}><WinIrIcon name="network" size={16} /><span>接入管理</span></button>
+          <button type="button" aria-label="通道与传输" aria-expanded={consoleOpen} title="通道与传输" onClick={() => setConsoleOpen(!consoleOpen)}><WinIrIcon name="console" size={16} /><span>通道与传输</span></button>
+          {onOpenSettings ? <button type="button" aria-label="界面设置" title="界面设置" onClick={(event) => onOpenSettings(event.currentTarget)}><WinIrIcon name="baseline" size={16} /><span>界面设置</span></button> : null}
+          {onBackToWelcome ? <button type="button" data-testid="windows-back-welcome" aria-label="返回模块选择 / 切换至 Linux" title="返回模块选择 / 切换至 Linux" disabled={busy} onClick={onBackToWelcome}><span aria-hidden="true">←</span><span>切换工作台</span></button> : null}
+          <button type="button" aria-label={rail ? "展开导航" : "收起导航"} aria-pressed={rail} title={rail ? "展开导航" : "收起导航"} onClick={() => setRail(!rail)}><span aria-hidden="true">{rail ? "»" : "«"}</span><span>{rail ? "展开导航" : "收起导航"}</span></button>
         </div>
       </aside>
 
@@ -332,13 +284,13 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onCo
           {activeTab !== "desktop" ? <ModuleHeader title={activeModule.label} description={activeModule.description} collectedAt={collectedTime(data.collectedAt[activeTab as CollectionTab])} busy={busy || !connected} actionLabel={activeModule.action} onCollect={collectCurrent}
             extra={<>
               {back ? <button type="button" className="win-ir-btn wir-back-link" onClick={() => navigate(back.from)}>← 返回{moduleLabel(back.from)}</button> : null}
-              {activeTab === "files" ? <button type="button" className="win-ir-btn" onClick={() => navigate("console")}>接收与保存</button> : null}
+              {activeTab === "files" ? <button type="button" className="win-ir-btn" onClick={() => openDock("files")}>接收与保存</button> : null}
               {activeTab !== "console" && activeTab !== "timeline" && data.snapshots[activeTab] ? <button type="button" className="win-ir-btn" onClick={() => void copy(JSON.stringify({ hostname: host, collectedAt: data.collectedAt[activeTab], module: activeTab, snapshot: data.snapshots[activeTab] }, null, 2))}>复制结果 JSON</button> : null}
             </>}
           /> : null}
           {data.collectionErrors[activeTab as CollectionTab] ? <details className="wir-collection-warnings"><summary>上次采集未完成 · 查看原因与重试</summary><span>上次采集未完成：{data.collectionErrors[activeTab as CollectionTab]}{data.snapshots[activeTab as CollectionTab] ? " 下面保留上一次成功采集的结果。" : ""}</span><button type="button" className="win-ir-btn" disabled={busy || !connected} onClick={collectCurrent}>重试</button></details> : null}
           {WIN_IR_MODULES.filter((module) => visited.has(module.key)).map(({ key }) => <Activity key={`${data.snapshotKey}:${key}`} mode={key === activeTab ? "visible" : "hidden"}>
-            {key === "desktop" ? <WinIrDesktop api={api.windowsRdp} covered={covered || consoleOpen || setupOpen} /> : null}
+            {key === "desktop" ? <WinIrDesktop api={api.windowsRdp} covered={covered || setupOpen} /> : null}
             {key === "overview" ? <WinIrOverview snapshots={data.snapshots} collectedAt={data.collectedAt} busy={busy || !connected} onNavigate={(tab) => navigate(tab, true)} onGo={goTo} onCollectAll={() => void data.collectAll()} /> : null}
             {key === "baseline" ? <WinIrBaseline snapshot={data.snapshots.baseline ?? null} focus={focusFor(focus, "baseline")} busy={busy} connected={connected} onCopy={(text) => void copy(text)} onRemediate={(item) => void remediateBaseline(item)} /> : null}
             {key === "processes" ? <WinIrProcesses busy={busy} connected={connected} onInspect={data.inspectProcess} onKill={(process) => void killProcess(process)} snapshot={data.snapshots.processes ?? null} network={data.snapshots.network ?? null} focus={focusFor(focus, "processes")} related={related} onCopy={(text) => void copy(text)} onFile={locateFile} onNetwork={(pid) => goTo({ tab: "network", pid })} /> : null}
@@ -347,18 +299,15 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onCo
             {key === "accounts" ? <WinIrAccounts snapshot={data.snapshots.accounts ?? null} busy={busy} connected={connected} focus={focusFor(focus, "accounts")} related={related} onCopy={(text) => void copy(text)} onLogs={(query) => goTo({ tab: "logs", query })} onDisable={(entry) => void disableAccount(entry)} /> : null}
             {key === "logs" ? <WinIrLogs onDirectory={(path) => { if (!busy && connected) { navigate("files", true); void data.collect("files", path); } }} snapshot={data.snapshots.logs ?? null} busy={busy || !connected} category={data.snapshots.logs?.categoryFilter ?? "all"} onCategory={(category) => void data.collect("logs", category)} focus={focusFor(focus, "logs")} onCopy={(text) => void copy(text)} /> : null}
             {key === "timeline" ? <WinIrTimeline snapshots={data.snapshots} onCopy={(text) => void copy(text)} onGo={goTo} /> : null}
-            {key === "files" ? <WinIrFileManager snapshot={data.snapshots.files ?? null} busy={busy} connected={connected} revealPath={focus?.target.tab === "files" ? focus.target.path : null} related={related} onNavigate={(path) => void data.collect("files", path)} onPreview={data.previewFile} onPull={(path) => void data.pullFile(path)} onDelete={(entry) => void deleteFile(entry)} onCopy={(text) => void copy(text)} /> : null}
+            {key === "files" ? <WinIrFileManager snapshot={data.snapshots.files ?? null} busy={busy} connected={connected} revealPath={focus?.target.tab === "files" ? focus.target.path : null} related={related} onNavigate={(path) => void data.collect("files", path)} onPreview={data.previewFile} onPull={(path) => void data.pullFile(path).then((received) => { if (received) openDock("files"); })} onDelete={(entry) => void deleteFile(entry)} onCopy={(text) => void copy(text)} /> : null}
             {key === "registry" ? <WinIrRegistry snapshot={data.snapshots.registry ?? null} busy={busy} connected={connected} focus={focusFor(focus, "registry")} related={related} onNavigate={(path) => void data.collect("registry", path)} onDeleteValue={(keyPath, value) => void deleteRegistryValue(keyPath, value)} onCopy={(text) => void copy(text)} /> : null}
 
           </Activity>)}
         </div> : null}
       </div>
-      <Activity mode={consoleOpen ? "visible" : "hidden"}>
-        <aside className="wir-channel-drawer" aria-label="通道与传输面板" onKeyDown={(event) => { if (event.key === "Escape" && !document.querySelector('[role="dialog"], [role="alertdialog"]') && !busy && !event.defaultPrevented && !(event.target instanceof HTMLTextAreaElement)) { setConsoleOpen(false); } }}>
-          <header><strong>通道与传输</strong><span>{connected ? "会话已连接" : "未连接"} · {data.status?.receivedFiles.length ?? 0} 个接收文件</span><button type="button" className="wir-icon-button" aria-label="收起通道与传输" disabled={busy} onClick={() => setConsoleOpen(false)}>⌄</button></header>
-          <div className="wir-channel-content"><WinIrConsole status={data.status} busy={busy} sessionKey={data.sessionKey} hostname={host || "当前远程会话"} output={data.commandOutput} savedFiles={data.savedFiles} canSave={api.saveWindowsFile !== undefined} onSave={(fileId) => void data.saveFile(fileId)} onCopy={(text) => void copy(text)} onSend={data.sendChat} onRun={data.runCommand} onUnregister={() => void local("unregister-plugin", "正在移除插件注册…", "当前用户的插件注册已移除。")} /></div>
-        </aside>
-      </Activity>
+      <WinIrDock data={data} expanded={consoleOpen} tab={dockTab} onTab={openDock} onToggle={() => setConsoleOpen(!consoleOpen)}>
+        <WinIrConsole panel={dockTab} status={data.status} busy={busy} sessionKey={data.sessionKey} hostname={host || "当前远程会话"} output={data.commandOutput} savedFiles={data.savedFiles} canSave={api.saveWindowsFile !== undefined} onSave={(fileId) => void data.saveFile(fileId)} onCopy={(text) => void copy(text)} onSend={data.sendChat} onRun={data.runCommand} onUnregister={() => void local("unregister-plugin", "正在移除插件注册…", "当前用户的插件注册已移除。")} />
+      </WinIrDock>
       {confirm.dialog ? <DialogHost dialog={confirm.dialog} scrollMessage onResolve={confirm.resolve} /> : null}
     </section>
   );

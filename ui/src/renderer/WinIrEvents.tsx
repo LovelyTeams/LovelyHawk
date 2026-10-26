@@ -69,6 +69,7 @@ export function WinIrLogs({ snapshot, busy, category, onCategory, focus, onCopy,
         ].map(([label, path]) => <button key={path} type="button" disabled={busy || !onDirectory} title={`在文件排查中打开 ${path}`} onClick={() => onDirectory?.(path!)}>{label} <span aria-hidden="true">↗</span></button>)}</nav>
       </aside>
       <div className="wir-log-main">
+        <p className="wir-query-scope">远端查询：{LOG_CATEGORIES.find((preset) => preset.value === category)?.label ?? category} · 最近 7 天 · 每通道最多 200 条。下方搜索仅筛选已返回记录。</p>
         <StatStrip cards={[
           { label: "已返回事件", value: snapshot?.totalCount ?? "—", hint: "最近事件样本，非全部历史" },
           { label: "高危线索", value: snapshot?.highRiskCount ?? "—", tone: "high", onClick: () => setRisk("high") },
@@ -76,7 +77,7 @@ export function WinIrLogs({ snapshot, busy, category, onCategory, focus, onCopy,
           { label: "日志清除 104 / 1102", value: snapshot ? entries.filter((entry) => (entry.channel.toLowerCase() === "system" && entry.eventId === 104) || (entry.channel.toLowerCase() === "security" && entry.eventId === 1102)).length : "—", tone: "high" },
         ]} />
         <div className="wir-toolbar">
-          <SearchBox value={query} onChange={setQuery} placeholder="搜索事件内容、账户、地址或通道" />
+          <SearchBox value={query} onChange={setQuery} placeholder="在已返回事件中搜索内容、账户或地址" />
           <input className="win-ir-input wir-event-filter" type="text" inputMode="numeric" value={eventId} aria-label="事件 ID 筛选" placeholder="事件 ID" onChange={(event) => setEventId(event.target.value.replace(/[^\d,， ]/gu, ""))} />
           <button type="button" className="win-ir-btn" disabled={!visible.length} onClick={() => onCopy(toCsv(
             ["时间", "通道", "记录 ID", "事件 ID", "分类", "摘要", "详情"],

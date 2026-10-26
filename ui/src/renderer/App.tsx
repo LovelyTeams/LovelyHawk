@@ -745,7 +745,7 @@ export function App() {
               api={window.lovelyhawk}
             />
           ) : activePage.id === "windows-incident" ? (
-            <WindowsIncidentPage covered={overlayOpen || pageModalOpen} channelOpenRequest={windowsChannelRequest}
+            <WindowsIncidentPage onOpenSettings={openSettings} covered={overlayOpen || pageModalOpen} channelOpenRequest={windowsChannelRequest}
               api={window.lovelyhawk}
               writeClipboard={window.lovelyhawk.writeClipboard}
               onConnectionChange={acceptWindowsTarget}

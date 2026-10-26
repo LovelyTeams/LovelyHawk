@@ -275,9 +275,15 @@ export function DataTable<T>({ label, columns, rows, rowKey, selectedKey, onSele
 
   useEffect(() => {
     if (selectedKey === null) return;
-    const row = bodyRef.current?.querySelector<HTMLElement>(`[data-row-key="${CSS.escape(selectedKey)}"]`);
-    row?.scrollIntoView({ block: "nearest" });
-  }, [selectedKey]);
+    const body = bodyRef.current;
+    const row = body?.querySelector<HTMLElement>(`[data-row-key="${CSS.escape(selectedKey)}"]`);
+    if (!body || !row || body.clientHeight === 0) return;
+    const viewport = body.getBoundingClientRect(), bounds = row.getBoundingClientRect();
+    const top = viewport.top + (body.querySelector("thead")?.getBoundingClientRect().height ?? 0);
+    // Scroll only the evidence list, keeping the module header and dock in place.
+    if (bounds.top < top) body.scrollTop -= top - bounds.top;
+    else if (bounds.bottom > viewport.bottom) body.scrollTop += bounds.bottom - viewport.bottom;
+  }, [selectedKey, pageIndex]);
 
   function onKeyDown(event: KeyboardEvent<HTMLTableElement>) {
     if (event.target instanceof HTMLElement && event.target.closest("button, input, select")) return;
@@ -382,12 +388,23 @@ export function DetailPane({ title, subtitle, risk, reasons, fields, children, a
   tabs?: ReactNode;
   className?: string;
 }) {
+  const pane = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const root = pane.current;
+    const table = root?.closest(".wir-module")?.querySelector<HTMLElement>('table[role="grid"]');
+    if (table && table.getClientRects().length === 0) root?.querySelector<HTMLButtonElement>('[aria-label="关闭详情"]')?.focus({ preventScroll: true });
+  }, []);
   const copyAll = () => onCopy?.(copyText ?? [`${title}${subtitle ? ` · ${subtitle}` : ""}`, ...fields.map((field) => `${field.label}：${field.value}`), ...(reasons ?? []).map((reason) => `风险：${reason}`)].join("\n"));
+  const close = (element: HTMLElement) => {
+    const table = (element.closest(".wir-explorer, .wir-module") ?? element.parentElement)?.querySelector<HTMLElement>('table[role="grid"]');
+    onClose();
+    // In the narrow inspector the table is hidden until React commits the close.
+    requestAnimationFrame(() => { if (table?.isConnected) table.focus({ preventScroll: true }); });
+  };
   return (
-    <aside className={`wir-detail${className ? ` ${className}` : ""}`} aria-label={`${title} 详情`} onKeyDown={(event) => {
+    <aside ref={pane} className={`wir-detail${className ? ` ${className}` : ""}`} aria-label={`${title} 详情`} onKeyDown={(event) => {
       if (event.key === "Escape") {
-        const table = (event.currentTarget.closest(".wir-explorer, .wir-module") ?? event.currentTarget.parentElement)?.querySelector<HTMLElement>('table[role="grid"]');
-        event.stopPropagation(); onClose(); table?.focus();
+        event.stopPropagation(); close(event.currentTarget);
       }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c" && !window.getSelection()?.toString() && onCopy) { event.preventDefault(); copyAll(); }
     }}>
@@ -397,9 +414,10 @@ export function DetailPane({ title, subtitle, risk, reasons, fields, children, a
           <h3 title={title}>{title}</h3>
           {subtitle ? <p>{subtitle}</p> : null}
         </div>
-        <button type="button" className="wir-icon-button" aria-label="关闭详情" title="关闭详情（Esc）" onClick={onClose}>×</button>
+        <button type="button" className="wir-icon-button" aria-label="关闭详情" title="关闭详情（Esc）" onClick={(event) => close(event.currentTarget)}>×</button>
       </header>
       {tabs}
+      <div className="wir-detail-content">
       {reasons && reasons.length > 0 ? (
         <ul className={`wir-reasons is-${risk ?? "low"}`}>{reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
       ) : null}
@@ -412,6 +430,7 @@ export function DetailPane({ title, subtitle, risk, reasons, fields, children, a
         ))}
       </dl> : null}
       {children}
+      </div>
       <footer>
         {onCopy ? <button type="button" className="win-ir-btn" onClick={copyAll}>复制全部字段</button> : null}
         {actions}

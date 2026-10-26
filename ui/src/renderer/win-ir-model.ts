@@ -33,13 +33,13 @@ export const WIN_IR_MODULES: ReadonlyArray<{
   group: string;
   action: string;
 }> = [
-  { key: "overview", label: "主机总览", group: "研判", description: "先了解目标与防护状态，再沿着风险线索深入排查。", action: "刷新主机概况" },
-  { key: "baseline", label: "基线配置", group: "研判", description: "对照当前值和建议值核查配置，查看每项检查的依据与建议。", action: "核查安全基线" },
-  { key: "timeline", label: "调查时间线", group: "研判", description: "按时间对照已采集的事件、进程启动和文件修改记录。", action: "采集核心模块" },
-  { key: "processes", label: "进程分析", group: "排查", description: "从父子关系、执行路径和命令行定位可疑活动。", action: "刷新进程" },
-  { key: "network", label: "网络连接", group: "排查", description: "区分监听、活动连接和公网地址，关联到所属进程。", action: "刷新连接" },
-  { key: "startup", label: "启动项", group: "排查", description: "按持久化来源检查启动位置、执行命令与运行账户。", action: "采集启动项" },
-  { key: "accounts", label: "本地账户", group: "排查", description: "核对管理员、账户状态、口令属性与最近登录。", action: "采集账户" },
+  { key: "overview", label: "主机总览", group: "调查", description: "先了解目标与防护状态，再沿着风险线索深入排查。", action: "刷新主机概况" },
+  { key: "baseline", label: "基线配置", group: "配置", description: "对照当前值和建议值核查配置，查看每项检查的依据与建议。", action: "核查安全基线" },
+  { key: "timeline", label: "调查时间线", group: "取证", description: "按时间对照已采集的事件、进程启动和文件修改记录。", action: "采集核心模块" },
+  { key: "processes", label: "进程分析", group: "调查", description: "从父子关系、执行路径和命令行定位可疑活动。", action: "刷新进程" },
+  { key: "network", label: "网络连接", group: "调查", description: "区分监听、活动连接和公网地址，关联到所属进程。", action: "刷新连接" },
+  { key: "startup", label: "启动项", group: "调查", description: "按持久化来源检查启动位置、执行命令与运行账户。", action: "采集启动项" },
+  { key: "accounts", label: "本地账户", group: "调查", description: "核对管理员、账户状态、口令属性与最近登录。", action: "采集账户" },
   { key: "logs", label: "事件日志", group: "取证", description: "围绕登录、账户变更、服务安装和脚本执行筛选事件。", action: "读取事件日志" },
   { key: "files", label: "文件排查", group: "取证", description: "像文件管理器一样浏览远程目录，查看属性、预览内容并拉取取证文件。", action: "刷新目录" },
   { key: "registry", label: "注册表", group: "取证", description: "浏览常见持久化、凭据策略与用户活动位置，查看原始键值。", action: "刷新键值" },

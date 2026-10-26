@@ -6,9 +6,10 @@ import { buildProcessTree, endpoint, isPublicAddress, matchesQuery, processAnces
 import { WinIrProcessLinks, useProcessInspection, type LinkKind } from "./WinIrProcessLinks";
 import { WinIrRelated, type RelatedContext } from "./WinIrRelated";
 import { RELATED_ID } from "./win-ir-links";
+import { WinIrIcon } from "./WinIrIcon";
 import { networkKey, type FocusTarget, type InvestigationFocus } from "./win-ir-model";
 
-type DetailTab = "overview" | "lineage" | LinkKind | "related";
+type DetailTab = "overview" | "fields" | "lineage" | LinkKind | "related";
 type ProcessTarget = Extract<FocusTarget, { tab: "processes" }>;
 type NetworkTarget = Extract<FocusTarget, { tab: "network" }>;
 
@@ -213,7 +214,9 @@ export function WinIrProcesses({ snapshot, network, focus, related, onCopy, onFi
   ].join("\n") : "";
 
   return (
-    <div className="wir-module">
+    <div className="wir-module wir-process-module">
+      <div className={`wir-master wir-process-master${split ? " is-split" : ""}`}>
+      <section className="wir-process-list" aria-label="进程列表与筛选">
       <StatStrip cards={[
         { label: "已取得进程", value: snapshot?.totalCount ?? "—" },
         { label: "高危线索", value: snapshot ? counts.high : "—", tone: "high", onClick: () => setRisk("high") },
@@ -235,7 +238,6 @@ export function WinIrProcesses({ snapshot, network, focus, related, onCopy, onFi
       {missing !== null ? <p className="wir-footnote" role="status">当前进程快照中没有 PID {missing}，进程可能已退出或快照较旧，请刷新进程后再查找。</p> : null}
       {pinnedProcess && filtering && !matchesFilter(pinnedProcess) ? <p className="wir-footnote">已临时显示 {pinnedProcess.name}（PID {pinnedProcess.pid}），它不符合当前筛选；修改筛选后恢复。</p> : null}
       {isTree && filtering ? <p className="wir-footnote">进程树保留匹配记录的父进程（淡色显示），便于对照启动链。</p> : null}
-      <div className={`wir-master wir-process-master${split ? " is-split" : ""}`}>
         <div className="wir-process-table">
           <DataTable key={view} label="进程分析" columns={columns} hiddenColumns={hiddenColumns} rows={visible} rowKey={({ process }) => processKey(process)} selectedKey={selected}
             onSelect={(row) => setSelected(row ? processKey(row.process) : null)} rowRisk={({ process }) => process.riskLevel}
@@ -244,18 +246,26 @@ export function WinIrProcesses({ snapshot, network, focus, related, onCopy, onFi
             defaultSort={isTree ? undefined : { key: "risk", descending: true }}
             empty={snapshot ? "当前进程快照中没有符合筛选的记录。" : "点击「刷新进程」，读取进程路径、命令行与父子关系。"} />
         </div>
+        <p className="wir-footnote">父子关系来自当前快照；已退出的父进程无法还原。风险标记只作为调查线索。</p>
+      </section>
         {current ? <DetailPane className="wir-process-detail" title={current.name} subtitle={`PID ${current.pid} · PPID ${current.ppid}`} risk={current.riskLevel}
-          reasons={tab === "overview" ? current.riskReasons : []} onClose={() => setSelected(null)} onCopy={onCopy} copyText={copyText}
-          fields={tab === "overview" ? fields : []}
-          tabs={<DetailTabs label="进程详情" value={tab} onChange={setTab} options={[
-            { value: "overview", label: "概况" },
-            { value: "lineage", label: "进程链" },
-            { value: "network", label: "网络", count: inspection.inspection?.network.length ?? snapshotNetwork?.length },
-            { value: "services", label: "服务", count: inspection.inspection?.services.length },
-            { value: "modules", label: "DLL", count: inspection.inspection?.modules.length },
-            ...(related ? [{ value: "related" as const, label: "关联" }] : []),
-          ]} />}
+          reasons={[]} onClose={() => setSelected(null)} onCopy={onCopy} copyText={copyText}
+          fields={tab === "fields" ? fields : []}
+          tabs={<>
+            <DetailTabs label="进程详情" value={tab === "fields" ? "fields" : "overview"} onChange={setTab} options={[
+              { value: "overview", label: "调查详情" }, { value: "fields", label: "原始字段" },
+            ]} />
+            {tab !== "overview" && tab !== "fields" ? <DetailTabs label="进程关联" value={tab} onChange={setTab} options={[
+              { value: "lineage", label: "进程链" },
+              { value: "network", label: "网络", count: inspection.inspection?.network.length ?? snapshotNetwork?.length },
+              { value: "services", label: "服务", count: inspection.inspection?.services.length },
+              { value: "modules", label: "DLL", count: inspection.inspection?.modules.length },
+              ...(related ? [{ value: "related" as const, label: "关联" }] : []),
+            ]} /> : null}
+          </>}
+
           actions={<>
+            {related ? <button type="button" className="win-ir-btn is-primary" onClick={() => setTab("related")}>查看关联线索</button> : null}
             <button type="button" className="win-ir-btn" onClick={() => onNetwork(current.pid)}>在网络连接中查看 ↗</button>
             {current.executablePath ? <button type="button" className="win-ir-btn" onClick={() => onFile(current.executablePath)}>在文件排查中打开 ↗</button> : null}
             {onKill ? (
@@ -270,6 +280,23 @@ export function WinIrProcesses({ snapshot, network, focus, related, onCopy, onFi
               </button>
             ) : null}
           </>}>
+          {tab === "overview" ? <div className="wir-investigation-summary">
+            <section><h4>{current.riskReasons.length ? "为什么需要关注" : "当前观察"}</h4>
+              {current.riskReasons.length ? <ul className="wir-investigation-reasons">{current.riskReasons.map((reason) => <li key={reason}>{reason}</li>)}</ul> : <p>本次规则未标记风险，仍需结合来源、路径和行为核实。</p>}
+              <p className="wir-footnote">这些是调查线索，尚不能确认恶意行为。</p>
+            </section>
+            <section><header><h4>进程关系</h4><button type="button" className="wir-link" onClick={() => setTab("lineage")}>查看完整进程链</button></header>
+              <div className="wir-lineage-preview">{ancestors.length ? [...ancestors].reverse().slice(-3).map((parent) => <button type="button" key={processKey(parent)} onClick={() => reveal(parent)} title={`在进程列表中定位 ${parent.name} (${parent.pid})`}>{parent.name} <small>({parent.pid})</small></button>) : <span>未取得父进程</span>}<strong>{current.name}</strong></div>
+              <p className="wir-footnote">按当前快照对应；完整进程链保留无法核实的关系。</p>
+            </section>
+            <section><header><h4>命令行</h4><button type="button" className="wir-link" disabled={!current.commandLine} onClick={() => onCopy(current.commandLine)}>复制命令行</button></header><pre className="wir-command-evidence">{current.commandLine || "未取得"}</pre></section>
+            <section><h4>关联线索</h4><div className="wir-investigation-links">
+              <button type="button" onClick={() => setTab("network")}><WinIrIcon name="network" size={16} /><span>网络连接</span><em>{inspection.inspection?.network.length ?? snapshotNetwork?.length ?? "未读取"}</em><span aria-hidden="true">›</span></button>
+              <button type="button" onClick={() => setTab("services")}><WinIrIcon name="startup" size={16} /><span>承载服务</span><em>{inspection.inspection?.services.length ?? "未读取"}</em><span aria-hidden="true">›</span></button>
+              <button type="button" onClick={() => setTab("modules")}><WinIrIcon name="files" size={16} /><span>已加载 DLL</span><em>{inspection.inspection?.modules.length ?? "未读取"}</em><span aria-hidden="true">›</span></button>
+            </div><p className="wir-footnote">{inspection.inspection ? "已按 PID 与启动时间读取；各项不是同时快照。" : "网络快照仅按 PID 对应；服务与 DLL 需按需读取。"}</p></section>
+            <section><header><h4>执行文件</h4>{current.executablePath ? <button type="button" className="wir-link" disabled={busy || !connected} onClick={() => onFile(current.executablePath)}>在文件中定位</button> : null}</header><p className="is-mono">{current.executablePath || "未取得 / 受保护"}</p></section>
+          </div> : null}
           {tab === "lineage" ? <Lineage current={current} processes={processes} onReveal={reveal} /> : null}
           {tab === "network" || tab === "services" || tab === "modules"
             ? <WinIrProcessLinks key={`${processKey(current)}:${tab}`} kind={tab} process={current} state={inspection} snapshotNetwork={snapshotNetwork} onFile={onFile} onCopy={onCopy} />
@@ -278,7 +305,6 @@ export function WinIrProcesses({ snapshot, network, focus, related, onCopy, onFi
             query={{ paths: [current.executablePath], accounts: [current.user], pid: current.pid, exclude: RELATED_ID.process(current) }} /> : null}
         </DetailPane> : null}
       </div>
-      <p className="wir-footnote">父子关系来自当前快照：父进程晚于子进程启动时视为 PID 被复用，不再挂接；已退出的父进程无法还原。无法读取的路径和命令行保持未知，风险标记只作为调查线索。</p>
     </div>
   );
 }

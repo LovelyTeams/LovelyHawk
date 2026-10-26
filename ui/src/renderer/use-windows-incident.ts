@@ -287,14 +287,16 @@ export function useWindowsIncident(api: WindowsIncidentApi) {
   }, [finish, remote, start]);
 
   const pullFile = useCallback(async (path: string) => {
-    if (!start("正在拉取文件并核对完整性…")) return;
+    if (!start("正在拉取文件并核对完整性…")) return false;
     try {
       const response = await remote({ action: "pull-file", remotePath: path }, epochRef.current);
       if (response.kind === "status") {
         observe(response.status);
         setNotice("文件已接收到缓存，SHA256 校验通过。点击「接收与保存」可另存到本机。");
+        return true;
       }
-    } catch (reason) { if (live.current) setError(errorText(reason, "文件拉取失败，请检查大小和读取权限。")); }
+      return false;
+    } catch (reason) { if (live.current) setError(errorText(reason, "文件拉取失败，请检查大小和读取权限。")); return false; }
     finally { finish(); }
   }, [finish, observe, remote, start]);
 

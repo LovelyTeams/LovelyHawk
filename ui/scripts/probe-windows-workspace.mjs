@@ -87,7 +87,7 @@ try {
   const rdpNativeStatus = await evaluate("window.lovelyhawk.windowsRdp({ action: 'status' })");
   check("the real native RDP bridge starts idle without launching a client", rdpNativeStatus.phase === "idle" && rdpNativeStatus.clientId === null);
   await evaluate("document.querySelector('[data-testid=\"open-windows-channel\"]').click(), true");
-  check("the bottom status bar opens the channel drawer", await evaluate("document.querySelector('.wir-channel-drawer').getClientRects().length > 0"));
+  check("the bottom status bar opens the channel drawer", await evaluate("document.querySelector('.wir-channel-content').getClientRects().length > 0"));
   await evaluate("document.querySelector('[data-testid=\"open-windows-channel\"]').click(), true");
   await screenshot("01-setup-light");
 
@@ -125,7 +125,13 @@ try {
   await chooseRow("powershell.exe");
   check("hostile command lines remain plain text", await evaluate(`!${scope}.querySelector('script') && ${scope}.textContent.includes('<script>fixture()</script>')`));
   check("process detail opens only beside the list", await evaluate(`(() => { const detail = ${visibleDetail}; const table = ${scope}.querySelector('.wir-process-table'); return Boolean(detail && table) && !${scope}.querySelector('.wir-process-links') && detail.getBoundingClientRect().left >= table.getBoundingClientRect().right - 1; })()`));
-  await clickTab("服务");
+  check("the inspector starts with reasons and a separate raw-fields tab", await evaluate(`${visibleDetail}?.textContent.includes('为什么需要关注') && ${visibleDetail}?.textContent.includes('原始字段')`));
+  await screenshot("10a-process-investigation");
+  await dimensions(1280, 800); await delay(180);
+  check("laptop layout keeps the inspector beside a usable list", await evaluate(`(() => { const detail = ${visibleDetail}.getBoundingClientRect(); const list = ${scope}.querySelector('.wir-process-list').getBoundingClientRect(); return list.width >= 480 && detail.left >= list.right && document.documentElement.scrollWidth <= innerWidth; })()`));
+  await screenshot("10b-process-laptop");
+  await dimensions(1440, 960); await delay(180);
+  await clickText("承载服务", false);
   await clickText("读取网络 / 服务 / DLL");
   await idle();
   check("process inspection carries PID and creation time", await evaluate("window.__windowsFixture.calls.some(c => c.action === 'inspect-process' && c.pid > 0 && c.startTime)"));
@@ -208,10 +214,21 @@ try {
   await chooseRow("evidence.txt");
   await clickText("取证拉取", false);
   await idle();
+  check("pulling a file opens the receipts tab and labels the unsaved cache", await evaluate(`${scope}.querySelector('.wir-dock.is-expanded.is-files') !== null && ${scope}.querySelector('.wir-transfer-list').textContent.includes('待保存') && !${scope}.querySelector('.wir-command-label').getClientRects().length`));
+  check("the dock uses layout space instead of covering the workspace", await evaluate(`(() => { const main = ${scope}.querySelector('.win-ir-main').getBoundingClientRect(); const dock = ${scope}.querySelector('.wir-dock').getBoundingClientRect(); return main.bottom <= dock.top + 1 && dock.bottom <= innerHeight; })()`));
   await clickText("接收与保存");
+  await evaluate("window.__windowsFixture.failNext('cancel-save'), true");
+  await clickText("另存为…");
+  await idle();
+  check("cancelled saving retains a pending receipt and the host reminder", await evaluate(`${scope}.querySelector('.wir-transfer-list').textContent.includes('待保存') && ${scope}.querySelector('.wir-host-actions').textContent.includes('1 个文件待保存')`));
+  await evaluate("window.__windowsFixture.failNext('save-file'), true");
+  await clickText("另存为…");
+  await idle();
+  check("failed saving keeps the file available for retry", await evaluate(`${scope}.textContent.includes('测试中的保存失败') && ${scope}.querySelector('.wir-transfer-list').textContent.includes('待保存')`));
   await clickText("另存为…");
   await idle();
   check("a verified receipt can be saved and its feedback remains visible", await evaluate(`${scope}.textContent.includes('已另存为 evidence.txt') && ${scope}.querySelector('.wir-transfer-list').textContent.includes('已另存')`));
+  check("only a completed save clears the unsaved reminder", await evaluate(`!${scope}.querySelector('.wir-host-actions .wir-unsaved-link')`));
   await screenshot("14-transfers");
 
   await module("远程桌面");
@@ -243,7 +260,14 @@ try {
   check("event detail keeps the real record identifier", await evaluate(`${visibleDetail}?.textContent.includes('983745') && !${scope}.querySelector('script')`));
   await screenshot("16-event-detail");
 
-  await clickText("通道与传输");
+  await clickTab("命令检查台");
+  await setInput('.wir-command-label textarea', "whoami /all");
+  await clickTab("通信日志");
+  await evaluate(`${scope}.querySelector('.wir-dock-tabs [aria-selected="true"]').focus(), true`);
+  await pressKey("ArrowLeft", "ArrowLeft", 37);
+  check("dock tabs support keyboard selection and move focus together", await evaluate(`${scope}.querySelector('.wir-dock-tabs [aria-selected="true"]').textContent === '命令检查台' && document.activeElement?.textContent === '命令检查台'`));
+  await clickTab("命令检查台");
+  check("dock tab changes preserve the command draft", await evaluate(`${scope}.querySelector('.wir-command-label textarea').value === 'whoami /all'`));
   await clickText("whoami /all");
   await clickText("确认并执行");
   await wait("document.querySelector('[role=\"alertdialog\"], [role=\"dialog\"]') !== null", "command confirmation");
@@ -272,6 +296,7 @@ try {
   await evaluate("window.__windowsFixture.failNext('status'), true");
   await wait(`${scope}.querySelector('.wir-collection-warnings[role="alert"]')?.textContent.includes('暂时无法核实连接状态')`, "temporary status failure");
   check("an unknown connection status does not invite blind registration", await evaluate(`(() => { const register = ${scope}.querySelector('[data-testid="windows-register-plugin"]'); return register === null || register.disabled || !register.getClientRects().length; })()`));
+  check("the host bar marks an unknown connection instead of showing a healthy indicator", await evaluate(`${scope}.querySelector('.wir-host-connection.is-offline')?.textContent.includes('连接状态待核实') && Boolean(${scope}.querySelector('.wir-host-connection .status-dot.idle'))`));
   await wait(`!${scope}.querySelector('.wir-session-bar.is-disconnected') && !${scope}.querySelector('.wir-collection-warnings[role="alert"]')`, "same session status recovery");
   check("a temporary status outage preserves the selection for the same session", await evaluate(`${visibleDetail}?.textContent.includes('dropper.exe')`));
 
@@ -386,8 +411,13 @@ try {
   await screenshot("21-files-narrow-dark");
   await module("进程分析");
   await screenshot("22-processes-narrow-dark");
-  await evaluate(`${scope}.querySelector('button[aria-label="收起导航"]').click(), true`);
-  check("collapsed navigation retains accessible module names", await evaluate(`${scope}.querySelectorAll('.win-ir-nav-item[aria-label]').length === 11`));
+  check("narrow windows automatically use the navigation rail", await evaluate(`${scope}.querySelector('.windows-incident-page.is-rail') !== null`));
+  await chooseRow("services.exe");
+  check("the narrow inspector has its own readable view and reachable footer", await evaluate(`(() => { const detail = ${visibleDetail}; const list = ${scope}.querySelector('.wir-process-list'); const footer = detail?.querySelector('footer').getBoundingClientRect(); return Boolean(detail) && getComputedStyle(list).display === 'none' && footer.bottom <= ${scope}.querySelector('.win-ir-main').getBoundingClientRect().bottom + 1; })()`));
+  await screenshot("22a-process-narrow-inspector");
+  await clickLabel("关闭详情");
+  check("closing the narrow inspector restores the table and keyboard focus", await evaluate(`getComputedStyle(${scope}.querySelector('.wir-process-list')).display !== 'none' && document.activeElement?.getAttribute('role') === 'grid'`));
+  check("collapsed navigation retains all investigation names and the desktop entry", await evaluate(`${scope}.querySelectorAll('.win-ir-nav-item[aria-label]').length === 10 && Boolean(${scope}.querySelector('button[aria-label="远程桌面"]'))`));
   await screenshot("23-navigation-rail");
   check("no browser runtime or console errors", errors.length === 0, errors);
   await evaluate("window.__windowsFixture.unmount(), true");

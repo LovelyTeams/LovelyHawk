@@ -195,6 +195,8 @@ export function mount() {
     },
     async saveWindowsFile(fileId) {
       if (fileId !== receivedId) throw new Error("Unknown test receipt");
+      if (failAction === "save-file") { failAction = ""; throw new Error("测试中的保存失败；接收缓存仍然保留。"); }
+      if (failAction === "cancel-save") { failAction = ""; return { saved: false, fileName: null, sha256: null }; }
       return { saved: true, fileName: "evidence.txt", sha256: digest };
     },
   };
