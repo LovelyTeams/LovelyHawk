@@ -1,0 +1,530 @@
+.app-frame:has(.windows-incident-page) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.app-frame:has(.windows-incident-page) > .sidebar {
+  display: none;
+}
+
+.windows-incident-page {
+  display: grid;
+  grid-template-columns: clamp(200px, var(--sidebar-width, 240px), 32vw) minmax(0, 1fr);
+  min-height: 100%;
+  height: 100%;
+  padding: 0;
+  gap: 0;
+}
+
+.win-ir-btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* Main column --------------------------------------------------------------- */
+
+.win-ir-main {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  padding: 20px 24px 32px;
+  overflow-y: auto;
+  min-width: 0;
+}
+
+.win-ir-eyebrow {
+  margin: 0 0 4px;
+  color: var(--accent-text);
+  font-size: var(--font-caption);
+  font-weight: 700;
+  letter-spacing: .1em;
+}
+
+.win-ir-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--info-border);
+  color: var(--info-text);
+  background: var(--info-soft);
+  font-size: var(--font-small);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.win-ir-notice.is-ok { color: var(--success-text); border-color: var(--success-border); background: var(--success-soft); }
+.win-ir-notice.is-warn { color: var(--warning-text); border-color: var(--warning-border); background: var(--warning-soft); }
+.win-ir-notice.is-error { color: var(--danger-text); border-color: var(--danger-border); background: var(--danger-soft); }
+
+.win-ir-spinner {
+  display: inline-block;
+  vertical-align: middle;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--info-border);
+  border-top-color: var(--info);
+  border-radius: 50%;
+  animation: win-ir-spin .8s linear infinite;
+}
+
+@keyframes win-ir-spin { to { transform: rotate(360deg); } }
+
+/* Setup guide: the three steps to a connected session ----------------------- */
+
+.win-ir-setup {
+  display: grid;
+  gap: 18px;
+  width: 100%;
+  max-width: 880px;
+  margin: 8px auto 0;
+}
+
+.win-ir-setup-head h1 {
+  margin: 0 0 6px;
+  color: var(--text);
+  font-size: var(--page-title-size);
+  font-weight: 700;
+  letter-spacing: -.02em;
+}
+
+.win-ir-setup-head > p:not(.win-ir-eyebrow) {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-small);
+  line-height: 1.6;
+}
+
+.win-ir-progress {
+  height: 6px;
+  margin-top: 14px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-inset);
+}
+
+.win-ir-progress i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+  box-shadow: 0 0 10px var(--accent-glow);
+  transition: width .35s ease;
+}
+
+.win-ir-steps {
+  position: relative;
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.win-ir-step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 16px;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  transition: border-color .2s ease, box-shadow .2s ease, opacity .2s ease;
+}
+
+/* The line joining one step's number to the next. */
+.win-ir-step + .win-ir-step::before {
+  position: absolute;
+  top: -13px;
+  left: 37px;
+  width: 2px;
+  height: 14px;
+  background: var(--border-strong);
+  content: "";
+}
+
+.win-ir-step.is-current {
+  border-color: var(--accent-soft-border);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 6%, var(--surface)), var(--surface) 60%);
+  box-shadow: 0 10px 28px -16px var(--accent-glow), var(--shadow-sm);
+}
+
+.win-ir-step.is-pending { opacity: .72; }
+
+.win-ir-step-index {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  color: var(--muted);
+  background: var(--surface-inset);
+  font-size: var(--font-body);
+  font-weight: 700;
+}
+
+.win-ir-step.is-current .win-ir-step-index {
+  border-color: var(--accent);
+  color: var(--on-accent);
+  background: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-glow);
+}
+
+.win-ir-step.is-done .win-ir-step-index {
+  border-color: var(--success-border);
+  color: var(--success-text);
+  background: var(--success-soft);
+}
+
+.win-ir-step-body {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.win-ir-step-body h2 {
+  margin: 6px 0 0;
+  color: var(--text);
+  font-size: var(--font-subtitle);
+  font-weight: 650;
+}
+
+.win-ir-step-body > p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-small);
+  line-height: 1.65;
+}
+
+.win-ir-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.win-ir-checks li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  background: var(--surface-alt);
+  font-size: var(--font-caption);
+}
+
+.win-ir-checks li::before {
+  width: 6px;
+  height: 6px;
+  border: 1.5px solid var(--faint);
+  border-radius: 50%;
+  content: "";
+}
+
+.win-ir-checks li.is-ok {
+  border-color: var(--success-border);
+  color: var(--success-text);
+  background: var(--success-soft);
+}
+
+.win-ir-checks li.is-ok::before {
+  border-color: var(--success);
+  background: var(--success);
+}
+
+.win-ir-step-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.win-ir-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.win-ir-option {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-alt);
+}
+
+.win-ir-option strong {
+  color: var(--text);
+  font-size: var(--font-small);
+}
+
+.win-ir-option > span {
+  color: var(--muted);
+  font-size: var(--font-caption);
+  line-height: 1.6;
+}
+
+/* Connected header ---------------------------------------------------------- */
+
+.win-ir-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 6%, var(--surface)), var(--surface) 55%);
+  box-shadow: var(--shadow-sm);
+}
+
+.win-ir-title-block h1 {
+  margin: 0 0 6px;
+  color: var(--text);
+  font-size: var(--page-title-size);
+  font-weight: 700;
+}
+
+.win-ir-title-block p:not(.win-ir-eyebrow) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-caption);
+}
+
+.win-ir-since { color: var(--muted); }
+
+.win-ir-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: var(--font-caption);
+  font-weight: 500;
+  border: 1px solid var(--border);
+  color: var(--text);
+  background: var(--surface-alt);
+}
+
+.win-ir-pill.is-ok {
+  color: var(--success-text);
+  border-color: var(--success-border);
+  background: var(--success-soft);
+}
+
+.win-ir-pill.is-warn {
+  color: var(--warning-text);
+  border-color: var(--warning-border);
+  background: var(--warning-soft);
+}
+
+.win-ir-pill.is-danger {
+  color: var(--danger-text);
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+}
+
+.win-ir-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.win-ir-btn {
+  min-height: 30px;
+  padding: 4px 12px;
+  border-radius: 7px;
+  font: inherit;
+  font-size: var(--font-small);
+  cursor: pointer;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  transition: background .15s ease, border-color .15s ease, transform .15s ease, box-shadow .15s ease;
+}
+
+.win-ir-btn:hover:not(:disabled) {
+  border-color: var(--accent-soft-border);
+  background: var(--surface-hover);
+}
+
+.win-ir-btn.is-primary {
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: var(--accent);
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.win-ir-btn.is-primary:hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+  transform: translateY(-1px);
+}
+
+.win-ir-btn.is-quiet {
+  border-color: transparent;
+  color: var(--muted);
+  background: transparent;
+}
+
+.win-ir-btn.is-quiet:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.win-ir-btn.is-danger {
+  color: var(--danger-text);
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+  font-weight: 600;
+}
+
+.win-ir-btn.is-danger:hover:not(:disabled) {
+  border-color: var(--danger-text);
+  background: var(--danger-soft);
+}
+
+.win-ir-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+@media (max-width: 1180px) {
+  .windows-incident-page { grid-template-columns: clamp(190px, var(--sidebar-width, 240px), 24vw) minmax(0, 1fr); }
+  .win-ir-step { grid-template-columns: 30px minmax(0, 1fr); gap: 12px; padding: 16px; }
+  .win-ir-step-index { width: 30px; height: 30px; }
+  .win-ir-step + .win-ir-step::before { left: 31px; }
+}
+
+.win-ir-guide-box {
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-alt);
+  color: var(--text);
+  font-size: var(--font-small);
+  line-height: 1.6;
+}
+
+.win-ir-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+}
+
+.win-ir-card {
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--font-small);
+}
+
+.win-ir-card-label {
+  font-size: var(--font-caption);
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.win-ir-card-value {
+  font-size: var(--font-subtitle);
+  font-weight: 600;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.win-ir-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: var(--font-small);
+}
+
+.win-ir-input {
+  flex: 1;
+  min-width: 220px;
+  padding: 6px 10px;
+  border-radius: 7px;
+  border: 1px solid var(--border-strong);
+  background: var(--input-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-small);
+}
+
+.win-ir-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.win-ir-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-small);
+}
+
+.win-ir-table th,
+.win-ir-table td {
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text);
+  vertical-align: top;
+}
+
+.win-ir-table th {
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--surface-alt);
+}
+
+.win-ir-mono {
+  font: var(--font-caption) "Cascadia Mono", monospace;
+  word-break: break-all;
+}
+
+.win-ir-console {
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-alt);
+  color: var(--text);
+  font-size: var(--font-small);
+}
+
+.win-ir-pre {
+  margin: 8px 0 0;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface);
+  color: var(--text);
+  font: var(--font-caption) "Cascadia Mono", monospace;
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

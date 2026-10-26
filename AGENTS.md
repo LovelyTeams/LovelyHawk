@@ -144,6 +144,8 @@ CDP 探针等真实主文档（`https://tauri.localhost/`）加载完成后再�
 pnpm ui:check
 # 桌面端原生自动化：构建 UI 与调试版宿主，逐页巡检并截图
 pnpm desktop:test:debug
+# Windows 应急工作台界面（合成数据，先 cargo build 调试宿主；不能代替真实 RDP/目标验证）
+node ui/scripts/probe-windows-workspace.mjs
 # 真实靶机上的连接 + 终端子窗口场景（需实验室主机与 backend:harness）
 node ui/scripts/probe-terminal-window.mjs
 # Core / backend / 宿主的领域与边界验证

@@ -18,6 +18,7 @@ mod instance_lock;
 mod local_browser;
 mod local_files;
 mod main_commands;
+mod windows_rdp;
 mod smoke;
 mod test_hooks;
 mod theme;
@@ -86,6 +87,15 @@ fn development_overrides() -> DevelopmentOverrides {
 }
 
 pub fn run() -> ExitCode {
+    if lovelyhawk_win_dvc::has_com_embedding_arg(std::env::args_os().skip(1)) {
+        // Windows COM only spawns `<exe> -Embedding` when `mstsc.exe` sees a
+        // leftover `SimpleRdpPlugin` registration and no running LovelyHawk
+        // process has registered the class object. Remove the stale registry
+        // entry and exit without opening a window.
+        let _ = lovelyhawk_win_dvc::unregister_addin_per_user();
+        return ExitCode::SUCCESS;
+    }
+
     let development = cfg!(debug_assertions);
     let capture = DiagnosticLogCapture::new(DiagnosticLogLevel::Info);
     let stderr_filter = tracing_subscriber::EnvFilter::try_from_default_env()
@@ -164,6 +174,7 @@ pub fn run() -> ExitCode {
             }
             app.manage(Host {
                 bridge: BackendBridge::new(Arc::new(state)),
+                rdp: Mutex::new(windows_rdp::RdpState::default()),
                 binding: Mutex::new(BindingState::default()),
                 children: Mutex::new(ChildWindows::default()),
                 local: Mutex::new(LocalBrowser::default()),
@@ -199,6 +210,8 @@ pub fn run() -> ExitCode {
                     }
                 }
                 WindowEvent::Destroyed if label == MAIN_LABEL => {
+                    window.state::<Host>().rdp.lock().stop();
+                    let _ = lovelyhawk_win_dvc::unregister_addin_per_user();
                     let app = window.app_handle().clone();
                     tauri::async_runtime::spawn(async move {
                         app.state::<Host>().close_all_children(&app).await;
@@ -236,6 +249,8 @@ pub fn run() -> ExitCode {
             main_commands::config_visual_import_database,
             main_commands::config_visual_copy,
             main_commands::config_visual_save,
+            main_commands::windows_file_save,
+            main_commands::windows_rdp,
             main_commands::clipboard_write,
             main_commands::window_theme,
             main_commands::terminal_window_open,

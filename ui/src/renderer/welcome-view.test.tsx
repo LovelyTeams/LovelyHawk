@@ -106,7 +106,7 @@ describe("WelcomeView", () => {
     expect(page).not.toMatch(/(?<!-)height: 100%/u);
     expect(appSource).toContain(
       "const welcomeScreen = activePage === null && activeTarget === null && uiPreferences.showStatusBar;");
-    expect(appSource).toContain('<div className={welcomeScreen ? "app-frame is-welcome" : "app-frame"}>');
+    expect(appSource).toContain('["app-frame", welcomeScreen ? "is-welcome" : "", rail ? "is-rail" : ""]');
     // Every colour in the new welcome rules comes from a theme token.
     const welcome = css.slice(css.indexOf("/* Welcome: the product"), css.indexOf(".welcome-tools {"));
     expect(welcome.length).toBeGreaterThan(1000);

@@ -32,11 +32,17 @@ use crate::ssh::{BoundSshSession, SshService};
 use crate::ssh_compat::SshCompatibilityService;
 use crate::system_info::SystemInfoService;
 use crate::target::{TargetContext, TargetGuard, TargetIdentity};
+use crate::windows_incident::WindowsIncidentService;
 use crate::{CoreError, CoreResult, PortableStore};
 
 /// Strongly typed service graph owned by the native application.
 #[derive(Debug, Clone)]
 pub struct BackendServices {
+    inner: Arc<BackendServicesInner>,
+}
+
+#[derive(Debug)]
+struct BackendServicesInner {
     store: PortableStore,
     target: Arc<TargetContext>,
     settings: SettingsRepository,
@@ -62,6 +68,7 @@ pub struct BackendServices {
     commands: CommandWorkbenchService,
     baseline: BaselineService,
     java: JavaService,
+    windows_incident: WindowsIncidentService,
 }
 
 impl BackendServices {
@@ -122,139 +129,147 @@ impl BackendServices {
         );
         let settings = SettingsRepository::new(store.clone(), crypto.clone());
         let ai = runtime.map(|runtime| AiService::new(runtime, settings.clone()));
+        let windows_incident = WindowsIncidentService::new();
         Ok(Self {
-            target,
-            settings,
-            connections,
-            operation_journal,
-            ssh,
-            sftp,
-            ssh_compatibility: SshCompatibilityService,
-            detection,
-            docker,
-            database,
-            log_analysis,
-            packet_capture,
-            file_analysis,
-            investigation,
-            report,
-            integrity,
-            kubernetes,
-            middleware,
-            system_info,
-            ai,
-            audit,
-            commands,
-            baseline,
-            java,
-            store,
+            inner: Arc::new(BackendServicesInner {
+                target,
+                settings,
+                connections,
+                operation_journal,
+                ssh,
+                sftp,
+                ssh_compatibility: SshCompatibilityService,
+                detection,
+                docker,
+                database,
+                log_analysis,
+                packet_capture,
+                file_analysis,
+                investigation,
+                report,
+                integrity,
+                kubernetes,
+                middleware,
+                system_info,
+                ai,
+                audit,
+                commands,
+                baseline,
+                java,
+                windows_incident,
+                store,
+            }),
         })
     }
 
+    pub fn windows_incident(&self) -> &WindowsIncidentService {
+        &self.inner.windows_incident
+    }
+
     pub fn baseline(&self) -> &BaselineService {
-        &self.baseline
+        &self.inner.baseline
     }
 
     pub fn middleware(&self) -> &MiddlewareService {
-        &self.middleware
+        &self.inner.middleware
     }
 
     pub fn java(&self) -> &JavaService {
-        &self.java
+        &self.inner.java
     }
 
     pub fn store(&self) -> &PortableStore {
-        &self.store
+        &self.inner.store
     }
 
     pub fn target(&self) -> &Arc<TargetContext> {
-        &self.target
+        &self.inner.target
     }
 
     pub fn settings(&self) -> &SettingsRepository {
-        &self.settings
+        &self.inner.settings
     }
 
     pub fn connections(&self) -> &ConnectionRepository {
-        &self.connections
+        &self.inner.connections
     }
 
     pub fn operation_journal(&self) -> &PortableOperationJournal {
-        &self.operation_journal
+        &self.inner.operation_journal
     }
 
     pub fn ssh(&self) -> &SshService {
-        &self.ssh
+        &self.inner.ssh
     }
 
     pub fn sftp(&self) -> &SftpService {
-        &self.sftp
+        &self.inner.sftp
     }
 
     pub fn ssh_compatibility(&self) -> &SshCompatibilityService {
-        &self.ssh_compatibility
+        &self.inner.ssh_compatibility
     }
 
     pub fn detection(&self) -> &DetectionService {
-        &self.detection
+        &self.inner.detection
     }
 
     pub fn docker(&self) -> &DockerService {
-        &self.docker
+        &self.inner.docker
     }
 
     pub fn database(&self) -> &DatabaseService {
-        &self.database
+        &self.inner.database
     }
 
     pub fn log_analysis(&self) -> &LogAnalysisService {
-        &self.log_analysis
+        &self.inner.log_analysis
     }
 
     pub fn packet_capture(&self) -> &PacketCaptureService {
-        &self.packet_capture
+        &self.inner.packet_capture
     }
 
     pub fn file_analysis(&self) -> &FileAnalysisService {
-        &self.file_analysis
+        &self.inner.file_analysis
     }
 
     pub fn investigation(&self) -> &InvestigationRepositories {
-        &self.investigation
+        &self.inner.investigation
     }
 
     pub fn report(&self) -> &ReportService {
-        &self.report
+        &self.inner.report
     }
 
     pub fn integrity(&self) -> &IntegrityService {
-        &self.integrity
+        &self.inner.integrity
     }
 
     pub fn kubernetes(&self) -> &KubernetesService {
-        &self.kubernetes
+        &self.inner.kubernetes
     }
 
     pub fn system_info(&self) -> &SystemInfoService {
-        &self.system_info
+        &self.inner.system_info
     }
 
     pub fn ai(&self) -> CoreResult<&AiService> {
-        self.ai.as_ref().ok_or(CoreError::Unsupported {
+        self.inner.ai.as_ref().ok_or(CoreError::Unsupported {
             feature: "AI service without an injected process Tokio runtime",
         })
     }
 
     pub fn audit(&self) -> &AuditService {
-        &self.audit
+        &self.inner.audit
     }
 
     pub fn commands(&self) -> &CommandWorkbenchService {
-        &self.commands
+        &self.inner.commands
     }
 
     pub fn activate_target(&self, identity: TargetIdentity) -> CoreResult<TargetGuard> {
-        self.target.activate(identity)
+        self.inner.target.activate(identity)
     }
 
     /// Bind an actor-owned SSH session to an already activated target epoch.
@@ -264,9 +279,9 @@ impl BackendServices {
         guard: &TargetGuard,
         session_id: &str,
     ) -> CoreResult<BoundSshSession> {
-        self.target.validate(guard)?;
-        let bound = self.ssh.bind_session(guard.clone(), session_id).await?;
-        self.target.validate(guard)?;
+        self.inner.target.validate(guard)?;
+        let bound = self.inner.ssh.bind_session(guard.clone(), session_id).await?;
+        self.inner.target.validate(guard)?;
         Ok(bound)
     }
 
@@ -274,7 +289,7 @@ impl BackendServices {
         &self,
         sensitive_roots: impl IntoIterator<Item = PathBuf>,
     ) -> CoreResult<PathGuard> {
-        PathGuard::for_store(&self.store, sensitive_roots)
+        PathGuard::for_store(&self.inner.store, sensitive_roots)
     }
 
     /// Run target-bound asynchronous work with the required double validation.
@@ -285,9 +300,9 @@ impl BackendServices {
         F: FnOnce() -> Fut,
         Fut: Future<Output = CoreResult<T>>,
     {
-        self.target.validate(guard)?;
+        self.inner.target.validate(guard)?;
         let result = operation().await;
-        self.target.validate(guard)?;
+        self.inner.target.validate(guard)?;
         result
     }
 }

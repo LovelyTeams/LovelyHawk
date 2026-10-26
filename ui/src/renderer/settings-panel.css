@@ -19,7 +19,7 @@
   border: 1px solid var(--border);
   border-radius: 20px;
   background: var(--surface-inset);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-lg);
 }
 
 .settings-header,
@@ -74,10 +74,25 @@
   cursor: pointer;
 }
 
+.settings-tabs button { position: relative; transition: color .15s ease, background .15s ease; }
+.settings-tabs button:hover:not(.is-active) { color: var(--text); background: var(--surface-hover); }
+
 .settings-tabs button.is-active {
   color: var(--accent-text);
   background: var(--accent-soft);
   font-weight: 700;
+}
+
+.settings-tabs button.is-active::before {
+  position: absolute;
+  top: 9px;
+  bottom: 9px;
+  left: 0;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+  content: "";
 }
 
 .settings-content { min-width: 0; overflow: auto; padding: 24px 26px 34px; }

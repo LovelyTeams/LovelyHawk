@@ -34,7 +34,7 @@ const port = 9300 + Math.floor(Math.random() * 500);
 const smokeNonce = randomUUID().replaceAll("-", "");
 const smokeRoot = path.join(os.tmpdir(), `lovelyhawk-smoke-${smokeNonce}`);
 
-const EXPECTED_API_METHODS = 166;
+const EXPECTED_API_METHODS = 169;
 const EXPECTED_PAGES = 15;
 const checks = [];
 function check(name, ok, detail = null) {
@@ -95,7 +95,7 @@ try {
     csp: document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.content ?? "",
     inlineHandlers: document.querySelectorAll('[onclick],[onerror],[onload]').length,
     resources: performance.getEntriesByType("resource").map((entry) => entry.name),
-    navItems: [...document.querySelectorAll(".nav-item")].map((item) => item.textContent.trim()),
+    navItems: [...document.querySelectorAll("nav[aria-label=主导航] .nav-item")].map((item) => item.textContent.trim()),
     controls: [...document.querySelectorAll('[data-testid="window-controls"] button')].map((b) => b.dataset.testid),
     dragRegion: document.querySelector('[data-testid="window-titlebar"]')?.getAttribute("data-tauri-drag-region"),
   }))()`);
@@ -135,9 +135,9 @@ try {
   // Every page, in navigation order.
   for (let index = 0; index < shell.navItems.length; index += 1) {
     const label = shell.navItems[index];
-    await session.evaluate(`document.querySelectorAll(".nav-item")[${index}].click(), true`);
+    await session.evaluate(`document.querySelectorAll("nav[aria-label=主导航] .nav-item")[${index}].click(), true`);
     const rendered = await waitFor(() => session.evaluate(`(() => {
-      const item = document.querySelectorAll(".nav-item")[${index}];
+      const item = document.querySelectorAll("nav[aria-label=主导航] .nav-item")[${index}];
       const loading = document.querySelector(".content-page-loading");
       const content = document.querySelector("main.content");
       return item?.classList.contains("active") && loading === null && (content?.textContent?.trim().length ?? 0) > 0

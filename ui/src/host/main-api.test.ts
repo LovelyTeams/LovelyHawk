@@ -42,13 +42,37 @@ describe("main window API", () => {
   it("is frozen and keeps the method count the renderer was built against", () => {
     const api = createMainApi();
     expect(Object.isFrozen(api)).toBe(true);
-    expect(Object.keys(api)).toHaveLength(166);
+    expect(Object.keys(api)).toHaveLength(169);
+  });
+
+  it("keeps RDP on the dedicated main-window command and validates its response", async () => {
+    const idle = { clientId: null, server: "", phase: "idle", message: "" };
+    const calls = recordingHost(() => idle);
+    expect(await createMainApi().windowsRdp({ action: "status" })).toEqual(idle);
+    expect(calls).toEqual([{ command: "windows_rdp", args: { request: { action: "status" } } }]);
+    recordingHost(() => ({ ...idle, hwnd: 123 }));
+    await expect(createMainApi().windowsRdp({ action: "status" })).rejects.toThrow();
+    expect(capability("main-window").permissions).toContain("allow-windows-rdp");
+    expect(capability("child-windows").permissions).not.toContain("allow-windows-rdp");
+  });
+
+  it("saves Windows evidence through the host without exposing a local path or bytes", async () => {
+    const calls = recordingHost(() => ({ saved: true, fileName: "evidence.bin", sha256: "a".repeat(64) }));
+    const api = createMainApi();
+    expect(await api.saveWindowsFile(BINDING)).toEqual({ saved: true, fileName: "evidence.bin", sha256: "a".repeat(64) });
+    expect(calls).toEqual([{ command: "windows_file_save", args: { fileId: BINDING } }]);
+    await expect(api.saveWindowsFile("C:\\secret.txt")).rejects.toThrow();
+    expect(calls).toHaveLength(1);
+    recordingHost(() => ({ saved: true, fileName: "C:\\Users\\secret\\evidence.bin", sha256: "a".repeat(64) }));
+    await expect(api.saveWindowsFile(BINDING)).rejects.toThrow();
+    expect(allowedMethods).not.toContain("windows.evidence.part");
   });
 
   it("refuses bad arity and bad shapes before anything reaches the host", async () => {
     const calls = recordingHost();
     const api = createMainApi() as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
     for (const [method, args] of Object.entries({
+      windowsRdp: [{ action: "status" }, "extra"],
       getConnection: [],
       startSshConnect: ["", "extra"],
       getSshAttempt: [42],

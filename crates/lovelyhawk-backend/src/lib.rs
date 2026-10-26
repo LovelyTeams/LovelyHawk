@@ -41,6 +41,7 @@ mod ssh_api;
 mod system_info_action_api;
 mod system_info_api;
 mod terminal_api;
+mod windows_incident_api;
 
 use std::{
     collections::HashMap,
@@ -118,9 +119,16 @@ use crate::{
     ssh_api::{SecretResponses, SshApi},
     system_info_api::{SystemInfoApi, SystemInfoApiError},
     terminal_api::{TerminalApi, TerminalApiError},
+    windows_incident_api::{
+        WindowsEvidencePartRequest, WindowsIncidentApi, WindowsIncidentError,
+        WindowsIncidentRequest,
+    },
 };
 
 pub const PROTOCOL_VERSION: &str = "lovelyhawk-backend/v1";
+pub use lovelyhawk_core::windows_incident::{
+    WINDOWS_EVIDENCE_MAX_BYTES, WINDOWS_EVIDENCE_PART_BYTES, WindowsEvidencePart,
+};
 // A maximal typed note can expand when JSON escapes control characters. The
 // process boundary remains hard-bounded while still accepting every value the
 // core notes contract permits.
@@ -226,6 +234,7 @@ pub struct BackendState {
     settings: SettingsApi,
     system_info: SystemInfoApi,
     terminal: TerminalApi,
+    windows_incident: WindowsIncidentApi,
 }
 
 #[derive(Debug)]
@@ -334,6 +343,7 @@ impl BackendState {
         let terminal = TerminalApi::new(services.clone(), Arc::clone(&ssh));
         let nginx_repair = NginxRepairApi::new(services.clone(), Arc::clone(&ssh));
         let java_hot_update = JavaHotUpdateApi::new(services.clone(), Arc::clone(&ssh));
+        let windows_incident = WindowsIncidentApi::new(services.clone());
         Ok(Self {
             services,
             ai_history: AiHistoryApi::default(),
@@ -373,6 +383,7 @@ impl BackendState {
             settings,
             system_info,
             terminal,
+            windows_incident,
         })
     }
 
@@ -1094,6 +1105,25 @@ impl BackendState {
                         .map_err(java_hot_update_failure),
                     Err(failure) => Err(failure),
                 }
+            }
+            RpcMethod::WindowsIncident => {
+                match parse_params::<WindowsIncidentRequest>(request.params) {
+                    Ok(params) => self
+                        .windows_incident
+                        .dispatch(params)
+                        .await
+                        .map(to_value)
+                        .map_err(windows_incident_failure),
+                    Err(failure) => Err(failure),
+                }
+            }
+            RpcMethod::WindowsEvidencePart => {
+                parse_params::<WindowsEvidencePartRequest>(request.params).and_then(|params| {
+                    self.windows_incident
+                        .evidence_part(params)
+                        .map(to_value)
+                        .map_err(windows_incident_failure)
+                })
             }
             RpcMethod::JavaHotUpdateClassStage => {
                 match parse_params::<JavaClassStageParams>(request.params) {
@@ -2659,6 +2689,7 @@ impl BackendState {
 
     /// Stops every terminal session; the stdio loop does the same at EOF.
     pub async fn shutdown(&self) {
+        self.services.windows_incident().shutdown();
         self.terminal.shutdown().await;
     }
 
@@ -2809,6 +2840,10 @@ enum RpcMethod {
     NginxRepair,
     #[serde(rename = "java.hot-update")]
     JavaHotUpdate,
+    #[serde(rename = "windows.incident")]
+    WindowsIncident,
+    #[serde(rename = "windows.evidence.part")]
+    WindowsEvidencePart,
     #[serde(rename = "java.hot-update.class.stage")]
     JavaHotUpdateClassStage,
     #[serde(rename = "postgresql.runtime")]
@@ -5410,6 +5445,25 @@ fn java_hot_update_failure(error: JavaHotUpdateError) -> RpcFailure {
     };
     RpcFailure {
         operation: "run Java hot update",
+        code,
+        public_message,
+        source: None,
+    }
+}
+
+fn windows_incident_failure(error: WindowsIncidentError) -> RpcFailure {
+    let (code, public_message) = match error {
+        WindowsIncidentError::Invalid => (
+            "invalid-params",
+            "The Windows incident response request is invalid.",
+        ),
+        WindowsIncidentError::Failed => (
+            "windows-incident-failed",
+            "LovelyHawk could not complete the Windows DVC operation.",
+        ),
+    };
+    RpcFailure {
+        operation: "run Windows incident response",
         code,
         public_message,
         source: None,

@@ -1,3 +1,4 @@
+import { isWindowsRdpRequest, isWindowsRdpStatus } from "../shared/windows-rdp-contract.js";
 import { listen } from "@tauri-apps/api/event";
 
 import { isCaseLibraryRequest, matchesCaseLibraryResult, type CaseLibraryRequest } from "../shared/case-library-contract.js";
@@ -10,6 +11,7 @@ import { isNginxRepairRequest } from "../shared/nginx-repair-contract.js";
 import { isLogRulesRequest } from "../shared/log-rules-contract.js";
 import { isAiAssistRequest } from "../shared/ai-assist-contract.js";
 import { isJavaClassStageResult, isJavaHandle, isJavaHotUpdateRequest } from "../shared/java-hot-update-contract.js";
+import { isWindowsFileId, isWindowsFileSaveResult, isWindowsIncidentRequest } from "../shared/windows-incident-contract.js";
 import { isPostgresqlRuntimeRequest } from "../shared/postgresql-runtime-contract.js";
 import { isThemeId } from "../shared/theme-contract.js";
 import {
@@ -254,6 +256,22 @@ export function createMainApi(transport: BackendTransport = hostBackendTransport
       requireArity(values, 1, "Java 热更新请求无效。");
       if (!isJavaHotUpdateRequest(values[0])) refuse("Java 热更新请求无效。");
       return backend.javaHotUpdate(values[0]);
+    },
+    windowsRdp: async (...values: unknown[]) => {
+      requireArity(values, 1, "远程桌面请求无效。");
+      if (!isWindowsRdpRequest(values[0])) refuse("远程桌面请求无效。");
+      return verified(host("windows_rdp", { request: values[0] }), isWindowsRdpStatus, "远程桌面状态无法核实。");
+    },
+    windowsIncident: async (...values: unknown[]) => {
+      requireArity(values, 1, "Windows 应急响应请求无效。");
+      if (!isWindowsIncidentRequest(values[0])) refuse("Windows 应急响应请求无效。");
+      return backend.windowsIncident(values[0]);
+    },
+    saveWindowsFile: async (...values: unknown[]) => {
+      requireArity(values, 1, "取证文件请求无效。");
+      if (!isWindowsFileId(values[0])) refuse("取证文件请求无效。");
+      return verified(host("windows_file_save", { fileId: values[0] }, DIALOG_TIMEOUT_MS),
+        isWindowsFileSaveResult, "文件保存结果无法核实，请检查保存位置后重试。");
     },
     stageJavaClass: async (...values: unknown[]) => {
       requireArity(values, 1, "类文件请求无效。");

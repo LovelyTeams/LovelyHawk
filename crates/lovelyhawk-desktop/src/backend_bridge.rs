@@ -60,6 +60,7 @@ const MAIN_WINDOW_METHODS: &[&str] = &[
     "log.rules",
     "ai.assist",
     "java.hot-update",
+    "windows.incident",
     "postgresql.runtime",
     "emergency.file-evidence",
     "case.workspace",
@@ -291,6 +292,7 @@ mod tests {
         for method in [
             "connections.import-file",
             "connections.export-file",
+            "windows.evidence.part",
             "sftp-browser.download",
             "sftp-browser.upload.stage",
             "java.hot-update.class.stage",

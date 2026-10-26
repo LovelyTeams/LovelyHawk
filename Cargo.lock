@@ -2738,6 +2738,7 @@ dependencies = [
  "bytes",
  "chrono",
  "futures",
+ "lovelyhawk-win-dvc",
  "native-tls",
  "parking_lot",
  "postgres-native-tls",
@@ -2762,6 +2763,7 @@ name = "lovelyhawk-desktop"
 version = "0.0.1-dev"
 dependencies = [
  "lovelyhawk-backend",
+ "lovelyhawk-win-dvc",
  "parking_lot",
  "rfd",
  "serde",
@@ -2792,6 +2794,22 @@ dependencies = [
  "thiserror 1.0.69",
  "unicode-width",
  "url",
+]
+
+[[package]]
+name = "lovelyhawk-win-dvc"
+version = "0.0.1-dev"
+dependencies = [
+ "base64 0.21.7",
+ "chrono",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tracing",
+ "uuid",
+ "windows",
+ "windows-core",
 ]
 
 [[package]]

@@ -3,12 +3,14 @@ param(
     [string]$Version = '0.0.1-dev',
     [string]$OutputDirectory = (Join-Path (Split-Path -Parent $PSScriptRoot) 'artifacts'),
     [string]$ExecutablePath = (Join-Path (Split-Path -Parent $PSScriptRoot) 'target\x86_64-pc-windows-msvc\release\lovelyhawk.exe'),
+    [string]$AgentPath,
     [string]$LicensePath = (Join-Path (Split-Path -Parent $PSScriptRoot) 'LICENSE'),
     [string]$NoticesPath = (Join-Path (Split-Path -Parent $PSScriptRoot) 'ui\THIRD_PARTY_NOTICES.md'),
     [switch]$Build
 )
 
-# Portable Windows package: one executable with the UI embedded, its licenses,
+# Portable Windows package: the desktop with its UI embedded, the remote
+# Windows session agent, licenses,
 # and a manifest. Runtime state is created beside the executable under data\
 # on first launch; the package itself ships none. WebView2 Runtime comes from
 # the system (present on Windows 11 and current Windows 10).
@@ -28,9 +30,12 @@ if ($Build) {
 }
 
 $executable = (Resolve-Path -LiteralPath $ExecutablePath).Path
+if ([string]::IsNullOrWhiteSpace($AgentPath)) { $AgentPath = Join-Path (Split-Path -Parent $executable) 'lovelyhawk-win-agent.exe' }
+$agent = (Resolve-Path -LiteralPath $AgentPath).Path
 $license = (Resolve-Path -LiteralPath $LicensePath).Path
 $notices = (Resolve-Path -LiteralPath $NoticesPath).Path
 & (Join-Path $PSScriptRoot 'desktop-verify-windows-binary.ps1') -BinaryPath $executable -Target 'x86_64-pc-windows-msvc' -AllowSystemUcrt
+& (Join-Path $PSScriptRoot 'desktop-verify-windows-binary.ps1') -BinaryPath $agent -Target 'x86_64-pc-windows-msvc' -AllowSystemUcrt
 
 $noticesText = Get-Content -LiteralPath $notices -Raw
 foreach ($requiredNotice in @('React 19.2.8', 'React DOM 19.2.8', 'Scheduler 0.27.0', 'MIT License', 'Inter 4.1', 'Cascadia Mono 2407.24', 'Tauri 2.12.1', '@tauri-apps/api 2.12.1', 'xterm.js 6.0.0')) {
@@ -72,6 +77,7 @@ $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 try {
     [System.IO.Directory]::CreateDirectory($packageRoot) | Out-Null
     Copy-Item -LiteralPath $executable -Destination (Join-Path $packageRoot 'LovelyHawk.exe')
+    Copy-Item -LiteralPath $agent -Destination (Join-Path $packageRoot 'lovelyhawk-win-agent.exe')
     Copy-Item -LiteralPath $license -Destination (Join-Path $packageRoot 'LICENSE')
     Copy-Item -LiteralPath $notices -Destination (Join-Path $packageRoot 'THIRD_PARTY_NOTICES.md')
     # The Rust crates' own license texts and a bill of materials for everything inside.
@@ -85,7 +91,11 @@ try {
         '复制整个文件夹即可迁移。不会写入用户配置目录。',
         '',
         '运行需要系统自带的 Microsoft Edge WebView2 Runtime（Windows 11 与已更新的 Windows 10 默认具备）。',
-        '同一个 data 文件夹同时只允许运行一份程序。'
+        '同一个 data 文件夹同时只允许运行一份程序。',
+        '',
+        'Windows 应急响应：在主界面按三步接入向导操作。',
+        'lovelyhawk-win-agent.exe 是远程会话采集端；也可使用向导中的免落地 PowerShell 方式。',
+        '采集端应由操作员复制到已授权的远程桌面会话中启动，不会随主程序自动运行。'
     ) -join "`r`n"
     [System.IO.File]::WriteAllText((Join-Path $packageRoot 'README.txt'), "$readme`r`n", $utf8NoBom)
 

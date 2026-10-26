@@ -36,6 +36,8 @@
     "allow-config-visual-import-database",
     "allow-config-visual-copy",
     "allow-config-visual-save",
+    "allow-windows-file-save",
+    "allow-windows-rdp",
     "allow-clipboard-write",
     "allow-window-theme",
     "allow-terminal-window-open",

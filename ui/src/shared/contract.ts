@@ -1,4 +1,6 @@
+import type { WindowsRdpRequest, WindowsRdpStatus } from "./windows-rdp-contract.js";
 import type { JavaClassStageResult, JavaHotUpdateRequest, JavaHotUpdateResponse } from "./java-hot-update-contract.js";
+import type { WindowsFileSaveResult, WindowsIncidentRequest, WindowsIncidentResponse } from "./windows-incident-contract.js";
 import type { NginxRepairRequest, NginxRepairResponse } from "./nginx-repair-contract.js";
 import type { LogRulesRequest, LogRulesResponse } from "./log-rules-contract.js";
 import type { AiAssistRequest, AiAssistResponse } from "./ai-assist-contract.js";
@@ -479,6 +481,9 @@ export interface LovelyHawkApi {
   aiAssist(request: AiAssistRequest): Promise<AiAssistResponse>;
   javaHotUpdate(request: JavaHotUpdateRequest): Promise<JavaHotUpdateResponse>;
   stageJavaClass(bindingHandle: string): Promise<JavaClassStageResult>;
+  windowsRdp(request: WindowsRdpRequest): Promise<WindowsRdpStatus>;
+  windowsIncident(request: WindowsIncidentRequest): Promise<WindowsIncidentResponse>;
+  saveWindowsFile(fileId: string): Promise<WindowsFileSaveResult>;
   bootstrap(): Promise<BootstrapResult>;
   listConnections(): Promise<ConnectionSummary[]>;
   getConnection(id: string): Promise<ConnectionEditView>;

@@ -28,6 +28,7 @@ tauri-build.workspace = true
 
 [dependencies]
 lovelyhawk-backend = { path = "../lovelyhawk-backend" }
+lovelyhawk-win-dvc = { path = "../lovelyhawk-win-dvc" }
 parking_lot.workspace = true
 serde.workspace = true
 serde_json.workspace = true

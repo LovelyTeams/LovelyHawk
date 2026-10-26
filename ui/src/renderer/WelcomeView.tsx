@@ -14,6 +14,7 @@ export interface WelcomeViewProps {
   /** Pages that work with nothing connected, offered as a second way in. */
   offlinePages?: readonly PageDescriptor[];
   onNavigate?: (pageId: string) => void;
+  onOpenWindowsIncident?: () => void;
   onOpenConnections?: (returnFocus: HTMLElement) => void;
   /**
    * Every action opens the connection manager with an intent instead of acting
@@ -128,6 +129,18 @@ const RECOGNISED_SYSTEMS: readonly string[] = [
   "openEuler", "Anolis", "统信 UOS", "麒麟", "deepin",
 ];
 
+const WINDOWS_CAPABILITIES: readonly string[] = [
+  "主机总览",
+  "基线配置",
+  "进程查看",
+  "网络连接",
+  "启动项",
+  "本地账户",
+  "事件日志",
+  "文件排查",
+  "注册表",
+];
+
 /**
  * When a connection was last used, in the operator's own clock: today and
  * yesterday by name, this year by month and day, older ones by year.
@@ -164,12 +177,20 @@ export function WelcomeView({
   connectionsError = null,
   offlinePages = [],
   onNavigate,
+  onOpenWindowsIncident,
   onOpenConnections,
   onConnectionAction,
   onCreateConnection,
   now,
 }: WelcomeViewProps) {
   const ordered = welcomeConnectionOrder(connections);
+  const enterWindows = () => {
+    if (onOpenWindowsIncident !== undefined) {
+      onOpenWindowsIncident();
+    } else if (onNavigate !== undefined) {
+      onNavigate("windows-incident");
+    }
+  };
   return (
     <div className="page welcome-page" data-testid="welcome-view">
       <div className="welcome-inner">
@@ -177,13 +198,47 @@ export function WelcomeView({
           <img className="welcome-hero-logo" src="./logo.png" alt="" />
           <div>
             <p className="welcome-hero-title">LovelyHawk<span aria-hidden="true">.</span></p>
-            <p className="welcome-hero-subtitle">Linux 应急响应 / 运维工作台</p>
+            <p className="welcome-hero-subtitle">Windows &amp; Linux 应急响应 / 运维工作台</p>
           </div>
         </header>
+
+        <div className="welcome-platform-banner">
+          <section
+            className="welcome-card welcome-platform-card"
+            aria-labelledby="welcome-windows-title"
+          >
+            <div className="welcome-platform-body">
+              <div>
+                <span className="welcome-platform-tag">独立工作台 · RDP 动态虚拟通道</span>
+                <h2 id="welcome-windows-title">Windows 应急响应</h2>
+                <p className="welcome-start-hint">
+                  通过远程桌面虚拟通道连接被检 Windows 会话，进入独立的 Windows 应急响应工作台。
+                </p>
+                <ul className="welcome-systems welcome-windows-Caps" aria-label="Windows 应急响应功能">
+                  {WINDOWS_CAPABILITIES.map((cap) => (
+                    <li key={cap}>{cap}</li>
+                  ))}
+                </ul>
+              </div>
+              <div className="welcome-platform-cta">
+                <button
+                  type="button"
+                  className="welcome-windows-button"
+                  data-testid="welcome-enter-windows"
+                  onClick={enterWindows}
+                >
+                  <span>进入 Windows 应急响应</span>
+                  <ArrowIcon />
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
 
         <div className="welcome-grid">
           <section className="welcome-card welcome-start" aria-labelledby="welcome-intro-title">
             <StartIllustration />
+            <span className="welcome-platform-tag">Linux 应急响应模块 · SSH / SFTP</span>
             <h1 id="welcome-intro-title">开始一次应急响应</h1>
             <p className="welcome-start-label">能自动识别的系统</p>
             <ul className="welcome-systems" aria-label="能自动识别的系统">

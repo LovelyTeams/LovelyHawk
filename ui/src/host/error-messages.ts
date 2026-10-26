@@ -200,6 +200,9 @@ export const BACKEND_ERROR_MESSAGES: Readonly<Record<string, string>> = Object.f
   "java-hot-update-timeout": "Java 操作没有在时限内结束，请重新打开 JAR 核对当前内容。",
   "java-hot-update-failed": "Java 操作没有完成，详细原因见应用日志。",
 
+  // Windows incident response over RDP DVC.
+  "windows-incident-failed": "Windows 应急响应操作没有完成，请检查远程桌面虚拟通道连接状态。",
+
   // Reports.
   "disposal-report-binding-unavailable": "目标连接已断开或已切换，处置报告没有生成。",
   "disposal-report-capacity": "待处理的处置报告快照太多，请先关闭一些。",

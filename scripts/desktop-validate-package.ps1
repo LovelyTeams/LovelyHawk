@@ -12,7 +12,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
-$expectedFiles = @('LICENSE', 'LovelyHawk.exe', 'PACKAGE_MANIFEST.json', 'README.txt', 'SBOM.cdx.json', 'THIRD_PARTY_LICENSES_RUST.txt', 'THIRD_PARTY_NOTICES.md')
+$expectedFiles = @('LICENSE', 'LovelyHawk.exe', 'lovelyhawk-win-agent.exe', 'PACKAGE_MANIFEST.json', 'README.txt', 'SBOM.cdx.json', 'THIRD_PARTY_LICENSES_RUST.txt', 'THIRD_PARTY_NOTICES.md')
 
 # How each bundled UI package is named in THIRD_PARTY_NOTICES.md.
 $noticeNames = @{
@@ -124,6 +124,7 @@ function Assert-SelfTest {
         $package = Join-Path $scratch 'LovelyHawk-1.0.0-windows-x64'
         [System.IO.Directory]::CreateDirectory($package) | Out-Null
         [System.IO.File]::WriteAllBytes((Join-Path $package 'LovelyHawk.exe'), [byte[]](@(0x4D, 0x5A) + (,0 * 600)))
+        [System.IO.File]::WriteAllBytes((Join-Path $package 'lovelyhawk-win-agent.exe'), [byte[]](@(0x4D, 0x5A) + (,0 * 600)))
         foreach ($name in @('LICENSE', 'README.txt')) { Set-Content -LiteralPath (Join-Path $package $name) -Value $name }
         Set-Content -LiteralPath (Join-Path $package 'THIRD_PARTY_NOTICES.md') -Value "## React 19.2.8`n- SHA-256: ``aaaa```n"
         Set-Content -LiteralPath (Join-Path $package 'THIRD_PARTY_LICENSES_RUST.txt') -Value "header`nserde 1.0.0 — MIT OR Apache-2.0 — texts #1"
@@ -132,13 +133,16 @@ function Assert-SelfTest {
         $font = '{"type":"file","name":"ui/assets/fonts/Inter-Regular.ttf","hashes":[{"alg":"SHA-256","content":"aaaa"}],"licenses":[{"license":{"id":"OFL-1.1"}}]}'
         $goodSbom = "{`"bomFormat`":`"CycloneDX`",`"specVersion`":`"1.5`",`"components`":[$crate,$uiPackage,$font]}"
         Set-Content -LiteralPath (Join-Path $package 'SBOM.cdx.json') -Value $goodSbom
-        $files = @('LICENSE', 'LovelyHawk.exe', 'README.txt', 'SBOM.cdx.json', 'THIRD_PARTY_LICENSES_RUST.txt', 'THIRD_PARTY_NOTICES.md') | ForEach-Object {
+        $files = @('LICENSE', 'LovelyHawk.exe', 'lovelyhawk-win-agent.exe', 'README.txt', 'SBOM.cdx.json', 'THIRD_PARTY_LICENSES_RUST.txt', 'THIRD_PARTY_NOTICES.md') | ForEach-Object {
             $path = Join-Path $package $_
             [ordered]@{ path = $_; size = (Get-Item -LiteralPath $path).Length; sha256 = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() }
         }
         [ordered]@{ schema = 'lovelyhawk-portable-package/v1'; version = '1.0.0'; files = $files } | ConvertTo-Json -Depth 4 |
             Set-Content -LiteralPath (Join-Path $package 'PACKAGE_MANIFEST.json')
         if (@(Get-PackageViolations -Root $scratch).Count -ne 0) { throw 'Package validator self-test rejected a well-formed package.' }
+        Remove-Item -LiteralPath (Join-Path $package 'lovelyhawk-win-agent.exe')
+        if (@(Get-PackageViolations -Root $scratch).Count -eq 0) { throw 'Package validator self-test accepted a missing Windows session agent.' }
+        [System.IO.File]::WriteAllBytes((Join-Path $package 'lovelyhawk-win-agent.exe'), [byte[]](@(0x4D, 0x5A) + (,0 * 600)))
         [System.IO.Directory]::CreateDirectory((Join-Path $package 'data')) | Out-Null
         if (@(Get-PackageViolations -Root $scratch).Count -eq 0) { throw 'Package validator self-test accepted shipped runtime data.' }
         Remove-Item -LiteralPath (Join-Path $package 'data') -Recurse -Force

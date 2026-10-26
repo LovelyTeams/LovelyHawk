@@ -46,6 +46,14 @@ const ICONS: Record<string, () => ReactElement> = {
       <path d="m4.6 6.2 2 1.8-2 1.8M8.4 10.4h3" />
     </svg>
   ),
+  "windows-incident": () => (
+    <svg {...ICON_PROPS}>
+      <rect x="2.2" y="2.2" width="5.2" height="5.2" rx=".8" />
+      <rect x="8.6" y="2.2" width="5.2" height="5.2" rx=".8" />
+      <rect x="2.2" y="8.6" width="5.2" height="5.2" rx=".8" />
+      <rect x="8.6" y="8.6" width="5.2" height="5.2" rx=".8" />
+    </svg>
+  ),
   "log-analysis": () => (
     <svg {...ICON_PROPS}>
       <path d="M2.2 3.4h9M2.2 6.4h6.4M2.2 9.4h3.8M2.2 12.4h3" />

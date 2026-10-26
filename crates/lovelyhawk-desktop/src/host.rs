@@ -32,6 +32,7 @@ const CLOSE_GATE_TIMEOUT: Duration = Duration::from_secs(15);
 #[derive(Debug)]
 pub struct Host {
     pub bridge: BackendBridge,
+    pub rdp: Mutex<crate::windows_rdp::RdpState>,
     pub binding: Mutex<BindingState>,
     pub children: Mutex<ChildWindows>,
     pub local: Mutex<LocalBrowser>,

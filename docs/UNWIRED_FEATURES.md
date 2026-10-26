@@ -1470,3 +1470,7 @@ packaged 验收不足而继续为 `Pending` 的切片。每一条都必须按其
   dead-man、独立 verify 和 restore 闭环，并完成真实自锁/自动恢复矩阵；phase 1 不提供 mutation API、按钮、
   generic execute、terminal/file/export；由于 phase 2 与真实 Linux 矩阵尚未完成，页面继续计为
   `Pending`，不得据此宣称 Firewall 完整迁移。
+
+## Windows 应急响应补充（2026-10-24）
+
+工作台的树形文件/注册表、进程关联查询、日志类别和扩展基线已沿 core → backend → shared/host → 页面接线。内嵌 RDP 沿专用主窗口命令接入原生客户端显示区域，保持宿主禁止 unsafe；属于实验性能力，尚缺真实远端登录、鼠标键盘、DPI、焦点和重连证据。详见 [Windows 工作台](WINDOWS_INCIDENT_WORKBENCH.md)。仍缺完整 EVTX 解析、案件链路、经过确认和独立复核的 Windows 自动修补与恢复，不能因本轮 UI 完成关闭这些待办。

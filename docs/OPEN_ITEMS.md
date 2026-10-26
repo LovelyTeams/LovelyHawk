@@ -574,3 +574,9 @@ Rocky 上每次打开命令工作台都要 **31.9 秒**，第二次还是 31.9 �
 **验收**：`pnpm lab:catalog-latency` 九台靶机全部通过，四台 RPM 系现在都报 `detected`。
 
 </details>
+
+## Windows 应急工作台反馈（2026-10-24）
+
+已实现：Agent 空闲误断连与重试、单行 PowerShell、扩充主机信息和 32 项基线、文件/注册表树、日志预设、进程网络/服务/DLL 关联、加载动画与底部日志抽屉。具体范围和证据见 [Windows 工作台](WINDOWS_INCIDENT_WORKBENCH.md)。
+
+待真实环境验证：RDP 原生嵌入的多屏 DPI、登录提示、焦点、全屏快捷键、断连重连；Agent 长时间在线和非管理员权限矩阵；PowerShell 5.1 交互粘贴与真实 DVC 回传。当前没有确认归属的远程 Windows 实验目标，不把本机只读采集或合成 UI 测试计作这些项目通过。

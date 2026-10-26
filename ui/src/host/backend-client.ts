@@ -1,6 +1,7 @@
 import { utf8ByteLength, type BackendTransport } from "./transport.js";
 import { BACKEND_ERROR_MESSAGES } from "./error-messages.js";
 import { isJavaHotUpdateRequest, matchesJavaHotUpdateResponse, type JavaHotUpdateRequest, type JavaHotUpdateResponse } from "../shared/java-hot-update-contract.js";
+import { isWindowsIncidentRequest, matchesWindowsIncidentResponse, type WindowsIncidentRequest, type WindowsIncidentResponse } from "../shared/windows-incident-contract.js";
 import { isNginxRepairRequest, matchesNginxRepairResponse, type NginxRepairRequest, type NginxRepairResponse } from "../shared/nginx-repair-contract.js";
 import { isLogRulesRequest, matchesLogRulesResponse, type LogRulesRequest, type LogRulesResponse } from "../shared/log-rules-contract.js";
 import { isAiAssistRequest, matchesAiAssistResponse, type AiAssistRequest, type AiAssistResponse } from "../shared/ai-assist-contract.js";
@@ -723,6 +724,13 @@ export class BackendClient {
     // (the backend allows 300 s); everything else reads.
     const response = await this.#request("java.hot-update", request, request.action === "execute" ? 330_000 : 180_000);
     if (!matchesJavaHotUpdateResponse(request, response)) throw new Error("Java 热更新返回了无法核实的结果，请重新扫描。");
+    return response;
+  }
+
+  async windowsIncident(request: WindowsIncidentRequest): Promise<WindowsIncidentResponse> {
+    if (!isWindowsIncidentRequest(request)) throw new Error("Windows 应急响应请求无效。");
+    const response = await this.#request("windows.incident", request, 60_000);
+    if (!matchesWindowsIncidentResponse(request, response)) throw new Error("Windows 应急响应返回了无法核实的结果，请重试。");
     return response;
   }
 

@@ -23,7 +23,7 @@ try {
     $previousRustFlags = [Environment]::GetEnvironmentVariable('RUSTFLAGS', 'Process')
     try {
         [Environment]::SetEnvironmentVariable('RUSTFLAGS', '-C target-feature=+crt-static', 'Process')
-        & cargo build --release --locked --package lovelyhawk-desktop --bin lovelyhawk --target $Target
+        & cargo build --release --locked --package lovelyhawk-desktop --package lovelyhawk-win-dvc --bin lovelyhawk --bin lovelyhawk-win-agent --target $Target
         if ($LASTEXITCODE -ne 0) { throw "Release desktop build failed with exit code $LASTEXITCODE." }
     } finally {
         [Environment]::SetEnvironmentVariable('RUSTFLAGS', $previousRustFlags, 'Process')
@@ -35,6 +35,8 @@ try {
 $binary = Join-Path $root "target\$Target\release\lovelyhawk.exe"
 $verifyArguments = @{ BinaryPath = $binary; Target = $Target; AllowSystemUcrt = $true }
 if (-not [string]::IsNullOrWhiteSpace($LlvmObjdumpPath)) { $verifyArguments.LlvmObjdumpPath = $LlvmObjdumpPath }
+& (Join-Path $PSScriptRoot 'desktop-verify-windows-binary.ps1') @verifyArguments
+$verifyArguments.BinaryPath = Join-Path $root "target\$Target\release\lovelyhawk-win-agent.exe"
 & (Join-Path $PSScriptRoot 'desktop-verify-windows-binary.ps1') @verifyArguments
 
 Write-Host "Release desktop executable is ready at '$binary'."

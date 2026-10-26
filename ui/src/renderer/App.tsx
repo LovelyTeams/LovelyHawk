@@ -36,7 +36,9 @@ import {
 } from "./ApplicationLogOverlay";
 import { AppTitleBar } from "./AppTitleBar";
 import { NavIcon } from "./nav-icons";
+import { SidebarNav } from "./SidebarNav";
 import { SidebarTarget } from "./SidebarTarget";
+import { ThemePicker } from "./ThemePicker";
 import { TargetRequiredBanner } from "./TargetRequiredBanner";
 import { WelcomeView } from "./WelcomeView";
 import { errorText } from "./error-text";
@@ -73,6 +75,7 @@ const JavaHotUpdatePage = lazy(async () => ({ default: (await import("./JavaHotU
 const KubernetesPage = lazy(async () => ({ default: (await import("./KubernetesPage")).KubernetesPage }));
 const DockerPage = lazy(async () => ({ default: (await import("./DockerPage")).DockerPage }));
 const EmergencyCommandsPage = lazy(async () => ({ default: (await import("./EmergencyCommandsPage")).EmergencyCommandsPage }));
+const WindowsIncidentPage = lazy(async () => ({ default: (await import("./WindowsIncidentPage")).WindowsIncidentPage }));
 import {
   initialNotificationState,
   notificationReducer,
@@ -94,8 +97,21 @@ interface ConnectionManagerRequest {
 
 /** Not a backend page: the disconnected landing view rendered by App itself. */
 export const WELCOME_PAGE_ID = "welcome";
+export const WINDOWS_INCIDENT_PAGE_ID = "windows-incident";
 /** Page the app opens once a target is bound from the welcome view. */
 const FIRST_CONNECTED_PAGE_ID = "system-info";
+
+const WINDOWS_PAGE_DESCRIPTOR: PageDescriptor = {
+  id: WINDOWS_INCIDENT_PAGE_ID,
+  group: "triage",
+  title: "Windows 应急响应",
+  icon: "⊞",
+  capability: "local-workspace",
+  summary: "Windows 应急响应独立工作台",
+  primaryAction: "刷新状态",
+  sections: [],
+  migrationState: "ready",
+};
 
 const groupLabels: Record<PageGroup, string> = {
   target: "目标",
@@ -143,7 +159,13 @@ export function App() {
   const [themeId, setThemeId] = useState<SettingsTheme>(DEFAULT_THEME_ID);
   const [uiPreferences, setUiPreferences] = useState<UiPreferences>(DEFAULT_UI_PREFERENCES);
   const [navigationBusy, setNavigationBusy] = useState(false);
+  const [railPreferred, setRailPreferred] = useState(false);
   const [activeTarget, setActiveTarget] = useState<ActiveSshTarget | null>(null);
+  const [windowsChannelRequest, setWindowsChannelRequest] = useState(0);
+  const [windowsTarget, setWindowsTarget] = useState<{ connected: boolean; hostname: string | null }>({ connected: false, hostname: null });
+  const acceptWindowsTarget = useCallback((connected: boolean, hostname: string | null) => {
+    setWindowsTarget((previous) => previous.connected === connected && previous.hostname === hostname ? previous : { connected, hostname });
+  }, []);
   const [caseReport, setCaseReport] = useState<DisposalReportSnapshot | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
   const unsavedEditorsConfirm = useConfirmDialog();
@@ -186,9 +208,10 @@ export function App() {
       })
       .catch(() => undefined);
   }, [applyThemeChoice]);
-  const cycleTheme = useCallback(async () => {
+  const chooseTheme = useCallback(async (wanted: SettingsTheme) => {
     const previous = themeId;
-    const next = applyThemeChoice(nextThemeId(previous));
+    if (wanted === previous) return;
+    const next = applyThemeChoice(wanted);
     try {
       const snapshot = await window.lovelyhawk.loadSettings();
       await window.lovelyhawk.saveSettings({ ...toSettingsSaveInput(snapshot), theme: next });
@@ -275,11 +298,17 @@ export function App() {
   }, []);
 
   const activePage = useMemo(
-    () => bootstrap?.pages.find((page) => page.id === activePageId) ?? null,
+    () =>
+      activePageId === WINDOWS_INCIDENT_PAGE_ID
+        ? WINDOWS_PAGE_DESCRIPTOR
+        : bootstrap?.pages.find((page) => page.id === activePageId) ?? null,
     [activePageId, bootstrap],
   );
   const waitingForTarget = activeTarget === null && activePage?.capability === "connected-target";
   const welcomeScreen = activePage === null && activeTarget === null && uiPreferences.showStatusBar;
+  // The rail drops the target card, so it is only offered while the status
+  // bar carries the target, its disconnect and the log and report entries.
+  const rail = railPreferred && uiPreferences.showStatusBar;
 
   if (error !== null) {
     return (
@@ -525,7 +554,7 @@ export function App() {
           sshTerminalDisabled: activeTarget === null,
           onOpenSshTerminal: () => void openSshTerminal(),
           onOpenCommandHistory: openCommandHistory,
-          onCycleTheme: () => void cycleTheme(),
+          onCycleTheme: () => void chooseTheme(nextThemeId(themeId)),
           onOpenSettings: openSettings,
         }}
       />
@@ -534,46 +563,60 @@ export function App() {
           target, so the sidebar steps aside. It stays when the status bar is
           hidden, because then the sidebar carries the log, the report and
           any connection error. */}
-      <div className={welcomeScreen ? "app-frame is-welcome" : "app-frame"}>
-      <aside className="sidebar" aria-hidden={overlayOpen ? true : undefined} inert={overlayOpen ? true : undefined}>
-        <SidebarTarget
-          target={activeTarget?.target ?? null}
-          disconnecting={disconnecting}
-          onConnect={(returnFocus) =>
-            openConnectionManager({ connectionId: null, startCreating: false }, returnFocus)}
-          onOpenTerminal={() => void openSshTerminal()}
-          onDisconnect={() => void disconnectTarget()}
-          error={uiPreferences.showStatusBar ? null : targetError}
+      <div className={["app-frame", welcomeScreen ? "is-welcome" : "", rail ? "is-rail" : ""].filter(Boolean).join(" ")}>
+      <aside className={rail ? "sidebar is-rail" : "sidebar"} aria-hidden={overlayOpen ? true : undefined} inert={overlayOpen ? true : undefined}>
+        {rail ? null : (
+          <SidebarTarget
+            target={activeTarget?.target ?? null}
+            disconnecting={disconnecting}
+            onConnect={(returnFocus) =>
+              openConnectionManager({ connectionId: null, startCreating: false }, returnFocus)}
+            onOpenTerminal={() => void openSshTerminal()}
+            onDisconnect={() => void disconnectTarget()}
+            error={uiPreferences.showStatusBar ? null : targetError}
+          />
+        )}
+        <div className="nav-switch-row">
+          <button
+            type="button"
+            className="nav-item nav-switch"
+            disabled={navigationBusy}
+            aria-label={rail ? "切换至 Windows 应急" : undefined}
+            title="切换至 Windows 应急响应工作台"
+            onClick={() => void navigateTo(WINDOWS_INCIDENT_PAGE_ID)}
+          >
+            <span className="nav-icon"><NavIcon pageId="windows-incident" glyph="⊞" /></span>
+            <strong>切换至 Windows 应急</strong>
+          </button>
+        </div>
+        <SidebarNav
+          pages={bootstrap.pages}
+          groupLabels={groupLabels}
+          activePageId={activePageId}
+          targetConnected={activeTarget !== null}
+          busy={navigationBusy}
+          rail={rail}
+          onNavigate={(pageId) => void navigateTo(pageId)}
         />
-        <nav aria-label="主导航" aria-busy={navigationBusy}>
-          {(Object.keys(groupLabels) as PageGroup[]).map((group) => (
-            <div className="nav-group" key={group}>
-              <p>{groupLabels[group]}</p>
-              {bootstrap.pages.filter((page) => page.group === group).map((page) => {
-                const waiting = activeTarget === null && page.capability === "connected-target";
-                return (
-                  <button
-                    className={[
-                      "nav-item",
-                      page.id === activePageId ? "active" : "",
-                      waiting ? "needs-target" : "",
-                    ].filter(Boolean).join(" ")}
-                    key={page.id}
-                    type="button"
-                    disabled={navigationBusy}
-                    aria-current={page.id === activePageId ? "page" : undefined}
-                    title={waiting ? `${page.title}：连接目标后可用` : page.summary}
-                    onClick={() => void navigateTo(page.id)}
-                  >
-                    <span className="nav-icon"><NavIcon pageId={page.id} glyph={page.icon} /></span>
-                    <strong>{page.title}</strong>
-                    {waiting ? <i className="nav-needs-target" aria-label="需要连接目标" /> : null}
-                  </button>
-                );
-              })}
-            </div>
-          ))}
-        </nav>
+        {uiPreferences.showStatusBar ? (
+          <div className="sidebar-rail-toggle">
+            <button
+              type="button"
+              data-testid="sidebar-rail-toggle"
+              aria-pressed={rail}
+              aria-label={rail ? "展开导航" : "收起导航"}
+              title={rail ? "展开导航" : "收起为图标栏"}
+              onClick={() => setRailPreferred((value) => !value)}
+            >
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="1.8" y="2.4" width="12.4" height="11.2" rx="2" />
+                <path d="M6 2.4v11.2" />
+                <path d={rail ? "m9 6.2 1.8 1.8L9 9.8" : "m10.8 6.2-1.8 1.8 1.8 1.8"} />
+              </svg>
+              {rail ? null : <span>收起导航</span>}
+            </button>
+          </div>
+        ) : null}
         {uiPreferences.showStatusBar ? null : (
           // With the status bar hidden, its two entries move here so they
           // stay one click away.
@@ -615,6 +658,7 @@ export function App() {
               offlinePages={bootstrap.pages.filter((page) =>
                 page.capability !== "connected-target")}
               onNavigate={(pageId) => void navigateTo(pageId)}
+              onOpenWindowsIncident={() => void navigateTo(WINDOWS_INCIDENT_PAGE_ID)}
               onOpenConnections={(returnFocus) =>
                 openConnectionManager({ connectionId: null, startCreating: false }, returnFocus)}
               onConnectionAction={(connectionId, intent, returnFocus) =>
@@ -700,6 +744,13 @@ export function App() {
               bindingHandle={activeTarget?.bindingHandle ?? null}
               api={window.lovelyhawk}
             />
+          ) : activePage.id === "windows-incident" ? (
+            <WindowsIncidentPage covered={overlayOpen || pageModalOpen} channelOpenRequest={windowsChannelRequest}
+              api={window.lovelyhawk}
+              writeClipboard={window.lovelyhawk.writeClipboard}
+              onConnectionChange={acceptWindowsTarget}
+              onBackToWelcome={() => void navigateTo(WELCOME_PAGE_ID)}
+            />
           ) : (
             <MigrationPlaceholder page={activePage} />
           )}
@@ -777,13 +828,14 @@ export function App() {
         inert={overlayOpen ? true : undefined}
       >
         <div className="statusbar-group">
+          {activePageId === WINDOWS_INCIDENT_PAGE_ID ? <button type="button" className="statusbar-button" data-testid="open-windows-channel" onClick={() => setWindowsChannelRequest((n) => n + 1)}>通道与传输</button> : null}
           <button type="button" className="statusbar-button" data-testid="open-application-log" onClick={(event) => openApplicationLog(event.currentTarget)}>应用日志</button>
           <button type="button" className="statusbar-button" data-testid="open-disposal-report" onClick={(event) => openDisposalReport(event.currentTarget)}>处置报告</button>
         </div>
         <div className="statusbar-target">
-          <span className={activeTarget === null ? "status-dot idle" : "status-dot"} />
-          <span>{activeTarget === null ? "未连接目标" : targetLabel(activeTarget.target)}</span>
-          {activeTarget !== null ? (
+          <span className={(activePageId === WINDOWS_INCIDENT_PAGE_ID ? windowsTarget.connected : activeTarget !== null) ? "status-dot" : "status-dot idle"} />
+          <span>{activePageId === WINDOWS_INCIDENT_PAGE_ID ? (windowsTarget.connected ? windowsTarget.hostname ?? "Windows 会话已连接" : "Windows 会话未连接") : activeTarget === null ? "未连接目标" : targetLabel(activeTarget.target)}</span>
+          {activePageId !== WINDOWS_INCIDENT_PAGE_ID && activeTarget !== null ? (
             <button
               type="button"
               className="statusbar-button statusbar-disconnect"
@@ -794,7 +846,10 @@ export function App() {
               {disconnecting ? "断开中…" : "断开"}
             </button>
           ) : null}
-          {targetError !== null ? <span className="statusbar-error" role="alert">{targetError}</span> : null}
+          {activePageId !== WINDOWS_INCIDENT_PAGE_ID && targetError !== null ? <span className="statusbar-error" role="alert">{targetError}</span> : null}
+        </div>
+        <div className="statusbar-group statusbar-end">
+          <ThemePicker themeId={themeId} onSelect={(next) => void chooseTheme(next)} />
         </div>
       </footer>
       ) : null}

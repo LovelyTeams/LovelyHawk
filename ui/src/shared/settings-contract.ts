@@ -1,4 +1,21 @@
-export type SettingsTheme = "light" | "dark" | "sakura" | "incident-canvas";
+export type SettingsTheme =
+  | "light"
+  | "dark"
+  | "sakura"
+  | "pink"
+  | "tingwu"
+  | "dongfang"
+  | "chunchen"
+  | "ruolan"
+  | "linye"
+  | "shanhu"
+  | "nihong"
+  | "spark"
+  | "incident-canvas"
+  | "shenhai"
+  | "wuye"
+  | "jiaotang"
+  | "molv";
 export type SettingsLanguage = "zh-CN" | "en-US";
 export type SettingsLogLevel = "debug" | "info" | "warn" | "error";
 export type SettingsAiProviderKind = "open-ai-compatible" | "anthropic" | "gemini";
@@ -287,7 +304,25 @@ function isAi(value: unknown, includeKeyPresence: boolean): value is SettingsAi 
 function isSettings(value: unknown, includeKeyPresence: boolean): boolean {
   if (!isRecord(value) || !exact(value, SETTINGS_KEYS)) return false;
   if (
-    !oneOf(value.theme, ["light", "dark", "sakura", "incident-canvas"] as const) ||
+    !oneOf(value.theme, [
+      "light",
+      "dark",
+      "sakura",
+      "pink",
+      "tingwu",
+      "dongfang",
+      "chunchen",
+      "ruolan",
+      "linye",
+      "shanhu",
+      "nihong",
+      "spark",
+      "incident-canvas",
+      "shenhai",
+      "wuye",
+      "jiaotang",
+      "molv",
+    ] as const) ||
     !oneOf(value.language, ["zh-CN", "en-US"] as const) ||
     typeof value.autoConnect !== "boolean" ||
     !integerIn(value.defaultSshPort, 1, 65_535) ||

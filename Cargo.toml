@@ -4,6 +4,7 @@ members = [
   "crates/lovelyhawk-backend",
   "crates/lovelyhawk-terminal",
   "crates/lovelyhawk-desktop",
+  "crates/lovelyhawk-win-dvc",
 ]
 # The desktop app embeds the built UI (ui/dist) at compile time, so it is
 # built on purpose with `--package lovelyhawk-desktop` after the UI build.
@@ -11,6 +12,7 @@ default-members = [
   "crates/lovelyhawk-core",
   "crates/lovelyhawk-backend",
   "crates/lovelyhawk-terminal",
+  "crates/lovelyhawk-win-dvc",
 ]
 resolver = "2"
 
@@ -57,6 +59,21 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 unicode-width = "0.2"
 url = "2.5"
 uuid = { version = "1", features = ["v4", "serde"] }
+windows = { version = "0.62.2", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Com",
+  "Win32_System_Console",
+  "Win32_System_IO",
+  "Win32_System_Pipes",
+  "Win32_System_Registry",
+  "Win32_System_RemoteDesktop",
+  "Win32_System_SystemInformation",
+  "Win32_System_Threading",
+  "Win32_UI_WindowsAndMessaging",
+] }
+windows-core = "0.62.2"
 zeroize = { version = "1", features = ["derive"] }
 
 [profile.dev]

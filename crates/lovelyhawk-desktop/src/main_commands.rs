@@ -942,6 +942,84 @@ pub async fn config_visual_save<R: Runtime>(
 }
 
 #[tauri::command]
+pub async fn windows_file_save<R: Runtime>(
+    window: WebviewWindow<R>,
+    host: State<'_, Host>,
+    file_id: String,
+) -> CommandResult<Value> {
+    use lovelyhawk_backend::{
+        WINDOWS_EVIDENCE_MAX_BYTES, WINDOWS_EVIDENCE_PART_BYTES, WindowsEvidencePart,
+    };
+    require_main(&window)?;
+    if file_id.len() != 36 || uuid::Uuid::parse_str(&file_id).is_err() {
+        return Err("取证文件请求无效。".to_owned());
+    }
+    let mut content = Vec::new();
+    let mut first: Option<WindowsEvidencePart> = None;
+    loop {
+        let offset = content.len() as u64;
+        let payload = host
+            .bridge
+            .call(
+                "windows.evidence.part",
+                json!({ "fileId": file_id, "offset": offset }),
+            )
+            .await
+            .map_err(|_| "文件已不在缓存中或未通过校验，请重新拉取后再保存。".to_owned())?;
+        let part: WindowsEvidencePart =
+            serde_json::from_value(payload).map_err(|_| "文件内容未通过校验。".to_owned())?;
+        let remaining = part.size_bytes.saturating_sub(offset) as usize;
+        if part.file_id != file_id
+            || part.offset != offset
+            || part.size_bytes > WINDOWS_EVIDENCE_MAX_BYTES as u64
+            || part.bytes.len() != remaining.min(WINDOWS_EVIDENCE_PART_BYTES)
+            || first.as_ref().is_some_and(|initial| {
+                initial.name != part.name
+                    || initial.sha256 != part.sha256
+                    || initial.size_bytes != part.size_bytes
+            })
+        {
+            return Err("取证文件内容或元数据发生变化，未保存文件。".to_owned());
+        }
+        content.extend_from_slice(&part.bytes);
+        if first.is_none() {
+            first = Some(part);
+        }
+        let initial = first
+            .as_ref()
+            .ok_or_else(|| "文件读取未完成。".to_owned())?;
+        if content.len() as u64 == initial.size_bytes {
+            break;
+        }
+    }
+    let initial = first.ok_or_else(|| "文件读取未完成。".to_owned())?;
+    if !initial.verifies(&content) {
+        return Err("文件 SHA256 校验失败，未保存文件。".to_owned());
+    }
+    let suggested = if local_files::is_safe_file_name(&initial.name) {
+        initial.name
+    } else {
+        "windows-evidence.bin".to_owned()
+    };
+    let Some(path) = local_files::choose(
+        &window,
+        "另存 Windows 取证文件",
+        DialogKind::Save {
+            default_name: &suggested,
+        },
+        None,
+    )
+    .await
+    else {
+        return Ok(json!({ "saved": false, "fileName": null, "sha256": null }));
+    };
+    local_files::write_new_file(&path, &content).map_err(str::to_owned)?;
+    Ok(
+        json!({ "saved": true, "fileName": local_files::display_name(&path, &suggested), "sha256": initial.sha256 }),
+    )
+}
+
+#[tauri::command]
 pub fn clipboard_write<R: Runtime>(
     app: AppHandle<R>,
     window: WebviewWindow<R>,
@@ -1111,6 +1189,71 @@ fn unix_millis() -> u128 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis())
         .unwrap_or_default()
+}
+
+/// Owns the native viewport on the GUI thread; the page submits a closed intent.
+#[tauri::command]
+pub async fn windows_rdp<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    request: crate::windows_rdp::Request,
+) -> CommandResult<crate::windows_rdp::Status> {
+    require_main(&window)?;
+    let starting = matches!(request, crate::windows_rdp::Request::Start { .. });
+    let (send, receive) = tokio::sync::oneshot::channel();
+    let target = window.clone();
+    app.run_on_main_thread(move || {
+        use tauri::Manager;
+        let host = target.state::<Host>();
+        let result = host
+            .webview_data
+            .parent()
+            .ok_or_else(|| "便携数据目录无效".to_owned())
+            .and_then(|root| host.rdp.lock().apply(&target, root, request));
+        let _ = send.send(result);
+    })
+    .map_err(|_| "无法调度远程桌面窗口".to_owned())?;
+    let status = receive
+        .await
+        .map_err(|_| "远程桌面窗口已关闭".to_owned())??;
+    if starting && status.client_id.is_some() {
+        watch_rdp(app, window);
+    }
+    Ok(status)
+}
+
+/// mstsc shows and sizes its own window when a session starts or reconnects,
+/// even while the page has hidden it. Until the client exits, the requested
+/// placement or hiding is re-applied on the GUI thread.
+fn watch_rdp<R: Runtime>(app: AppHandle<R>, window: WebviewWindow<R>) {
+    use tauri::Manager;
+    {
+        let host = window.state::<Host>();
+        let mut rdp = host.rdp.lock();
+        if rdp.watching {
+            return;
+        }
+        rdp.watching = true;
+    }
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            let (send, receive) = tokio::sync::oneshot::channel();
+            let target = window.clone();
+            let scheduled = app.run_on_main_thread(move || {
+                let host = target.state::<Host>();
+                let mut rdp = host.rdp.lock();
+                let alive = rdp.enforce(&target);
+                if !alive {
+                    rdp.watching = false;
+                }
+                let _ = send.send(alive);
+            });
+            if scheduled.is_err() || !receive.await.unwrap_or(false) {
+                break;
+            }
+        }
+    });
 }
 
 #[cfg(test)]

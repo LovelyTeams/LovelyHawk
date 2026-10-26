@@ -15,6 +15,7 @@ base64.workspace = true
 bytes.workspace = true
 chrono.workspace = true
 futures.workspace = true
+lovelyhawk-win-dvc = { path = "../lovelyhawk-win-dvc" }
 parking_lot.workspace = true
 native-tls.workspace = true
 postgres-native-tls.workspace = true

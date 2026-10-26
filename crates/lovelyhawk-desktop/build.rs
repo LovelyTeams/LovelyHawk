@@ -24,6 +24,8 @@ const COMMANDS: &[&str] = &[
     "config_visual_import_database",
     "config_visual_copy",
     "config_visual_save",
+    "windows_file_save",
+    "windows_rdp",
     "clipboard_write",
     "window_theme",
     "terminal_window_open",

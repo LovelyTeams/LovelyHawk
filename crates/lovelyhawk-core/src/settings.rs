@@ -29,7 +29,20 @@ pub enum Theme {
     Light,
     Dark,
     Sakura,
+    Pink,
+    Tingwu,
+    Dongfang,
+    Chunchen,
+    Ruolan,
+    Linye,
+    Shanhu,
+    Nihong,
+    Spark,
     IncidentCanvas,
+    Shenhai,
+    Wuye,
+    Jiaotang,
+    Molv,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

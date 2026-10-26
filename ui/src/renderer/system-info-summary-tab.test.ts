@@ -134,9 +134,9 @@ describe("target status placement", () => {
     expect(statusbar).toMatch(/className="statusbar-error" role="alert"/u);
   });
 
-  it("keeps the disconnect control out of the tree while nothing is bound", () => {
+  it("keeps SSH disconnect hidden without a target and while Windows IR is active", () => {
     expect(appSource).toMatch(
-      /\{activeTarget !== null \? \(\s*<button[\s\S]{0,240}data-testid="disconnect-target"/u,
+      /\{activePageId !== WINDOWS_INCIDENT_PAGE_ID && activeTarget !== null \? \(\s*<button[\s\S]{0,240}data-testid="disconnect-target"/u,
     );
   });
 });

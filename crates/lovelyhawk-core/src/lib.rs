@@ -82,6 +82,7 @@ pub mod target;
 pub mod tomcat_config;
 pub mod types;
 pub mod visual_document;
+pub mod windows_incident;
 
 pub use error::{
     CoreError, CoreResult, SshHostRole, SshKeyboardInteractiveChallenge,
