@@ -145,3 +145,36 @@ Windows 桌面探针核对 1440×960、1280×800、960×780 布局、浅色/深�
 初次运行 91/92，发现窄窗口关闭详情后焦点未返回已恢复的表格，失败证据保留在 `target/desktop-debug/windows-workspace-8d91db5c-48cc-4201-92ab-b871c0373126/evidence/`。修复为等待视图提交后返回焦点，保留原失败断言并通过复测；随后补充笔记本布局、底栏键盘和未知连接状态检查。
 
 当前调试程序为 `target/debug/lovelyhawk.exe`，SHA256 为 `7444b0e61ff08ec6e2fe16c202e223851f4cf4c83cda72aa91e4ea77f52daf69`。构建前确认该程序未运行，两个探针均使用独立数据根并正常退出。本轮没有生成正式便携包，也没有连接真实 RDP 目标。
+
+## 2026-10-26 基线覆盖扩展
+
+基线目录由 32 项扩展为 **69 项、15 类**。新增 37 项涵盖本地口令与锁定、高级审计、四个日志通道及容量、进程命令行审计、防火墙记录、Defender 防护与更新、VBS/凭据保护运行状态、UAC/匿名权限、WinRM 客户端和 LLMNR。完整目录、采集来源、产品建议阈值、微软/CISA 原始资料和兼容矩阵见 [Windows 基线覆盖](WINDOWS_BASELINE_COVERAGE.md)。
+
+新增“不适用”结果、统计和筛选，不进入通过计数或概况风险列表；无法读取仍显示“无法判断”，并保留权限、组件、缺失配置与角色的原因。目录总数不再写成“已检查”。本地 SAM 检查不冒充域策略；防护/日志配置不冒充实际防护与留存证明。页面补充采集影响说明，PowerShell/.NET 临时编译及系统审计记录可能产生。
+
+新增项只读，不提供未实现的快速修复按钮。已有入口由 core 的实际支持状态决定，并限定到明确的不通过/需复核结果。DTO 核对唯一规则编号、五类计数、总数与修复能力的状态组合。原生查询使用 `baseline-v3`，不识别时沿既有 PowerShell 路径回退。新查询不设置策略、不提权；本机审计与 Security 日志权限不足已验证为未知。
+
+### 本轮实际检查
+
+证据目录 `target/windows-baseline-1793017646231/`：
+
+| 检查 | 结果 / 证据 |
+| --- | --- |
+| `pnpm ui:check` | 140 个文件 / 1,168 项通过，类型和构建通过；`ui-check.log` |
+| 最后详情标记调整后的 UI 类型、相关测试和构建 | 2 个文件 / 18 项通过；`ui-final-focused.log`、`ui-build.log`；保留原有共享 chunk 大小提示 |
+| Windows core | 22 项通过，含本机九模块和新增固定原生策略读取；`core-tests.log` |
+| backend / 宿主 / win-dvc | 分别 354 / 39 / 11 项通过；`boundary-tests.log` |
+| Clippy | core、win-dvc、backend、desktop 全目标无警告；`clippy.log` |
+| 文件路径边界回归 | 1 项通过；`path-boundary-test.log`。修正同文件已有布尔表达式 lint，未改变准入条件 |
+| source / dependency / 普通 ledger 门禁 | 通过；对应 `*-gate.log`。ledger 仍为 24/53，不计 strict 完成 |
+| 调试宿主与原生 Agent 构建 | 通过；`build.log`；程序位于 `target/debug/` |
+| Windows 工作区真实 WebView2 验收 | 100/100；`target/desktop-debug/windows-workspace-d68c8d1c-531a-47d6-8475-79ecc238b5af/evidence/` |
+| 整应用真实 WebView2 巡检 | 95/95；`target/desktop-debug/ea929c58-10b7-443b-8e61-e100cdf7bf5e/evidence/` |
+
+两个桌面探针使用独立数据根、正常关闭，控制台错误为 0。新增桌面断言覆盖检查来源与人工复核、分类筛选、权限缺口、不适用筛选及详情不显示绿色正常标记；原有快速修复确认、取消、绑定与重新读取仍通过。截图 `03-baseline.png`、`03a-baseline-permission-gap.png` 已人工查看。已连接内容为显式合成数据，不能计作远程 Windows Server 实测。
+
+最终调试宿主 SHA256：`0a1c015b186921a1a2913970911606ea2740ddc02d6bb7ee9f0b75f89265dbb8`；原生 Agent：`968c0c7a2bb70fd3277d118fbaa505c3fad872b8b95f666b611054803ab2ea61`。汇总和源码摘要保存在证据目录 `verification.json`。
+
+编译阶段的失败保留为 `ui-optional-prop-failed.log` 和 `clippy-existing-bool-failed.log`，分别修正精确可选属性传递和已有布尔表达式后复测通过，没有放宽类型或 lint 规则。首次规则计数测试误写为 72，失败后按实际 37 条新增目录更正为 69，保留字段边界、缺口与权限断言，最终结果见 `core-tests.log`。
+
+本轮不生成正式便携发布包；实际只读环境为 Windows 11 专业版 10.0.26200 x64 / PowerShell 5.1。Windows Server、域控制器、ARM64、管理员审计正向路径、受限 PowerShell 和真实 RDP 回传保持待验证；UI 合成数据与本机读取不得替代这些矩阵。修补、恢复和案件留证缺口继续保持开放。

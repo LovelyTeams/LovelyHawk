@@ -10,7 +10,7 @@ import { commandExecutable, matchesQuery, riskCounts, toCsv, type RiskFilter } f
 import { RELATED_ID, commandPath } from "./win-ir-links";
 import { startupKey, startupSourceLabel, type FocusTarget, type InvestigationFocus } from "./win-ir-model";
 
-const BASELINE_STATUS = { pass: "通过", fail: "不通过", warn: "需复核", unknown: "无法判断" } as const;
+const BASELINE_STATUS = { pass: "通过", fail: "不通过", warn: "需复核", unknown: "无法判断", "not-applicable": "不适用" } as const;
 
 type Target<K extends FocusTarget["tab"]> = InvestigationFocus<Extract<FocusTarget, { tab: K }>> | null;
 
@@ -36,23 +36,26 @@ export function WinIrBaseline({ snapshot, focus, busy = false, connected = false
   const categories = [...new Set(items.map((item) => item.category))];
   const visible = items.filter((item) =>
     (status === "all" || item.status === status) && (category === "all" || item.category === category) &&
-    matchesQuery(query, item.title, item.currentValue, item.expectedValue, item.description, item.recommendation));
+    matchesQuery(query, item.id, item.category, item.title, item.currentValue, item.expectedValue, item.description, item.recommendation));
   const current = items.find((item) => item.id === selected);
   const columns: Column<WindowsBaselineItem>[] = [
     { key: "title", label: "检查项", width: "32%", sort: (item) => item.title, render: (item) => <div className="wir-cell-stack"><strong>{item.title}</strong><small>{item.category}</small></div> },
     { key: "current", label: "当前值", width: "26%", mono: true, render: (item) => <span className="wir-clip" title={item.currentValue}>{item.currentValue || "未取得"}</span> },
     { key: "expected", label: "建议值", mono: true, render: (item) => <span className="wir-clip" title={item.expectedValue}>{item.expectedValue}</span> },
-    { key: "risk", label: "结果", width: "110px", sort: riskSort((item) => item.severity), render: (item) => <RiskBadge level={item.status === "pass" ? "normal" : item.severity} label={BASELINE_STATUS[item.status]} /> },
+    { key: "risk", label: "结果", width: "110px", sort: riskSort((item) => item.severity), render: (item) => item.status === "not-applicable" ? <span className="wir-tag">不适用</span> : <RiskBadge level={item.status === "pass" ? "normal" : item.severity} label={BASELINE_STATUS[item.status]} /> },
   ];
   return (
     <div className="wir-module">
       <StatStrip cards={[
-        { label: "已检查", value: snapshot?.totalChecks ?? "—", hint: "当前规则覆盖范围" },
+        { label: "检查目录", value: snapshot?.totalChecks ?? "—", hint: "含无法判断和不适用项" },
         { label: "通过", value: snapshot?.passedCount ?? "—", tone: "normal", onClick: () => setStatus("pass") },
         { label: "不通过", value: snapshot?.failedCount ?? "—", tone: "high", onClick: () => setStatus("fail") },
         { label: "无法判断", value: snapshot?.unknownCount ?? "—", tone: "low", onClick: () => setStatus("unknown") },
         { label: "需要复核", value: snapshot?.warningCount ?? "—", tone: "medium", onClick: () => setStatus("warn") },
+        { label: "不适用", value: snapshot?.notApplicableCount ?? "—", onClick: () => setStatus("not-applicable") },
       ]} />
+      <p className="wir-query-scope">{snapshot ? `当前返回 ${categories.length} 类检查。` : "核查后可按类别与结果筛选。"}口令策略限定本地账户，审计与防护按本次采集权限读取；“无法判断”和“不适用”均不计入通过。</p>
+      <details className="wir-collection-warnings"><summary>检查范围与采集影响</summary><p>检查读取系统策略、日志通道和防护状态，不修改这些配置，也不自动提权。查询可能产生 PowerShell/.NET 临时编译文件及系统审计记录。口令策略不读取口令，日志检查只读取通道配置；容量建议不等于实际留存天数。缺少组件、权限或适用条件时保留缺口。</p></details>
       <div className="wir-toolbar">
         <SearchBox value={query} onChange={setQuery} placeholder="搜索检查项、配置值或加固建议" />
         <select className="win-ir-input wir-select" aria-label="基线类别" value={category} onChange={(event) => setCategory(event.target.value)}>
@@ -69,27 +72,29 @@ export function WinIrBaseline({ snapshot, focus, busy = false, connected = false
         { value: "warn", label: "需复核", tone: "medium", count: snapshot?.warningCount },
         { value: "pass", label: "通过", tone: "normal", count: snapshot?.passedCount },
         { value: "unknown", label: "无法判断", count: snapshot?.unknownCount },
+        { value: "not-applicable", label: "不适用", count: snapshot?.notApplicableCount },
       ]} />
       <MissingFocus show={missing} what="检查项" />
       <div className={`wir-master${current ? " is-split" : ""}`}>
         <DataTable label="基线检查" columns={columns} rows={visible} rowKey={(item) => item.id} selectedKey={selected} onSelect={(item) => setSelected(item?.id ?? null)} rowRisk={(item) => item.severity} defaultSort={{ key: "risk", descending: true }} empty={snapshot ? "没有符合当前筛选的检查项。" : "点击「核查安全基线」，读取当前配置与防护状态。"} />
-        {current ? <DetailPane title={current.title} subtitle={current.category} risk={current.severity} onClose={() => setSelected(null)} onCopy={onCopy} fields={[
+        {current ? <DetailPane title={current.title} subtitle={current.category} {...(current.status === "not-applicable" ? {} : { risk: current.severity })} onClose={() => setSelected(null)} onCopy={onCopy} fields={[
           { label: "检查结果", value: BASELINE_STATUS[current.status] },
           { label: "采集到的配置 / 运行值", value: current.currentValue, mono: true },
           { label: "建议值", value: current.expectedValue, mono: true },
           { label: "说明与依据", value: current.description },
           { label: "加固建议", value: current.recommendation },
-        ]} actions={onRemediate && current.status !== "pass" ? (
+        ]} actions={onRemediate && current.remediationAvailable && (current.status === "fail" || current.status === "warn") ? (
           <button
             type="button"
             className="win-ir-btn is-primary"
-            disabled={busy || !connected || current.id === "defender-tamper"}
-            title={current.id === "defender-tamper" ? "Defender 防篡改保护受系统内核保护，需在 Windows 安全中心界面手动开启" : undefined}
+            disabled={busy || !connected}
             onClick={() => onRemediate(current)}
           >
-            {current.id === "defender-tamper" ? "需在安全中心开启" : "快速修复"}
+            快速修复
           </button>
-        ) : undefined} /> : null}
+        ) : undefined}>
+          {!current.remediationAvailable && current.status !== "pass" ? <p className="wir-footnote">{current.status === "unknown" ? "先补齐采集与适用条件，再制定变更计划。" : current.status === "not-applicable" ? "当前条件下不执行此项修复。" : "此项提供检查与建议，尚未提供自动修复；请按适用范围人工复核。"}</p> : null}
+        </DetailPane> : null}
       </div>
       <p className="wir-footnote">结果仅对应已列出的检查项；“通过”不代表主机无入侵，也不代表完整符合某项合规标准。配置变更应另行确认影响并复核。</p>
     </div>

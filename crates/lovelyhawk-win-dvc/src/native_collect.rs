@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256};
 pub fn handle_native_collect(spec: &str) -> String {
     let result = if spec == "overview" || spec == "overview-v2" {
         collect_overview()
-    } else if spec == "baseline" || spec == "baseline-v2" {
+    } else if matches!(spec, "baseline" | "baseline-v2" | "baseline-v3") {
         collect_baseline()
     } else if spec == "processes" || spec == "processes-v2" {
         collect_processes()

@@ -28,7 +28,7 @@ export function WinIrOverview({ snapshots, collectedAt, busy, onNavigate, onGo, 
       detail: `概况报告 ${host.highRiskCount} 项高危、${host.mediumRiskCount} 项需关注；请继续核查基线配置。`,
       tab: "baseline" as const, risk: (host.highRiskCount > 0 ? "high" : "medium") as WindowsRiskLevel,
     }] : []),
-    ...(snapshots.baseline?.items.filter((item) => item.status !== "pass").map((item): Finding => ({ id: `baseline:${item.id}`, title: item.title, detail: item.description, tab: "baseline", risk: item.severity, target: { tab: "baseline", id: item.id } })) ?? []),
+    ...(snapshots.baseline?.items.filter((item) => item.status !== "pass" && item.status !== "not-applicable").map((item): Finding => ({ id: `baseline:${item.id}`, title: item.title, detail: item.description, tab: "baseline", risk: item.severity, target: { tab: "baseline", id: item.id } })) ?? []),
     ...(snapshots.processes?.processes.filter((item) => item.riskLevel !== "normal").map((item): Finding => ({ id: `process:${item.pid}:${item.startTime}`, title: item.name, detail: item.riskReasons.join("；"), tab: "processes", risk: item.riskLevel, target: { tab: "processes", pid: item.pid, startTime: item.startTime } })) ?? []),
     ...(snapshots.startup?.entries.filter((item) => item.riskLevel !== "normal").map((item, index): Finding => ({ id: `startup:${index}`, title: item.name, detail: item.riskReason, tab: "startup", risk: item.riskLevel, target: { tab: "startup", key: startupKey(item) } })) ?? []),
     ...(snapshots.accounts?.accounts.filter((item) => item.riskLevel !== "normal").map((item): Finding => ({ id: `account:${item.sid || item.name}`, title: item.name, detail: item.riskReasons.join("；"), tab: "accounts", risk: item.riskLevel, target: { tab: "accounts", sid: item.sid, name: item.name } })) ?? []),
@@ -55,7 +55,7 @@ export function WinIrOverview({ snapshots, collectedAt, busy, onNavigate, onGo, 
       <StatStrip cards={[
         { label: "核心模块已采集", value: `${complete} / ${CORE_COLLECTION.length}`, hint: "各模块采集时间单独记录" },
         { label: "高危线索条目", value: complete <= 1 && findings.length === 0 ? "待排查" : findings.filter((item) => item.risk === "high").length, tone: "high", hint: "仅含已采集记录，各模块可能重叠" },
-        { label: baseline ? "基线通过项" : "基线状态", value: baseline ? `${baseline.passedCount} / ${baseline.totalChecks}` : "未核查", tone: !baseline ? "info" : baseline.failedCount ? "high" : baseline.warningCount ? "medium" : "normal", onClick: () => onNavigate("baseline") },
+        { label: baseline ? "基线通过项" : "基线状态", value: baseline ? `${baseline.passedCount} / ${baseline.totalChecks}` : "未核查", tone: !baseline ? "info" : baseline.failedCount ? "high" : baseline.warningCount ? "medium" : baseline.unknownCount ? "low" : baseline.passedCount === baseline.totalChecks ? "normal" : "info", onClick: () => onNavigate("baseline") },
         { label: "主机已运行", value: host ? `${Math.floor(host.uptimeHours / 24)} 天 ${host.uptimeHours % 24} 时` : "—", hint: host?.bootTime || "启动时间待采集" },
       ]} />
       <div className="wir-overview-grid">

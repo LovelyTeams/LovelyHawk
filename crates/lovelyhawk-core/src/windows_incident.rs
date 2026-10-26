@@ -18,6 +18,7 @@ pub use lovelyhawk_win_dvc::{
 use serde::{Deserialize, Serialize};
 
 use crate::{CoreError, CoreResult};
+mod baseline;
 
 const DEFAULT_COLLECTION_TIMEOUT: Duration = Duration::from_secs(45);
 pub const WINDOWS_EVIDENCE_PART_BYTES: usize = 256 * 1024;
@@ -106,11 +107,12 @@ pub struct WindowsBaselineItem {
     pub title: String,
     pub current_value: String,
     pub expected_value: String,
-    /// `"pass"` | `"warn"` | `"fail"`
+    /// `"pass"` | `"warn"` | `"fail"` | `"unknown"` | `"not-applicable"`
     pub status: String,
     pub severity: WindowsRiskLevel,
     pub description: String,
     pub recommendation: String,
+    pub remediation_available: bool,
 }
 
 /// Baseline check snapshot.
@@ -122,6 +124,7 @@ pub struct WindowsBaselineSnapshot {
     pub failed_count: u32,
     pub warning_count: u32,
     pub unknown_count: u32,
+    pub not_applicable_count: u32,
     pub items: Vec<WindowsBaselineItem>,
 }
 
@@ -657,7 +660,7 @@ impl WindowsIncidentService {
     }
 
     pub fn collect_baseline(&self, session_id: &str) -> CoreResult<WindowsBaselineSnapshot> {
-        let json_str = self.run_native_or_ps("baseline-v2", PS_COLLECT_BASELINE, session_id)?;
+        let json_str = self.run_native_or_ps("baseline-v3", PS_COLLECT_BASELINE, session_id)?;
         parse_baseline_json(&json_str)
     }
 
@@ -923,9 +926,9 @@ pub fn baseline_remediation_script(rule_id: &str) -> Option<&'static str> {
         "auto-logon" => Some(
             "New-ItemProperty -LiteralPath 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon' -Name 'AutoAdminLogon' -PropertyType String -Value '0' -Force | Out-Null",
         ),
-        "smb1" => Some(
-            "Set-SmbServerConfiguration -EnableSMB1Protocol $false -Force -ErrorAction Stop",
-        ),
+        "smb1" => {
+            Some("Set-SmbServerConfiguration -EnableSMB1Protocol $false -Force -ErrorAction Stop")
+        }
         "smb-server-sign" => Some(
             "Set-SmbServerConfiguration -RequireSecuritySignature $true -Force -ErrorAction Stop",
         ),
@@ -935,9 +938,9 @@ pub fn baseline_remediation_script(rule_id: &str) -> Option<&'static str> {
         "smb-insecure-guest" => Some(
             "Set-SmbClientConfiguration -EnableInsecureGuestLogons $false -Force -ErrorAction Stop",
         ),
-        "defender-rt" => Some(
-            "Set-MpPreference -DisableRealtimeMonitoring $false -ErrorAction Stop",
-        ),
+        "defender-rt" => {
+            Some("Set-MpPreference -DisableRealtimeMonitoring $false -ErrorAction Stop")
+        }
         "firewall" => Some(
             "Set-NetFirewallProfile -Profile Domain,Private,Public -Enabled True -ErrorAction Stop",
         ),
@@ -1229,9 +1232,10 @@ pub fn build_delete_file_ps_script(file_path: &str, dir_path: &str) -> Option<St
         return None;
     }
     let bytes = f.as_bytes();
-    if !(bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && matches!(bytes[2], b'\\' | b'/'))
-        && !f.starts_with('%')
-    {
+    let absolute_path = bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/');
+    if !(absolute_path || f.starts_with('%')) {
         return None;
     }
     let normalized = f.replace('/', "\\");
@@ -2022,7 +2026,7 @@ pub fn parse_baseline_json(json_str: &str) -> CoreResult<WindowsBaselineSnapshot
             "Policies\\Explorer\\NoDriveTypeAutoRun；版本与其他 AutoPlay 策略需一起核对。",
         ),
     ];
-    let items: Vec<_> = rules.iter().map(|(id, category, title, field, expected, allowed, description)| {
+    let mut items: Vec<_> = rules.iter().map(|(id, category, title, field, expected, allowed, description)| {
         let value = raw.get(*field).filter(|v| !v.is_null()).and_then(|v| match v {
             serde_json::Value::String(s) => Some(s.clone()),
             serde_json::Value::Bool(_) | serde_json::Value::Number(_) => Some(v.to_string()),
@@ -2038,14 +2042,20 @@ pub fn parse_baseline_json(json_str: &str) -> CoreResult<WindowsBaselineSnapshot
             severity: if unknown { WindowsRiskLevel::Low } else if pass { WindowsRiskLevel::Normal } else if matches!(*id, "wdigest" | "smb1" | "guest" | "auto-logon" | "defender-rt") { WindowsRiskLevel::High } else { WindowsRiskLevel::Medium },
             description: (*description).to_owned(),
             recommendation: if unknown { "先核对当前系统版本、组件、读取权限及缺失配置的默认行为；未读取到的值不能算通过。" } else { "结合系统版本和业务依赖确认适用性，保留原配置后制定变更计划，并独立验证实际生效情况。" }.to_owned(),
+            remediation_available: !unknown && !pass && baseline_remediation_script(id).is_some(),
         }
     }).collect();
+    baseline::append_checks(&raw, &mut items);
     Ok(WindowsBaselineSnapshot {
         total_checks: items.len() as u32,
         passed_count: items.iter().filter(|i| i.status == "pass").count() as u32,
         failed_count: items.iter().filter(|i| i.status == "fail").count() as u32,
         warning_count: items.iter().filter(|i| i.status == "warn").count() as u32,
         unknown_count: items.iter().filter(|i| i.status == "unknown").count() as u32,
+        not_applicable_count: items
+            .iter()
+            .filter(|i| i.status == "not-applicable")
+            .count() as u32,
         items,
     })
 }
@@ -3098,15 +3108,15 @@ mod tests {
     fn baseline_parser_detects_wdigest_and_guest_risks() {
         let sample = r#"{"rdpNla":0,"rdpEnc":3,"uacLua":1,"wdigest":1,"lsassPpl":0,"autoLogon":"0","smb1":0,"guestEnabled":true,"defenderRealtime":false,"fwDisabledCount":1,"psScriptBlock":0}"#;
         let snap = parse_baseline_json(sample).unwrap();
-        assert_eq!(snap.total_checks, 32);
-        assert_eq!(snap.unknown_count, 21);
+        assert_eq!(snap.total_checks, 69);
+        assert_eq!(snap.unknown_count, 58);
         assert!(snap.failed_count >= 4);
     }
 
     #[test]
     fn unavailable_baselines_never_count_as_secure_and_event_ids_need_channels() {
         let baseline = parse_baseline_json("{}").unwrap();
-        assert_eq!(baseline.unknown_count, 32);
+        assert_eq!(baseline.unknown_count, 69);
         assert_eq!(baseline.passed_count, 0);
         assert_eq!(baseline.failed_count, 0);
         let unsupported = parse_baseline_json(r#"{"lsassPpl":2}"#).unwrap();
@@ -3254,7 +3264,7 @@ mod tests {
 
         let bl = strip_exit_prefix(&handle_native_collect("baseline")).unwrap();
         let bl_snap = parse_baseline_json(&bl).unwrap();
-        assert_eq!(bl_snap.total_checks, 32);
+        assert_eq!(bl_snap.total_checks, 69);
 
         let pr = strip_exit_prefix(&handle_native_collect("processes")).unwrap();
         let pr_snap = parse_processes_json(&pr).unwrap();
@@ -3265,7 +3275,11 @@ mod tests {
             .find(|p| p.pid == std::process::id())
             .unwrap();
         // The test's own process is always readable, elevated or not.
-        assert!(this.user.contains('\\'), "own process owner: {:?}", this.user);
+        assert!(
+            this.user.contains('\\'),
+            "own process owner: {:?}",
+            this.user
+        );
         let details = strip_exit_prefix(&handle_native_collect(&format!(
             "inspect-process:{}:{}",
             this.pid, this.start_time

@@ -162,7 +162,11 @@ $values = foreach ($name in ($names | Select-Object -First 256)) {{
 }
 
 pub const OVERVIEW: &str = include_str!("queries/overview.ps1");
-pub const BASELINE: &str = include_str!("queries/baseline.ps1");
+pub const BASELINE: &str = concat!(
+    include_str!("queries/baseline-native.ps1"),
+    "\n",
+    include_str!("queries/baseline.ps1")
+);
 pub const NETWORK: &str = include_str!("queries/network.ps1");
 pub const PROCESSES: &str = include_str!("queries/processes.ps1");
 

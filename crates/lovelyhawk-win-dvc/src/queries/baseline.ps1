@@ -1,19 +1,42 @@
 $ErrorActionPreference = 'Stop'
-function Reg-Value($path, $name) {
-  try { Get-ItemPropertyValue -LiteralPath $path -Name $name -ErrorAction Stop } catch { $null }
+$baselineErrors = @{}
+function Read-Failure($record) {
+  if ($record.CategoryInfo.Category -eq 'PermissionDenied' -or $record.Exception -is [UnauthorizedAccessException] -or $record.Exception.InnerException -is [UnauthorizedAccessException]) { 'permission-denied' }
+  elseif ($record.Exception -is [System.Management.Automation.CommandNotFoundException]) { 'unavailable' }
+  else { 'query-failed' }
 }
-function Query-Value([scriptblock]$query) { try { & $query } catch { $null } }
+function Reg-Value($path, $name, $field = '') {
+  try { Get-ItemPropertyValue -LiteralPath $path -Name $name -ErrorAction Stop }
+  catch { if ($field) { $baselineErrors[$field] = if ($_.CategoryInfo.Category -eq 'ObjectNotFound' -or $_.CategoryInfo.Category -eq 'InvalidArgument') { 'not-configured' } else { Read-Failure $_ } }; $null }
+}
+function Query-Value([scriptblock]$query, $field = '') {
+  try { & $query } catch { if ($field) { $baselineErrors[$field] = Read-Failure $_ }; $null }
+}
+function Property-Value($item, $name) { if ($null -ne $item) { $item.$name } else { $null } }
 $rdp = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp'
 $lsa = 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa'
 $policy = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
 $ps = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell'
-$mp = Query-Value { Get-MpComputerStatus }
+$mp = Query-Value { Get-MpComputerStatus } 'defender'
 $smb = Query-Value { Get-SmbServerConfiguration }
 $smbClient = Query-Value { Get-SmbClientConfiguration }
-$fw = @(Query-Value { Get-NetFirewallProfile -PolicyStore ActiveStore })
-$os = Query-Value { Get-CimInstance Win32_OperatingSystem -OperationTimeoutSec 8 }
+$fw = @(Query-Value { Get-NetFirewallProfile -PolicyStore ActiveStore } 'firewall')
+$os = Query-Value { Get-CimInstance Win32_OperatingSystem -OperationTimeoutSec 8 } 'os'
 $guest = Query-Value { Get-LocalUser | Where-Object { $_.SID.Value -match '-501$' } | Select-Object -First 1 }
-[ordered]@{
+$dg = Query-Value { Get-CimInstance -ClassName Win32_DeviceGuard -Namespace 'root\Microsoft\Windows\DeviceGuard' -OperationTimeoutSec 8 } 'deviceGuard'
+$logs = @{}
+foreach ($channel in @('Security', 'System', 'Application', 'Microsoft-Windows-PowerShell/Operational')) {
+  $logs[$channel] = Query-Value { Get-WinEvent -ListLog $channel -ErrorAction Stop } $channel
+}
+$profiles = @($fw | ForEach-Object {
+  [ordered]@{
+    name = [string]$_.Name; enabled = [string]$_.Enabled
+    inbound = [string]$_.DefaultInboundAction; logBlocked = [string]$_.LogBlocked
+    logSizeKb = Property-Value $_ 'LogMaxSizeKilobytes'
+  }
+})
+$completeProfiles = $profiles.Count -eq 3 -and (@($profiles.name | Sort-Object -Unique) -join ',') -eq 'Domain,Private,Public'
+$result = [ordered]@{
   rdpNla = Reg-Value $rdp 'UserAuthentication'; rdpEnc = Reg-Value $rdp 'MinEncryptionLevel'
   uacLua = Reg-Value $policy 'EnableLUA'; uacPrompt = Reg-Value $policy 'ConsentPromptBehaviorAdmin'
   secureDesktop = Reg-Value $policy 'PromptOnSecureDesktop'; uacFilterAdmin = Reg-Value $policy 'FilterAdministratorToken'
@@ -30,7 +53,7 @@ $guest = Query-Value { Get-LocalUser | Where-Object { $_.SID.Value -match '-501$
   guestEnabled = if ($guest) { [bool]$guest.Enabled } else { $null }
   defenderRealtime = if ($mp -and $null -ne $mp.RealTimeProtectionEnabled) { [bool]$mp.RealTimeProtectionEnabled } else { $null }
   defenderTamper = if ($mp -and $null -ne $mp.IsTamperProtected) { [int]$mp.IsTamperProtected } else { $null }
-  fwDisabledCount = if ($fw.Count -eq 3) { @($fw | Where-Object { -not $_.Enabled }).Count } else { $null }
+  fwDisabledCount = if ($completeProfiles -and @($profiles | Where-Object { $_.enabled -notin @('True', 'False') }).Count -eq 0) { @($profiles | Where-Object { $_.enabled -eq 'False' }).Count } else { $null }
   psScriptBlock = Reg-Value "$ps\ScriptBlockLogging" 'EnableScriptBlockLogging'
   psModuleLogging = Reg-Value "$ps\ModuleLogging" 'EnableModuleLogging'
   psTranscription = Reg-Value "$ps\Transcription" 'EnableTranscripting'
@@ -41,4 +64,29 @@ $guest = Query-Value { Get-LocalUser | Where-Object { $_.SID.Value -match '-501$
   alwaysInstallMachine = Reg-Value 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Installer' 'AlwaysInstallElevated'
   alwaysInstallUser = Reg-Value 'HKCU:\SOFTWARE\Policies\Microsoft\Windows\Installer' 'AlwaysInstallElevated'
   autoRun = Reg-Value 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' 'NoDriveTypeAutoRun'
-} | ConvertTo-Json -Compress
+  productType = Property-Value $os 'ProductType'
+  defenderMode = Property-Value $mp 'AMRunningMode'
+  defenderAntivirus = Property-Value $mp 'AntivirusEnabled'
+  defenderBehavior = Property-Value $mp 'BehaviorMonitorEnabled'
+  defenderOnAccess = Property-Value $mp 'OnAccessProtectionEnabled'
+  defenderSignatureAge = Property-Value $mp 'AntivirusSignatureAge'
+  vbsStatus = Property-Value $dg 'VirtualizationBasedSecurityStatus'
+  securityServicesRunning = if ($null -ne $dg.SecurityServicesRunning) { @($dg.SecurityServicesRunning) } else { $null }
+  firewallProfiles = $profiles
+  securityLogEnabled = Property-Value $logs.Security 'IsEnabled'
+  securityLogMaxBytes = Property-Value $logs.Security 'MaximumSizeInBytes'
+  systemLogEnabled = Property-Value $logs.System 'IsEnabled'
+  systemLogMaxBytes = Property-Value $logs.System 'MaximumSizeInBytes'
+  applicationLogEnabled = Property-Value $logs.Application 'IsEnabled'
+  powershellLogEnabled = Property-Value $logs['Microsoft-Windows-PowerShell/Operational'] 'IsEnabled'
+  processCommandLine = Reg-Value "$policy\Audit" 'ProcessCreationIncludeCmdLine_Enabled' 'processCommandLine'
+  uacStandardPrompt = Reg-Value $policy 'ConsentPromptBehaviorUser' 'uacStandardPrompt'
+  remoteTokenFilter = Reg-Value $policy 'LocalAccountTokenFilterPolicy' 'remoteTokenFilter'
+  everyoneAnonymous = Reg-Value $lsa 'EveryoneIncludesAnonymous' 'everyoneAnonymous'
+  winrmClientBasic = Reg-Value 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM\Client' 'AllowBasic' 'winrmClientBasic'
+  winrmClientUnencrypted = Reg-Value 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM\Client' 'AllowUnencryptedTraffic' 'winrmClientUnencrypted'
+  llmnr = Reg-Value 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient' 'EnableMulticast' 'llmnr'
+}
+foreach ($key in $baselineNative.Keys) { $result[$key] = $baselineNative[$key] }
+$result.readErrors = $baselineErrors
+$result | ConvertTo-Json -Depth 5 -Compress

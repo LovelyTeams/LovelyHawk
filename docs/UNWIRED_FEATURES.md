@@ -1474,3 +1474,5 @@ packaged 验收不足而继续为 `Pending` 的切片。每一条都必须按其
 ## Windows 应急响应补充（2026-10-24）
 
 工作台的树形文件/注册表、进程关联查询、日志类别和扩展基线已沿 core → backend → shared/host → 页面接线。内嵌 RDP 沿专用主窗口命令接入原生客户端显示区域，保持宿主禁止 unsafe；属于实验性能力，尚缺真实远端登录、鼠标键盘、DPI、焦点和重连证据。详见 [Windows 工作台](WINDOWS_INCIDENT_WORKBENCH.md)。仍缺完整 EVTX 解析、案件链路、经过确认和独立复核的 Windows 自动修补与恢复，不能因本轮 UI 完成关闭这些待办。
+
+2026-10-26：Windows 只读基线已扩至 69 项、15 类，新增 37 项的固定查询和规则、五种结果、原因与适用范围均已接线，见 [覆盖与验证](WINDOWS_BASELINE_COVERAGE.md)。当前实测限 Windows 11 10.0.26200 x64 本机查询与权限拒绝路径；域控制器、Windows Server、管理员审计正向读取、受限 PowerShell 和真实 RDP 采集矩阵保持 NOT_RUN。新增项不提供自动修补；已有修补入口的真实计划、备份恢复与独立验证缺口不因本轮能力标记或合成 UI 测试关闭。

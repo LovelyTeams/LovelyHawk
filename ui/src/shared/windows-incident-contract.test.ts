@@ -7,6 +7,25 @@ import {
 const sessionId = "00000000-0000-4000-8000-000000000001";
 
 describe("windows-incident contract", () => {
+  it("keeps unknown and inapplicable baseline results out of pass counts and repair actions", () => {
+    const request = { action: "collect-baseline", sessionId } as const;
+    const base = { category: "测试", title: "检查项", currentValue: "未取得", expectedValue: "启用", severity: "low", description: "读取范围", recommendation: "核对权限", remediationAvailable: false };
+    const snapshot = { totalChecks: 4, passedCount: 1, failedCount: 1, warningCount: 0, unknownCount: 1, notApplicableCount: 1, items: [
+      { ...base, id: "pass", status: "pass" },
+      { ...base, id: "fail", status: "fail", remediationAvailable: true },
+      { ...base, id: "unknown", status: "unknown" },
+      { ...base, id: "na", status: "not-applicable" },
+    ] };
+    const valid = (value: unknown) => matchesWindowsIncidentResponse(request, { kind: "baseline", snapshot: value });
+    expect(valid(snapshot)).toBe(true);
+    for (const changed of [
+      { ...snapshot, passedCount: 2 }, { ...snapshot, unknownCount: 0 }, { ...snapshot, notApplicableCount: 0 },
+      { ...snapshot, totalChecks: 5 },
+      { ...snapshot, items: snapshot.items.map((item) => ({ ...item, id: "duplicate" })) },
+      { ...snapshot, items: snapshot.items.map((item) => ({ ...item, remediationAvailable: true })) },
+      { ...snapshot, items: snapshot.items.map(({ remediationAvailable: _missing, ...item }) => item) },
+    ]) expect(valid(changed)).toBe(false);
+  });
   it("binds process details to both the selected PID and creation timestamp", () => {
     const request = { action: "inspect-process", pid: 12, startTime: "2026-10-24T10:00:00.0000000Z", sessionId } as const;
     const inspection = { pid: 12, startTime: request.startTime, observedAt: "2026-10-24T10:10:00Z", user: "lab", services: [], modules: [], network: [], warnings: [] };

@@ -49,10 +49,14 @@ export function mount() {
       defenderEnabled: true, realtimeProtection: true, firewallDomainEnabled: true, firewallPrivateEnabled: true,
       firewallPublicEnabled: false, highRiskCount: 1, mediumRiskCount: 1, facts: [{ group: "网络", label: "Ethernet", value: "IP: 192.0.2.10 · DNS: 192.0.2.1" }], warnings: [], highlights: ["公用网络防火墙未报告为开启，请结合当前网络配置核实。"],
     },
-    baseline: { totalChecks: 3, passedCount: 1, failedCount: 1, warningCount: 1, unknownCount: 0, items: [
-      { id: "wdigest", category: "凭据保护", title: "WDigest 凭据缓存", currentValue: "启用", expectedValue: "禁用", status: "fail", severity: "high", description: "可能增加凭据暴露风险。", recommendation: "核对业务依赖并制定修复计划。" },
-      { id: "uac", category: "权限控制", title: "用户账户控制", currentValue: "启用", expectedValue: "启用", status: "pass", severity: "normal", description: "本次读取报告 UAC 已启用。", recommendation: "结合实际权限策略核实。" },
-      { id: "log", category: "日志审计", title: "PowerShell 脚本块日志", currentValue: "未取得", expectedValue: "启用", status: "warn", severity: "medium", description: "采集权限不足。", recommendation: "由有权限的操作员核实。" },
+    baseline: { totalChecks: 7, passedCount: 1, failedCount: 2, warningCount: 2, unknownCount: 1, notApplicableCount: 1, items: [
+      { id: "wdigest", remediationAvailable: true, category: "凭据保护", title: "WDigest 凭据缓存", currentValue: "启用", expectedValue: "禁用", status: "fail", severity: "high", description: "可能增加凭据暴露风险。", recommendation: "核对业务依赖并制定修复计划。" },
+      { id: "uac", remediationAvailable: false, category: "权限控制", title: "用户账户控制", currentValue: "启用", expectedValue: "启用", status: "pass", severity: "normal", description: "本次读取报告 UAC 已启用。", recommendation: "结合实际权限策略核实。" },
+      { id: "log", remediationAvailable: false, category: "日志审计", title: "PowerShell 脚本块日志", currentValue: "未取得", expectedValue: "启用", status: "warn", severity: "medium", description: "采集权限不足。", recommendation: "由有权限的操作员核实。" },
+      { id: "password-length", remediationAvailable: false, category: "口令与锁定", title: "本地账户最短口令长度", currentValue: "8 字符", expectedValue: "至少 14 字符", status: "fail", severity: "medium", description: "来源：NetUserModalsGet 的本地 SAM 策略；不代表域账户口令。", recommendation: "评估本地账户及业务依赖后制定计划。" },
+      { id: "audit-logon", remediationAvailable: false, category: "高级审计", title: "登录成功与失败审计", currentValue: "当前账户缺少读取权限；未自动提权", expectedValue: "成功和失败", status: "unknown", severity: "low", description: "来源：AuditQuerySystemPolicy 的固定子类别 GUID。", recommendation: "由有读取权限的操作员重新核查。" },
+      { id: "lockout-duration", remediationAvailable: false, category: "口令与锁定", title: "本地账户锁定持续时间", currentValue: "锁定阈值为 0，本项尚不生效", expectedValue: "至少 15 分钟，或仅由管理员解锁", status: "not-applicable", severity: "normal", description: "仅在锁定阈值大于 0 时适用。", recommendation: "先复核锁定阈值。" },
+      { id: "security-log-size", remediationAvailable: false, category: "日志留存", title: "Security 日志容量", currentValue: "20971520 字节", expectedValue: "建议至少 192 MiB", status: "warn", severity: "medium", description: "来源：Get-WinEvent -ListLog Security 的 MaximumSizeInBytes。", recommendation: "容量不证明实际留存期；结合转发、覆盖速度核实。" },
     ] },
     processes: { totalCount: processes.length, suspiciousCount: 1, processes },
     network: { totalCount: 2, suspiciousCount: 1, connections: [
@@ -130,7 +134,7 @@ export function mount() {
         case "remediate-baseline":
           snapshots.baseline = {
             ...snapshots.baseline,
-            items: snapshots.baseline.items.map((item) => item.id === request.ruleId ? { ...item, status: "pass", severity: "normal", currentValue: item.expectedValue } : item),
+            items: snapshots.baseline.items.map((item) => item.id === request.ruleId ? { ...item, status: "pass", severity: "normal", currentValue: item.expectedValue, remediationAvailable: false } : item),
             passedCount: snapshots.baseline.passedCount + 1,
             failedCount: Math.max(0, snapshots.baseline.failedCount - 1),
           };

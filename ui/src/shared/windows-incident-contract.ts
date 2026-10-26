@@ -109,10 +109,11 @@ export interface WindowsBaselineItem {
   title: string;
   currentValue: string;
   expectedValue: string;
-  status: "pass" | "warn" | "fail" | "unknown";
+  status: "pass" | "warn" | "fail" | "unknown" | "not-applicable";
   severity: WindowsRiskLevel;
   description: string;
   recommendation: string;
+  remediationAvailable: boolean;
 }
 
 export interface WindowsBaselineSnapshot {
@@ -121,6 +122,7 @@ export interface WindowsBaselineSnapshot {
   failedCount: number;
   warningCount: number;
   unknownCount: number;
+  notApplicableCount: number;
   items: WindowsBaselineItem[];
 }
 
@@ -482,14 +484,23 @@ const checkOverview = object({
   defenderEnabled: nullable(boolean), realtimeProtection: nullable(boolean), firewallDomainEnabled: nullable(boolean), firewallPrivateEnabled: nullable(boolean),
   firewallPublicEnabled: nullable(boolean), highRiskCount: uint, mediumRiskCount: uint, highlights: reasonList, facts: list(object({ group: shortText, label: shortText, value: text }), 256), warnings: reasonList,
 });
-const checkBaseline = object({
-  totalChecks: uint, passedCount: uint, failedCount: uint, warningCount: uint, unknownCount: uint,
+const checkBaselineShape = object({
+  totalChecks: uint, passedCount: uint, failedCount: uint, warningCount: uint, unknownCount: uint, notApplicableCount: uint,
   items: list(object({
     id: shortText, category: shortText, title: shortText, currentValue: text, expectedValue: text,
-    status: (value) => typeof value === "string" && ["pass", "warn", "fail", "unknown"].includes(value),
-    severity: risk, description: text, recommendation: text,
+    status: (value) => typeof value === "string" && ["pass", "warn", "fail", "unknown", "not-applicable"].includes(value),
+    severity: risk, description: text, recommendation: text, remediationAvailable: boolean,
   }), 1024),
 });
+const checkBaseline: Check = (value) => {
+  if (!checkBaselineShape(value)) return false;
+  const snapshot = value as WindowsBaselineSnapshot;
+  const ids = new Set(snapshot.items.map((item) => item.id));
+  const counts = { pass: snapshot.passedCount, fail: snapshot.failedCount, warn: snapshot.warningCount, unknown: snapshot.unknownCount, "not-applicable": snapshot.notApplicableCount };
+  return ids.size === snapshot.items.length && snapshot.totalChecks === snapshot.items.length &&
+    Object.entries(counts).every(([status, count]) => snapshot.items.filter((item) => item.status === status).length === count) &&
+    snapshot.items.every((item) => !item.remediationAvailable || item.status === "fail" || item.status === "warn");
+};
 const checkProcesses = object({
   totalCount: uint, suspiciousCount: uint,
   processes: list(object({

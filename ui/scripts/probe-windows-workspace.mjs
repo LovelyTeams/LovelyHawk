@@ -103,6 +103,23 @@ try {
     check(`${name} renders in the native window`, await evaluate(`${scope}.querySelector('.wir-module-head h1').textContent.includes(${JSON.stringify(name)})`));
     await screenshot(file);
   }
+  await module("基线配置");
+  await chooseRow("本地账户最短口令长度");
+  check("new baseline findings show their source and do not offer unsupported quick repair", await evaluate(`${visibleDetail}?.textContent.includes('NetUserModalsGet') && ![...${visibleDetail}.querySelectorAll('button')].some(b => b.textContent.includes('快速修复')) && ${visibleDetail}.textContent.includes('尚未提供自动修复')`));
+  await clickText("不适用", false);
+  check("not applicable baseline results have a separate filter and neutral label", await evaluate(`(() => { const rows = ${scope}.querySelector('table[aria-label^="基线检查"] tbody'); return rows.rows.length === 1 && rows.textContent.includes('锁定持续时间') && rows.textContent.includes('不适用'); })()`));
+  await chooseRow("锁定持续时间");
+  check("not applicable detail does not claim a normal risk or offer remediation", await evaluate(`!${visibleDetail}.querySelector('header .wir-badge') && ${visibleDetail}.textContent.includes('当前条件下不执行此项修复') && ![...${visibleDetail}.querySelectorAll('button')].some(b => b.textContent.includes('快速修复'))`));
+  await clickText("无法判断", false);
+  await chooseRow("登录成功与失败审计");
+  check("audit permission gaps remain unknown without a repair shortcut", await evaluate(`${visibleDetail}?.textContent.includes('缺少读取权限') && ${visibleDetail}.textContent.includes('无法判断') && ![...${visibleDetail}.querySelectorAll('button')].some(b => b.textContent.includes('快速修复'))`));
+  await screenshot("03a-baseline-permission-gap");
+  await clickText("全部", false);
+  await evaluate(`(() => { const select = ${scope}.querySelector('select[aria-label="基线类别"]'); select.value = '口令与锁定'; select.dispatchEvent(new Event('change', {bubbles:true})); return true; })()`);
+  await delay(100);
+  check("baseline categories narrow the list without combining unknown with pass", await evaluate(`${scope}.querySelector('table[aria-label^="基线检查"] tbody').rows.length === 2`));
+  await evaluate(`(() => { const select = ${scope}.querySelector('select[aria-label="基线类别"]'); select.value = 'all'; select.dispatchEvent(new Event('change', {bubbles:true})); return true; })()`);
+  await delay(100);
   const processRows = `${scope}.querySelector('table[aria-label^="进程分析"] tbody')?.rows.length`;
   const clickTab = async (text) => {
     const ok = await evaluate(`(() => { const tab = [...${scope}.querySelectorAll('[role="tab"]')].find(t => t.getClientRects().length && t.textContent.startsWith(${JSON.stringify(text)})); if (!tab) return false; tab.click(); return true; })()`);
