@@ -42,3 +42,7 @@ secrets/
 
 .github/workflows/release.yml
 tmp/*
+
+rdp-dvc-demo/*
+tools/lab.7z
+LovelyHawk_dev.exe
