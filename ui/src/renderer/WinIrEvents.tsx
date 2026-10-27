@@ -85,7 +85,7 @@ export function WinIrLogs({ snapshot, busy, category, onCategory, focus, onCopy,
           ))}>复制 CSV</button>
         </div>
         <FilterChips label="事件风险" value={risk} onChange={setRisk} options={riskChipOptions(riskCounts(entries, (entry) => entry.riskLevel))} />
-        <CollectionWarnings warnings={snapshot?.warnings ?? []} />
+        <CollectionWarnings source="事件日志" warnings={snapshot?.warnings ?? []} />
         {missing ? <p className="wir-footnote" role="status">当前返回的事件中没有要定位的记录，可能不在本次日志类别或已超出采集上限，请切换类别或重新读取。</p> : null}
         <div className={`wir-master${current ? " is-split" : ""}`}>
           <DataTable label="事件日志" columns={columns} rows={visible} rowKey={(entry) => entry.rowId} selectedKey={selected} onSelect={(entry) => setSelected(entry?.rowId ?? null)} rowRisk={(entry) => entry.riskLevel} defaultSort={{ key: "time", descending: true }} empty={snapshot ? "当前采集范围中没有符合筛选的事件；请同时核对权限与审计配置。" : "选择日志类别后读取近期关键事件。"} />

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { WindowsIncidentResponse, WindowsProcessEntry, WindowsProcessPlan, WindowsProcessChangeReport, WindowsRemoteIntent } from "../shared/windows-incident-contract";
-import { WinIrModal } from "./WinIrKit";
+import { CollectionWarnings, WinIrModal } from "./WinIrKit";
 import { errorText } from "./error-text";
 
 const LABELS = { verified: "已核实退出", refused: "检查未通过，未执行", failed: "终止失败", skipped: "未执行", uncertain: "结果待核实" };
@@ -56,11 +56,11 @@ export function WinIrProcessChange({ process, tree, session, currentSession, onR
     {plan && !attempted ? <button type="button" className="win-ir-btn is-danger" disabled={working || !available || plan.expiresAt * 1000 <= clock} onClick={() => void apply()}>确认结束这 {plan.items.length} 个进程</button> : null}
     {attempted && !working ? <button type="button" className="win-ir-btn" disabled={!available} onClick={() => { onClose(); onRefresh(); }}>刷新进程并复查</button> : null}
   </>}>
-    <p className="wir-reader-warning">强制结束会丢失未保存的数据，并可能中断服务。没有备份，无法恢复进程运行状态；请先留存所需证据。不会自动提权或绕过系统保护。</p>
+    <p className="wir-context-note">强制结束会丢失未保存的数据，并可能中断服务。没有备份，无法恢复进程运行状态；请先留存所需证据。不会自动提权或绕过系统保护。</p>
     <p>{tree ? "读取当前根进程及全部可核实的后代（最多 64 个），从最深层子进程开始结束。确认期间范围或身份变化会拒绝执行。" : "仅结束选中的进程，不结束其子进程。"}执行期间新建或自动拉起的进程需另外复查。</p>
     {!available ? <p role="alert">连接已变化，当前计划失效，请关闭后重新核对目标。</p> : null}
     {working ? <p role="status">{attempted ? "正在执行并核对退出状态，请等待结果…" : "正在只读预览影响范围…"}</p> : null}
-    {error ? <p className="wir-reader-warning" role="alert">{error}</p> : null}
+    <CollectionWarnings inline announce source="进程处置" summary="操作未完成 · 查看原因" severity="error" warnings={error ? [error] : []} />
     {plan ? <div ref={planRegion} className="wir-baseline-plan" tabIndex={0} role="region" aria-label="完整进程范围">
       <p>目标：<strong>{plan.target}</strong> · 共 {plan.items.length} 个 · 有效至 {new Date(plan.expiresAt * 1000).toLocaleTimeString()}</p>
       {plan.expiresAt * 1000 <= clock && !attempted ? <p role="alert">预览已过期，请关闭并重新读取。</p> : null}

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { WINDOWS_BASELINE_CHANGE_IDS, type WindowsBaselineChangePlan, type WindowsBaselineChangeReport, type WindowsBaselineItem, type WindowsIncidentResponse, type WindowsRemoteIntent } from "../shared/windows-incident-contract";
-import { WinIrModal } from "./WinIrKit";
+import { CollectionWarnings, WinIrModal } from "./WinIrKit";
 import { errorText } from "./error-text";
 
 const STATE = { pending: "未执行", applying: "正在执行 / 结果待核实", verified: "配置回读通过", restored: "原值回读通过", refused: "状态变化，拒绝写入", uncertain: "结果不明，需人工复核", skipped: "未执行" } as const;
@@ -69,8 +69,8 @@ export function WinIrBaselineChanges({ items, initialIds, session, currentSessio
     {applying ? <button type="button" className="win-ir-btn" disabled={stopping || !available} onClick={() => void cancel()}>{stopping ? "等待当前项结束…" : "中止后续项"}</button> : plan ? <button type="button" className="win-ir-btn is-primary" disabled={working || !available || !plan.items.length || plan.expiresAt * 1000 <= Date.now()} onClick={() => void apply()}>确认{plan.restoring ? "恢复" : "配置"}这 {plan.items.length} 项并复核</button> : !report && !history ? <button type="button" className="win-ir-btn is-primary" disabled={working || !available || !selected.size} onClick={() => void preview()}>预览 {selected.size} 项配置</button> : null}
     {report && !working ? <button type="button" className="win-ir-btn is-primary" disabled={!available} onClick={() => { onClose(); onRefresh(); }}>重新核查完整基线</button> : null}
   </>}>
-    {!available ? <p role="alert" className="wir-reader-warning">会话已变化，本窗口的计划与执行入口已失效。历史反馈仍保留，请重新连接后核对目标。</p> : null}
-    {error ? <p role="alert" className="wir-reader-warning">{error}</p> : null}
+    {!available ? <p role="alert" className="wir-context-note">会话已变化，本窗口的计划与执行入口已失效。历史反馈仍保留，请重新连接后核对目标。</p> : null}
+    <CollectionWarnings inline announce source="基线配置" summary="操作未完成 · 查看原因" severity="error" warnings={error ? [error] : []} />
     {working ? <p role="status">{applying ? report?.message ?? "正在检查原状态并持久保存备份…" : "正在读取，请稍候…"}</p> : null}
     {plan ? <div ref={planRegion} className="wir-baseline-plan" tabIndex={0} role="region" aria-label="配置差异与影响"><p>目标：<strong>{plan.target}</strong> · 有效至 {new Date(plan.expiresAt * 1000).toLocaleTimeString()}</p>
       <ul>{plan.notes.map((note) => <li key={note}>{note}</li>)}</ul>

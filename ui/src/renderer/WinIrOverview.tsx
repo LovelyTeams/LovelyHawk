@@ -84,7 +84,7 @@ export function WinIrOverview({ snapshots, collectedAt, busy, onNavigate, onGo, 
         </section>
       </div>
       {host ? <>
-        <CollectionWarnings warnings={host.warnings} />
+        <CollectionWarnings source="主机概况" warnings={host.warnings} />
         <section className="wir-panel"><header><h2>主机详细信息</h2><span className="wir-tag">{host.facts.length} 项观察</span></header>
           <div className="wir-host-facts">{[...new Set(host.facts.map((fact) => fact.group))].map((group) => <details key={group} open={group !== "更新记录"}><summary>{group} · {host.facts.filter((fact) => fact.group === group).length}</summary><dl>{host.facts.filter((fact) => fact.group === group).map((fact, i) => <div key={i}><dt>{fact.label}</dt><dd>{fact.value || "未取得"}</dd></div>)}</dl></details>)}</div>
         </section>

@@ -367,7 +367,7 @@ try {
   await evaluate("window.__windowsFixture.resume(), true"); await idle();
   await evaluate("window.__windowsFixture.failNext('collect-registry'), true");
   await clickText("注册表 · 任务缓存"); await idle();
-  check("a failed playbook collection exposes the error and previous snapshot", await evaluate(`${scope}.querySelector('.wir-collection-warnings').textContent.includes('上次采集未完成') && ${scope}.querySelector('.wir-collection-warnings').textContent.includes('上一次成功采集')`));
+  check("a failed playbook collection exposes the error and previous snapshot", await evaluate(`${scope}.querySelector('.notice-summary.is-error').textContent.includes('上次采集未完成') && ${scope}.querySelector('.notice-summary.is-error').textContent.includes('上一次成功采集')`));
   await clickText("← 返回响应方案");
   await clickText("注册表 · 任务缓存"); await idle();
   await clickText("← 返回响应方案");
@@ -387,10 +387,10 @@ try {
   check("a late preview cannot attach itself to a different selected file", await evaluate(`!${scope}.querySelector('.wir-preview-body') && ${visibleDetail}?.textContent.includes('dropper.exe')`));
 
   await evaluate("window.__windowsFixture.failNext('status'), true");
-  await wait(`${scope}.querySelector('.wir-collection-warnings[role="alert"]')?.textContent.includes('暂时无法核实连接状态')`, "temporary status failure");
+  await wait(`${scope}.querySelector('.notice-summary.is-error')?.textContent.includes('暂时无法核实连接状态')`, "temporary status failure");
   check("an unknown connection status does not invite blind registration", await evaluate(`(() => { const register = ${scope}.querySelector('[data-testid="windows-register-plugin"]'); return register === null || register.disabled || !register.getClientRects().length; })()`));
   check("the host bar marks an unknown connection instead of showing a healthy indicator", await evaluate(`${scope}.querySelector('.wir-host-connection.is-offline')?.textContent.includes('连接状态待核实') && Boolean(${scope}.querySelector('.wir-host-connection .status-dot.idle'))`));
-  await wait(`!${scope}.querySelector('.wir-session-bar.is-disconnected') && !${scope}.querySelector('.wir-collection-warnings[role="alert"]')`, "same session status recovery");
+  await wait(`!${scope}.querySelector('.wir-session-bar.is-disconnected') && !${scope}.querySelector('.notice-summary.is-error')`, "same session status recovery");
   check("a temporary status outage preserves the selection for the same session", await evaluate(`${visibleDetail}?.textContent.includes('dropper.exe')`));
 
   await evaluate("window.__windowsFixture.status.channelConnected = false, true");
@@ -649,6 +649,37 @@ try {
   await evaluate("window.__windowsFixture.status.channelConnected = false, true");
   await wait(`${scope}.querySelector('.wir-playbook-availability').textContent.includes('当前未连接')`, "playbook disconnect");
   check("disconnect retains the selected guidance and disables target actions", await evaluate(`${playbookDetail}.getAttribute('aria-label') === '驱动异常与删除受阻' && [...${playbookDetail}.querySelectorAll('.wir-playbook-actions button')].every(b => b.textContent.startsWith('准备查询') ? !b.disabled : b.disabled)`));
+  await evaluate("window.__windowsFixture.reconnect('UI-FIXTURE-03'), window.__windowsFixture.enableCollectionWarnings(), true");
+  await wait(`${scope}.querySelector('.wir-host-connection')?.textContent.includes('已连接')`, "notice fixture reconnected");
+  await idle();
+  await dimensions(1440,960); await module("启动项"); await clickText("采集启动项"); await idle();
+  await wait("window.__windowsFixture.notifications().history.some(n=>n.source==='启动项采集')", "collection gaps reach notification history");
+  const summaryLink = `${scope}.querySelector('.wir-startup-content .notice-summary-link')`;
+  const noticeBefore = await evaluate("window.__windowsFixture.notifications().history.filter(n=>n.source==='启动项采集').length");
+  const compact = await evaluate(`(()=>{const region=${scope}.querySelector('.wir-startup-content'),summary=region.querySelector('.wir-collection-summary'),toolbar=region.querySelector('.wir-toolbar');return {height:summary.getBoundingClientRect().height,offset:toolbar.getBoundingClientRect().top-region.getBoundingClientRect().top,link:summary.textContent,banners:region.querySelectorAll('.wir-reader-warning,.wir-collection-warnings').length,rows:region.querySelectorAll('tbody tr').length};})()`);
+  check("startup gaps occupy one compact row with no repeated banners", compact.height <= 28 && compact.offset <= 40 && compact.banners === 0 && compact.rows === 100 && compact.link.includes('部分读取'),compact);
+  check("long warning collections retain their final line and literal hostile markup", await evaluate("window.__windowsFixture.notifications().history.some(n=>n.message.includes('最后一条说明')) && window.__windowsFixture.notifications().history.some(n=>n.message.includes('<img src=x')) && window.__windowsFixture.notifications().history.every(n=>n.message.length<=4000)"));
+  await wait("window.__windowsFixture.notifications().notifications.length===0", "brief collection toast expires");
+  await screenshot("35-startup-compact-notices");
+  await module("服务"); await module("启动项");
+  const noticeAfter = await evaluate("window.__windowsFixture.notifications().history.filter(n=>n.source==='启动项采集').length");
+  check("revisiting the same snapshot does not publish its warnings again", noticeAfter === noticeBefore, {startupBefore:noticeBefore,startupAfter:noticeAfter,sources:await evaluate("window.__windowsFixture.notifications().history.map(n=>n.source)")});
+  await evaluate(`${summaryLink}.focus(), ${summaryLink}.click(), true`);
+  await wait(`${scope}.querySelector('.notification-center') !== null`, "collection notification center");
+  check("the compact entry opens full notices with target context and no executable markup", await evaluate(`${scope}.querySelector('.notification-center').textContent.includes('最后一条说明') && ${scope}.querySelector('.notification-center').textContent.includes('UI-FIXTURE-03') && !${scope}.querySelector('.notification-center img')`));
+  await screenshot("36-collection-notification-center");
+  await clickLabel("关闭通知中心");
+  check("notification close returns focus to the compact source entry", await evaluate("document.activeElement?.classList.contains('notice-summary-link')"));
+  await dimensions(820,780); await screenshot("37-startup-compact-narrow");
+  check("compact notices fit narrow windows without hiding incompleteness",await evaluate(`document.documentElement.scrollWidth<=innerWidth && ${summaryLink}.textContent.includes('部分读取') && ${summaryLink}.getBoundingClientRect().height<=48`));
+  await dimensions(1440,960);
+  for(const [label,refresh] of [["服务","刷新服务"],["驱动","刷新驱动"],["计划任务","刷新计划任务"],["事件日志","采集日志"],["注册表","读取键值"]]) {
+    await module(label);
+    // Use the fixed module header action; registry also has an address-bar refresh.
+    await evaluate(`${scope}.querySelector('.wir-module-head .is-primary').click(), true`); await idle();
+    check(`${label} archives collection warnings without a full-width banner`,await evaluate(`(()=>{const main=${scope}.querySelector('.win-ir-main');return ![...main.querySelectorAll('.wir-reader-warning,.wir-collection-warnings')].some(e=>e.getClientRects().length) && [...main.querySelectorAll('.notice-summary-link')].some(e=>e.getClientRects().length) && window.__windowsFixture.notifications().history.some(n=>n.source===${JSON.stringify(label+'采集')});})()`));
+  }
+  await screenshot("38-registry-compact-notices");
   check("no browser runtime or console errors", errors.length === 0, errors);
   await evaluate("window.__windowsFixture.unmount(), true");
   await evaluate("document.querySelector('[data-testid=\"window-close\"]').click(), true");

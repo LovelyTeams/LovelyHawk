@@ -590,9 +590,9 @@ const checkStartupShape = object({
     category: startupCategory,
     sourceType: shortText, name: shortText, location: text, command: text, runAs: shortText, state: shortText,
     riskLevel: risk, riskReason: shortText,
-  }), 4000),
+  }), 20000),
   observedAt: shortText, truncated: boolean, warnings: reasonList,
-  categories: list(object({category:startupCategory,count:uint,status:(v)=>["complete","partial","unavailable"].includes(v as string),message:shortText}),19),
+  categories: list(object({category:startupCategory,count:(v)=>uint(v) && (v as number) <= 5000,status:(v)=>["complete","partial","unavailable"].includes(v as string),message:shortText}),19),
 });
 const checkStartup: Check = (value) => {
   if (!checkStartupShape(value)) return false;

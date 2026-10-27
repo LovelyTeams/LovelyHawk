@@ -115,7 +115,7 @@ export function WinIrRegistry({ snapshot, busy, connected, focus, related, onNav
           </div>
         </nav>
         <section className="wir-explorer-main" aria-label="键值内容">
-          <CollectionWarnings warnings={snapshot?.warnings ?? []} />
+          <CollectionWarnings source="注册表" warnings={snapshot?.warnings ?? []} />
           <div className="wir-explorer-actions" role="toolbar" aria-label="注册表操作">
             <button type="button" className="win-ir-btn" disabled={!keyPath} onClick={() => keyPath && onCopy(keyPath)}>复制键路径</button>
             <button type="button" className="win-ir-btn" disabled={!selectedValue} onClick={() => selectedValue && onCopy(selectedValue.data)}>复制值数据</button>
@@ -138,8 +138,8 @@ export function WinIrRegistry({ snapshot, busy, connected, focus, related, onNav
           </div>
           {selectedValue && snapshot ? <WinIrInspector key={`${snapshot.keyPath}:${selectedValue.name}`} title={`${selectedValue.name || "(默认)"} · ${selectedValue.kind}`} onClose={() => setSelected(null)} tabs={[
             { id: "value", label: "值数据", content: <div className="wir-inspector-split"><div className="wir-value-reader">
-              {selectedValue.riskReason ? <p className="wir-reader-warning">{selectedValue.riskReason}</p> : null}
-              {selectedValue.truncated ? <p role="status" className="wir-reader-warning">数据已截断，复制仅包含已返回部分；不能据此判断完整配置。</p> : null}
+              {selectedValue.riskReason ? <p className="wir-context-note">{selectedValue.riskReason}</p> : null}
+              <CollectionWarnings source="注册表值" summary="值数据已截断 · 查看说明" warnings={selectedValue.truncated ? ["数据已截断，复制仅包含已返回部分；不能据此判断完整配置。"] : []} />
               <pre className="wir-registry-data">{selectedValue.data || "（空字符串）"}</pre>
               <div className="wir-toolbar"><button type="button" className="win-ir-btn is-primary" onClick={() => onCopy(selectedValue.data)}>复制数据</button>
                 {onDeleteValue && selectedValue.name !== "" ? <button type="button" className="win-ir-btn is-danger" disabled={busy || !connected || selectedValue.truncated || (/\\winlogon$/iu.test(snapshot.keyPath) && /^(shell|userinit)$/iu.test(selectedValue.name))} title="删除前另行确认；截断数据和核心登录项不可删除" onClick={() => onDeleteValue(snapshot.keyPath, selectedValue)}>删除键值…</button> : null}

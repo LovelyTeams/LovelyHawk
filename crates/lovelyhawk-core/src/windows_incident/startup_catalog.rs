@@ -91,11 +91,11 @@ pub fn parse_startup_catalog(raw: &str) -> CoreResult<WindowsStartupSnapshot> {
             "启动项响应不完整或超过上限，请重新采集并核对权限。",
         )
     };
-    if raw.len() > 3 * 1024 * 1024 {
+    if raw.len() > 4_500_000 {
         return Err(invalid());
     }
     let data: Raw = serde_json::from_str(raw).map_err(|_| invalid())?;
-    if data.entries.len() > 4000
+    if data.entries.len() > 20000
         || data.categories.len() != 19
         || data.warnings.len() > 32
         || data.warnings.iter().any(|s| s.len() > 2048)
@@ -115,6 +115,7 @@ pub fn parse_startup_catalog(raw: &str) -> CoreResult<WindowsStartupSnapshot> {
             .collect();
         if matches.len() != 1
             || matches[0].message.len() > 2048
+            || matches[0].count > 5000
             || matches[0].count as usize
                 != result
                     .entries
@@ -138,6 +139,9 @@ pub fn parse_startup_catalog(raw: &str) -> CoreResult<WindowsStartupSnapshot> {
     result.warnings = data.warnings;
     result.observed_at = data.observed_at;
     result.truncated = data.truncated;
+    if serde_json::to_vec(&result).map_err(|_| invalid())?.len() > 8 * 1024 * 1024 {
+        return Err(invalid());
+    }
     Ok(result)
 }
 impl WindowsIncidentService {
@@ -150,6 +154,34 @@ impl WindowsIncidentService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn large_catalog_keeps_rows_beyond_the_old_limit_and_bounds_the_total() {
+        let entries: Vec<_> = (0..1200).map(|i| serde_json::json!({
+            "category":"codecs","sourceType":"registry","name":format!("codec-{i}"),
+            "location":"HKLM:\\Software\\Fixture","command":"codec.dll","runAs":"","state":"String"
+        })).collect();
+        let categories: Vec<_> = STARTUP_CATEGORIES
+            .iter()
+            .map(|c| StartupCategoryResult {
+                category: *c,
+                count: if *c == StartupCategory::Codecs {
+                    1200
+                } else {
+                    0
+                },
+                status: StartupCoverage::Complete,
+                message: "固定测试位置".into(),
+            })
+            .collect();
+        let mut raw = serde_json::json!({"observedAt":"2026-10-27T00:00:00Z","truncated":false,"warnings":[],"categories":categories,"entries":entries});
+        let parsed = parse_startup_catalog(&raw.to_string()).unwrap();
+        assert_eq!(parsed.entries.len(), 1200);
+        assert_eq!(parsed.entries.last().unwrap().name, "codec-1199");
+        assert!(!parsed.truncated);
+        raw["categories"][5]["count"] = 5001.into();
+        assert!(parse_startup_catalog(&raw.to_string()).is_err());
+        assert!(parse_startup_catalog(&" ".repeat(4_500_001)).is_err());
+    }
     #[cfg(windows)]
     #[test]
     fn native_powershell_catalog_round_trips_all_categories() {

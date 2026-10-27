@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { WindowsControlOperation, WindowsControlPlan, WindowsControlReport, WindowsIncidentResponse, WindowsInventoryKind, WindowsRemoteIntent } from "../shared/windows-incident-contract";
-import { WinIrModal } from "./WinIrKit";
+import { CollectionWarnings, WinIrModal } from "./WinIrKit";
 import { errorText } from "./error-text";
 
 export const CONTROL_LABELS: Record<WindowsControlOperation, string> = { start: "启动", stop: "停止", restart: "重启", automatic: "设为自动启动", manual: "设为手动启动", enable: "启用", disable: "禁用", run: "立即运行", delete: "删除注册项" };
@@ -72,7 +72,7 @@ export function WinIrControlChange({ selection, currentSession, onRequest, onClo
   </>}>
     {!available ? <p role="alert">连接已变化，当前计划失效，请关闭后重新核对目标。</p> : null}
     {working ? <p role="status">{attempted ? "正在执行并核对结果，请等待…" : "正在只读核对，请等待…"}</p> : null}
-    {error ? <p className="wir-reader-warning" role="alert">{error}</p> : null}
+    <CollectionWarnings inline announce source="服务与任务处置" summary="操作未完成 · 查看原因" severity="error" warnings={error ? [error] : []} />
     {plan ? <div ref={region} tabIndex={0} role="region" aria-label="完整操作计划" className="wir-baseline-plan">
       <p>目标：<strong>{plan.target}</strong> · 对象：<strong>{plan.name}</strong></p>
       <p>当前状态：{plan.currentState} · 预期变化：{plan.beforeSetting} → {plan.afterSetting}</p>

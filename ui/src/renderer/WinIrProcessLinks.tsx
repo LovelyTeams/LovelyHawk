@@ -69,7 +69,7 @@ export function WinIrProcessLinks({ kind, process, state, snapshotNetwork, onFil
     </div>
     {!process.startTime ? <p className="wir-footnote">缺少启动时间，不能可靠核对进程身份，请刷新或检查读取权限。</p> : null}
     {error ? <p className="wir-preview-error" role="alert">{error}</p> : null}
-    <CollectionWarnings warnings={inspection?.warnings ?? []} />
+    <CollectionWarnings announce source="进程关联" warnings={inspection?.warnings ?? []} />
     {rows.length > 0 ? <SearchBox value={query} onChange={setQuery} placeholder={`筛选${KIND_LABEL[kind]}`} /> : null}
     {visible.length > 0 ? <ul className="wir-link-list" aria-label={`${process.name} 的${KIND_LABEL[kind]}`}>
       {visible.slice(0, LIMIT).map((r) => <li key={r.id}>
@@ -86,6 +86,6 @@ export function WinIrProcessLinks({ kind, process, state, snapshotNetwork, onFil
           : `点击读取，查看这个进程的${KIND_LABEL[kind]}。`}</div>}
     {visible.length > LIMIT ? <p className="wir-footnote">共 {visible.length} 条，仅显示前 {LIMIT} 条，请输入筛选条件缩小范围。</p> : null}
     {fromSnapshot ? <p className="wir-footnote">网络快照与进程快照不是同时采集，PID 可能已被复用。</p> : null}
-    <details className="wir-collection-warnings"><summary>关联与判读范围</summary><p>读取前后核对进程启动时间；各数据仍不是原子快照。服务按报告的进程编号对应，DLL 来自系统模块枚举，不包含隐藏或手工映射模块。路径、外连或模块数量本身不能证明恶意或安全。</p></details>
+    <CollectionWarnings source="进程关联" summary="关联与判读范围" severity="info" announce={false} warnings={["读取前后核对进程启动时间；各数据仍不是原子快照。服务按报告的进程编号对应，DLL 来自系统模块枚举，不包含隐藏或手工映射模块。路径、外连或模块数量本身不能证明恶意或安全。"]} />
   </div>;
 }

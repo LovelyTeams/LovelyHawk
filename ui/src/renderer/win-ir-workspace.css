@@ -38,9 +38,6 @@
 .wir-rdp-size { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
 .wir-rdp-size input { width: 86px; min-height: 32px; padding-block: 4px; font-variant-numeric: tabular-nums; }
 .wir-rdp-viewport { flex: 1; min-height: 200px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface-inset); display: grid; place-items: center; }
-.wir-collection-warnings { margin: 0; padding: 5px 10px; color: var(--muted); background: var(--surface-inset); border: 1px solid var(--border); border-radius: 6px; font-size: var(--font-caption); }
-.wir-collection-warnings summary { cursor: pointer; color: var(--warning-text); }
-.wir-collection-warnings p, .wir-collection-warnings ul { margin: 8px 0; line-height: 1.6; }
 .wir-host-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; padding: 10px 14px; font-size: var(--font-caption); }
 .wir-host-facts details { min-width: 0; }
 .wir-host-facts summary { cursor: pointer; color: var(--text-secondary); font-weight: 600; }
@@ -660,9 +657,7 @@ button.wir-stat:hover { color: var(--text); border-color: var(--accent-soft-bord
 .wir-reader-fields dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .wir-file-properties { min-width: 0; padding-bottom: 12px; }
 .wir-file-properties > button { margin-inline: 12px; }
-.wir-reader-warning { margin: 8px 12px; padding: 8px 10px; border: 1px solid var(--warning-border); color: var(--warning-text); background: var(--warning-soft); border-radius: 5px; font-size: var(--font-small); overflow-wrap: anywhere; line-height: 1.6; }
 .wir-value-reader { padding: 12px; min-width: 0; }
-.wir-value-reader .wir-reader-warning { margin: 0 0 10px; }
 .wir-registry-data { margin: 0 0 14px; padding: 14px; min-height: 80px; border: 1px solid var(--border); background: var(--surface-inset); color: var(--text); font: var(--font-small)/1.7 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .wir-access-guide { padding: 0 16px; color: var(--text-secondary); font-size: var(--font-small); line-height: 1.8; }
 .wir-access-guide li { padding-block: 4px; }
@@ -692,3 +687,7 @@ button.wir-stat:hover { color: var(--text); border-color: var(--accent-soft-bord
 .wir-registry-navigation > .wir-detail-tabs button { width: auto; min-width: 0; padding: 8px 4px; justify-content: center; }
 .wir-access-guide article { padding: 10px; border: 1px solid var(--border); border-radius: 6px; margin-block: 8px; }
 .wir-access-guide code { display: block; overflow-wrap: anywhere; }
+
+.wir-collection-summary { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.wir-coverage-state { font-size: var(--font-caption); color: var(--muted); }
+.wir-context-note { margin: 4px 0; font-size: var(--font-caption); line-height: 1.5; color: var(--warning-text); overflow-wrap: anywhere; }

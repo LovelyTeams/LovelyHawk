@@ -3,7 +3,7 @@ $ProgressPreference='SilentlyContinue'
 $rows=New-Object 'Collections.Generic.List[object]'
 $categories=@('logon','explorer','internet-explorer','services','drivers','codecs','winsock','print','lsa','network','boot-execute','image-hijacks','app-init','known-dlls','winlogon','ime','tasks','gadgets','folder-extensions')
 $coverage=@{};foreach($c in $categories){$coverage[$c]=@{category=$c;count=0;status='complete';message='已检查本版本支持的固定位置；不代表覆盖全部持久化机制。'}}
-$collectionState=@{truncated=$false};$seenRows=@{}
+$collectionState=@{truncated=$false;bytes=0};$seenRows=@{}
 $clock=[Diagnostics.Stopwatch]::StartNew()
 $view=if([Environment]::Is64BitOperatingSystem){[Microsoft.Win32.RegistryView]::Registry64}else{[Microsoft.Win32.RegistryView]::Registry32}
 $roots=@{'HKLM:'=[Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine,$view);'HKCU:'=[Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser,$view)}
@@ -14,9 +14,13 @@ function Clip($v,$n){$s=[string]$v;if($s.Length -gt $n){$collectionState.truncat
 function Row($c,$source,$name,$location,$command,$account,$state){
   $identity=@($c,$source,$location,$name)|ConvertTo-Json -Compress
   if($seenRows.ContainsKey($identity)){return}
-  if($rows.Count -ge 4000 -or $coverage[$c].count -ge 500){$collectionState.truncated=$true;Gap $c '达到本次条目上限，清单不完整。';return}
+  if($rows.Count -ge 20000 -or $coverage[$c].count -ge 5000){$collectionState.truncated=$true;Gap $c '达到本次条目上限（每类 5000 / 总共 20000），清单不完整。';return}
+  $row=@{category=$c;sourceType=$source;name=(Clip $name 500);location=(Clip $location 2000);command=(Clip $command 2000);runAs=(Clip $account 250);state=(Clip $state 60)}
+  $bytes=[Text.Encoding]::UTF8.GetByteCount(($row|ConvertTo-Json -Depth 8 -Compress))+1
+  if($collectionState.bytes+$bytes -gt 4460000){$collectionState.truncated=$true;Gap $c '达到本次 4.5 MB 字节预算，清单不完整。';return}
+  $collectionState.bytes+=$bytes
   $seenRows[$identity]=$true
-  $rows.Add(@{category=$c;sourceType=$source;name=(Clip $name 500);location=(Clip $location 2000);command=(Clip $command 2000);runAs=(Clip $account 250);state=(Clip $state 60)})
+  $rows.Add($row)
   $coverage[$c].count++
 }
 function Reg($c,$path,$names=$null){
@@ -27,8 +31,9 @@ function Reg($c,$path,$names=$null){
     $key=Open-Key $path
     if($null -eq $key){return}
     $all=@($key.GetValueNames())
-    if($all.Count -gt 500){Gap $c '单个注册表位置超过 500 个值，已截断。';$collectionState.truncated=$true}
-    foreach($name in ($all|Select-Object -First 500)){
+    if($all.Count -gt 5000){Gap $c '单个注册表位置超过 5000 个值，已截断。';$collectionState.truncated=$true}
+    foreach($name in ($all|Select-Object -First 5000)){
+      if(-not(In-Time $c)){break}
       if($null -ne $names -and $names -notcontains $name){continue}
       $kind=$key.GetValueKind($name)
       $value=$key.GetValue($name,$null,[Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
@@ -40,7 +45,7 @@ function Reg($c,$path,$names=$null){
   }catch{Gap $c '部分注册表位置读取失败，请核对权限；空结果不能解释为不存在启动项。'}
   finally{if($null -ne $key){$key.Dispose()}}
 }
-function Children($c,$path,$names=$null,$suffix='',$scanLimit=500){
+function Children($c,$path,$names=$null,$suffix='',$scanLimit=5000){
   if(-not(In-Time $c)){return}
   $parent=$null
   try{
@@ -48,6 +53,7 @@ function Children($c,$path,$names=$null,$suffix='',$scanLimit=500){
     $keys=@($parent.GetSubKeyNames())
     if($keys.Count -gt $scanLimit){Gap $c '注册表子项超过本次上限，清单已截断。';$collectionState.truncated=$true}
     foreach($k in ($keys|Select-Object -First $scanLimit)){
+      if(-not(In-Time $c)){break}
       $p=$path+'\'+$k+$suffix
       Reg $c $p $names
     }
@@ -62,8 +68,8 @@ function Classes($c,$path){
   $parent=$null
   try{
     $parent=Open-Key $path;if($null -eq $parent){return}
-    $keys=@($parent.GetSubKeyNames());if($keys.Count -gt 100){Gap $c '仅解析前 100 个 COM 注册的服务器路径。'}
-    foreach($childName in ($keys|Select-Object -First 100)){
+    $keys=@($parent.GetSubKeyNames());if($keys.Count -gt 1000){Gap $c '仅解析前 1000 个 COM 注册的服务器路径。'}
+    foreach($childName in ($keys|Select-Object -First 1000)){
       $k=$parent.OpenSubKey($childName);if($null -eq $k){continue}
       try{$id=if($childName -match '^\{[0-9a-fA-F-]{36}\}$'){$childName}else{[string]$k.GetValue('')}}finally{$k.Dispose()}
       if($id -match '^\{[0-9a-fA-F-]{36}\}$'){
@@ -141,25 +147,25 @@ try{
 foreach($folder in @([Environment]::GetFolderPath('Startup'),[Environment]::GetFolderPath('CommonStartup'))){
   try{
     if(-not $folder -or -not(Test-Path -LiteralPath $folder)){continue}
-    $files=@(Get-ChildItem -LiteralPath $folder -File -Force -ErrorAction Stop|Select-Object -First 501)
-    if($files.Count -gt 500){Gap 'logon' '启动目录超过本次上限。';$collectionState.truncated=$true}
-    foreach($f in ($files|Select-Object -First 500)){Row 'logon' 'startup-folder' $f.Name $folder $f.FullName '' '目录项（未执行或解析快捷方式）'}
+    $files=@(Get-ChildItem -LiteralPath $folder -File -Force -ErrorAction Stop|Select-Object -First 5001)
+    if($files.Count -gt 5000){Gap 'logon' '启动目录超过本次上限。';$collectionState.truncated=$true}
+    foreach($f in ($files|Select-Object -First 5000)){Row 'logon' 'startup-folder' $f.Name $folder $f.FullName '' '目录项（未执行或解析快捷方式）'}
   }catch{Gap 'logon' '部分启动目录无法读取。'}
 }
 foreach($kind in @('services','drivers')){
   if(-not(In-Time $kind)){continue}
   try{
     $class=if($kind -eq 'services'){'Win32_Service'}else{'Win32_SystemDriver'}
-    $all=@(Get-CimInstance $class -OperationTimeoutSec 8|Select-Object -First 501)
-    if($all.Count -gt 500){Gap $kind '服务条目超过启动项视图上限，可在独立页面继续排查。';$collectionState.truncated=$true}
-    foreach($s in ($all|Select-Object -First 500)){Row $kind $(if($kind -eq 'services'){'service'}else{'driver'}) $s.Name ($system+'\Services\'+$s.Name) $s.PathName $s.StartName ($s.State+' / '+$s.StartMode)}
+    $all=@(Get-CimInstance $class -OperationTimeoutSec 8|Select-Object -First 5001)
+    if($all.Count -gt 5000){Gap $kind '服务条目超过启动项视图上限，可在独立页面继续排查。';$collectionState.truncated=$true}
+    foreach($s in ($all|Select-Object -First 5000)){Row $kind $(if($kind -eq 'services'){'service'}else{'driver'}) $s.Name ($system+'\Services\'+$s.Name) $s.PathName $s.StartName ($s.State+' / '+$s.StartMode)}
   }catch{$coverage[$kind].status='unavailable';$coverage[$kind].message='CIM 清单读取失败，请核对权限和系统支持。'}
 }
 try{
   if(-not(In-Time 'tasks')){throw 'Time budget'}
-  $all=@(Get-ScheduledTask -ErrorAction Stop|Select-Object -First 501)
-  if($all.Count -gt 500){Gap 'tasks' '任务超过启动项视图上限，可在计划任务页面继续排查。';$collectionState.truncated=$true}
-  foreach($t in ($all|Select-Object -First 500)){
+  $all=@(Get-ScheduledTask -ErrorAction Stop|Select-Object -First 5001)
+  if($all.Count -gt 5000){Gap 'tasks' '任务超过启动项视图上限，可在计划任务页面继续排查。';$collectionState.truncated=$true}
+  foreach($t in ($all|Select-Object -First 5000)){
     $command=(@($t.Actions|Select-Object -First 10|ForEach-Object{([string]$_.Execute+' '+$_.Arguments).Trim()}) -join ' ; ')
     Row 'tasks' 'scheduled-task' $t.TaskName $t.TaskPath $command $t.Principal.UserId ([string]$t.State)
   }
@@ -167,9 +173,6 @@ try{
 $warnings=@('范围：计算机与当前采集账户；未加载或其他账户的配置不在本次范围。','分类是已知配置位置；IE、小工具等历史功能即使未安装也可能残留配置。','服务 / 驱动 / 计划任务包含禁用与手动项；配置存在不等于已经执行。')
 $result=@{observedAt=[DateTime]::UtcNow.ToString('o');truncated=$collectionState.truncated;warnings=$warnings;categories=@($categories|ForEach-Object{$coverage[$_]});entries=$rows.ToArray()}
 $json=$result|ConvertTo-Json -Depth 8 -Compress
-while([Text.Encoding]::UTF8.GetByteCount($json) -gt 2900000 -and $rows.Count -gt 0){
-  $last=$rows[$rows.Count-1];$coverage[$last.category].count--;Gap $last.category '响应达到字节上限，清单已截断。';$rows.RemoveAt($rows.Count-1)
-  $result.entries=$rows.ToArray();$result.truncated=$true;$json=$result|ConvertTo-Json -Depth 8 -Compress
-}
+if([Text.Encoding]::UTF8.GetByteCount($json) -gt 4500000){throw '启动项响应超过本次字节预算，请缩小范围。'}
 foreach($key in $roots.Values){$key.Dispose()}
 $json

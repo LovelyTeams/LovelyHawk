@@ -6,7 +6,7 @@ import type {
   WindowsStartupCategory, WindowsInventoryKind,
 } from "../shared/windows-incident-contract";
 import { WINDOWS_STARTUP_CATEGORIES } from "../shared/windows-incident-contract";
-import { DataTable, DetailPane, FilterChips, RiskBadge, RiskCell, SearchBox, StatStrip, riskChipOptions, riskSort, useFocusRequest, type Column } from "./WinIrKit";
+import { CollectionWarnings, DataTable, DetailPane, FilterChips, RiskBadge, RiskCell, SearchBox, StatStrip, riskChipOptions, riskSort, useFocusRequest, type Column } from "./WinIrKit";
 import { WinIrRelated, type RelatedContext } from "./WinIrRelated";
 import { commandExecutable, matchesQuery, riskCounts, toCsv, type RiskFilter } from "./win-ir-helpers";
 import { RELATED_ID, commandPath } from "./win-ir-links";
@@ -57,7 +57,7 @@ export function WinIrBaseline({ snapshot, focus, busy = false, connected = false
         { label: "不适用", value: snapshot?.notApplicableCount ?? "—", onClick: () => setStatus("not-applicable") },
       ]} />
       <p className="wir-query-scope">{snapshot ? `当前返回 ${categories.length} 类检查。` : "核查后可按类别与结果筛选。"}口令策略限定本地账户，审计与防护按本次采集权限读取；“无法判断”和“不适用”均不计入通过。</p>
-      <details className="wir-collection-warnings"><summary>检查范围与采集影响</summary><p>检查读取系统策略、日志通道和防护状态，不修改这些配置，也不自动提权。查询可能产生 PowerShell/.NET 临时编译文件及系统审计记录。口令策略不读取口令，日志检查只读取通道配置；容量建议不等于实际留存天数。缺少组件、权限或适用条件时保留缺口。</p></details>
+      <CollectionWarnings source="基线检查" summary="检查范围与采集影响" severity="info" announce={false} warnings={["检查读取系统策略、日志通道和防护状态，不修改这些配置，也不自动提权。查询可能产生 PowerShell/.NET 临时编译文件及系统审计记录。口令策略不读取口令，日志检查只读取通道配置；容量建议不等于实际留存天数。缺少组件、权限或适用条件时保留缺口。"]} />
       <div className="wir-toolbar">
         {onConfigure ? <button type="button" className="win-ir-btn is-primary" disabled={busy || !connected || !snapshot} onClick={onConfigure}>一键配置…</button> : null}
         <SearchBox value={query} onChange={setQuery} placeholder="搜索检查项、配置值或加固建议" />
@@ -149,9 +149,10 @@ export function WinIrStartup({ snapshot, focus, related, busy = false, connected
         {WINDOWS_STARTUP_CATEGORIES.map(key=>{const c=snapshot?.categories.find(item=>item.category===key);return <button key={key} type="button" aria-pressed={category===key} onClick={()=>{setCategory(key);setSelected(null);setSource("all");}} title={c?.message??"尚未采集"}>{STARTUP_CATEGORY_LABELS[key]}<span>{c?.count??"—"}{c&&c.status!=="complete"?" !":""}</span></button>;})}
       </nav>
       <div className="wir-startup-content">
-      {coverage?<p className={coverage.status==="complete"?"wir-query-scope":"wir-reader-warning"} role="status">{coverage.status==="complete"?"已读取所列位置":coverage.status==="partial"?"部分读取":"未能读取"}：{coverage.message}</p>:null}
-      {snapshot?.warnings.length?<details className="wir-collection-warnings"><summary>采集范围与缺口（{snapshot.warnings.length}）</summary>{snapshot.warnings.map((message,i)=><p key={i}>{message}</p>)}</details>:null}
-      {snapshot?.truncated?<p className="wir-reader-warning" role="status">清单或字段已截断；每类最多 500 条，总共最多 4000 条，不能视为完整清单。</p>:null}
+      <div className="wir-collection-summary">
+        <CollectionWarnings source="启动项采集" stamp={snapshot?.observedAt} severity={snapshot?.truncated || snapshot?.categories.some(c => c.status !== "complete") ? "warning" : "info"} summary={snapshot?.truncated || snapshot?.categories.some(c => c.status !== "complete") ? "部分读取 · 查看采集说明" : "采集范围与说明"} warnings={[...(snapshot?.warnings ?? []), ...(snapshot?.categories.filter(c => c.status !== "complete").map(c => `${STARTUP_CATEGORY_LABELS[c.category]} · ${c.status === "partial" ? "部分读取" : "未能读取"}：${c.message}`) ?? []), ...(snapshot?.truncated ? ["清单或字段已截断，不能视为完整清单；具体范围见各分类说明。"] : [])]} />
+        {coverage ? <span className="wir-coverage-state">{STARTUP_CATEGORY_LABELS[coverage.category]} · {coverage.status === "complete" ? "已读取所列位置" : coverage.status === "partial" ? "部分读取" : "未能读取"}</span> : null}
+      </div>
       <div className="wir-toolbar">
         <SearchBox value={query} onChange={setQuery} placeholder="搜索名称、路径、运行账户或命令" />
         <select aria-label="持久化来源" className="win-ir-input wir-select" value={source} onChange={(event) => setSource(event.target.value)}>

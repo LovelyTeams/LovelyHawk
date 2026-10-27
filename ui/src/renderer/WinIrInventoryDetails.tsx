@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { WindowsControlOperation, WindowsIncidentResponse, WindowsInventoryDetails, WindowsInventoryEntry, WindowsInventoryKind, WindowsRemoteIntent } from "../shared/windows-incident-contract";
 import { CONTROL_ACTIONS, CONTROL_LABELS } from "./WinIrControlChange";
-import { WinIrModal } from "./WinIrKit";
+import { CollectionWarnings, WinIrModal } from "./WinIrKit";
 import { errorText } from "./error-text";
 
 export type InventoryDetailSelection = {kind:WindowsInventoryKind;entry:WindowsInventoryEntry;session:string|null;observedAt:string};
@@ -44,9 +44,9 @@ export function WinIrInventoryDetails({selection,currentSession,onRequest,onClos
     {working?<p role="status">正在只读读取详情，最长等待 45 秒；关闭窗口后不会展示迟到结果。</p>:null}
     {!available?<p role="alert">当前未连接原会话，仅保留已取得的详情；重新连接后请刷新清单。</p>:null}
     {!entry.objectId?<p role="alert">条目信息不完整或已截断，请重新采集后读取实时详情。</p>:null}
-    {error?<p className="wir-reader-warning" role="alert">{error} 当前保留的是此前采集内容。</p>:null}
+    <CollectionWarnings announce inline source={title} summary="详情读取失败 · 保留此前内容" severity="error" warnings={error ? [`${error} 当前保留的是此前采集内容。`] : []} />
     <dl className="wir-inventory-fields" tabIndex={0} aria-label="对象详细信息">{fields.map((field,index)=><div key={`${field.label}:${index}`}><dt>{field.label}</dt><dd>{field.value||"未配置 / 未提供"}</dd></div>)}</dl>
-    {details?.warnings.map((warning,index)=><p key={index} className="wir-reader-warning">{warning}</p>)}
+    <CollectionWarnings announce inline source={title} stamp={details?.observedAt} warnings={details?.warnings ?? []} />
     <p className="wir-footnote">操作仍会重新读取并预览；删除须先禁用并停止对象。删除只移除注册定义，文件保留且没有一键恢复备份。</p>
   </WinIrModal>;
 }

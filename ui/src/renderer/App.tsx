@@ -1,4 +1,4 @@
-import { NotificationCenter, NotificationContext } from "./NotificationCenter";
+import { NotificationCenter, NotificationContext, NotificationOpenContext } from "./NotificationCenter";
 import {
   lazy,
   Suspense,
@@ -190,8 +190,8 @@ export function App() {
   const disposalReportReturnFocusRef = useRef<HTMLElement | null>(null);
   const applicationLogReturnFocusRef = useRef<HTMLElement | null>(null);
 
-  const publishNotification = useCallback((source: string, message: string, severity: import("./notification-state").NotificationSeverity) => {
-    dispatchNotification({type:"message",source,message,severity,now:Date.now()});
+  const publishNotification = useCallback((source: string, message: string, severity: import("./notification-state").NotificationSeverity, key?: string) => {
+    dispatchNotification({type:"message",source,message,severity,key,now:Date.now()});
   }, []);
   useEffect(() => { if (notificationsOpen) dispatchNotification({type:"read"}); }, [notificationsOpen,notificationState.history]);
   useEffect(() => { if (!overlayOpen && !pageModalOpen) dispatchNotification({type:"resume",now:Date.now()}); }, [overlayOpen,pageModalOpen]);
@@ -549,7 +549,7 @@ export function App() {
     <button type="button" data-testid="sidebar-open-disposal-report" onClick={(event) => openDisposalReport(event.currentTarget)}>处置报告</button>
   </div>;
   return (
-    <NotificationContext.Provider value={publishNotification}><div className={uiPreferences.showStatusBar ? "window-shell" : "window-shell no-statusbar"}>
+    <NotificationContext.Provider value={publishNotification}><NotificationOpenContext.Provider value={() => setNotificationsOpen(true)}><div className={uiPreferences.showStatusBar ? "window-shell" : "window-shell no-statusbar"}>
       <AppTitleBar
         section={activePage === null ? "欢迎" : activePage.title}
         backgroundHidden={overlayOpen}
@@ -849,7 +849,7 @@ export function App() {
         </div>
       </footer>
       ) : null}
-    </div></NotificationContext.Provider>
+    </div></NotificationOpenContext.Provider></NotificationContext.Provider>
   );
 }
 

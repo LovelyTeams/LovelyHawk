@@ -3,7 +3,8 @@ import type { AppNotification, NotificationSeverity } from "./notification-state
 import { isModalScrimActive, useModalScrim } from "./modal-scrim";
 import "./notification-stack.css";
 
-export type PublishNotification = (source: string, message: string, severity: NotificationSeverity) => void;
+export type PublishNotification = (source: string, message: string, severity: NotificationSeverity, key?: string) => void;
+export const NotificationOpenContext = createContext<(() => void) | null>(null);
 export const NotificationContext = createContext<PublishNotification | null>(null);
 
 /** Explicit operation feedback only. Task state, input validation and evidence stay in their views. */

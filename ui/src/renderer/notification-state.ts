@@ -6,7 +6,7 @@ export type NotificationSeverity = "info" | "success" | "warning" | "error";
 export type NotificationIntent = "background-task-started" | "settings-saved" | "application-log-copied" | "attention-required" | "operation-failed" | "manual-action-required";
 export interface AppNotification {
   id: string; intent: NotificationIntent | "page-message"; severity: NotificationSeverity; message: string;
-  expiresAt: number | null; source?: string; createdAt?: number; read?: boolean;
+  expiresAt: number | null; source?: string; createdAt?: number; read?: boolean; key?: string | undefined;
 }
 export interface NotificationState {
   nextId: number;
@@ -17,7 +17,7 @@ export interface NotificationState {
 }
 export type NotificationAction =
   | { type: "show"; intent: NotificationIntent; now: number }
-  | { type: "message"; source: string; message: string; severity: NotificationSeverity; now: number }
+  | { type: "message"; source: string; message: string; severity: NotificationSeverity; now: number; key?: string | undefined }
   | { type: "dismiss" | "remove"; id: string }
   | { type: "expire" | "resume"; now: number }
   | { type: "read" | "clear" };
@@ -44,9 +44,12 @@ export function notificationReducer(state: NotificationState, action: Notificati
       if (!spec || !spec.message) return state;
       const source = action.type === "message" ? action.source : "应用";
       const intent = action.type === "show" ? action.intent : "page-message";
+      const key = action.type === "message" && typeof action.key === "string" && action.key.length <= 1024 ? action.key : undefined;
+      const previous = key ? state.history.find(n => n.key === key && n.source === source && n.message === spec.message && n.severity === spec.severity) : undefined;
+      if (previous) return state;
       const existing = state.notifications.find((n) => n.intent === intent && n.source === source && n.message === spec.message);
       const nextId = existing ? state.nextId : state.nextId >= Number.MAX_SAFE_INTEGER ? 1 : state.nextId + 1;
-      const item: AppNotification = { id:existing?.id ?? `notification-${nextId}`,intent,source,severity:spec.severity,message:spec.message,createdAt:action.now,expiresAt:action.now + notificationTimeoutMs(spec.severity),read:false };
+      const item: AppNotification = { id:existing?.id ?? `notification-${nextId}`,key,intent,source,severity:spec.severity,message:spec.message,createdAt:action.now,expiresAt:action.now + notificationTimeoutMs(spec.severity),read:false };
       const history = [item,...state.history.filter((n) => n.id !== item.id)];
       const excess = Math.max(0,history.length-MAX_NOTIFICATIONS);
       return {nextId,notifications:[item],history:history.slice(0,MAX_NOTIFICATIONS),omitted:state.omitted+excess};

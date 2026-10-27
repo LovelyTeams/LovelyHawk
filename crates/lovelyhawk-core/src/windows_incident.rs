@@ -1426,6 +1426,35 @@ function Send-DvcFrame([hashtable]$obj) {
     if (-not $ok -or $written -ne $frame.Length) { throw '通道写入未完成，请重新连接。' }
 }
 
+function Send-DvcResult([string]$text,[string]$requestId) {
+    $bytes=[Text.Encoding]::UTF8.GetBytes($text)
+    if($bytes.Length -gt 16777216){$text='[error] 查询输出超过 16 MiB 总量上限，请缩小查询范围。';$bytes=[Text.Encoding]::UTF8.GetBytes($text)}
+    $parsedId=[Guid]::Empty
+    if(-not [Guid]::TryParse($requestId,[ref]$parsedId)){
+        if($bytes.Length -gt 524288){$text='[error] 当前客户端不支持分段结果，请更新工作台后重新采集。'}
+        Send-DvcFrame @{type='result';text=$text};return
+    }
+    if($bytes.Length -le 49152){Send-DvcFrame @{type='result';name=$requestId;text=$text};return}
+    Send-DvcFrame @{type='result_start';name=$requestId;size=$bytes.Length}
+    for($offset=0;$offset -lt $bytes.Length;$offset+=49152){
+        $count=[Math]::Min(49152,$bytes.Length-$offset)
+        Send-DvcFrame @{type='result_chunk';name=$requestId;size=$offset;b64=[Convert]::ToBase64String($bytes,$offset,$count)}
+    }
+    $hash=[Security.Cryptography.SHA256]::Create()
+    try{$digest=[BitConverter]::ToString($hash.ComputeHash($bytes)).Replace('-','').ToLowerInvariant()}finally{$hash.Dispose()}
+    Send-DvcFrame @{type='result_end';name=$requestId;size=$bytes.Length;sha256=$digest}
+}
+
+function Read-DvcOutput {
+    begin {$buffer=[Text.StringBuilder]::new();$byteCount=0}
+    process {
+        $line=[string]$_
+        $byteCount += [Text.Encoding]::UTF8.GetByteCount($line)+2
+        if($byteCount -gt 16777088){throw '查询输出超过 16 MiB 总量上限，请缩小查询范围。'}
+        [void]$buffer.AppendLine($line)
+    }
+    end {$buffer.ToString().Trim()}
+}
 function Invoke-DvcCommand([string]$cmdText) {
     $oldPref = $ErrorActionPreference
     $ErrorActionPreference = 'SilentlyContinue'
@@ -1435,11 +1464,11 @@ function Invoke-DvcCommand([string]$cmdText) {
             $b64 = $Matches[1]
             $scriptText = [System.Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($b64))
             Write-Host "[*] 正在进程内执行 PowerShell 采集脚本..." -ForegroundColor Cyan
-            $res = & ([scriptblock]::Create($scriptText)) | Out-String -Width 8192
+            $res = & ([scriptblock]::Create($scriptText)) | Out-String -Stream -Width 8192 | Read-DvcOutput
             return "[exit=0]`n" + ([string]$res).Trim()
         } else {
             Write-Host "[*] 正在执行已确认的命令..." -ForegroundColor Cyan
-            $res = & cmd.exe /c $cmdText 2>&1 | Out-String -Width 8192
+            $res = & cmd.exe /c $cmdText 2>&1 | Out-String -Stream -Width 8192 | Read-DvcOutput
             return "[exit=0]`n" + ([string]$res).Trim()
         }
     } catch {
@@ -1540,7 +1569,7 @@ while ($true) {
                 $msg = $msgJson | ConvertFrom-Json
                 if ($msg.type -eq 'cmd') {
                     $outText = Invoke-DvcCommand ([string]$msg.text)
-                    Send-DvcFrame @{ type = 'result'; text = $outText }
+                    Send-DvcResult $outText ([string]$msg.name)
                 } elseif ($msg.type -eq 'file_start') {
                     $recvDir = Join-Path (Get-Location).Path 'recv'
                     New-Item -ItemType Directory -Force -Path $recvDir | Out-Null
@@ -3053,6 +3082,71 @@ mod tests {
         assert!(script.contains("WTSVirtualChannelOpenEx"));
         assert!(script.contains("dvc::lovelyhawk::winir"));
         assert!(script.contains("dvc::demo::chat"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn fileless_segmented_output_round_trips_native_powershell() {
+        use sha2::{Digest, Sha256};
+        use std::os::windows::process::CommandExt;
+        let source = fileless_powershell_source();
+        let helpers = source
+            .split("function Send-DvcResult")
+            .nth(1)
+            .unwrap()
+            .split("function Invoke-DvcCommand")
+            .next()
+            .unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        let script = format!(
+            r#"
+[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
+$ErrorActionPreference='Stop'
+$script:frames=New-Object 'Collections.Generic.List[object]'
+function Send-DvcFrame([hashtable]$obj) {{ $script:frames.Add($obj) }}
+function Send-DvcResult{helpers}
+$text=('中文XYZ' * 100000)
+Send-DvcResult $text '{id}'
+ConvertTo-Json -InputObject $script:frames.ToArray() -Depth 8 -Compress
+"#
+        );
+        let command = script_transport::compressed_command(&script).unwrap();
+        let output = std::process::Command::new(
+            std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+                .join("System32/WindowsPowerShell/v1.0/powershell.exe"),
+        )
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-EncodedCommand",
+            command.split_whitespace().last().unwrap(),
+        ])
+        .creation_flags(0x08000000)
+        .output()
+        .unwrap();
+        assert!(output.status.success(), "native result encoder failed");
+        let frames: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
+        let expected = "中文XYZ".repeat(100000);
+        let mut bytes = Vec::new();
+        assert_eq!(frames[0]["type"], "result_start");
+        assert_eq!(frames[0]["size"], expected.len());
+        for frame in &frames[1..frames.len() - 1] {
+            assert_eq!(frame["name"], id);
+            assert_eq!(frame["type"], "result_chunk");
+            assert_eq!(frame["size"], bytes.len());
+            let chunk = BASE64.decode(frame["b64"].as_str().unwrap()).unwrap();
+            assert!(chunk.len() <= lovelyhawk_win_dvc::command_result::COMMAND_RESULT_CHUNK_BYTES);
+            bytes.extend_from_slice(&chunk);
+        }
+        let end = frames.last().unwrap();
+        assert_eq!(end["type"], "result_end");
+        assert_eq!(end["name"], id);
+        assert_eq!(end["size"], expected.len());
+        assert_eq!(
+            end["sha256"],
+            format!("{:x}", Sha256::digest(expected.as_bytes()))
+        );
+        assert_eq!(String::from_utf8(bytes).unwrap(), expected);
     }
 
     #[test]

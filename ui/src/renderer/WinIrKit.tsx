@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import type { WindowsRiskLevel } from "../shared/windows-incident-contract";
+import { NoticeSummary } from "./NoticeSummary";
 import { RISK_LABEL, RISK_ORDER, type RiskFilter } from "./win-ir-helpers";
 import { useModalScrim } from "./modal-scrim";
 
@@ -88,8 +89,11 @@ export function useFocusRequest<T>(focus: { target: T; request: number } | null 
   });
 }
 
-export function CollectionWarnings({ warnings }: { warnings: readonly string[] }) {
-  return warnings.length ? <details className="wir-collection-warnings"><summary>采集范围与缺口 · {warnings.length} 项</summary><ul>{warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></details> : null;
+export function CollectionWarnings({ warnings, source = "采集说明", summary, stamp, severity, announce = false, inline }: {
+  warnings: readonly string[]; source?: string; summary?: string | undefined; stamp?: string | undefined;
+  severity?: "info" | "warning" | "error" | undefined; announce?: boolean | undefined; inline?: boolean | undefined;
+}) {
+  return <NoticeSummary source={source} messages={warnings} summary={summary ?? `采集说明 · ${warnings.filter(Boolean).length} 项`} stamp={stamp} severity={severity} announce={announce} inline={inline} />;
 }
 
 export function RiskBadge({ level, label }: { level: WindowsRiskLevel; label?: string }) {

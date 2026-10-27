@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { WindowsFileAccess } from "../shared/windows-incident-contract";
+import { CollectionWarnings } from "./WinIrKit";
 import { errorText } from "./error-text";
 
 export function WinIrFileAccessPanel({ path, busy, connected, onInspect, onCopy, onCommands }: {
@@ -19,9 +20,9 @@ export function WinIrFileAccessPanel({ path, busy, connected, onInspect, onCopy,
   }
   return <div className="wir-access-guide"><div className="wir-toolbar"><button type="button" className="win-ir-btn is-primary" disabled={busy || loading || !connected} onClick={() => void inspect()}>{loading ? "正在读取权限与服务关联…" : "诊断文件访问与驱动关联"}</button><button type="button" className="win-ir-btn" onClick={onCommands}>打开服务 / 驱动命令预设</button></div>
     <p>只读查询文件属性、访问规则及相同路径的进程、服务、驱动。不会提权、夺取所有权或强制卸载。</p>
-    {error ? <p role="alert" className="wir-reader-warning">{error}</p> : null}
+    <CollectionWarnings announce source="文件访问诊断" summary="诊断未完成 · 查看原因" severity="error" warnings={error ? [error] : []} />
     {result ? <><p>观察时间：{result.observedAt} · 属主：{result.owner || "未取得"} · 属性：{result.attributes || "未取得"}</p>
-      {result.warnings.map((warning) => <p key={warning} className="wir-reader-warning">{warning}</p>)}
+      <CollectionWarnings announce source="文件访问诊断" stamp={result.observedAt} warnings={result.warnings} />
       <p>相同程序路径的进程：{result.processes.length ? result.processes.map((process) => `${process.name} (PID ${process.pid})`).join("、") : "本次未取得；不代表无人占用"}</p>
       {result.services.length ? result.services.map((service) => <article key={`${service.kind}:${service.name}`}><strong>{service.kind === "driver" ? "驱动" : "服务"}：{service.displayName || service.name}</strong><p>{service.name} · {service.state} · 启动方式 {service.startMode}</p><code>{service.path}</code><button type="button" className="win-ir-btn" onClick={() => onCopy(`${service.name}\n${service.path}\n${service.state}\n${service.startMode}`)}>复制关联记录</button></article>) : <p>未取得相同路径的服务或驱动；模块加载、过滤驱动和间接路径仍需核查。</p>}
       <details><summary>查看 {result.accessRules.length} 条访问规则</summary>{result.accessRules.map((rule, index) => <p key={index}>{rule.identity} · {rule.access === "Deny" ? "拒绝" : "允许"} · {rule.rights} · {rule.inherited ? "继承" : "显式"}</p>)}</details>

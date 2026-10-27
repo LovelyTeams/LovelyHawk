@@ -115,3 +115,15 @@ html[data-motion="reduced"] .notification-stack { animation: none; }
     width: auto;
   }
 }
+
+/* The toast is a brief signpost. The notification center retains the full message. */
+.notification-stack .notification-card p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.notice-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; font-size: var(--font-caption); color: var(--warning-text); }
+.notice-summary.is-info { color: var(--muted); }
+.notice-summary.is-error { color: var(--danger); }
+.notice-summary-link { border: 0; padding: 2px 0; color: inherit; background: transparent; cursor: pointer; font: inherit; text-align: left; }
+.notice-summary-link:hover { text-decoration: underline; }
+.notice-summary-link:focus-visible, .notice-summary-disclosure summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.notice-summary-disclosure { min-width: 0; max-width: 100%; }
+.notice-summary-disclosure summary { cursor: pointer; padding: 2px 0; }
+.notice-summary-disclosure ul { margin: 6px 0; padding-left: 20px; max-height: 180px; overflow: auto; overflow-wrap: anywhere; white-space: pre-wrap; }

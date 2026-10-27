@@ -1,3 +1,7 @@
+import { useCallback, useEffect, useReducer, useState, type ReactNode } from "react";
+import { NotificationCenter, NotificationContext, NotificationOpenContext } from "../src/renderer/NotificationCenter";
+import { NotificationStack } from "../src/renderer/NotificationStack";
+import { initialNotificationState, notificationReducer, type NotificationSeverity } from "../src/renderer/notification-state";
 import type { WindowsRdpRequest, WindowsRdpStatus } from "../src/shared/windows-rdp-contract";
 // Test-only entry, bundled by probe-windows-workspace.mjs and mounted through
 // CDP in an isolated native window. It is never imported by the application.
@@ -41,6 +45,7 @@ export function mount() {
     ...Array.from({ length: 236 }, (_, index) => sampleProcess(1100 + index, 468, `worker-${String(index).padStart(3, "0")}.exe`)),
   ];
   const inventory = (kind: WindowsInventoryKind): WindowsInventorySnapshot => ({kind,observedAt:stamp,totalCount:2,truncated:false,warnings:[],entries:[{objectId:crypto.randomUUID(),name:`fixture-${kind}`,displayName:"Synthetic inventory",location:kind==="tasks"?"\\Fixture\\":`HKLM:\\SYSTEM\\CurrentControlSet\\Services\\fixture-${kind}`,command:"C:\\Users\\Public\\fixture.exe",account:"LocalSystem",state:"Running",startMode:"Auto",pid:kind==="services"?640:0,details:["Synthetic fixture only", "触发器：登录 · 操作：fixture.exe"],riskLevel:"medium",riskReason:"测试线索"},{objectId:crypto.randomUUID(),name:`disabled-${kind}`,displayName:"Disabled fixture",location:"fixture",command:"",account:"",state:"Disabled",startMode:"Disabled",pid:0,details:[],riskLevel:"normal",riskReason:""}]});
+  let warningMode = false;
   const snapshots: Omit<WinIrSnapshots, "files" | "registry"> = {
     services:inventory("services"),drivers:inventory("drivers"),tasks:inventory("tasks"),
     overview: {
@@ -242,6 +247,10 @@ export function mount() {
         default: response = { kind: "status", status: structuredClone(status), filelessScript: script };
       }
       response = structuredClone(response);
+      if (warningMode && "snapshot" in response && "warnings" in response.snapshot) {
+        response.snapshot.warnings = ["只读采集遇到权限缺口。".repeat(30), "<img src=x onerror=alert(1)> 按纯文本显示", ...Array.from({length:8},(_,i)=>`说明 ${i+1}：${"需核对当前采集范围。".repeat(30)}`), "最后一条说明：没有结果不能证明没有风险。"];
+        if(response.kind === "startup") { response.snapshot.truncated = true; response.snapshot.categories[5]!.status = "partial"; response.snapshot.categories[5]!.message = "分类存在权限缺口；当前已返回超过 500 条。"; }
+      }
       if (!matchesWindowsIncidentResponse(request, response)) throw new Error(`Fixture response failed the real contract: ${request.action}`);
       if (delayAction === request.action) { delayAction = ""; await new Promise<void>((resolve) => { release = resolve; }); }
       return response;
@@ -259,10 +268,33 @@ export function mount() {
       return { saved: true, fileName: "evidence.txt", sha256: digest };
     },
   };
+  let enableNotices = () => {};
+  let notificationState = initialNotificationState;
+  function NotificationHarness({children}: {children:ReactNode}) {
+    const [enabled,setEnabled] = useState(false);
+    const [open,setOpen] = useState(false);
+    const [state,dispatch] = useReducer(notificationReducer, initialNotificationState);
+    notificationState = state;
+    enableNotices = () => setEnabled(true);
+    const publish = useCallback((source:string,message:string,severity:NotificationSeverity,key?:string) => dispatch({type:"message",source,message,severity,key,now:Date.now()}),[]);
+    useEffect(()=>{if(open)dispatch({type:"read"});},[open,state.history]);
+    return <NotificationContext.Provider value={enabled ? publish : null}><NotificationOpenContext.Provider value={enabled ? ()=>setOpen(true) : null}>
+      {children}
+      {enabled ? <><button type="button" data-testid="fixture-notifications" className="statusbar-button" style={{position:"fixed",bottom:0,left:10,zIndex:1400}} onClick={()=>setOpen(true)}>通知 {state.history.length}</button><NotificationStack notifications={state.notifications} modalOpen={open} onDismiss={id=>dispatch({type:"dismiss",id})} onExpire={now=>dispatch({type:"expire",now})}/>{open ? <NotificationCenter history={state.history} omitted={state.omitted} onClose={()=>setOpen(false)} onClear={()=>dispatch({type:"clear"})} onRemove={id=>dispatch({type:"remove",id})}/> : null}</> : null}
+    </NotificationOpenContext.Provider></NotificationContext.Provider>;
+  }
   const root = createRoot(container);
-  root.render(<WindowsIncidentPage api={api} writeClipboard={async (text) => { copies.push(text); }} />);
+  root.render(<NotificationHarness><WindowsIncidentPage api={api} writeClipboard={async (text) => { copies.push(text); }} /></NotificationHarness>);
   return {
     calls, copies, status, rdpCalls,
+    notifications: () => notificationState,
+    enableCollectionWarnings: () => {
+      warningMode = true; enableNotices();
+      const template = snapshots.startup.entries[0]!;
+      snapshots.startup.entries.push(...Array.from({length:1200},(_,i)=>({...template,category:"codecs" as const,name:`codec-fixture-${i}`,riskLevel:"normal" as const,riskReason:""})));
+      snapshots.startup.totalCount = snapshots.startup.entries.length;
+      for(const c of snapshots.startup.categories) c.count = snapshots.startup.entries.filter(e=>e.category===c.category).length;
+    },
     expandTasks:()=>{const template=snapshots.tasks.entries[0];snapshots.tasks.entries.push(...Array.from({length:120},(_,i)=>({...template,objectId:crypto.randomUUID(),name:`长列表任务-${i+1}`,displayName:"任务说明，需在详情中完整查看。".repeat(12)})));snapshots.tasks.totalCount=snapshots.tasks.entries.length;},
     failNext: (action: string) => { failAction = action; },
     pauseNext: (action: string) => { delayAction = action; },

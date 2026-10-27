@@ -1,6 +1,8 @@
+import { WinIrCollectionNotices } from "./WinIrCollectionNotices";
 import { WinIrInventoryDetails, type InventoryDetailSelection } from "./WinIrInventoryDetails";
 import { WinIrInventory } from "./WinIrInventory";
 import { WinIrControlChange, type ControlSelection } from "./WinIrControlChange";
+import { NoticeScopeContext, NoticeSummary } from "./NoticeSummary";
 import { TransientNotice } from "./NotificationCenter";
 import { WinIrProcessChange } from "./WinIrProcessChange";
 import { WinIrDesktop } from "./WinIrDesktop";
@@ -244,7 +246,8 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOp
   />;
 
   return (
-    <section className={`page windows-incident-page${rail ? " is-rail" : ""}`} data-testid="windows-incident-page">
+    <NoticeScopeContext.Provider value={{key:data.snapshotKey,label:host ? `目标：${host}` : "Windows 当前会话"}}><section className={`page windows-incident-page${rail ? " is-rail" : ""}`} data-testid="windows-incident-page">
+      <WinIrCollectionNotices snapshots={data.snapshots} collectedAt={data.collectedAt} errors={data.collectionErrors} />
       <header className="wir-host-bar" aria-label="当前被检主机">
         <span className="wir-host-icon"><WinIrIcon name="overview" size={20} /></span>
         <strong title={host ?? undefined}>{host || (connected ? "主机名称待采集" : "等待连接被检主机")}</strong>
@@ -289,7 +292,7 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOp
           <span className="status-dot idle" aria-hidden="true" /><strong>连接已断开</strong><span className="wir-session-host">{host || "主机名称待采集"}</span><span className="wir-session-hint">旧快照仅供查看，远程操作已暂停</span>
           <button type="button" className="win-ir-btn" onClick={() => setSetupOpen(true)}>重新接入</button>
         </div> : null}
-        {data.statusError ? <details className="wir-collection-warnings" role="alert"><summary>连接状态待核实 · 远程操作已暂停</summary><span>{data.statusError}</span><button type="button" className="win-ir-btn" onClick={() => void data.refresh().catch(() => undefined)}>重试连接状态</button></details> : null}
+        {data.statusError ? <NoticeSummary source="连接状态" messages={[data.statusError]} summary="连接待核实 · 操作已暂停" severity="error"><button type="button" className="wir-link" onClick={() => void data.refresh().catch(() => undefined)}>重试连接状态</button></NoticeSummary> : null}
         {data.reconnect?.phase === "verifying" ? <div className="win-ir-notice" role="status"><span>采集通道已重新连接，正在核对是否仍是 {data.reconnect.host}；核对完成前显示的是重连前的结果。</span></div> : null}
         {data.reconnect?.phase === "kept" ? <TransientNotice source="Windows 应急响应" message={`已重新连接 ${data.reconnect.host}（按主机名、域和系统版本核对），保留原采集结果；可按需刷新。`} severity="success"><div className="win-ir-notice is-ok" role="status"><span>已重新连接 {data.reconnect.host}（按主机名、域和系统版本核对），保留了重连前采集的结果；各模块的采集时间不变，可按需刷新。</span><button type="button" className="wir-icon-button" aria-label="关闭重连提示" onClick={data.dismissReconnect}>×</button></div></TransientNotice> : null}
         {data.reconnect?.phase === "replaced" ? <TransientNotice source="Windows 应急响应" message={`重新连接的主机 ${data.reconnect.host} 与之前 ${data.reconnect.previous} 不同，已清空旧结果。`} severity="warning"><div className="win-ir-notice is-warn" role="status"><span>重新连接的主机（{data.reconnect.host}）与之前（{data.reconnect.previous}）不同，已清空旧结果。</span><button type="button" className="wir-icon-button" aria-label="关闭重连提示" onClick={data.dismissReconnect}>×</button></div></TransientNotice> : null}
@@ -313,7 +316,7 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOp
               {activeTab !== "console" && activeTab !== "timeline" && data.snapshots[activeTab] ? <button type="button" className="win-ir-btn" onClick={() => void copy(JSON.stringify({ hostname: host, collectedAt: data.collectedAt[activeTab], module: activeTab, snapshot: data.snapshots[activeTab] }, null, 2))}>复制结果 JSON</button> : null}
             </>}
           /> : null}
-          {data.collectionErrors[activeTab as CollectionTab] ? <details className="wir-collection-warnings"><summary>上次采集未完成 · 查看原因与重试</summary><span>上次采集未完成：{data.collectionErrors[activeTab as CollectionTab]}{data.snapshots[activeTab as CollectionTab] ? " 下面保留上一次成功采集的结果。" : ""}</span><button type="button" className="win-ir-btn" disabled={busy || !connected} onClick={collectCurrent}>重试</button></details> : null}
+          {data.collectionErrors[activeTab as CollectionTab] ? <NoticeSummary announce={false} source={`${activeModule.label}采集`} summary="上次未完成 · 查看原因" messages={[`上次采集未完成：${data.collectionErrors[activeTab as CollectionTab]}${data.snapshots[activeTab as CollectionTab] ? " 当前保留上一次成功采集的结果。" : ""}`]} severity="error"><button type="button" className="wir-link" disabled={busy || !connected} onClick={collectCurrent}>重试</button></NoticeSummary> : null}
           {WIN_IR_MODULES.filter((module) => visited.has(module.key)).map(({ key }) => <Activity key={key === "playbooks" ? key : `${data.snapshotKey}:${key}`} mode={key === activeTab ? "visible" : "hidden"}>
             {key === "playbooks" ? <WinIrPlaybooks connected={connected} busy={busy} onAction={openPlaybookAction} onCopy={(text) => void copy(text)} /> : null}
             {key === "desktop" ? <WinIrDesktop api={api.windowsRdp} covered={covered || setupOpen} canCopyScript={Boolean(data.filelessScript && writeClipboard)} onCopyScript={() => void copy(data.filelessScript)} /> : null}
@@ -340,6 +343,6 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOp
       {controlSelection?<WinIrControlChange selection={controlSelection} currentSession={data.sessionKey} onRequest={data.baselineRequest} onClose={()=>setControlSelection(null)} onRefresh={()=>void data.collect(controlSelection.kind)} onResult={(message,failed)=>failed?data.setError(message):data.setNotice(message)}/>:null}
       {baselineSelection ? <WinIrBaselineChanges items={data.snapshots.baseline?.items ?? []} initialIds={baselineSelection.ids} session={baselineSelection.session} currentSession={data.sessionKey} onRequest={data.baselineRequest} onClose={() => setBaselineSelection(null)} onRefresh={() => void data.collect("baseline")} /> : null}
       {confirm.dialog ? <DialogHost dialog={confirm.dialog} scrollMessage onResolve={confirm.resolve} /> : null}
-    </section>
+    </section></NoticeScopeContext.Provider>
   );
 }

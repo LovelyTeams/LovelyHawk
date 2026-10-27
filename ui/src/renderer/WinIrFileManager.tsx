@@ -327,5 +327,5 @@ function FileProperties({ entry, onCopy }: { entry: WindowsFileEntry; onCopy: (t
     <div><dt>修改时间</dt><dd>{entry.lastWriteTime || "未取得"}</dd></div>
     <div><dt>属性</dt><dd>{[entry.hidden ? "隐藏" : "", entry.system ? "系统" : ""].filter(Boolean).join("、") || "常规"}</dd></div>
     <div><dt>SHA256</dt><dd>{entry.sha256 || "未计算；取证拉取后校验接收内容"}</dd></div>
-  </dl>{entry.riskReason ? <p className="wir-reader-warning">{entry.riskReason}</p> : null}<button type="button" className="win-ir-btn" onClick={() => onCopy(entry.fullPath)}>复制路径</button></div>;
+  </dl>{entry.riskReason ? <p className="wir-context-note">{entry.riskReason}</p> : null}<button type="button" className="win-ir-btn" onClick={() => onCopy(entry.fullPath)}>复制路径</button></div>;
 }

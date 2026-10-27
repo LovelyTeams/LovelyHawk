@@ -22,7 +22,7 @@
 
 采集机器及当前采集账户的固定注册表位置，包括适用位置的 32 位物理分支、常见 Run / RunOnce / Active Setup、Shell 扩展及 COM 注册、AppInit、IFEO / SilentProcessExit、KnownDLLs、BootExecute、LSA、打印与网络提供者、Winsock 目录、IME / TSF、Sidebar 历史配置，以及启动目录、服务 / 驱动 / 任务。只读取，不激活 COM 组件、不执行快捷方式、不加载 DLL。Sidebar 文件读取有上限；注册表、CIM 和任务查询可能产生系统审计记录。Add-Type 的系统编译过程也可能产生临时文件，不能称整个操作绝对无磁盘痕迹。
 
-每类返回 `complete / partial / unavailable` 和计数；complete 仅表示本版本列出的固定位置已检查。最多每类 500 条、合计 4000 条，JSON 预算约 2.9 MB；COM 服务器解析、注册表子项、字段和时间均有界限，超限显示缺口。其他账户、离线 hive、任意 Shell ProgID、所有 TSF 语言配置、WMI 订阅、隐藏内核对象及全部第三方加载点不在此目录的完整覆盖承诺内。小工具 / IE 分类也可能包含历史残留，安装或配置记录不等于正在执行。
+每类返回 `complete / partial / unavailable` 和计数；complete 仅表示本版本列出的固定位置已检查。后续容量与传输已更新为每类 5000 条、合计 20000 条，JSON 预算约 4.5 MB，见 [采集提示与分段结果](WINDOWS_COLLECTION_NOTIFICATIONS.md)；COM 服务器解析、注册表子项、字段和时间均有界限，超限显示缺口。其他账户、离线 hive、任意 Shell ProgID、所有 TSF 语言配置、WMI 订阅、隐藏内核对象及全部第三方加载点不在此目录的完整覆盖承诺内。小工具 / IE 分类也可能包含历史残留，安装或配置记录不等于正在执行。
 
 新增关键系统类别不会继承通用“清理启动项”按钮。原有 Logon Run / RunOnce 清理入口保留；新的服务与任务入口走上述计划链路。其他注册表记录可定位查看，由相应模块另行确认操作。本轮没有增加批量删除或自动修复系统加载键。
 

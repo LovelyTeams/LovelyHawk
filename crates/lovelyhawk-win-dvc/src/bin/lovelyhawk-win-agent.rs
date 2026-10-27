@@ -92,7 +92,8 @@ mod win_agent {
 
     const READ_BUFFER_SIZE: usize = 4096;
     const READ_TIMEOUT_MS: u32 = 2000;
-    const MAX_CMD_OUTPUT_CHARS: usize = 512 * 1024;
+    const MAX_CMD_OUTPUT_BYTES: usize =
+        lovelyhawk_win_dvc::command_result::MAX_COMMAND_RESULT_BYTES - 128;
 
     #[derive(Clone, Copy)]
     struct SendHandle(HANDLE);
@@ -220,6 +221,7 @@ mod win_agent {
                                 return Err("收到重叠指令，已关闭通道以避免结果混淆".to_owned());
                             }
                             let cmd_text = msg.text.clone();
+                            let request_id = msg.name.clone();
                             let sender = send_for_reader.clone();
                             let executing = Arc::clone(&executing);
                             println!(
@@ -245,7 +247,11 @@ mod win_agent {
                                     // this response. The old session's writer is invalidated on close.
                                     executing.store(false, Ordering::Release);
                                     if let Err(error) =
-                                        sender(DvcWireMessage::result("server", 0, out))
+                                        lovelyhawk_win_dvc::command_result::send_command_result(
+                                            &out,
+                                            request_id.as_deref(),
+                                            &sender,
+                                        )
                                     {
                                         eprintln!("[send] {error}");
                                     }
@@ -333,7 +339,7 @@ mod win_agent {
         let run = |command: &mut Command| {
             lovelyhawk_win_dvc::agent_runtime::bounded_output(
                 command,
-                MAX_CMD_OUTPUT_CHARS,
+                MAX_CMD_OUTPUT_BYTES,
                 std::time::Duration::from_secs(35),
             )
         };
@@ -372,9 +378,9 @@ mod win_agent {
                     combined.push_str(stderr.trim());
                 }
                 let trimmed = combined.trim();
-                if trimmed.chars().count() > MAX_CMD_OUTPUT_CHARS {
+                if trimmed.len() > MAX_CMD_OUTPUT_BYTES {
                     return format!(
-                        "[error] 命令输出超过 {MAX_CMD_OUTPUT_CHARS} 字符上限，请缩小查询范围"
+                        "[error] 命令输出超过 {MAX_CMD_OUTPUT_BYTES} 字节上限，请缩小查询范围"
                     );
                 }
                 format!("[exit={code}]\n{trimmed}")

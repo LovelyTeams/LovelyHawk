@@ -14,10 +14,11 @@ use parking_lot::{Condvar, Mutex};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub mod native_collect;
-pub mod windows_read_queries;
 pub mod agent_runtime;
+pub mod command_result;
+pub mod native_collect;
 pub mod rdp_viewport;
+pub mod windows_read_queries;
 
 /// COM CLSID shared with the RDP client AddIn registration.
 pub const PLUGIN_CLSID_STR: &str = "{D9B80669-C06A-4BD1-9CB1-3B7168C9E3A3}";
@@ -265,7 +266,7 @@ struct SharedDvcState {
     recent_logs: VecDeque<DvcLogEntry>,
     received_files: VecDeque<DvcReceivedFile>,
     in_progress_file: Option<InProgressFile>,
-    pending_results: VecDeque<String>,
+    pending_command: Option<command_result::PendingCommand>,
     writer: Option<ChannelWriteFn>,
 }
 
@@ -293,7 +294,7 @@ impl Default for SharedDvcState {
             recent_logs: VecDeque::new(),
             received_files: VecDeque::new(),
             in_progress_file: None,
-            pending_results: VecDeque::new(),
+            pending_command: None,
             writer: None,
         }
     }
@@ -328,7 +329,8 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<std::ffi::OsStr>,
 {
-    args.into_iter().any(|arg| is_com_embedding_arg(arg.as_ref()))
+    args.into_iter()
+        .any(|arg| is_com_embedding_arg(arg.as_ref()))
 }
 
 /// Thread-safe handle to the in-process DVC COM LocalServer hub.
@@ -532,15 +534,20 @@ impl DvcHub {
         session_id: &str,
     ) -> Result<String, String> {
         let _serial = self.cmd_lock.lock();
+        let request_id = uuid::Uuid::new_v4().to_string();
         {
             let mut guard = self.state.lock();
             if guard.session_id.as_deref() != Some(session_id) || !guard.channel_connected {
                 return Err("远程会话已变化，本次命令未发送。".to_owned());
             }
-            guard.pending_results.clear();
+            guard.pending_command = Some(command_result::PendingCommand::new(request_id.clone()));
         }
-        let msg = DvcWireMessage::cmd("client", 0, command);
-        self.send_wire_for_session(msg, Some(session_id))?;
+        let mut msg = DvcWireMessage::cmd("client", 0, command);
+        msg.name = Some(request_id);
+        if let Err(error) = self.send_wire_for_session(msg, Some(session_id)) {
+            self.state.lock().pending_command = None;
+            return Err(error);
+        }
 
         let deadline = Instant::now() + timeout;
         let mut guard = self.state.lock();
@@ -548,8 +555,9 @@ impl DvcHub {
             if !guard.channel_connected || guard.session_id.as_deref() != Some(session_id) {
                 return Err("DVC 通道已断开或会话已变化。".to_owned());
             }
-            if let Some(output) = guard.pending_results.pop_front() {
-                return Ok(output);
+            if let Some(output) = guard.pending_command.as_mut().and_then(|p| p.result.take()) {
+                guard.pending_command = None;
+                return output;
             }
             let now = Instant::now();
             if now >= deadline {
@@ -558,7 +566,7 @@ impl DvcHub {
                 guard.channel_connected = false;
                 guard.session_id = None;
                 guard.writer = None;
-                guard.pending_results.clear();
+                guard.pending_command = None;
                 guard.push_log(
                     "system",
                     "error",
@@ -643,11 +651,14 @@ impl DvcHub {
         }
         guard.messages_received += 1;
         match msg.msg_type.as_str() {
-            "result" => {
-                let preview: String = msg.text.chars().take(120).collect();
-                guard.push_log("in", "result", preview);
-                guard.pending_results.push_back(msg.text);
-                self.result_cv.notify_all();
+            "result" | "result_start" | "result_chunk" | "result_end" => {
+                if let Some(pending) = guard.pending_command.as_mut()
+                    && pending.accept(msg)
+                    && pending.result.is_some()
+                {
+                    guard.push_log("in", "result", "命令响应接收结束（内容不写入通信日志）");
+                    self.result_cv.notify_all();
+                }
             }
             "file_start" => {
                 let name = msg.name.unwrap_or_else(|| "unnamed.bin".to_owned());
@@ -983,6 +994,7 @@ mod win_impl {
             }
             guard.channel_connected = false;
             guard.session_id = None;
+            guard.pending_command = None;
             guard.writer = None;
             guard.push_log(
                 "system",
@@ -1023,7 +1035,7 @@ mod win_impl {
                 guard.active_channel_name = Some(self.channel_name.clone());
                 guard.connected_since = Some(Utc::now().to_rfc3339());
                 guard.session_id = Some(session_id.clone());
-                guard.pending_results.clear();
+                guard.pending_command = None;
                 guard.in_progress_file = None;
                 guard.writer = Some(writer);
                 guard.push_log(
@@ -1268,6 +1280,45 @@ pub use win_impl::{
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn segmented_reply_is_bound_to_the_pending_command_and_session() {
+        let hub = DvcHub::new();
+        let expected = "中文结果".repeat(100_000);
+        {
+            let mut state = hub.state.lock();
+            state.channel_connected = true;
+            state.session_id = Some("owned-fixture".into());
+            let responder = hub.clone();
+            let output = expected.clone();
+            state.writer = Some(Arc::new(move |bytes| {
+                let request = StreamDecoder::new().feed(bytes).unwrap().remove(0);
+                assert!(request.name.is_some());
+                command_result::send_command_result(&output, request.name.as_deref(), |frame| {
+                    assert!(!responder.on_incoming_for_session(frame.clone(), "old-session"));
+                    assert!(responder.on_incoming_for_session(frame, "owned-fixture"));
+                    Ok(())
+                })
+            }));
+        }
+        assert_eq!(
+            hub.execute_command_for_session(
+                "read-only fixture",
+                Duration::from_secs(2),
+                "owned-fixture"
+            )
+            .unwrap(),
+            expected
+        );
+        assert!(hub.state.lock().pending_command.is_none());
+        assert!(
+            !hub.status()
+                .recent_logs
+                .iter()
+                .any(|l| l.summary.contains("中文结果"))
+        );
+        hub.state.lock().writer = None;
+    }
 
     #[test]
     fn stale_session_is_refused_before_any_command_or_chat_is_sent() {

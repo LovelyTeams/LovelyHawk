@@ -35,7 +35,7 @@ impl WindowsIncidentService {
                     "没有取得目标返回结果，请核对连接并重新采集；不能确认操作是否完成。",
                 )
             })?;
-        if output.len() > 4 * 1024 * 1024 {
+        if output.len() > lovelyhawk_win_dvc::command_result::MAX_COMMAND_RESULT_BYTES {
             return Err(CoreError::validation(
                 "windows script",
                 "目标返回内容超过上限。",
