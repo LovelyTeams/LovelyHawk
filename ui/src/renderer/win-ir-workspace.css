@@ -1,4 +1,14 @@
 .wir-places > * { flex: none; }
+.wir-inventory-row-actions { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+.wir-inventory-row-actions > button { flex: none; }
+.wir-inventory-name > strong, .wir-inventory-name > small { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.wir-inventory-action-menu { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-block: 16px; }
+.wir-inventory-fields { margin: 0; }
+.wir-inventory-fields > div { padding: 10px 0; border-bottom: 1px solid var(--border-subtle); }
+.wir-inventory-fields dt { margin-bottom: 5px; color: var(--muted); font-size: var(--font-caption); }
+.wir-inventory-fields dd { margin: 0; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.wir-delete-ack { display: flex; gap: 8px; align-items: flex-start; margin-top: 14px; color: var(--danger-text); }
+.wir-delete-ack input { flex: none; margin-top: 3px; }
 .wir-startup-layout { display: grid; grid-template-columns: 196px minmax(0, 1fr); gap: 14px; min-height: 0; flex: 1; }
 .wir-startup-content { display: flex; flex-direction: column; gap: 10px; min-width: 0; min-height: 0; }
 .wir-startup-categories { display: flex; flex-direction: column; gap: 3px; padding: 5px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); overflow: auto; max-height: min(75vh, calc(100dvh - 340px)); min-height: 180px; align-self: start; }

@@ -16,7 +16,7 @@ it("requires all startup categories and distinguishes incomplete coverage from e
 it("binds controls to captured ids and refuses invented scope or false task success", () => {
   const request={action:"plan-control",sessionId,objectId:sessionId,operation:"stop"} as const;
   expect(isWindowsIncidentRequest(request)).toBe(true);
-  for(const bad of [{...request,name:"RpcSs"},{...request,force:true},{...request,operation:"delete"},{...request,objectId:"service-name"},{action:"apply-control",sessionId,planId:sessionId,operation:"stop"}]) expect(isWindowsIncidentRequest(bad)).toBe(false);
+  for(const bad of [{...request,name:"RpcSs"},{...request,force:true},{...request,operation:"purge"},{...request,objectId:"service-name"},{action:"apply-control",sessionId,planId:sessionId,operation:"stop"}]) expect(isWindowsIncidentRequest(bad)).toBe(false);
   const apply={action:"apply-control",sessionId,planId:sessionId} as const;
   const report={id:sessionId,target:"lab",kind:"tasks",name:"owned",operation:"run",state:"submitted",message:"已接受请求",canRestore:false,createdAt:1790000000};
   expect(matchesWindowsIncidentResponse(apply,{kind:"control-report",report})).toBe(true);
@@ -185,4 +185,19 @@ it("bounds file diagnosis and rejects injected effect parameters", () => {
   const inspection = { path: request.path, observedAt: "2026-10-26T01:00:00Z", attributes: "ReadOnly", owner: "SYSTEM", accessRules: [{ identity: "Users", rights: "ReadAndExecute", access: "Allow", inherited: true }], processes: [], services: [{ name: "driver", displayName: "Driver", state: "Running", startMode: "Boot", path: request.path, kind: "driver" }], warnings: ["权限观察不代表有效删除权限"] };
   expect(matchesWindowsIncidentResponse(request, { kind: "file-access", inspection })).toBe(true);
   for (const changed of [{ ...inspection, services: Array(257).fill(inspection.services[0]) }, { ...inspection, accessRules: Array(65).fill(inspection.accessRules[0]) }, { ...inspection, deleted: true }, { ...inspection, services: [{ ...inspection.services[0], kind: "kernel-exploit" }] }]) expect(matchesWindowsIncidentResponse(request, { kind: "file-access", inspection: changed })).toBe(false);
+});
+
+
+it("validates captured-object details and irreversible deletion without arbitrary targets", () => {
+  const request={action:"inspect-inventory",objectId:sessionId,sessionId} as const;
+  expect(isWindowsIncidentRequest(request)).toBe(true);
+  for(const extra of [{...request,name:"Schedule"},{...request,path:"\\owned"},{...request,objectId:"name"},{...request,operation:"delete"}])expect(isWindowsIncidentRequest(extra)).toBe(false);
+  const details={objectId:sessionId,target:"lab",kind:"tasks",name:"\\owned",observedAt:"2026-10-27T01:00:00Z",fields:[{label:"说明",value:"<script>plain text</script>"}],warnings:["部分数据无法读取"]};
+  expect(matchesWindowsIncidentResponse(request,{kind:"inventory-details",details})).toBe(true);
+  for(const extra of [{...details,objectId:"00000000-0000-4000-8000-000000000002"},{...details,xml:"private"},{...details,fields:Array(97).fill(details.fields[0])},{...details,fields:[{label:"x",value:"x".repeat(8193)}]}])expect(matchesWindowsIncidentResponse(request,{kind:"inventory-details",details:extra})).toBe(false);
+  expect(isWindowsIncidentRequest({action:"plan-control",sessionId,objectId:sessionId,operation:"delete"})).toBe(true);
+  const report={id:sessionId,target:"lab",kind:"services",name:"owned",operation:"delete",state:"verified",message:"注册项已移除",canRestore:false,createdAt:1790000000};
+  const apply={action:"apply-control",sessionId,planId:sessionId} as const;
+  expect(matchesWindowsIncidentResponse(apply,{kind:"control-report",report})).toBe(true);
+  for(const extra of [{...report,canRestore:true},{...report,state:"submitted"}])expect(matchesWindowsIncidentResponse(apply,{kind:"control-report",report:extra})).toBe(false);
 });

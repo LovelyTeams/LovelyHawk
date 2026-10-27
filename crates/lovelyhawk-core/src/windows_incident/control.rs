@@ -32,6 +32,7 @@ pub enum ControlOperation {
     Enable,
     Disable,
     Run,
+    Delete,
 }
 impl ControlOperation {
     pub fn label(self) -> &'static str {
@@ -44,6 +45,7 @@ impl ControlOperation {
             Self::Enable => "启用",
             Self::Disable => "禁用",
             Self::Run => "立即运行",
+            Self::Delete => "删除注册项",
         }
     }
     fn setting(self, kind: WindowsInventoryKind) -> Option<&'static str> {
@@ -59,7 +61,10 @@ impl ControlOperation {
     fn allowed(self, kind: WindowsInventoryKind) -> bool {
         match kind {
             WindowsInventoryKind::Tasks => {
-                matches!(self, Self::Run | Self::Stop | Self::Enable | Self::Disable)
+                matches!(
+                    self,
+                    Self::Run | Self::Stop | Self::Enable | Self::Disable | Self::Delete
+                )
             }
             _ => matches!(
                 self,
@@ -69,6 +74,7 @@ impl ControlOperation {
                     | Self::Automatic
                     | Self::Manual
                     | Self::Disable
+                    | Self::Delete
             ),
         }
     }
@@ -124,6 +130,68 @@ pub struct ControlReport {
     pub message: String,
     pub can_restore: bool,
     pub created_at: u64,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct InventoryDetailField {
+    pub label: String,
+    pub value: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct InventoryDetails {
+    pub object_id: String,
+    pub target: String,
+    pub kind: WindowsInventoryKind,
+    pub name: String,
+    pub observed_at: String,
+    pub fields: Vec<InventoryDetailField>,
+    pub warnings: Vec<String>,
+}
+impl InventoryDetails {
+    fn valid(&self) -> bool {
+        Uuid::parse_str(&self.object_id).is_ok()
+            && !self.target.is_empty()
+            && self.target.len() <= 255
+            && !self.name.is_empty()
+            && self.name.len() <= 1024
+            && self.observed_at.len() <= 64
+            && chrono::DateTime::parse_from_rfc3339(&self.observed_at).is_ok()
+            && self.fields.len() <= 96
+            && !self.fields.is_empty()
+            && self
+                .fields
+                .iter()
+                .all(|v| !v.label.is_empty() && v.label.len() <= 128 && v.value.len() <= 8192)
+            && self.warnings.len() <= 16
+            && self.warnings.iter().all(|v| v.len() <= 1024)
+    }
+}
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DeletionObservation {
+    machine: String,
+    kind: WindowsInventoryKind,
+    name: String,
+    state: DeletionState,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum DeletionState {
+    Absent,
+    Pending,
+    Present,
+}
+fn deletion_matches(plan: &Plan, after: &DeletionObservation) -> bool {
+    plan.view.operation == ControlOperation::Delete
+        && after.machine == plan.machine
+        && after.kind == plan.subject.kind
+        && after.name == plan.view.name
+}
+fn deletion_verified(plan: &Plan, after: &DeletionObservation, result: ControlResultState) -> bool {
+    deletion_matches(plan, after)
+        && after.state == DeletionState::Absent
+        && result == ControlResultState::Verified
 }
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -203,7 +271,8 @@ impl ControlChanges {
 fn readback_matches(plan: &Plan, after: &Observation, result: ControlResultState) -> bool {
     let op = plan.view.operation;
     let kind = plan.subject.kind;
-    if !after.valid()
+    if op == ControlOperation::Delete
+        || !after.valid()
         || after.config_hash != plan.before.config_hash
         || after.setting != op.setting(kind).unwrap_or(&plan.before.setting)
     {
@@ -328,9 +397,47 @@ impl WindowsIncidentService {
         }
     }
     fn control_script(&self, request: serde_json::Value, session: &str) -> CoreResult<String> {
+        let script = if request["mode"] == "details" {
+            include_str!("inventory_detail.ps1")
+        } else {
+            include_str!("control.ps1")
+        };
         let data =
             BASE64.encode(serde_json::to_vec(&request).map_err(|_| invalid("无法准备操作请求。"))?);
-        self.run_bounded_script(&format!("$request=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{data}'))|ConvertFrom-Json\n{}",include_str!("control.ps1")),session)
+        self.run_bounded_script(&format!("$request=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{data}'))|ConvertFrom-Json\n{script}"),session)
+    }
+    fn collected_control(&self, object_id: &str, session: &str) -> CoreResult<Collected> {
+        self.require_control_session(session)?;
+        self.control_changes
+            .objects
+            .lock()
+            .get(object_id)
+            .cloned()
+            .filter(|s| s.session == session && s.created.elapsed() < Duration::from_secs(600))
+            .ok_or_else(|| invalid("对象已过期，请刷新清单后重试。"))
+    }
+    pub fn inspect_inventory(
+        &self,
+        object_id: &str,
+        session: &str,
+    ) -> CoreResult<InventoryDetails> {
+        let selected = self.collected_control(object_id, session)?;
+        let raw = self.control_script(
+            serde_json::json!({"mode":"details","objectId":object_id,"subject":selected.subject}),
+            session,
+        )?;
+        let details: InventoryDetails = serde_json::from_str(raw.trim()).map_err(|_| {
+            invalid("无法读取对象详情；对象可能已移除或当前权限不足，请刷新清单后重试。")
+        })?;
+        if !details.valid()
+            || details.object_id != object_id
+            || details.kind != selected.subject.kind
+            || details.name != control_display_name(&selected.subject)
+        {
+            return Err(invalid("详情响应不完整或对象不一致，请刷新清单。"));
+        }
+        self.require_control_session(session)?;
+        Ok(details)
     }
     fn require_control_session(&self, session: &str) -> CoreResult<()> {
         let status = self.status();
@@ -352,7 +459,7 @@ impl WindowsIncidentService {
             serde_json::json!({"mode":"inspect","subject":subject,"operation":op}),
             session,
         )?;
-        let inspected:Inspection=serde_json::from_str(raw.trim()).map_err(|_|invalid("无法生成操作计划：请核对读取 / 操作权限、依赖及系统保护条件。核心、引导和采集连接服务不能在此处直接变更。"))?;
+        let inspected:Inspection=serde_json::from_str(raw.trim()).map_err(|_|invalid(if op == ControlOperation::Delete { "无法生成删除计划：请先禁用并停止对象、刷新清单后再试。服务及驱动还须没有依赖它的对象；核心、引导及系统保护对象不能在此处删除。" } else { "无法生成操作计划：请核对读取 / 操作权限、依赖及系统保护条件。核心、引导和采集连接服务不能在此处直接变更。" }))?;
         if inspected.target.is_empty()
             || inspected.target.len() > 255
             || inspected.machine.len() != 64
@@ -410,6 +517,7 @@ impl WindowsIncidentService {
                     ControlOperation::Start | ControlOperation::Restart => "运行中（仅服务状态）",
                     ControlOperation::Stop => "停止本次确认的对象 / 任务实例",
                     ControlOperation::Run => "提交一次运行请求",
+                    ControlOperation::Delete => "删除注册定义（执行文件保留）",
                     _ => "未取得",
                 }
                 .into()
@@ -422,6 +530,13 @@ impl WindowsIncidentService {
             );
             if subject.kind != WindowsInventoryKind::Tasks {
                 impact.push("只修改启动方式，保留原有的延迟启动、触发器与失败恢复设置。".into());
+            }
+        } else if op == ControlOperation::Delete {
+            impact.push("仅删除此对象的注册定义，不删除程序、驱动文件或安装包；不停止其他对象，也不自动重启系统。".into());
+            impact.push("此删除不能一键恢复：操作记录只保存身份与配置摘要，不是完整备份。请先自行留存可用的任务定义或安装包及所需凭据；恢复需重新注册或重新安装。".into());
+            impact.push("仅允许已禁用且无运行实例的对象；服务 / 驱动还必须已停止，且没有任何依赖它的服务。确认后会再次核对配置与依赖。".into());
+            if subject.kind != WindowsInventoryKind::Tasks {
+                impact.push("Windows 可能先标记删除并等待其他程序释放引用；只有重新查询明确不存在才报告已移除。删除驱动注册项不等于卸载驱动包或恢复设备。".into());
             }
         } else {
             impact.push("运行状态变更不可回滚：停止 / 重启可能丢失数据，运行任务可能产生其配置的业务效果；失败后不会自动重新启动。".into());
@@ -482,14 +597,7 @@ impl WindowsIncidentService {
             .ok_or_else(|| invalid("另一个操作正在进行。"))?;
         self.require_control_session(session)?;
         *self.control_changes.pending.lock() = None;
-        let selected = self
-            .control_changes
-            .objects
-            .lock()
-            .get(object_id)
-            .cloned()
-            .filter(|s| s.session == session && s.created.elapsed() < Duration::from_secs(600))
-            .ok_or_else(|| invalid("对象已过期，请刷新清单后重试。"))?;
+        let selected = self.collected_control(object_id, session)?;
         let inspected = self.inspect_control(&selected.subject, operation, session)?;
         if inspected.observation.state != selected.state {
             return Err(invalid("对象运行状态已变化，请刷新后预览。"));
@@ -629,15 +737,21 @@ impl WindowsIncidentService {
             state: ControlResultState,
             message: String,
             after: Option<Observation>,
+            #[serde(default)]
+            deletion: Option<DeletionObservation>,
         }
         if let Ok(raw)=self.control_script(serde_json::json!({"mode":"apply","subject":plan.subject,"operation":plan.view.operation,"machine":plan.machine,"fingerprint":plan.before.fingerprint}),session)
             && let Ok(receipt)=serde_json::from_str::<Receipt>(raw.trim())
             && receipt.message.len()<=2048 {
-            let consistent=receipt.after.as_ref().is_some_and(|o|readback_matches(&plan,o,receipt.state));
+            let deleted=receipt.after.is_none() && receipt.deletion.as_ref().is_some_and(|o|deletion_verified(&plan,o,receipt.state));
+            let pending_delete=receipt.deletion.as_ref().is_some_and(|o|deletion_matches(&plan,o) && o.state==DeletionState::Pending) && receipt.state==ControlResultState::Uncertain;
+            let consistent=deleted || receipt.after.as_ref().is_some_and(|o|readback_matches(&plan,o,receipt.state));
             if matches!(receipt.state,ControlResultState::Refused|ControlResultState::Uncertain)||consistent{
                 report.state=receipt.state;
                 report.message=match report.state{ControlResultState::Verified=>"已独立回读并核实本次操作；请刷新清单，结合日志复查业务结果。",ControlResultState::Submitted=>"调度器已接受本次运行请求；任务可能已迅速退出，请查看任务日志与实际业务结果。",ControlResultState::Refused=>"执行前检查未通过，未执行。对象、配置、权限或依赖可能变化，请刷新后重新预览。",ControlResultState::Uncertain=>"操作已经开始，但未能完整核实结果。请刷新并核对日志，不要重复旧计划；不会自动重新启动已停止的对象。"}.into();
                 report.can_restore=consistent&&report.state==ControlResultState::Verified&&plan.source_record.is_none()&&plan.view.operation.setting(plan.subject.kind).is_some();
+                if deleted { report.message="已重新查询并确认注册项不存在；执行文件保留。此删除没有一键恢复备份，也不代表设备或业务已恢复。".into(); }
+                else if pending_delete { report.message="Windows 已标记删除，仍在等待其他程序释放引用，尚未确认注册项消失。请稍后刷新复查，不要重复删除；不会自动重启系统。".into(); }
             }
         }
         records.last_mut().expect("record").report = report.clone();
@@ -761,6 +875,79 @@ mod tests {
         assert!(!ControlOperation::Run.allowed(WindowsInventoryKind::Drivers));
         assert!(!ControlOperation::Restart.allowed(WindowsInventoryKind::Tasks));
         assert!(ControlOperation::Disable.allowed(WindowsInventoryKind::Services));
+        for kind in [
+            WindowsInventoryKind::Tasks,
+            WindowsInventoryKind::Services,
+            WindowsInventoryKind::Drivers,
+        ] {
+            assert!(ControlOperation::Delete.allowed(kind));
+        }
+    }
+    #[test]
+    fn deletion_requires_exact_absence_and_never_reuses_a_state_readback() {
+        let mut plan = test_plan();
+        plan.view.operation = ControlOperation::Delete;
+        assert!(!readback_matches(
+            &plan,
+            &plan.before,
+            ControlResultState::Verified
+        ));
+        let mut proof = DeletionObservation {
+            machine: plan.machine.clone(),
+            kind: plan.subject.kind,
+            name: plan.view.name.clone(),
+            state: DeletionState::Absent,
+        };
+        assert!(deletion_verified(
+            &plan,
+            &proof,
+            ControlResultState::Verified
+        ));
+        for state in [DeletionState::Pending, DeletionState::Present] {
+            proof.state = state;
+            assert!(!deletion_verified(
+                &plan,
+                &proof,
+                ControlResultState::Verified
+            ));
+        }
+        proof.state = DeletionState::Absent;
+        assert!(!deletion_verified(
+            &plan,
+            &proof,
+            ControlResultState::Submitted
+        ));
+        proof.name.push_str("-another");
+        assert!(!deletion_verified(
+            &plan,
+            &proof,
+            ControlResultState::Verified
+        ));
+        proof.name = plan.view.name.clone();
+        proof.machine = "another".into();
+        assert!(!deletion_verified(
+            &plan,
+            &proof,
+            ControlResultState::Verified
+        ));
+        proof.machine = plan.machine.clone();
+        proof.kind = WindowsInventoryKind::Tasks;
+        assert!(!deletion_verified(
+            &plan,
+            &proof,
+            ControlResultState::Verified
+        ));
+    }
+    #[test]
+    fn details_are_bounded_and_reject_private_or_executable_extra_fields() {
+        let value = serde_json::json!({"objectId":Uuid::new_v4().to_string(),"target":"lab","kind":"tasks","name":"\\owned\\task","observedAt":"2026-10-27T00:00:00Z","fields":[{"label":"触发器","value":"按需"}],"warnings":["时间为观察值"]});
+        let mut detail: InventoryDetails = serde_json::from_value(value.clone()).unwrap();
+        assert!(detail.valid());
+        detail.fields[0].value = "x".repeat(8193);
+        assert!(!detail.valid());
+        let mut extra = value;
+        extra["xml"] = "private task definition".into();
+        assert!(serde_json::from_value::<InventoryDetails>(extra).is_err());
     }
     #[test]
     fn names_and_task_folders_cannot_escape_their_namespace() {
@@ -779,6 +966,14 @@ mod tests {
     }
     #[test]
     fn scripts_fit_the_bounded_transport() {
+        assert!(
+            super::super::script_transport::compressed_command(include_str!(
+                "inventory_detail.ps1"
+            ))
+            .unwrap()
+            .len()
+                < 30000
+        );
         assert!(
             super::super::script_transport::compressed_command(include_str!("control.ps1"))
                 .unwrap()

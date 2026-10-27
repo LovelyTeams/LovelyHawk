@@ -518,6 +518,56 @@ try {
   await wait(`!${scope}.querySelector('.wir-session-bar.is-disconnected')`,"control session reconnected");
   await module("驱动");await chooseRow("fixture-drivers");
   check("drivers expose guarded start stop and startup configuration actions",await evaluate(`[...${visibleDetail}.querySelectorAll('button')].filter(b=>['启动…','停止…','重启…','设为自动启动…','设为手动启动…','禁用…'].includes(b.textContent)).length===6 && ${visibleDetail}.textContent.includes('引导、系统启动及关键驱动')`));
+  await evaluate("window.__windowsFixture.expandTasks(), true");
+  for(const [label,kind] of [["服务","services"],["驱动","drivers"],["计划任务","tasks"]]) {
+    await module(label);
+    if(kind==="tasks"){await clickText("刷新计划任务");await idle();}
+    const writeCount=await evaluate("window.__windowsFixture.calls.filter(c=>c.action==='apply-control').length");
+    await clickText("详情");await idle();
+    await wait(`${dialog}?.querySelector('.wir-inventory-fields')?.textContent.includes('恶意长文本示例')`,`${kind} details loaded`);
+    check(`${kind} has a visible details action with real read intent and inert text`,await evaluate(`${dialog}.textContent.includes(${JSON.stringify(kind==="tasks"?"触发器 1":"依赖此对象的服务")}) && !${dialog}.querySelector('.wir-inventory-fields img') && window.__windowsFixture.calls.some(c=>c.action==='inspect-inventory'&&typeof c.objectId==='string') && window.__windowsFixture.calls.filter(c=>c.action==='apply-control').length===${writeCount}`));
+    await clickText("复制详情");
+    check(`${kind} details copy includes source and full readable fields`,await evaluate("window.__windowsFixture.copies.at(-1).includes('读取时间') && window.__windowsFixture.copies.at(-1).includes('<img src=x')"));
+    if(kind==="tasks") {
+      await dimensions(820,780);await delay(120);
+      check("task details and actions fit a narrow window above the long list",await evaluate(`${dialog}.getBoundingClientRect().right<=innerWidth && ${dialog}.querySelector('footer').getBoundingClientRect().bottom<=innerHeight && document.documentElement.scrollWidth<=innerWidth`));
+      await screenshot("31-task-details-narrow");await dimensions(1440,960);await delay(100);
+    }
+    await screenshot(`32-${kind}-details`);await escapeDialog();
+    check(`${kind} closing details returns focus to its visible row button`,await evaluate("document.activeElement?.textContent==='详情'"));
+    if(kind==="services") {
+      await evaluate("window.__windowsFixture.failNext('inspect-inventory'), true");await clickText("详情");await idle();
+      check("failed details retain the earlier collection and explain the failure",await evaluate(`${dialog}.textContent.includes('权限不足') && ${dialog}.textContent.includes('此前采集内容') && ${dialog}.querySelector('.wir-inventory-fields').textContent.includes('fixture-services')`));
+      await escapeDialog();
+      await evaluate("window.__windowsFixture.pauseNext('inspect-inventory'), true");await clickText("详情");
+      check("a pending detail read can be closed without enabling changes",await evaluate(`${dialog}.textContent.includes('最长等待 45 秒') && [...${dialog}.querySelectorAll('button')].find(b=>b.textContent==='删除注册项…')?.disabled`));
+      await clickText("关闭详情");await evaluate("window.__windowsFixture.resume(), true");await idle();
+      check("late detail responses do not reopen a closed window",await evaluate(`!${dialog}`));
+    }
+    if(kind==="tasks") {
+      const longTaskLayout=await evaluate(`(()=>{const rows=[...${scope}.querySelectorAll('.wir-inventory tbody tr')].filter(r=>r.getClientRects().length);const row=rows.find(r=>r.textContent.includes('长列表任务'));if(!row)return {found:false,rows:rows.length};const description=row.querySelector('.wir-inventory-name small'),style=getComputedStyle(description),singleLine=description.cloneNode(false);singleLine.textContent='测';Object.assign(singleLine.style,{position:'absolute',visibility:'hidden',display:'block',webkitLineClamp:'unset',width:description.clientWidth+'px'});description.parentElement.append(singleLine);const lineHeight=singleLine.getBoundingClientRect().height;singleLine.remove();return {found:true,rows:rows.length,height:description.getBoundingClientRect().height,lineHeight,clamp:style.webkitLineClamp,display:style.display};})()`);
+      check("long task descriptions remain bounded in the list",longTaskLayout.found && longTaskLayout.rows===100 && longTaskLayout.lineHeight>0 && longTaskLayout.height<=2*longTaskLayout.lineHeight+1,longTaskLayout);
+      await screenshot("34-tasks-long-list-actions");
+      await chooseRow("fixture-tasks");await evaluate(`[...${scope}.querySelectorAll('.wir-inventory table')].find(t=>t.getClientRects().length).focus(), true`);await pressKey("Enter","Enter",13);await idle();
+      check("Enter on the selected task opens details without running it",await evaluate(`${dialog}?.textContent.includes('计划任务详情') && window.__windowsFixture.calls.filter(c=>c.action==='apply-control').length===${writeCount}`));
+      await evaluate("window.__windowsFixture.status.channelConnected=false, true");await wait(`${dialog}?.textContent.includes('未连接原会话')`,"details disconnect");
+      check("disconnected details preserve observations and disable every target action",await evaluate(`${dialog}.querySelector('.wir-inventory-fields')!==null && [...${dialog}.querySelectorAll('button')].filter(b=>['删除注册项…','立即运行…','重新读取详情'].includes(b.textContent)).every(b=>b.disabled)`));
+      await evaluate("window.__windowsFixture.status.channelConnected=true, true");await wait(`!${scope}.querySelector('.wir-session-bar.is-disconnected')`,"details reconnect");await escapeDialog();
+    }
+    await clickText("操作 ▾");
+    check(`${kind} action chooser exposes deletion without writing`,await evaluate(`${dialog}.textContent.includes('删除注册项') && window.__windowsFixture.calls.filter(c=>c.action==='apply-control').length===${writeCount}`));
+    await evaluate(`[...${dialog}.querySelectorAll('button')].find(b=>b.textContent==='删除注册项…').click(), true`);await idle();
+    await wait(`Boolean(${dialog}?.querySelector('[aria-label="完整操作计划"]') && ${dialog}?.querySelector('input[type="checkbox"]'))`,`${kind} deletion preview`);
+    check(`${kind} deletion starts unacknowledged with no irreversible default`,await evaluate(`!${dialog}.querySelector('input[type="checkbox"]').checked && [...${dialog}.querySelectorAll('button')].find(b=>b.textContent==='确认删除注册项')?.disabled && ${dialog}.textContent.includes('执行文件保留') && ${dialog}.textContent.includes('不能一键恢复')`));
+    await pressKey("Enter","Enter",13);
+    check(`${kind} preview Enter cannot trigger deletion`,await evaluate(`window.__windowsFixture.calls.filter(c=>c.action==='apply-control').length===${writeCount}`));
+    await evaluate(`${dialog}.querySelector('input[type="checkbox"]').click(), true`);await delay(60);
+    await screenshot(`33-${kind}-delete-preview`);
+    await clickText("确认删除注册项");await idle();
+    check(`${kind} deletion executes once and never offers fake restore`,await evaluate(`window.__windowsFixture.calls.filter(c=>c.action==='apply-control').length===${writeCount+1} && !${dialog}.textContent.includes('可在处置记录')`));
+    await clickText("刷新清单并复查");await idle();
+    check(`${kind} refreshed list no longer contains the deleted registration`,await evaluate(`![...${scope}.querySelectorAll('.wir-inventory tbody tr')].some(r=>r.textContent.includes(${JSON.stringify('fixture-')}+${JSON.stringify(kind)}))`));
+  }
   await module("启动项");await dimensions(820,780);await delay(180);
   check("startup categories remain reachable in a narrow window without page overflow",await evaluate(`document.documentElement.scrollWidth<=innerWidth && ${categories}.scrollWidth>${categories}.clientWidth && ${scope}.querySelector('table[aria-label^="启动项与持久化"]').getBoundingClientRect().width>400`));
   await screenshot("30-startup-narrow");await dimensions(1440,960);await delay(100);

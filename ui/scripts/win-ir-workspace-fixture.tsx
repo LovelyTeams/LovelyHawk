@@ -137,17 +137,24 @@ export function mount() {
           const entries = snapshots.logs.entries.filter((entry) => request.category === "all" || entry.category === request.category);
           response = { kind: "logs", snapshot: { ...snapshots.logs, categoryFilter: request.category, totalCount: entries.length, highRiskCount: entries.filter((entry) => entry.riskLevel === "high").length, entries } }; break;
         }
-        case "collect-inventory": response={kind:"inventory",snapshot:snapshots[request.kind]}; break;
+        case "collect-inventory": response={kind:"inventory",snapshot:structuredClone(snapshots[request.kind])}; break;
+        case "inspect-inventory": {
+          const kind=(["services","drivers","tasks"] as const).find(k=>snapshots[k].entries.some(e=>e.objectId===request.objectId));
+          if(!kind)throw new Error("对象已移除，请刷新清单");
+          const entry=snapshots[kind].entries.find(e=>e.objectId===request.objectId)!;
+          response={kind:"inventory-details",details:{objectId:request.objectId,target:snapshots.overview.hostname,kind,name:kind==="tasks"?entry.location+entry.name:entry.name,observedAt:"2026-10-27T02:00:00Z",fields:[{label:"执行配置",value:entry.command},{label:kind==="tasks"?"触发器 1":"依赖此对象的服务",value:kind==="tasks"?"每天 09:00 · 已启用":"无"},{label:"恶意长文本示例",value:"<img src=x onerror=alert(1)>"}],warnings:["合成数据，只读详情不执行修改。"]}};break;
+        }
         case "plan-control": {
           const kind=(["services","drivers","tasks"] as const).find(k=>snapshots[k].entries.some(e=>e.objectId===request.objectId));
           if(!kind) throw new Error("对象过期");
           const entry=snapshots[kind].entries.find(e=>e.objectId===request.objectId)!;
-          const plan:WindowsControlPlan={id:crypto.randomUUID(),target:snapshots.overview.hostname,kind,name:entry.name,operation:request.operation,command:entry.command,currentState:entry.state,beforeSetting:"自动",afterSetting:request.operation,impact:["合成界面测试，不操作实际主机。","仅所选对象，不级联处置依赖项。"],restoring:false,expiresAt:Math.floor(Date.now()/1000)+120};
+          const plan:WindowsControlPlan={id:crypto.randomUUID(),target:snapshots.overview.hostname,kind,name:kind==="tasks"?entry.location+entry.name:entry.name,operation:request.operation,command:entry.command,currentState:entry.state,beforeSetting:"自动",afterSetting:request.operation,impact:["合成界面测试，不操作实际主机。","仅所选对象，不级联处置依赖项。",...(request.operation==="delete"?["删除注册定义，执行文件保留；没有完整备份，不能一键恢复。"]:[])],restoring:false,expiresAt:Math.floor(Date.now()/1000)+120};
           controlPlans.clear();controlPlans.set(plan.id,plan);response={kind:"control-plan",plan};break;
         }
         case "apply-control": {
           const plan=controlPlans.get(request.planId);if(!plan) throw new Error("计划已使用");controlPlans.delete(request.planId);
           const report:WindowsControlReport={id:plan.id,target:plan.target,kind:plan.kind,name:plan.name,operation:plan.operation,state:plan.operation==="run"?"submitted":"verified",message:plan.operation==="run"?"调度器已接受请求，仍需复查任务结果。":"合成测试：已核实操作结果。",canRestore:!plan.restoring&&["manual","automatic","disable","enable"].includes(plan.operation),createdAt:Math.floor(Date.now()/1000)};
+          if(plan.operation==="delete"){snapshots[plan.kind].entries=snapshots[plan.kind].entries.filter(e=>(plan.kind==="tasks"?e.location+e.name:e.name)!==plan.name);snapshots[plan.kind].totalCount=snapshots[plan.kind].entries.length;}
           controlHistory.push(report);response={kind:"control-report",report};break;
         }
         case "discard-control-plan": controlPlans.delete(request.planId);response={kind:"baseline-acknowledged",accepted:true};break;
@@ -256,6 +263,7 @@ export function mount() {
   root.render(<WindowsIncidentPage api={api} writeClipboard={async (text) => { copies.push(text); }} />);
   return {
     calls, copies, status, rdpCalls,
+    expandTasks:()=>{const template=snapshots.tasks.entries[0];snapshots.tasks.entries.push(...Array.from({length:120},(_,i)=>({...template,objectId:crypto.randomUUID(),name:`长列表任务-${i+1}`,displayName:"任务说明，需在详情中完整查看。".repeat(12)})));snapshots.tasks.totalCount=snapshots.tasks.entries.length;},
     failNext: (action: string) => { failAction = action; },
     pauseNext: (action: string) => { delayAction = action; },
     resume: () => { release?.(); release = undefined; },

@@ -29,7 +29,9 @@ pub use baseline_change::{
     BaselineChangeItem, BaselineChangePlan, BaselineChangeReport, BaselineChangeState,
     BaselinePlanItem, baseline_change_supported,
 };
-pub use control::{ControlOperation, ControlPlan, ControlReport, ControlResultState};
+pub use control::{
+    ControlOperation, ControlPlan, ControlReport, ControlResultState, InventoryDetails,
+};
 pub use inventory::{
     WindowsInventoryEntry, WindowsInventoryKind, WindowsInventorySnapshot, parse_inventory_json,
 };

@@ -126,6 +126,10 @@ pub(crate) enum WindowsIncidentRequest {
         operation: lovelyhawk_core::windows_incident::ControlOperation,
         session_id: String,
     },
+    InspectInventory {
+        object_id: String,
+        session_id: String,
+    },
     ApplyControl {
         plan_id: String,
         session_id: String,
@@ -210,6 +214,7 @@ impl WindowsIncidentRequest {
             | Self::PlanBaselineRestore { session_id, .. }
             | Self::CollectInventory { session_id, .. }
             | Self::PlanControl { session_id, .. }
+            | Self::InspectInventory { session_id, .. }
             | Self::ApplyControl { session_id, .. }
             | Self::DiscardControlPlan { session_id, .. }
             | Self::ControlHistory { session_id }
@@ -234,6 +239,9 @@ impl WindowsIncidentRequest {
     rename_all_fields = "camelCase"
 )]
 pub(crate) enum WindowsIncidentResponse {
+    InventoryDetails {
+        details: lovelyhawk_core::windows_incident::InventoryDetails,
+    },
     ControlPlan {
         plan: lovelyhawk_core::windows_incident::ControlPlan,
     },
@@ -730,6 +738,23 @@ impl WindowsIncidentApi {
                         .map_err(|_| WindowsIncidentError::Failed)?;
                 Ok(WindowsIncidentResponse::Inventory { snapshot })
             }
+            WindowsIncidentRequest::InspectInventory {
+                object_id,
+                session_id,
+            } => {
+                if object_id.len() != 36 || uuid::Uuid::parse_str(&object_id).is_err() {
+                    return Err(WindowsIncidentError::Invalid);
+                }
+                let result = tokio::task::spawn_blocking(move || {
+                    svc.inspect_inventory(&object_id, &session_id)
+                })
+                .await
+                .map_err(|_| WindowsIncidentError::Failed)?;
+                Ok(match result {
+                    Ok(details) => WindowsIncidentResponse::InventoryDetails { details },
+                    Err(e) => control_error(e),
+                })
+            }
             WindowsIncidentRequest::PlanControl {
                 object_id,
                 operation,
@@ -989,8 +1014,17 @@ mod tests {
             changed[extra] = "injected".into();
             assert!(serde_json::from_value::<super::WindowsIncidentRequest>(changed).is_err());
         }
+        assert!(serde_json::from_value::<super::WindowsIncidentRequest>(serde_json::json!({"action":"plan-control","objectId":id,"sessionId":id,"operation":"delete"})).is_ok());
+        let details =
+            serde_json::json!({"action":"inspect-inventory","objectId":id,"sessionId":id});
+        assert!(serde_json::from_value::<super::WindowsIncidentRequest>(details.clone()).is_ok());
+        for extra in ["name", "path", "operation", "force"] {
+            let mut invalid = details.clone();
+            invalid[extra] = "injected".into();
+            assert!(serde_json::from_value::<super::WindowsIncidentRequest>(invalid).is_err());
+        }
         let mut changed = request;
-        changed["operation"] = "delete".into();
+        changed["operation"] = "purge".into();
         assert!(serde_json::from_value::<super::WindowsIncidentRequest>(changed).is_err());
         assert!(serde_json::from_value::<super::WindowsIncidentRequest>(serde_json::json!({"action":"apply-control","planId":id,"sessionId":id,"operation":"disable"})).is_err());
     }

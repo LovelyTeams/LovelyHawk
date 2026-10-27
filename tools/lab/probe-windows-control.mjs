@@ -30,6 +30,11 @@ function control(request) {
   if(result.diagnostic)record("inspection diagnostic", "INFO",result.diagnostic);
   return result;
 }
+function details(subject) {
+  const request={objectId:"00000000-0000-4000-8000-000000000041",subject};
+  const data=Buffer.from(JSON.stringify(request)).toString("base64");
+  return ps(`$request=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${data}'))|ConvertFrom-Json\n${fs.readFileSync(path.join(repo,"crates/lovelyhawk-core/src/windows_incident/inventory_detail.ps1"),"utf8")}`);
+}
 function assert(name, condition) { record(name, condition ? "PASS" : "FAIL"); if (!condition) throw new Error(name); }
 const nonce = `LovelyHawk-Control-${randomUUID()}`;
 const folder = `\\${nonce}\\`;
@@ -46,6 +51,10 @@ try {
   assert("core service preview refused without effects", !!protectedPlan.error);
   const service = control({ mode: "inspect", subject: { kind: "services", name: "Spooler", location: "" }, operation: "manual" });
   record("read-only service configuration and dependencies", service.observation ? "PASS" : "NOT_RUN", service.observation ? { state: service.observation.state, setting: service.observation.setting } : "Permissions or system protection refused inspection");
+  const serviceDetails=details({kind:"services",name:"RpcSs",location:""});
+  assert("protected service remains readable in details",serviceDetails.kind==="services" && serviceDetails.fields.some(f=>f.label==="依赖此对象的服务"));
+  const driverDetails=details({kind:"drivers",name:"Tcpip",location:""});
+  assert("driver details expose configuration without any mutation",driverDetails.kind==="drivers" && driverDetails.fields.some(f=>f.label==="启动方式"));
   record("service and driver mutations", "NOT_RUN", "No owned service/driver fixture or elevated token; no real service changed");
   const create = ps(`$ErrorActionPreference='Stop';$s=New-Object -ComObject Schedule.Service;$s.Connect();$root=$s.GetFolder('\\');$created=$false;try{$sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value;$f=$root.CreateFolder('${nonce}');$created=$true;$t=$s.NewTask(0);$t.RegistrationInfo.Author='${nonce}';$t.RegistrationInfo.Description='Owned LovelyHawk inert task verification';$t.Principal.UserId=$sid;$t.Principal.LogonType=3;$t.Principal.RunLevel=0;$t.Settings.Enabled=$true;$t.Settings.Hidden=$true;$t.Settings.ExecutionTimeLimit='PT1M';$t.Settings.AllowDemandStart=$true;$t.Settings.DisallowStartIfOnBatteries=$false;$a=$t.Actions.Create(0);$a.Path=Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\powershell.exe';$a.Arguments='-NoProfile -NonInteractive -WindowStyle Hidden -Command "Start-Sleep -Seconds 45"';[void]$f.RegisterTaskDefinition('OwnedSleep',$t,2,$sid,$null,3);@{created=$true}|ConvertTo-Json}catch{if($created){$root.DeleteFolder('${nonce}',0)};@{created=$false;reason='Current account cannot create the isolated scheduler fixture'}|ConvertTo-Json}`);
   created = create.created;
@@ -53,6 +62,9 @@ try {
   else {
     const inspect = (operation) => control({ mode: "inspect", subject, operation });
     const apply = (operation, plan) => control({ mode: "apply", subject, operation, machine: plan.machine, fingerprint: plan.observation.fingerprint });
+    const taskDetails=details(subject);
+    assert("task details contain action settings triggers and run observations",taskDetails.name===folder+subject.name && ["操作 1","触发器数量","上次返回代码（不代表业务成功）","运行账户"].every(label=>taskDetails.fields.some(f=>f.label===label)));
+    assert("enabled task deletion refuses without effects",!!inspect("delete").error);
     const first = inspect("disable");
     assert("owned task preview exposes original enabled state", first.observation?.setting === "1" && first.observation.instances.length===0);
     const disabled = apply("disable", first);
@@ -65,20 +77,31 @@ try {
     assert("manual run reports submission, not business success", run.state === "submitted");
     const taskState=ps(`$s=New-Object -ComObject Schedule.Service;$s.Connect();$f=$s.GetFolder('\\${nonce}');$timer=[Diagnostics.Stopwatch]::StartNew();do{$t=$f.GetTask('OwnedSleep');$count=@($s.GetRunningTasks(1)|Where-Object{[string]::Equals([string]$_.Path,[string]$t.Path,[StringComparison]::OrdinalIgnoreCase)}).Count;if($count -gt 0){break};Start-Sleep -Milliseconds 200}while($timer.Elapsed.TotalSeconds -lt 5);@{instances=$count;state=$t.State;lastResult=$t.LastTaskResult}|ConvertTo-Json`);
     record("owned task after run", "INFO",taskState);
+    assert("running task deletion refuses without stopping the task",!!inspect("delete").error);
     const stopping = inspect("stop");
     assert("stop preview identifies running instances", stopping.observation?.instances.length > 0);
     const stopped = apply("stop", stopping);
     assert("stop verifies only approved task instances", stopped.state === "verified" && !stopped.after.instances.some(id => stopping.observation.instances.includes(id)));
+    assert("disable before deletion verifies",apply("disable",inspect("disable")).state==="verified");
+    const deletePlan=inspect("delete");
+    assert("delete preview has no runtime effect",deletePlan.observation?.setting==="0" && deletePlan.observation.instances.length===0);
+    assert("changed task can be re-enabled before deletion",apply("enable",inspect("enable")).state==="verified");
+    assert("stale deletion refuses after a configuration change",apply("delete",deletePlan).state==="refused");
+    assert("disable again has independent readback",apply("disable",inspect("disable")).state==="verified");
+    const removed=apply("delete",inspect("delete"));
+    assert("delete independently confirms exact registration absence",removed.state==="verified" && removed.after===null && removed.deletion?.state==="absent" && removed.deletion.kind==="tasks" && removed.deletion.name===folder+subject.name);
+    assert("deleted task details fail instead of returning empty success",!!details(subject).error);
+    assert("deletion leaves the task executable in place",fs.existsSync(powershell));
   }
 } catch (error) { failed = true; record("probe completion", "FAIL", String(error.message)); }
 finally {
   if (created) {
     try {
-      const cleanup = ps(`$ErrorActionPreference='Stop';$s=New-Object -ComObject Schedule.Service;$s.Connect();$f=$s.GetFolder('\\${nonce}');$t=$f.GetTask('OwnedSleep');[xml]$x=$t.Xml;if($x.Task.RegistrationInfo.Author -cne '${nonce}' -or $x.Task.Actions.Exec.Arguments -cne '-NoProfile -NonInteractive -WindowStyle Hidden -Command "Start-Sleep -Seconds 45"'){throw 'Ownership changed'};$t.Stop(0);$f.DeleteTask('OwnedSleep',0);$s.GetFolder('\\').DeleteFolder('${nonce}',0);@{removed=$true}|ConvertTo-Json`);
+      const cleanup = ps(`$ErrorActionPreference='Stop';$s=New-Object -ComObject Schedule.Service;$s.Connect();$f=$s.GetFolder('\\${nonce}');$tasks=@($f.GetTasks(1));if($tasks.Count -gt 1 -or $f.GetFolders(0).Count -ne 0){throw 'Unexpected fixture contents'};if($tasks.Count -eq 1){$t=$tasks[0];[xml]$x=$t.Xml;if($t.Name -cne 'OwnedSleep' -or $x.Task.RegistrationInfo.Author -cne '${nonce}' -or $x.Task.Actions.Exec.Arguments -cne '-NoProfile -NonInteractive -WindowStyle Hidden -Command "Start-Sleep -Seconds 45"'){throw 'Ownership changed'};$t.Stop(0);$f.DeleteTask('OwnedSleep',0)};$s.GetFolder('\\').DeleteFolder('${nonce}',0);@{removed=$true}|ConvertTo-Json`);
       assert("only the owned task and empty folder removed", cleanup.removed);
     } catch { failed = true; record("owned task cleanup", "FAIL", { folder, task: subject.name }); }
   }
-  const sourceHashes=Object.fromEntries(["control.ps1","startup_catalog.ps1","inventory.ps1","control.rs"].map(name=>[name,createHash("sha256").update(fs.readFileSync(path.join(repo,"crates/lovelyhawk-core/src/windows_incident",name))).digest("hex")]));
+  const sourceHashes=Object.fromEntries(["control.ps1","inventory_detail.ps1","startup_catalog.ps1","inventory.ps1","control.rs"].map(name=>[name,createHash("sha256").update(fs.readFileSync(path.join(repo,"crates/lovelyhawk-core/src/windows_incident",name))).digest("hex")]));
   fs.writeFileSync(path.join(root, "results.json"), JSON.stringify({ observedAt: new Date().toISOString(), environment, sourceHashes, scope: "local native scripts; not RDP or core journal integration", checks }, null, 2));
   console.log(root);
 }

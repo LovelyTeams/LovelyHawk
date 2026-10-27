@@ -3,7 +3,8 @@ import type { WindowsControlOperation, WindowsControlPlan, WindowsControlReport,
 import { WinIrModal } from "./WinIrKit";
 import { errorText } from "./error-text";
 
-export const CONTROL_LABELS: Record<WindowsControlOperation, string> = { start: "启动", stop: "停止", restart: "重启", automatic: "设为自动启动", manual: "设为手动启动", enable: "启用", disable: "禁用", run: "立即运行" };
+export const CONTROL_LABELS: Record<WindowsControlOperation, string> = { start: "启动", stop: "停止", restart: "重启", automatic: "设为自动启动", manual: "设为手动启动", enable: "启用", disable: "禁用", run: "立即运行", delete: "删除注册项" };
+export const CONTROL_ACTIONS: Record<WindowsInventoryKind, readonly WindowsControlOperation[]> = {tasks:["run","stop","enable","disable","delete"],services:["start","stop","restart","automatic","manual","disable","delete"],drivers:["start","stop","restart","automatic","manual","disable","delete"]};
 const RESULTS = { verified: "已核实", submitted: "已提交运行", refused: "未执行", uncertain: "结果待核实" };
 export type ControlSelection = { kind: WindowsInventoryKind; session: string; action: { objectId: string; name: string; operation: WindowsControlOperation } | null };
 
@@ -18,6 +19,7 @@ export function WinIrControlChange({ selection, currentSession, onRequest, onClo
   const [error, setError] = useState<string | null>(null);
   const [working, setWorking] = useState(true);
   const [attempted, setAttempted] = useState(false);
+  const [deletionUnderstood, setDeletionUnderstood] = useState(false);
   const [clock, setClock] = useState(Date.now);
   const lock = useRef(false);
   const initial = useRef(false);
@@ -47,7 +49,7 @@ export function WinIrControlChange({ selection, currentSession, onRequest, onClo
     finally { lock.current = false; if (live.current) setWorking(false); }
   }
   async function apply() {
-    if (lock.current || !available || !plan || attempted || plan.expiresAt * 1000 <= Date.now()) return;
+    if (lock.current || !available || !plan || attempted || plan.expiresAt * 1000 <= Date.now() || (plan.operation==="delete" && !deletionUnderstood)) return;
     lock.current = true; setWorking(true); setAttempted(true); setError(null);
     try {
       const response = await onRequest({ action: "apply-control", planId: plan.id }, selection.session, "正在执行已确认的操作并独立回读…");
@@ -65,7 +67,7 @@ export function WinIrControlChange({ selection, currentSession, onRequest, onClo
   const title = plan ? `${plan.restoring ? "恢复配置 · " : ""}${CONTROL_LABELS[plan.operation]}` : selection.action ? CONTROL_LABELS[selection.action.operation] : "处置与恢复记录";
   return <WinIrModal wide title={title} subtitle={plan?.name ?? selection.action?.name ?? "仅保存操作结果与可恢复的配置原值"} onClose={() => void close()} actions={<>
     <button type="button" className="win-ir-btn" disabled={working} onClick={() => void close()}>关闭</button>
-    {plan && !attempted ? <button type="button" className="win-ir-btn is-danger" disabled={working || !available || plan.expiresAt * 1000 <= clock} onClick={() => void apply()}>确认{plan.restoring ? "恢复配置" : CONTROL_LABELS[plan.operation]}</button> : null}
+    {plan && !attempted ? <button type="button" className="win-ir-btn is-danger" disabled={working || !available || plan.expiresAt * 1000 <= clock || (plan.operation==="delete" && !deletionUnderstood)} onClick={() => void apply()}>确认{plan.restoring ? "恢复配置" : CONTROL_LABELS[plan.operation]}</button> : null}
     {attempted && !working ? <button type="button" className="win-ir-btn is-primary" disabled={!available} onClick={() => { onClose(); onRefresh(); }}>刷新清单并复查</button> : null}
   </>}>
     {!available ? <p role="alert">连接已变化，当前计划失效，请关闭后重新核对目标。</p> : null}
@@ -79,6 +81,7 @@ export function WinIrControlChange({ selection, currentSession, onRequest, onClo
       <p>有效至 {new Date(plan.expiresAt * 1000).toLocaleTimeString()}；目标、配置或运行状态变化后需重新预览。</p>
       {plan.expiresAt * 1000 <= clock && !attempted ? <p role="alert">计划已过期，请关闭后重新预览。</p> : null}
     </div> : null}
+    {plan?.operation==="delete" && !attempted ? <label className="wir-delete-ack"><input type="checkbox" checked={deletionUnderstood} disabled={working||!available} onChange={event=>setDeletionUnderstood(event.target.checked)}/>我已核对删除范围，理解此操作没有完整备份、不能一键恢复，执行文件将保留。</label> : null}
     {report ? <p role="status">{RESULTS[report.state]}：{report.message}{report.canRestore ? " 可在处置记录中预览恢复原配置。" : ""}</p> : null}
     {!selection.action && !plan && !working ? <div className="wir-baseline-plan">
       <p>恢复只还原启动方式或任务启用状态；不会自动重新启动服务、驱动或任务。需要连接记录中的原主机。</p>

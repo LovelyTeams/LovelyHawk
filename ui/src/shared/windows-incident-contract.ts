@@ -30,6 +30,7 @@ export type WindowsRemoteIntent =
   | { action: "plan-baseline-restore"; recordId: string }
   | { action: "collect-inventory"; kind: WindowsInventoryKind }
   | { action: "plan-control"; objectId: string; operation: WindowsControlOperation }
+  | { action: "inspect-inventory"; objectId: string }
   | { action: "apply-control" | "discard-control-plan"; planId: string }
   | { action: "control-history" }
   | { action: "plan-control-restore"; recordId: string }
@@ -310,13 +311,15 @@ export interface WindowsInventoryEntry { objectId: string | null; name: string; 
 export interface WindowsInventorySnapshot { kind: WindowsInventoryKind; observedAt: string; totalCount: number; truncated: boolean; warnings: string[]; entries: WindowsInventoryEntry[] }
 export interface WindowsProcessPlan { id: string; target: string; expiresAt: number; tree: boolean; items: { pid: number; ppid: number; name: string; startTime: string }[] }
 export interface WindowsProcessChangeReport { id: string; items: { pid: number; state: "verified" | "refused" | "failed" | "skipped" | "uncertain" }[]; message: string }
-export const WINDOWS_CONTROL_OPERATIONS = ["start","stop","restart","automatic","manual","enable","disable","run"] as const;
+export const WINDOWS_CONTROL_OPERATIONS = ["start","stop","restart","automatic","manual","enable","disable","run","delete"] as const;
+export interface WindowsInventoryDetails { objectId: string; target: string; kind: WindowsInventoryKind; name: string; observedAt: string; fields: {label:string;value:string}[]; warnings: string[] }
 export type WindowsControlOperation = typeof WINDOWS_CONTROL_OPERATIONS[number];
 export interface WindowsControlPlan { id: string; target: string; kind: WindowsInventoryKind; name: string; operation: WindowsControlOperation; command: string; currentState: string; beforeSetting: string; afterSetting: string; impact: string[]; restoring: boolean; expiresAt: number }
 export interface WindowsControlReport { id: string; target: string; kind: WindowsInventoryKind; name: string; operation: WindowsControlOperation; state: "verified" | "submitted" | "refused" | "uncertain"; message: string; canRestore: boolean; createdAt: number }
 
 export type WindowsIncidentResponse =
   | { kind: "control-plan"; plan: WindowsControlPlan }
+  | { kind: "inventory-details"; details: WindowsInventoryDetails }
   | { kind: "control-report"; report: WindowsControlReport }
   | { kind: "control-history"; records: WindowsControlReport[] }
   | { kind: "inventory"; snapshot: WindowsInventorySnapshot }
@@ -453,6 +456,7 @@ export function isWindowsIncidentRequest(value: unknown): value is WindowsIncide
       );
     case "collect-inventory": return keys("kind") && ["services","drivers","tasks"].includes(value.kind as string);
     case "plan-control": return keys("objectId","operation") && isWindowsFileId(value.objectId) && controlOperation(value.operation);
+    case "inspect-inventory": return keys("objectId") && isWindowsFileId(value.objectId);
     case "apply-control": case "discard-control-plan": return keys("planId") && isWindowsFileId(value.planId);
     case "control-history": return keys();
     case "plan-control-restore": return keys("recordId") && isWindowsFileId(value.recordId);
@@ -648,9 +652,10 @@ export function matchesWindowsIncidentResponse(
   value: unknown,
 ): value is WindowsIncidentResponse {
   if (!isRecord(value) || typeof value.kind !== "string") return false;
-  if (["plan-control","apply-control","discard-control-plan","control-history","plan-control-restore","plan-process-change", "apply-process-plan", "discard-process-plan", "plan-baseline", "apply-baseline-plan", "discard-baseline-plan", "cancel-baseline-plan", "baseline-plan-progress", "baseline-history", "plan-baseline-restore"].includes(request.action) && value.kind === "baseline-change-error") return exactKeys(value,["kind","message"]) && isBoundedText(value.message,2048);
+  if (["inspect-inventory","plan-control","apply-control","discard-control-plan","control-history","plan-control-restore","plan-process-change", "apply-process-plan", "discard-process-plan", "plan-baseline", "apply-baseline-plan", "discard-baseline-plan", "cancel-baseline-plan", "baseline-plan-progress", "baseline-history", "plan-baseline-restore"].includes(request.action) && value.kind === "baseline-change-error") return exactKeys(value,["kind","message"]) && isBoundedText(value.message,2048);
   switch (request.action) {
     case "plan-control": return value.kind==="control-plan" && exactKeys(value,["kind","plan"]) && isWindowsControlPlan(value.plan) && !value.plan.restoring && value.plan.operation===request.operation;
+    case "inspect-inventory": return value.kind==="inventory-details" && exactKeys(value,["kind","details"]) && isWindowsInventoryDetails(value.details) && value.details.objectId===request.objectId;
     case "plan-control-restore": return value.kind==="control-plan" && exactKeys(value,["kind","plan"]) && isWindowsControlPlan(value.plan) && value.plan.restoring;
     case "apply-control": return value.kind==="control-report" && exactKeys(value,["kind","report"]) && isWindowsControlReport(value.report) && value.report.id===request.planId;
     case "discard-control-plan": return value.kind==="baseline-acknowledged" && exactKeys(value,["kind","accepted"]) && value.accepted===true;
@@ -754,7 +759,10 @@ export function isWindowsInventorySnapshot(value: unknown): value is WindowsInve
 }
 function controlOperation(value:unknown): value is WindowsControlOperation {return typeof value==="string" && (WINDOWS_CONTROL_OPERATIONS as readonly string[]).includes(value);}
 function controlKind(value:unknown): value is WindowsInventoryKind {return typeof value==="string" && ["services","drivers","tasks"].includes(value);}
-function validControlOperation(kind: WindowsInventoryKind, operation: WindowsControlOperation): boolean { return (kind==="tasks"?["run","stop","enable","disable"]:["start","stop","restart","automatic","manual","disable"]).includes(operation); }
+function validControlOperation(kind: WindowsInventoryKind, operation: WindowsControlOperation): boolean { return (kind==="tasks"?["run","stop","enable","disable","delete"]:["start","stop","restart","automatic","manual","disable","delete"]).includes(operation); }
+export function isWindowsInventoryDetails(value: unknown): value is WindowsInventoryDetails {
+  return isRecord(value) && exactKeys(value,["objectId","target","kind","name","observedAt","fields","warnings"]) && isWindowsFileId(value.objectId) && isBoundedText(value.target,255) && controlKind(value.kind) && isBoundedText(value.name,1024) && isBoundedText(value.observedAt,64) && Number.isFinite(Date.parse(value.observedAt)) && Array.isArray(value.fields) && value.fields.length>0 && list(object({label:v=>isBoundedText(v,128),value:v=>isBoundedText(v,8192,true)}),96)(value.fields) && list(v=>isBoundedText(v,1024),16)(value.warnings);
+}
 export function isWindowsControlPlan(value:unknown):value is WindowsControlPlan {
   return isRecord(value)&&exactKeys(value,["id","target","kind","name","operation","command","currentState","beforeSetting","afterSetting","impact","restoring","expiresAt"])&&isWindowsFileId(value.id)&&isBoundedText(value.target,255)&&controlKind(value.kind)&&isBoundedText(value.name,1024)&&controlOperation(value.operation)&&validControlOperation(value.kind,value.operation)&&isBoundedText(value.command,8192,true)&&isBoundedText(value.currentState,64,true)&&isBoundedText(value.beforeSetting,256)&&isBoundedText(value.afterSetting,256)&&list((v)=>isBoundedText(v,2048),12)(value.impact)&&typeof value.restoring==="boolean"&&(!value.restoring||["automatic","manual","enable","disable"].includes(value.operation))&&isEpoch(value.expiresAt);
 }
