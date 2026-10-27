@@ -7,7 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "vite";
 import react from "@vitejs/plugin-react";
-import { attach, delay, launchDesktop, waitFor } from "./cdp.mjs";
+import { attach, delay, launchDesktop, listTargets, waitFor } from "./cdp.mjs";
 
 const ui = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repository = path.dirname(ui);
@@ -35,6 +35,8 @@ const { child, output } = launchDesktop({
 });
 let exitCode = null;
 let session;
+let channelSession;
+let channelTarget;
 child.once("exit", (code) => { exitCode = code; });
 try {
   ({ session } = await attach(port, (url) => /^https?:\/\/tauri\.localhost\/(?:index\.html)?$/u.test(url)));
@@ -52,6 +54,30 @@ try {
   const dimensions = (width, height) => session.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
   const screenshot = (name) => session.screenshot(path.join(evidence, `${name}.png`));
   const scope = "document.querySelector('#windows-fixture')";
+  const channelScope = "document.querySelector('[data-testid=\"windows-channel-window\"]')";
+  async function attachChannel() {
+    ({ session: channelSession, target: channelTarget } = await attach(port, url => url === "https://tauri.localhost/terminal.html?window=windows-channel"));
+    const channelObservedAt = new Date().toISOString();
+    channelSession.onEvent((method, params) => {
+      if (method === "Runtime.exceptionThrown" || (method === "Runtime.consoleAPICalled" && params?.type === "error") || (method === "Log.entryAdded" && params?.entry?.level === "error")) errors.push({ window: "channel", channelObservedAt, method, params });
+    });
+    await channelSession.send("Runtime.enable"); await channelSession.send("Log.enable"); await channelSession.send("Page.enable");
+    await waitFor(() => channelSession.evaluate(`${channelScope} !== null`), { label: "native channel window ready" });
+  }
+  const ce = code => channelSession.evaluate(code);
+  const cw = (code, label) => waitFor(() => ce(code), { timeoutMs: 15000, label });
+  const cs = name => channelSession.screenshot(path.join(evidence, `${name}.png`));
+  const cc = async text => {
+    const ok = await ce(`(() => { const b = [...document.querySelectorAll('button')].find(b => b.getClientRects().length && !b.disabled && b.textContent.trim() === ${JSON.stringify(text)}); if (!b) return false; b.focus(); b.click(); return true; })()`);
+    if (!ok) throw new Error(`Channel button not found: ${text}`);
+    await delay(100);
+  };
+  const ci = async (selector, value) => {
+    await ce(`(() => { const input = document.querySelector(${JSON.stringify(selector)}); const proto = input.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto, 'value').set.call(input, ${JSON.stringify(value)}); input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+    await delay(100);
+  };
+  const channelIdle = () => cw("document.querySelector('.windows-channel-tabs > span').textContent === '当前无进行中的任务'", "channel operation settled");
+
   const visibleDetail = `[...${scope}.querySelectorAll('.wir-detail, .wir-inspector')].find(element => element.getClientRects().length)`;
   const visibleButtons = `[...${scope}.querySelectorAll('button')].filter(b => b.getClientRects().length && !b.disabled)`;
   const clickText = async (text, exact = true) => {
@@ -87,8 +113,41 @@ try {
   const rdpNativeStatus = await evaluate("window.lovelyhawk.windowsRdp({ action: 'status' })");
   check("the real native RDP bridge starts idle without launching a client", rdpNativeStatus.phase === "idle" && rdpNativeStatus.clientId === null);
   await evaluate("document.querySelector('[data-testid=\"open-windows-channel\"]').click(), true");
-  check("the bottom status bar opens the channel drawer", await evaluate("document.querySelector('.wir-channel-content').getClientRects().length > 0"));
+  await attachChannel();
+  check("the status bar opens a distinct native channel window with four tabs", await ce("document.querySelectorAll('.windows-channel-tabs [role=tab]').length === 4") && (await listTargets(port)).filter(t => t.url.includes('window=windows-channel')).length === 1);
+  check("the main workspace no longer reserves space for a bottom channel drawer", await evaluate("!document.querySelector('.wir-dock,.wir-channel-drawer')"));
+  check("the channel exposes no main or SSH backend API", await ce("typeof window.lovelyhawk === 'undefined' && typeof window.lovelyhawkTerminal === 'undefined' && Object.isFrozen(window.lovelyhawkChannel)"));
+  check("the native permission boundary refuses generic backend and owner calls from the child", await ce("Promise.all(['backend_call','windows_channel_owner'].map(command => window.__TAURI_INTERNALS__.invoke(command, command==='backend_call'?{method:'windows.incident',params:{action:'status'}}:{request:{kind:'attach'}}).then(()=>false,()=>true))).then(r=>r.every(Boolean))"));
+  await ce("window.lovelyhawkWindow.toggleMaximize().then(()=>true)");
+  await cw("window.lovelyhawkWindow.isMaximized()", "native channel maximized");
+  check("the channel uses a maximizable native window", await ce("window.lovelyhawkWindow.isMaximized()"));
+  await cs("01b-native-channel-maximized");
+  await ce("window.lovelyhawkWindow.toggleMaximize().then(()=>true)");
+  await cc("命令检查台"); await ci(".wir-command-label textarea", "echo draft-kept");
+  await ce("window.__channelProbeMarker='retained'; window.lovelyhawkWindow.close().then(()=>true)");
   await evaluate("document.querySelector('[data-testid=\"open-windows-channel\"]').click(), true");
+  await delay(400);
+  check("closing and reopening reuses the same document", await ce("window.__channelProbeMarker==='retained' && document.querySelector('.wir-command-label textarea').value==='echo draft-kept'") && (await listTargets(port)).filter(t=>t.id===channelTarget.id).length===1);
+  await evaluate("document.querySelector('[data-testid=\"windows-back-welcome\"]').click(), true");
+  await wait("document.querySelector('[role=\"alertdialog\"], [role=\"dialog\"]')?.textContent.includes('离开 Windows 工作台')", "native draft guard");
+  check("leaving the main workspace notices drafts in the hidden channel window", await evaluate("document.querySelector('[role=\"alertdialog\"], [role=\"dialog\"]').textContent.includes('未执行的命令草稿')"));
+  await evaluate("[...document.querySelectorAll('[role=\"alertdialog\"] button, [role=\"dialog\"] button')].find(b=>b.textContent==='取消').click(), true");
+  await delay(120);
+  check("cancelling departure retains both workspace and draft", await evaluate("document.querySelector('[data-testid=\"windows-incident-page\"]') !== null") && await ce("document.querySelector('.wir-command-label textarea').value==='echo draft-kept'"));
+  await evaluate("document.querySelector('[data-testid=\"windows-back-welcome\"]').click(), true");
+  await wait("document.querySelector('[role=\"alertdialog\"], [role=\"dialog\"]') !== null", "confirm departure");
+  await ci(".wir-command-label textarea", "echo changed-during-confirmation");
+  await evaluate("[...document.querySelectorAll('[role=\"alertdialog\"] button, [role=\"dialog\"] button')].find(b=>b.textContent==='离开工作台').click(), true");
+  await delay(250);
+  check("changing a draft during departure confirmation refuses the old decision", await evaluate("document.querySelector('[data-testid=\"windows-incident-page\"]') !== null && document.body.textContent.includes('确认期间草稿或任务状态已变化')"));
+  await evaluate("document.querySelector('[data-testid=\"windows-back-welcome\"]').click(), true");
+  await wait("document.querySelector('[role=\"alertdialog\"], [role=\"dialog\"]') !== null", "confirm current draft departure");
+  await evaluate("[...document.querySelectorAll('[role=\"alertdialog\"] button, [role=\"dialog\"] button')].find(b=>b.textContent==='离开工作台').click(), true");
+  await wait("document.querySelector('[data-testid=\"welcome-enter-windows\"]') !== null", "leave initial workspace");
+  await waitFor(async()=>!(await listTargets(port)).some(t=>t.url.includes('window=windows-channel')), {label:"channel released with its workspace"});
+  channelSession.close(); channelSession = null;
+  await evaluate("document.querySelector('[data-testid=\"welcome-enter-windows\"]').click(), true");
+  await wait("document.querySelector('.win-ir-setup') !== null", "new workspace");
   await screenshot("01-setup-light");
 
   await evaluate("document.querySelector('button[aria-label=\"响应方案\"]').click(), true");
@@ -244,22 +303,21 @@ try {
   await chooseRow("evidence.txt");
   await clickText("取证拉取", false);
   await idle();
-  check("pulling a file opens the receipts tab and labels the unsaved cache", await evaluate(`${scope}.querySelector('.wir-dock.is-expanded.is-files') !== null && ${scope}.querySelector('.wir-transfer-list').textContent.includes('待保存') && !${scope}.querySelector('.wir-command-label').getClientRects().length`));
-  check("the dock uses layout space instead of covering the workspace", await evaluate(`(() => { const main = ${scope}.querySelector('.win-ir-main').getBoundingClientRect(); const dock = ${scope}.querySelector('.wir-dock').getBoundingClientRect(); return main.bottom <= dock.top + 1 && dock.bottom <= innerHeight; })()`));
-  await clickText("接收与保存");
+  await attachChannel();
+  await cw("document.querySelector('.wir-transfer-list')?.textContent.includes('待保存')", "native file receipt");
+  check("pulling a file opens the native receipts tab and labels the unsaved cache", await ce("document.querySelector('.windows-channel-tabs [aria-selected=true]').textContent.startsWith('接收文件') && !document.querySelector('.wir-command-label').getClientRects().length"));
+  check("the receipts window leaves the full workspace list available", await evaluate(`!${scope}.querySelector('.wir-dock,.wir-transfer-list') && ${scope}.querySelector('.win-ir-main').getBoundingClientRect().height > 600`));
   await evaluate("window.__windowsFixture.failNext('cancel-save'), true");
-  await clickText("另存为…");
-  await idle();
-  check("cancelled saving retains a pending receipt and the host reminder", await evaluate(`${scope}.querySelector('.wir-transfer-list').textContent.includes('待保存') && ${scope}.querySelector('.wir-host-actions').textContent.includes('1 个文件待保存')`));
+  await cc("另存为…"); await channelIdle();
+  check("cancelled saving retains a pending receipt and the host reminder", await ce("document.querySelector('.wir-transfer-list').textContent.includes('待保存')") && await evaluate(`${scope}.querySelector('.wir-host-actions').textContent.includes('1 个文件待保存')`));
   await evaluate("window.__windowsFixture.failNext('save-file'), true");
-  await clickText("另存为…");
-  await idle();
-  check("failed saving keeps the file available for retry", await evaluate(`${scope}.textContent.includes('测试中的保存失败') && ${scope}.querySelector('.wir-transfer-list').textContent.includes('待保存')`));
-  await clickText("另存为…");
-  await idle();
-  check("a verified receipt can be saved and its feedback remains visible", await evaluate(`${scope}.textContent.includes('已另存为 evidence.txt') && ${scope}.querySelector('.wir-transfer-list').textContent.includes('已另存')`));
+  await cc("另存为…"); await channelIdle();
+  check("failed saving keeps the file available for retry", await evaluate(`${scope}.textContent.includes('测试中的保存失败')`) && await ce("document.querySelector('.wir-transfer-list').textContent.includes('待保存')"));
+  await cc("另存为…"); await channelIdle();
+  await cw("document.querySelector('.wir-transfer-list').textContent.includes('已另存')", "saved receipt");
+  check("a verified receipt can be saved and its feedback remains visible", await evaluate(`${scope}.textContent.includes('已另存为 evidence.txt')`) && await ce("document.querySelector('.wir-transfer-list').textContent.includes('已另存')"));
   check("only a completed save clears the unsaved reminder", await evaluate(`!${scope}.querySelector('.wir-host-actions .wir-unsaved-link')`));
-  await screenshot("14-transfers");
+  await cs("14-transfers");
 
   await module("远程桌面");
   await clickText("复制免落地 PowerShell");
@@ -295,25 +353,47 @@ try {
   check("event detail keeps the real record identifier", await evaluate(`${visibleDetail}?.textContent.includes('983745') && !${scope}.querySelector('script')`));
   await screenshot("16-event-detail");
 
-  await clickTab("命令检查台");
-  await setInput('.wir-command-label textarea', "whoami /all");
-  await clickTab("通信日志");
-  await evaluate(`${scope}.querySelector('.wir-dock-tabs [aria-selected="true"]').focus(), true`);
-  await pressKey("ArrowLeft", "ArrowLeft", 37);
-  check("dock tabs support keyboard selection and move focus together", await evaluate(`${scope}.querySelector('.wir-dock-tabs [aria-selected="true"]').textContent === '命令检查台' && document.activeElement?.textContent === '命令检查台'`));
-  await clickTab("命令检查台");
-  check("dock tab changes preserve the command draft", await evaluate(`${scope}.querySelector('.wir-command-label textarea').value === 'whoami /all'`));
-  await evaluate(`${scope}.querySelector('select[aria-label="命令预设类别"]').value = '主机与账户', ${scope}.querySelector('select[aria-label="命令预设类别"]').dispatchEvent(new Event('change', { bubbles: true })), true`);
-  await delay(100); await clickText("当前权限与令牌");
-  await clickText("确认并执行");
-  await wait("document.querySelector('[role=\"alertdialog\"], [role=\"dialog\"]') !== null", "command confirmation");
-  check("commands do not execute before confirmation", await evaluate("window.__windowsFixture.calls.every(c => c.action !== 'run-command')"));
-  await screenshot("17-command-confirmation");
-  await session.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
-  await session.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  await cc("命令检查台");
+  await ci('.wir-command-label textarea', "whoami /all");
+  await cc("通信日志");
+  await ce(`${channelScope}.querySelector('.windows-channel-tabs [aria-selected="true"]').focus(), true`);
+  await channelSession.send("Input.dispatchKeyEvent", {type:"keyDown",key:"ArrowLeft",code:"ArrowLeft",windowsVirtualKeyCode:37});
+  await channelSession.send("Input.dispatchKeyEvent", {type:"keyUp",key:"ArrowLeft",code:"ArrowLeft",windowsVirtualKeyCode:37});
   await delay(100);
-  check("Escape cancels the command without a remote call", await evaluate("!document.querySelector('[role=\"alertdialog\"], [role=\"dialog\"]') && window.__windowsFixture.calls.every(c => c.action !== 'run-command')"));
-  check("command cancellation returns keyboard focus", await evaluate("document.activeElement?.textContent.includes('确认并执行')"));
+  check("native window tabs support keyboard selection and move focus together", await ce(`${channelScope}.querySelector('.windows-channel-tabs [aria-selected="true"]').textContent === '命令检查台' && document.activeElement?.textContent === '命令检查台'`));
+  await cc("命令检查台");
+  check("window tab changes preserve the command draft", await ce(`${channelScope}.querySelector('.wir-command-label textarea').value === 'whoami /all'`));
+  await ce(`${channelScope}.querySelector('select[aria-label="命令预设类别"]').value = '主机与账户', ${channelScope}.querySelector('select[aria-label="命令预设类别"]').dispatchEvent(new Event('change', { bubbles: true })), true`);
+  await delay(100); await cc("当前权限与令牌");
+  await cc("确认并执行");
+  await cw("document.querySelector('[role=\"alertdialog\"], [role=\"dialog\"]') !== null", "command confirmation");
+  check("commands do not execute before confirmation", await evaluate("window.__windowsFixture.calls.every(c => c.action !== 'run-command')"));
+  await cs("17-command-confirmation");
+  await channelSession.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  await channelSession.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  await delay(100);
+  check("Escape cancels the command without a remote call", await ce("!document.querySelector('[role=\"alertdialog\"], [role=\"dialog\"]')") && await evaluate("window.__windowsFixture.calls.every(c => c.action !== 'run-command')"));
+  check("command cancellation returns keyboard focus", await ce("document.activeElement?.textContent.includes('确认并执行')"));
+
+  await evaluate("window.__windowsFixture.showChannelOutput().then(()=>true)");
+  await cw("document.querySelector('.wir-command-result pre')?.textContent.includes('样例 600')", "complete sample output in native window");
+  check("the independent command output uses the available height and keeps hostile text literal", await ce("(() => {const p=document.querySelector('.wir-command-result pre');return p.getBoundingClientRect().height>450 && p.scrollHeight>p.clientHeight && p.textContent.includes('<script>hostile()</script>') && !p.querySelector('script');})()"));
+  await ce("document.querySelector('.windows-channel-toast button')?.click(), true");
+  await cs("17a-command-output-wide");
+  await cc("复制输出");
+  await waitFor(()=>fs.existsSync(path.join(runRoot,'clipboard.txt')) && fs.readFileSync(path.join(runRoot,'clipboard.txt'),'utf8').includes('样例 600'), {label:"native output clipboard"});
+  check("copy from the child uses the bounded native clipboard command", fs.readFileSync(path.join(runRoot,'clipboard.txt'),'utf8').includes('<script>hostile()</script>'));
+  await channelSession.send("Emulation.setDeviceMetricsOverride", {width:820,height:650,deviceScaleFactor:1,mobile:false});
+  const narrowChannel = await ce("(() => {const presets=document.querySelector('.wir-command-presets');const chips=presets.querySelector('.wir-chips');return {width:innerWidth,scrollWidth:document.documentElement.scrollWidth,outputHeight:document.querySelector('.wir-command-result pre').getBoundingClientRect().height,presetHeight:presets.clientHeight,presetScrollHeight:presets.scrollHeight,chipBottom:chips.getBoundingClientRect().bottom,presetBottom:presets.getBoundingClientRect().bottom};})()");
+  check("the channel adapts to a narrow window without horizontal page overflow", narrowChannel.scrollWidth <= narrowChannel.width + 1 && narrowChannel.outputHeight >= 300 && narrowChannel.presetScrollHeight <= narrowChannel.presetHeight + 1 && narrowChannel.chipBottom <= narrowChannel.presetBottom + 1, narrowChannel);
+  await cs("17b-command-output-narrow");
+  await channelSession.send("Emulation.clearDeviceMetricsOverride");
+  await evaluate("window.lovelyhawk.setWindowTheme({theme:'dark',scrim:false})");
+  await cw("document.documentElement.dataset.theme==='dark'", "channel follows main theme");
+  check("the channel follows theme changes without reopening", await ce("document.documentElement.dataset.theme==='dark'"));
+  await cs("17c-command-output-dark");
+  await evaluate("window.lovelyhawk.setWindowTheme({theme:'light',scrim:false})");
+
 
   const playbookSearch = '.wir-playbooks-rail input[type="search"]';
   const playbookDetail = `${scope}.querySelector('.wir-playbook-detail')`;
@@ -344,17 +424,19 @@ try {
   await clickText("复制当前方案");
   check("copied playbooks preserve sources, evidence gaps and guidance status", await evaluate("window.__windowsFixture.copies.at(-1).includes('不是已采集证据或处置结果') && window.__windowsFixture.copies.at(-1).includes('https://attack.mitre.org/techniques/T1546/003/') && window.__windowsFixture.copies.at(-1).includes('带备份、对象核对和恢复的删除流程')"));
   await clickText("准备查询 · WMI 永久事件过滤器");
-  check("playbook recommendations preserve the existing command draft", await evaluate(`${scope}.querySelector('.wir-command-suggestion').textContent.includes('WMI 永久事件过滤器') && ${scope}.querySelector('.wir-command-label textarea').value === 'whoami /all' && window.__windowsFixture.calls.every(c => c.action !== 'run-command')`));
-  await clickText("保留草稿");
+  await cw("document.querySelector('.wir-command-suggestion') !== null", "recommended query in native window");
+  check("playbook recommendations preserve the existing command draft", await ce(`${channelScope}.querySelector('.wir-command-suggestion').textContent.includes('WMI 永久事件过滤器') && ${channelScope}.querySelector('.wir-command-label textarea').value === 'whoami /all'`) && await evaluate("window.__windowsFixture.calls.every(c => c.action !== 'run-command')"));
+  await cc("保留草稿");
   await module("响应方案");
   await clickText("准备查询 · WMI 永久事件过滤器");
-  await clickText("替换草稿为此查询");
-  check("accepting a recommendation fills a fixed query without executing it", await evaluate(`${scope}.querySelector('.wir-command-label textarea').value.includes('Get-CimInstance') && ${scope}.querySelector('.wir-command-label textarea').value.includes('__EventFilter') && window.__windowsFixture.calls.every(c => c.action !== 'run-command')`));
-  await clickText("确认并执行");
-  await wait("document.querySelector('[role=\"alertdialog\"], [role=\"dialog\"]') !== null", "playbook command confirmation");
-  check("a playbook query still requires a target-specific command confirmation", await evaluate("document.querySelector('[role=\"alertdialog\"], [role=\"dialog\"]').textContent.includes('UI-FIXTURE-01') && document.querySelector('[role=\"alertdialog\"], [role=\"dialog\"]').textContent.includes('__EventFilter') && window.__windowsFixture.calls.every(c => c.action !== 'run-command')"));
-  await session.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
-  await session.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  await delay(400);
+  await cc("替换草稿为此查询");
+  check("accepting a recommendation fills a fixed query without executing it", await ce(`${channelScope}.querySelector('.wir-command-label textarea').value.includes('Get-CimInstance') && ${channelScope}.querySelector('.wir-command-label textarea').value.includes('__EventFilter')`) && await evaluate("window.__windowsFixture.calls.every(c => c.action !== 'run-command')"));
+  await cc("确认并执行");
+  await cw("document.querySelector('[role=\"alertdialog\"], [role=\"dialog\"]') !== null", "playbook command confirmation");
+  check("a playbook query still requires a target-specific command confirmation", await ce("document.querySelector('[role=\"alertdialog\"], [role=\"dialog\"]').textContent.includes('UI-FIXTURE-01') && document.querySelector('[role=\"alertdialog\"], [role=\"dialog\"]').textContent.includes('__EventFilter')") && await evaluate("window.__windowsFixture.calls.every(c => c.action !== 'run-command')"));
+  await channelSession.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  await channelSession.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
   await delay(100);
 
   await module("响应方案");
@@ -680,14 +762,18 @@ try {
     check(`${label} archives collection warnings without a full-width banner`,await evaluate(`(()=>{const main=${scope}.querySelector('.win-ir-main');return ![...main.querySelectorAll('.wir-reader-warning,.wir-collection-warnings')].some(e=>e.getClientRects().length) && [...main.querySelectorAll('.notice-summary-link')].some(e=>e.getClientRects().length) && window.__windowsFixture.notifications().history.some(n=>n.source===${JSON.stringify(label+'采集')});})()`));
   }
   await screenshot("38-registry-compact-notices");
+  await ce("window.lovelyhawkChannel.notify({message:'合成测试：独立窗口反馈进入全局通知',severity:'info'}).then(()=>true)");
+  await wait("window.__windowsFixture.notifications().history.some(n=>n.source==='通道与传输' && n.message.includes('独立窗口反馈进入全局通知'))", "child feedback in global notification history");
+  check("channel window feedback is retained in the main global notification center", await evaluate("window.__windowsFixture.notifications().history.some(n=>n.source==='通道与传输' && n.message.includes('独立窗口反馈进入全局通知'))"));
   check("no browser runtime or console errors", errors.length === 0, errors);
   await evaluate("window.__windowsFixture.unmount(), true");
   await evaluate("document.querySelector('[data-testid=\"window-close\"]').click(), true");
   await waitFor(() => exitCode !== null, { timeoutMs: 15000, label: "clean exit" });
   check("the native window exits cleanly", exitCode === 0);
 } catch (error) {
-  check("probe completed", false, error instanceof Error ? error.message : String(error));
+  check("probe completed", false, {message:error instanceof Error ? error.message : String(error), exitCode});
   if (session) {
+    if (channelSession) await channelSession.screenshot(path.join(evidence, "channel-failure.png")).catch(() => undefined);
     await session.screenshot(path.join(evidence, "failure.png")).catch(() => undefined);
     const text = await session.evaluate("document.body.innerText").catch(() => "");
     fs.writeFileSync(path.join(evidence, "failure.txt"), String(text));
@@ -695,6 +781,7 @@ try {
 } finally {
   if (exitCode === null) child.kill();
   session?.close();
+  channelSession?.close();
   fs.writeFileSync(path.join(evidence, "console.json"), JSON.stringify(errors, null, 2));
   fs.writeFileSync(path.join(evidence, "checks.json"), JSON.stringify(checks, null, 2));
   fs.writeFileSync(path.join(evidence, "host.log"), output.join(""));

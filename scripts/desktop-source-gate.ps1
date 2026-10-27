@@ -374,8 +374,8 @@ if (Test-Path -LiteralPath $configPath) {
     if ($config.build.PSObject.Properties['devUrl']) { Add-GateViolation 'tauri.conf.json must not load a development server' }
     if ($config.build.frontendDist -cne '../../ui/dist') { Add-GateViolation "tauri.conf.json frontendDist must be '../../ui/dist'" }
     if (@($config.app.windows).Count -ne 0) { Add-GateViolation 'windows are created by the host, not declared in tauri.conf.json' }
-    if ((@($config.app.security.capabilities) -join ',') -cne 'main-window,child-windows') {
-        Add-GateViolation 'tauri.conf.json must enable exactly the main-window and child-windows capabilities'
+    if ((@($config.app.security.capabilities) -join ',') -cne 'main-window,child-windows,windows-channel') {
+        Add-GateViolation 'tauri.conf.json must enable exactly the main-window, child-windows and windows-channel capabilities'
     }
     if ((@($config.app.security.dangerousDisableAssetCspModification) -join ',') -cne 'style-src') {
         Add-GateViolation 'only style-src may opt out of asset CSP modification'
@@ -451,15 +451,20 @@ if (Test-Path -LiteralPath $buildScriptPath) {
     if ($split -lt 1) {
         Add-GateViolation 'build.rs command list must start the terminal-family block at terminal_open'
     } else {
-        $mainCommands = @($names[0..($split - 1)])
+        $channelCommands = @('windows_channel_child')
+        $mainCommands = @($names[0..($split - 1)] | Where-Object { $_ -notin $channelCommands })
         $childCommands = @($names[$split..($names.Count - 1)])
         $main = Get-Content -LiteralPath (Join-Path $hostRoot 'capabilities/main-window.json') -Raw | ConvertFrom-Json
         $child = Get-Content -LiteralPath (Join-Path $hostRoot 'capabilities/child-windows.json') -Raw | ConvertFrom-Json
-        foreach ($violation in @(Get-CapabilityViolation -Capability $main -Identifier 'main-window' -Windows @('main') -Commands $mainCommands -ForeignCommands $childCommands)) {
+        foreach ($violation in @(Get-CapabilityViolation -Capability $main -Identifier 'main-window' -Windows @('main') -Commands $mainCommands -ForeignCommands ($childCommands + $channelCommands))) {
             Add-GateViolation "main-window capability $violation"
         }
-        foreach ($violation in @(Get-CapabilityViolation -Capability $child -Identifier 'child-windows' -Windows @('child-*') -Commands $childCommands -ForeignCommands $mainCommands)) {
+        foreach ($violation in @(Get-CapabilityViolation -Capability $child -Identifier 'child-windows' -Windows @('child-*') -Commands $childCommands -ForeignCommands ($mainCommands + $channelCommands))) {
             Add-GateViolation "child-windows capability $violation"
+        }
+        $channel = Get-Content -LiteralPath (Join-Path $hostRoot 'capabilities/windows-channel.json') -Raw | ConvertFrom-Json
+        foreach ($violation in @(Get-CapabilityViolation -Capability $channel -Identifier 'windows-channel' -Windows @('windows-channel') -Commands $channelCommands -ForeignCommands ($mainCommands + $childCommands))) {
+            Add-GateViolation "windows-channel capability $violation"
         }
         $libText = Get-Content -LiteralPath (Join-Path $hostRoot 'src/lib.rs') -Raw
         foreach ($name in $names) {

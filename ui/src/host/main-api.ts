@@ -1,4 +1,5 @@
 import { isWindowsRdpRequest, isWindowsRdpStatus } from "../shared/windows-rdp-contract.js";
+import { createWindowsChannelOwnerApi } from "./windows-channel-api";
 import { listen } from "@tauri-apps/api/event";
 
 import { isCaseLibraryRequest, matchesCaseLibraryResult, type CaseLibraryRequest } from "../shared/case-library-contract.js";
@@ -262,6 +263,7 @@ export function createMainApi(transport: BackendTransport = hostBackendTransport
       if (!isWindowsRdpRequest(values[0])) refuse("远程桌面请求无效。");
       return verified(host("windows_rdp", { request: values[0] }), isWindowsRdpStatus, "远程桌面状态无法核实。");
     },
+    windowsChannel: createWindowsChannelOwnerApi(),
     windowsIncident: async (...values: unknown[]) => {
       requireArity(values, 1, "Windows 应急响应请求无效。");
       if (!isWindowsIncidentRequest(values[0])) refuse("Windows 应急响应请求无效。");

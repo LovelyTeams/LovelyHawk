@@ -38,6 +38,7 @@
     "allow-config-visual-save",
     "allow-windows-file-save",
     "allow-windows-rdp",
+    "allow-windows-channel-owner",
     "allow-clipboard-write",
     "allow-window-theme",
     "allow-terminal-window-open",

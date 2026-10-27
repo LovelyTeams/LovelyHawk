@@ -18,10 +18,11 @@ mod instance_lock;
 mod local_browser;
 mod local_files;
 mod main_commands;
-mod windows_rdp;
 mod smoke;
 mod test_hooks;
 mod theme;
+mod windows_channel;
+mod windows_rdp;
 
 use std::{
     path::PathBuf,
@@ -175,6 +176,7 @@ pub fn run() -> ExitCode {
             app.manage(Host {
                 bridge: BackendBridge::new(Arc::new(state)),
                 rdp: Mutex::new(windows_rdp::RdpState::default()),
+                channel: Mutex::new(windows_channel::ChannelState::default()),
                 binding: Mutex::new(BindingState::default()),
                 children: Mutex::new(ChildWindows::default()),
                 local: Mutex::new(LocalBrowser::default()),
@@ -193,6 +195,10 @@ pub fn run() -> ExitCode {
         .on_window_event(|window, event| {
             let label = window.label().to_owned();
             match event {
+                WindowEvent::CloseRequested { api, .. } if label == windows_channel::LABEL => {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
                 WindowEvent::CloseRequested { api, .. } if label == MAIN_LABEL => {
                     let host = window.state::<Host>();
                     if !host.close.is_allowed() {
@@ -228,6 +234,8 @@ pub fn run() -> ExitCode {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            windows_channel::windows_channel_owner,
+            windows_channel::windows_channel_child,
             main_commands::backend_call,
             main_commands::connections_import,
             main_commands::connections_export,

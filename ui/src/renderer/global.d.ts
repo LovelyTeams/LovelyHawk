@@ -4,6 +4,7 @@ import type { TerminalApi } from "../shared/terminal-contract";
 
 declare global {
   interface Window {
+    lovelyhawkChannel: import("../shared/windows-channel-contract").WindowsChannelApi;
     /** Main window only: the validated backend and host API. */
     lovelyhawk: LovelyHawkApi;
     /** Terminal and file-editor windows only. */

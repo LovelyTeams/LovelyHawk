@@ -1,12 +1,15 @@
 import { createRoot } from "react-dom/client";
 
-import { installChildHost } from "../host/install";
+import { installChannelHost, installChildHost } from "../host/install";
+import { WindowsChannelWindow } from "./WindowsChannelWindow";
 import { FileEditorWindow } from "./FileEditorWindow";
 import { TerminalWindow, terminalWindowKind } from "./TerminalWindow";
 import "./theme/themes.css";
 import "./styles.css";
 
-installChildHost();
+const kind = new URLSearchParams(window.location.search).get("window");
+if (kind === "windows-channel") installChannelHost();
+else installChildHost();
 
 const root = document.getElementById("root");
 if (root === null) throw new Error("LovelyHawk terminal renderer root is missing.");
@@ -19,7 +22,6 @@ if (root === null) throw new Error("LovelyHawk terminal renderer root is missing
  * other page for it. Anything unrecognised falls back to the terminal rather
  * than rendering nothing.
  */
-const kind = new URLSearchParams(window.location.search).get("window");
 
 /**
  * xterm measures its cells once, when it opens. With the bundled monospace
@@ -37,6 +39,6 @@ const fontReady = Promise.race([
 
 void fontReady.then(() => {
   createRoot(root).render(
-    kind === "file-editor" ? <FileEditorWindow /> : <TerminalWindow kind={terminalWindowKind(kind)} />,
+    kind === "windows-channel" ? <WindowsChannelWindow /> : kind === "file-editor" ? <FileEditorWindow /> : <TerminalWindow kind={terminalWindowKind(kind)} />,
   );
 });

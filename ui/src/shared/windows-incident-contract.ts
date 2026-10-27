@@ -347,6 +347,7 @@ export type WindowsIncidentResponse =
   | { kind: "registry"; snapshot: WindowsRegistrySnapshot };
 
 export interface WindowsIncidentApi {
+  windowsChannel?: import("./windows-channel-contract").WindowsChannelOwnerApi;
   windowsRdp?: (request: WindowsRdpRequest) => Promise<WindowsRdpStatus>;
   windowsIncident(request: WindowsIncidentRequest): Promise<WindowsIncidentResponse>;
   saveWindowsFile?(fileId: string): Promise<WindowsFileSaveResult>;

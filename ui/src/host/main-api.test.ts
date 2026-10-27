@@ -42,7 +42,7 @@ describe("main window API", () => {
   it("is frozen and keeps the method count the renderer was built against", () => {
     const api = createMainApi();
     expect(Object.isFrozen(api)).toBe(true);
-    expect(Object.keys(api)).toHaveLength(169);
+    expect(Object.keys(api)).toHaveLength(170);
   });
 
   it("keeps RDP on the dedicated main-window command and validates its response", async () => {
@@ -375,22 +375,29 @@ describe("terminal-family window API", () => {
   it("is granted only to the child windows, and the main window's commands only to main", () => {
     const main = capability("main-window");
     const child = capability("child-windows");
+    const channel = capability("windows-channel");
+    expect(channel.windows).toEqual(["windows-channel"]);
+    expect(channel.permissions).toContain("allow-windows-channel-child");
+    expect(main.permissions).not.toContain("allow-windows-channel-child");
+    expect(child.permissions).not.toContain("allow-windows-channel-child");
     expect(main.windows).toEqual(["main"]);
     expect(child.windows).toEqual(["child-*"]);
     const commandPermission = (name: string) => `allow-${name.replaceAll("_", "-")}`;
-    const mainCommands = hostCommands.slice(0, hostCommands.indexOf("terminal_open"));
+    const mainCommands = hostCommands.slice(0, hostCommands.indexOf("terminal_open")).filter(name => name !== "windows_channel_child");
     const childCommands = hostCommands.slice(hostCommands.indexOf("terminal_open"));
     expect(mainCommands).toContain("backend_call");
     for (const name of mainCommands) {
       expect(main.permissions).toContain(commandPermission(name));
       expect(child.permissions).not.toContain(commandPermission(name));
+      expect(channel.permissions).not.toContain(commandPermission(name));
     }
     for (const name of childCommands) {
       expect(child.permissions).toContain(commandPermission(name));
       expect(main.permissions).not.toContain(commandPermission(name));
+      expect(channel.permissions).not.toContain(commandPermission(name));
     }
     // No plugin reaches a page: dialogs, clipboard and files stay in the host.
-    for (const permission of [...main.permissions, ...child.permissions]) {
+    for (const permission of [...main.permissions, ...child.permissions, ...channel.permissions]) {
       expect(permission).toMatch(/^(core:(event|window):allow-|allow-)/u);
     }
   });

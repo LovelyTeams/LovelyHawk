@@ -482,6 +482,7 @@ export interface LovelyHawkApi {
   javaHotUpdate(request: JavaHotUpdateRequest): Promise<JavaHotUpdateResponse>;
   stageJavaClass(bindingHandle: string): Promise<JavaClassStageResult>;
   windowsRdp(request: WindowsRdpRequest): Promise<WindowsRdpStatus>;
+  readonly windowsChannel: import("./windows-channel-contract").WindowsChannelOwnerApi;
   windowsIncident(request: WindowsIncidentRequest): Promise<WindowsIncidentResponse>;
   saveWindowsFile(fileId: string): Promise<WindowsFileSaveResult>;
   bootstrap(): Promise<BootstrapResult>;

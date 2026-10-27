@@ -1,3 +1,4 @@
+import type { WindowsChannelView } from "../src/shared/windows-channel-contract";
 import { useCallback, useEffect, useReducer, useState, type ReactNode } from "react";
 import { NotificationCenter, NotificationContext, NotificationOpenContext } from "../src/renderer/NotificationCenter";
 import { NotificationStack } from "../src/renderer/NotificationStack";
@@ -106,7 +107,15 @@ export function mount() {
   const processPlans = new Map<string, WindowsProcessPlan>();
   const baselinePlans = new Map<string, WindowsBaselineChangePlan>();
   const baselineHistory: WindowsBaselineChangeReport[] = [];
+  const channel = window.lovelyhawk.windowsChannel!;
+  let channelState: { owner: string; sessionId: string | null; view: WindowsChannelView } | null = null;
+  let presentationOutput: { sessionId: string | null; output: WindowsChannelView["output"] } | null = null;
   const api: WindowsIncidentApi = {
+    windowsChannel: { ...channel, async sync(owner, sessionId, view) {
+      const presented = { ...view, output: presentationOutput?.sessionId === sessionId ? presentationOutput.output : view.output };
+      channelState = { owner, sessionId, view: presented };
+      await channel.sync(owner, sessionId, presented);
+    } },
     async windowsIncident(request) {
       calls.push(structuredClone(request));
       if (request.action === failAction) { failAction = ""; throw new Error("测试中的权限不足；原有结果保留。"); }
@@ -287,6 +296,12 @@ export function mount() {
   root.render(<NotificationHarness><WindowsIncidentPage api={api} writeClipboard={async (text) => { copies.push(text); }} /></NotificationHarness>);
   return {
     calls, copies, status, rdpCalls,
+    async showChannelOutput() {
+      if (!channelState) throw new Error("Open the native channel first");
+      const output = { command: "展示样例（未执行远程命令）", time: stamp, output: Array.from({length:600}, (_,i)=>`样例 ${i+1}  Service-${i+1}  Running  C:\\Windows\\System32\\fixture.exe`).join("\n") + "\n<script>hostile()</script>" };
+      presentationOutput = { sessionId: channelState.sessionId, output };
+      await channel.sync(channelState.owner, channelState.sessionId, { ...channelState.view, output });
+    },
     notifications: () => notificationState,
     enableCollectionWarnings: () => {
       warningMode = true; enableNotices();

@@ -259,13 +259,14 @@ export function useWindowsIncident(api: WindowsIncidentApi) {
     action: "register-plugin" | "unregister-plugin" | "start-listener" | "open-remote-desktop" | "reveal-agent",
     label: string, completed: string,
   ) => {
-    if (!start(label)) return;
+    if (!start(label)) return false;
     try {
       const response = await api.windowsIncident({ action });
       if (live.current && response.kind === "status") {
-        observe(response.status); setFilelessScript(response.filelessScript); setNotice(completed);
+        observe(response.status); setFilelessScript(response.filelessScript); setNotice(completed); return true;
       }
-    } catch (reason) { if (live.current) setError(errorText(reason, "操作未完成，请重试。")); }
+      return false;
+    } catch (reason) { if (live.current) setError(errorText(reason, "操作未完成，请重试。")); return false; }
     finally { finish(); }
   }, [api, finish, observe, start]);
 
@@ -308,7 +309,7 @@ export function useWindowsIncident(api: WindowsIncidentApi) {
   }, [finish, observe, remote, start]);
 
   const saveFile = useCallback(async (fileId: string) => {
-    if (!api.saveWindowsFile || !start("正在核对文件并准备另存…")) return;
+    if (!api.saveWindowsFile || !start("正在核对文件并准备另存…")) return false;
     try {
       const result = await api.saveWindowsFile(fileId);
       if (live.current) {
@@ -317,8 +318,10 @@ export function useWindowsIncident(api: WindowsIncidentApi) {
           setNotice(`已另存为 ${result.fileName}，文件 SHA256 已复核。`);
         } else setNotice("已取消另存，文件仍保留在接收缓存中。");
       }
+      return result.saved;
     } catch (reason) {
       if (live.current) setError(errorText(reason, "文件未保存；缓存仍可重试，请选择新的文件名以避免覆盖。"));
+      return false;
     } finally { finish(); }
   }, [api, finish, start]);
 
@@ -335,16 +338,18 @@ export function useWindowsIncident(api: WindowsIncidentApi) {
 
   const runCommand = useCallback(async (command: string, expectedSession: string) => {
     if (windowsSessionKey(statusRef.current) !== expectedSession) {
-      setError("确认期间会话发生变化，请核对目标后重新确认。"); return;
+      setError("确认期间会话发生变化，请核对目标后重新确认。"); return false;
     }
-    if (!start("正在等待远程命令返回…")) return;
+    if (!start("正在等待远程命令返回…")) return false;
     try {
       const response = await remote({ action: "run-command", command }, epochRef.current);
       if (response.kind === "command-output") {
         setCommandOutput({ command, output: response.output, time: new Date().toISOString() });
         observe(response.status);
+        return true;
       }
-    } catch (reason) { if (live.current) setError(errorText(reason, "命令未完成，请核对远程状态。")); }
+      return false;
+    } catch (reason) { if (live.current) setError(errorText(reason, "命令未完成，请核对远程状态。")); return false; }
     finally { finish(); }
   }, [finish, observe, remote, start]);
 

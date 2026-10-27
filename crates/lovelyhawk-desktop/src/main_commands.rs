@@ -5,7 +5,7 @@
 
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
-use tauri::{AppHandle, Runtime, State, WebviewWindow};
+use tauri::{AppHandle, Manager, Runtime, State, WebviewWindow};
 
 use zeroize::Zeroizing;
 
@@ -1001,8 +1001,20 @@ pub async fn windows_file_save<R: Runtime>(
     } else {
         "windows-evidence.bin".to_owned()
     };
+    let channel_window = if host.channel.lock().owns_save(&file_id) {
+        window
+            .app_handle()
+            .get_webview_window(crate::windows_channel::LABEL)
+    } else {
+        None
+    };
+    let dialog_parent = channel_window.as_ref().unwrap_or(&window);
+    if channel_window.is_some() {
+        let _ = dialog_parent.unminimize();
+        let _ = dialog_parent.show();
+    }
     let Some(path) = local_files::choose(
-        &window,
+        dialog_parent,
         "另存 Windows 取证文件",
         DialogKind::Save {
             default_name: &suggested,

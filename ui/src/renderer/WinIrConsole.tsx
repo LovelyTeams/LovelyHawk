@@ -1,4 +1,4 @@
-import { Activity, useState } from "react";
+import { Activity, useEffect, useState } from "react";
 
 import type { DvcRuntimeStatus } from "../shared/windows-incident-contract";
 import { DialogHost } from "./DialogHost";
@@ -8,17 +8,20 @@ import { WINDOWS_COMMAND_PRESETS } from "./win-ir-command-presets";
 
 export type WindowsDockTab = "tasks" | "files" | "command" | "logs";
 
-export function WinIrConsole({ panel, status, busy, sessionKey, hostname, output, savedFiles, canSave, onCopy, onSend, onRun, onSave, onUnregister, suggestion }: {
+export function WinIrConsole({ panel, status, busy, sessionKey, hostname, output, savedFiles, canSave, onCopy, onSend, onRun, onSave, onUnregister, suggestion, onDirtyChange }: {
   panel: WindowsDockTab;
-  status: DvcRuntimeStatus | null; busy: boolean; sessionKey: string | null; hostname: string;
+  status: (Pick<DvcRuntimeStatus, "messagesSent" | "messagesReceived" | "recentLogs" | "receivedFiles"> & { registration: { registered: boolean } }) | null; busy: boolean; sessionKey: string | null; hostname: string;
   output: { command: string; output: string; time: string } | null;
   savedFiles: ReadonlySet<string>; canSave: boolean; onSave: (fileId: string) => void;
   onCopy: (text: string) => void; onSend: (text: string) => Promise<boolean>;
-  onRun: (command: string, expectedSession: string) => Promise<void>; onUnregister: () => void;
+  onRun: (command: string, expectedSession: string) => Promise<unknown>; onUnregister: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
   suggestion?: { id: string; request: number } | null;
 }) {
   const [message, setMessage] = useState("");
   const [command, setCommand] = useState("whoami /all");
+  const [submittedCommand, setSubmittedCommand] = useState("whoami /all");
+  useEffect(() => { onDirtyChange?.(command !== submittedCommand || message.trim().length > 0); }, [command, submittedCommand, message, onDirtyChange]);
   const [presetGroup, setPresetGroup] = useState("服务与驱动");
   const [presetId, setPresetId] = useState<string | null>(null);
   const selectedPreset = WINDOWS_COMMAND_PRESETS.find((preset) => preset.id === presetId);
@@ -31,7 +34,7 @@ export function WinIrConsole({ panel, status, busy, sessionKey, hostname, output
     const capturedSession = sessionKey;
     if (!available || !submitted || !capturedSession) return;
     if (await confirm.ask("确认远程执行", `目标：${hostname}\n命令：\n${submitted}\n\n命令将以远程采集端的账户权限执行。自定义命令可能修改目标，执行结果不代表已完成安全复核。`, "执行该命令")) {
-      await onRun(submitted, capturedSession);
+      if (await onRun(submitted, capturedSession) !== false) setSubmittedCommand(submitted);
     }
   }
   return (

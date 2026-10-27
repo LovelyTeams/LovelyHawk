@@ -24,7 +24,7 @@
         "form-action": "'none'"
       },
       "dangerousDisableAssetCspModification": ["style-src"],
-      "capabilities": ["main-window", "child-windows"]
+      "capabilities": ["main-window", "child-windows", "windows-channel"]
     }
   },
   "bundle": {

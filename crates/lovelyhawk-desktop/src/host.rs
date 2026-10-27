@@ -33,6 +33,7 @@ const CLOSE_GATE_TIMEOUT: Duration = Duration::from_secs(15);
 pub struct Host {
     pub bridge: BackendBridge,
     pub rdp: Mutex<crate::windows_rdp::RdpState>,
+    pub channel: Mutex<crate::windows_channel::ChannelState>,
     pub binding: Mutex<BindingState>,
     pub children: Mutex<ChildWindows>,
     pub local: Mutex<LocalBrowser>,
@@ -184,6 +185,38 @@ impl Host {
             .center()
             .background_color(theme::color(native.window_background));
         self.harden(builder, Page::Main).build()
+    }
+
+    pub fn open_channel<R: Runtime>(&self, app: &AppHandle<R>) -> Result<(), String> {
+        if let Some(window) = app.get_webview_window(crate::windows_channel::LABEL) {
+            window
+                .unminimize()
+                .and_then(|_| window.show())
+                .and_then(|_| window.set_focus())
+                .map_err(|_| "无法显示通道窗口。".to_owned())?;
+            return Ok(());
+        }
+        let native = theme::resolve(&self.theme.lock().theme);
+        let builder = WebviewWindowBuilder::new(
+            app,
+            crate::windows_channel::LABEL,
+            self.page_url(WebviewUrl::App(
+                "terminal.html?window=windows-channel".into(),
+            )),
+        )
+        .title("LovelyHawk · 通道与传输")
+        .inner_size(1_240.0, 840.0)
+        .center()
+        .background_color(theme::color(native.window_background))
+        .initialization_script(launch_script(native.id, "通道与传输"));
+        self.harden(builder, Page::Channel)
+            .min_inner_size(800.0, 600.0)
+            .build()
+            .map_err(|error| {
+                tracing::error!(%error, "failed to open Windows channel window");
+                "无法打开通道与传输窗口。".to_owned()
+            })?;
+        Ok(())
     }
 
     /// Opens, or raises, the window for `kind` on `binding_handle`.
@@ -350,6 +383,7 @@ impl Host {
 pub enum Page {
     Main,
     Child,
+    Channel,
 }
 
 impl Page {
@@ -377,6 +411,9 @@ impl Page {
             return false;
         }
         match self {
+            Self::Channel => {
+                url.path() == "/terminal.html" && url.query() == Some("window=windows-channel")
+            }
             // Linux and macOS load the app root as `tauri://localhost`, whose
             // path is empty rather than "/".
             Self::Main => matches!(url.path(), "" | "/" | "/index.html") && url.query().is_none(),

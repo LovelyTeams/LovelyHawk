@@ -6,7 +6,7 @@ import { NoticeScopeContext, NoticeSummary } from "./NoticeSummary";
 import { TransientNotice } from "./NotificationCenter";
 import { WinIrProcessChange } from "./WinIrProcessChange";
 import { WinIrDesktop } from "./WinIrDesktop";
-import { Activity, useEffect, useRef, useState, type ReactNode } from "react";
+import { Activity, useEffect, useImperativeHandle, useRef, useState, type Ref, type ReactNode } from "react";
 
 import type {
   WindowsAccountEntry, WindowsFileEntry, WindowsIncidentApi,
@@ -17,8 +17,8 @@ import { errorText } from "./error-text";
 import { useConfirmDialog } from "./use-confirm-dialog";
 import { WinIrProcesses, WinIrNetwork } from "./WinIrActivity";
 import { WinIrAccounts, WinIrBaseline, WinIrStartup } from "./WinIrChecks";
-import { WinIrDock } from "./WinIrDock";
-import { WinIrConsole, type WindowsDockTab } from "./WinIrConsole";
+import { useWindowsChannel } from "./use-windows-channel";
+import type { WindowsChannelTab } from "../shared/windows-channel-contract";
 import { WinIrLogs, WinIrTimeline } from "./WinIrEvents";
 import { WinIrBaselineChanges } from "./WinIrBaselineChanges";
 import { WinIrFileManager } from "./WinIrFileManager";
@@ -39,7 +39,10 @@ import "./win-ir-workspace.css";
 
 export type { WindowsIncidentTab } from "./win-ir-model";
 
+export interface WindowsIncidentPageHandle { beforeDeactivate(): Promise<boolean> }
+
 export interface WindowsIncidentPageProps {
+  ref?: Ref<WindowsIncidentPageHandle>;
   api: WindowsIncidentApi;
   writeClipboard?: (text: string) => Promise<void>;
   onBackToWelcome?: () => void;
@@ -51,7 +54,7 @@ export interface WindowsIncidentPageProps {
   onConnectionChange?: (connected: boolean, hostname: string | null) => void;
 }
 
-export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOpenSettings, onConnectionChange, onBusyChange, channelOpenRequest = 0, covered = false, sidebarActions }: WindowsIncidentPageProps) {
+export function WindowsIncidentPage({ ref, api, writeClipboard, onBackToWelcome, onOpenSettings, onConnectionChange, onBusyChange, channelOpenRequest = 0, covered = false, sidebarActions }: WindowsIncidentPageProps) {
   const data = useWindowsIncident(api);
   const confirm = useConfirmDialog();
   const [baselineSelection, setBaselineSelection] = useState<{ ids: string[]; session: string } | null>(null);
@@ -67,11 +70,16 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOp
     update(); narrow.addEventListener("change", update);
     return () => narrow.removeEventListener("change", update);
   }, []);
-  const [consoleOpen, setConsoleOpen] = useState(false);
-  const [dockTab, setDockTab] = useState<WindowsDockTab>("tasks");
   const [commandSuggestion, setCommandSuggestion] = useState<{ id: string; request: number } | null>(null);
-  function openDock(tab: WindowsDockTab) { setDockTab(tab); setConsoleOpen(true); }
-  useEffect(() => { if (channelOpenRequest > 0) setConsoleOpen((open) => !open); }, [channelOpenRequest]);
+  const channel = useWindowsChannel(api.windowsChannel, data, commandSuggestion, api.saveWindowsFile !== undefined);
+  function openDock(tab: WindowsChannelTab) { void channel.open(tab); }
+  const handledChannelRequest = useRef(channelOpenRequest);
+  useEffect(() => {
+    if (channelOpenRequest !== handledChannelRequest.current) {
+      handledChannelRequest.current = channelOpenRequest; openDock("tasks");
+    }
+  }, [channelOpenRequest]);
+  useImperativeHandle(ref, () => ({ beforeDeactivate: () => channel.beforeLeave(confirm.ask) }));
   const [setupOpen, setSetupOpen] = useState(false);
   const [focus, setFocus] = useState<InvestigationFocus | null>(null);
   /** The module a cross-link left, so the target can offer the way back. */
@@ -81,7 +89,7 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOp
   const attempted = useRef(new Set<string>());
   const connected = data.sessionKey !== null;
   const busy = data.busy !== null;
-  useEffect(() => { onBusyChange?.(busy); return () => onBusyChange?.(false); }, [busy, onBusyChange]);
+  useEffect(() => { onBusyChange?.(busy || channel.pending); return () => onBusyChange?.(false); }, [busy, channel.pending, onBusyChange]);
   const host = data.snapshots.overview?.hostname ?? null;
   const hasSnapshots = Object.keys(data.snapshots).length > 0;
   const showWorkspace = connected || hasSnapshots || activeTab === "desktop" || activeTab === "playbooks";
@@ -109,7 +117,6 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOp
   function navigate(tab: WindowsIncidentTab, crossLink = false) {
     if (tab === "console") { openDock("command"); return; }
     if (tab === "playbooks") setSetupOpen(false);
-    setConsoleOpen(false);
     setReturnTo(crossLink && tab !== activeTab ? { from: activeTab, to: tab } : null);
     setActiveTab(tab);
     setVisited((before) => new Set([...before, tab]));
@@ -274,7 +281,7 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOp
         </nav>
         <div className="sidebar-rail-toggle win-ir-sidebar-foot">
           <button type="button" aria-label="接入管理" aria-expanded={setupView} title="接入管理" onClick={() => setSetupOpen(!setupOpen)}><WinIrIcon name="network" size={16} /><span>接入管理</span></button>
-          <button type="button" aria-label="通道与传输" aria-expanded={consoleOpen} title="通道与传输" onClick={() => setConsoleOpen(!consoleOpen)}><WinIrIcon name="console" size={16} /><span>通道与传输</span></button>
+          <button type="button" aria-label="通道与传输" title="在独立窗口中打开通道与传输" onClick={() => openDock("tasks")}><WinIrIcon name="console" size={16} /><span>通道与传输</span></button>
           {onOpenSettings ? <button type="button" aria-label="界面设置" title="界面设置" onClick={(event) => onOpenSettings(event.currentTarget)}><WinIrIcon name="baseline" size={16} /><span>界面设置</span></button> : null}
           {onBackToWelcome ? <button type="button" data-testid="windows-back-welcome" aria-label="返回模块选择 / 切换至 Linux" title="返回模块选择 / 切换至 Linux" disabled={busy} onClick={onBackToWelcome}><span aria-hidden="true">←</span><span>切换工作台</span></button> : null}
           <button type="button" aria-label={rail ? "展开导航" : "收起导航"} aria-pressed={rail} title={rail ? "展开导航" : "收起导航"} onClick={() => setRail(!rail)}><span aria-hidden="true">{rail ? "»" : "«"}</span><span>{rail ? "展开导航" : "收起导航"}</span></button>
@@ -335,9 +342,7 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOp
           </Activity>)}
         </div> : null}
       </div>
-      <WinIrDock data={data} expanded={consoleOpen} tab={dockTab} onTab={openDock} onToggle={() => setConsoleOpen(!consoleOpen)}>
-        <WinIrConsole suggestion={commandSuggestion} panel={dockTab} status={data.status} busy={busy} sessionKey={data.sessionKey} hostname={host || "当前远程会话"} output={data.commandOutput} savedFiles={data.savedFiles} canSave={api.saveWindowsFile !== undefined} onSave={(fileId) => void data.saveFile(fileId)} onCopy={(text) => void copy(text)} onSend={data.sendChat} onRun={data.runCommand} onUnregister={() => void local("unregister-plugin", "正在移除插件注册…", "当前用户的插件注册已移除。")} />
-      </WinIrDock>
+
       {processSelection ? <WinIrProcessChange {...processSelection} currentSession={data.sessionKey} onRequest={data.baselineRequest} onClose={() => setProcessSelection(null)} onRefresh={() => void data.collect("processes")} onResult={(message, failed) => failed ? data.setError(message) : data.setNotice(message)} /> : null}
       {inventoryDetail?<WinIrInventoryDetails selection={inventoryDetail} currentSession={data.sessionKey} onRequest={data.baselineRequest} onClose={()=>setInventoryDetail(null)} onCopy={text=>void copy(text)} onAction={operation=>{if(inventoryDetail.session===data.sessionKey&&data.sessionKey&&inventoryDetail.entry.objectId&&!busy){setInventoryDetail(null);setControlSelection({kind:inventoryDetail.kind,session:data.sessionKey,action:{objectId:inventoryDetail.entry.objectId,name:inventoryDetail.entry.name,operation}});}}}/>:null}
       {controlSelection?<WinIrControlChange selection={controlSelection} currentSession={data.sessionKey} onRequest={data.baselineRequest} onClose={()=>setControlSelection(null)} onRefresh={()=>void data.collect(controlSelection.kind)} onResult={(message,failed)=>failed?data.setError(message):data.setNotice(message)}/>:null}

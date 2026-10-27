@@ -1,3 +1,4 @@
+import type { WindowsIncidentPageHandle } from "./WindowsIncidentPage";
 import { NotificationCenter, NotificationContext, NotificationOpenContext } from "./NotificationCenter";
 import {
   lazy,
@@ -161,6 +162,7 @@ export function App() {
   const [railPreferred, setRailPreferred] = useState(false);
   const [activeTarget, setActiveTarget] = useState<ActiveSshTarget | null>(null);
   const windowsBusy = useRef(false);
+  const windowsRef = useRef<WindowsIncidentPageHandle>(null);
   const acceptWindowsBusy = useCallback((busy: boolean) => { windowsBusy.current = busy; }, []);
   const [windowsChannelRequest, setWindowsChannelRequest] = useState(0);
   const [windowsTarget, setWindowsTarget] = useState<{ connected: boolean; hostname: string | null }>({ connected: false, hostname: null });
@@ -247,6 +249,7 @@ export function App() {
     if (!(await beforeSettingsTransition(settingsOpen, settingsPanelRef.current))) {
       return false;
     }
+    if (activePageId === "windows-incident" && !(await windowsRef.current?.beforeDeactivate() ?? true)) return false;
     if (activePageId === "notes") {
       return notesRef.current?.beforeDeactivate() ?? true;
     }
@@ -367,6 +370,7 @@ export function App() {
         const canDeactivate = await configurationRef.current?.beforeDeactivate() ?? true;
         if (!canDeactivate) return false;
       }
+      if (activePageId === "windows-incident" && !(await windowsRef.current?.beforeDeactivate() ?? true)) return false;
       setActivePageId(pageId);
       return true;
     } finally {
@@ -738,7 +742,7 @@ export function App() {
               api={window.lovelyhawk}
             />
           ) : activePage.id === "windows-incident" ? (
-            <WindowsIncidentPage onBusyChange={acceptWindowsBusy} onOpenSettings={openSettings} covered={overlayOpen || pageModalOpen || notificationState.notifications.length > 0} channelOpenRequest={windowsChannelRequest}
+            <WindowsIncidentPage ref={windowsRef} onBusyChange={acceptWindowsBusy} onOpenSettings={openSettings} covered={overlayOpen || pageModalOpen || notificationState.notifications.length > 0} channelOpenRequest={windowsChannelRequest}
               sidebarActions={uiPreferences.showStatusBar ? null : sidebarActions}
               api={window.lovelyhawk}
               writeClipboard={window.lovelyhawk.writeClipboard}

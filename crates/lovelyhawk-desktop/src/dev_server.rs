@@ -13,9 +13,10 @@ use tauri::{Manager, Runtime, Url};
 
 pub const DEV_SERVER_VARIABLE: &str = "LOVELYHAWK_DEV_SERVER";
 
-const CAPABILITIES: [&str; 2] = [
+const CAPABILITIES: [&str; 3] = [
     include_str!("../capabilities/main-window.json"),
     include_str!("../capabilities/child-windows.json"),
+    include_str!("../capabilities/windows-channel.json"),
 ];
 
 /// The development origin from the environment, if one is set and acceptable.
