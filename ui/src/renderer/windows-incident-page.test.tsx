@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import type { WindowsIncidentApi, WindowsProcessEntry } from "../shared/windows-incident-contract";
+import { WINDOWS_STARTUP_CATEGORIES, type WindowsIncidentApi, type WindowsProcessEntry } from "../shared/windows-incident-contract";
 import { WindowsIncidentPage } from "./WindowsIncidentPage";
 import { DataTable } from "./WinIrKit";
 import { buildWindowsTimeline, isRoutineSystemStart, WinIrTimeline } from "./WinIrEvents";
@@ -120,7 +120,7 @@ describe("Windows investigation evidence helpers", () => {
     const service = { ...process(700, 4), name: "svchost.exe", executablePath: "C:\\Windows\\System32\\svchost.exe", user: "NT AUTHORITY\\SYSTEM" };
     const snapshots = {
       processes: { totalCount: 2, suspiciousCount: 0, processes: [dropper, service] },
-      startup: { totalCount: 1, suspiciousCount: 1, entries: [{ sourceType: "registry", name: "Updater", location: "HKLM:\\Run", command: '"c:/users/public/DROPPER.exe" -silent', runAs: "", state: "", riskLevel: "high" as const, riskReason: "" }] },
+      startup: { observedAt:"2026-10-27T00:00:00Z", truncated:false, warnings:[], categories:WINDOWS_STARTUP_CATEGORIES.map(category=>({category,count:category==="logon"?1:0,status:"complete",message:"fixture"})), totalCount: 1, suspiciousCount: 1, entries: [{ category:"logon", sourceType: "registry", name: "Updater", location: "HKLM:\\Run", command: '"c:/users/public/DROPPER.exe" -silent', runAs: "", state: "", riskLevel: "high" as const, riskReason: "" }] },
       registry: { keyPath: "HKLM:\\IFEO", subkeys: [], warnings: [], values: [{ name: "Debugger", kind: "String", data: "%TEMP%\\dropper.exe", truncated: false, riskLevel: "high" as const, riskReason: "" }] },
       network: { totalCount: 1, suspiciousCount: 0, connections: [{ protocol: "TCP", localAddress: "10.0.0.5", localPort: 5000, remoteAddress: "203.0.113.7", remotePort: 443, state: "Established", pid: 1234, processName: "other.exe", processPath: "C:\\other.exe", riskLevel: "normal" as const, riskReason: "" }] },
       logs: { categoryFilter: "all", totalCount: 1, highRiskCount: 0, warnings: [], entries: [{ recordId: 7, timeCreated: "2026-10-24T09:01:00Z", channel: "Security", eventId: 4624, level: "Information", category: "Logon", summary: "登录成功", detail: "Account Name: alice\nSource Address: 203.0.113.7", detailTruncated: false, riskLevel: "normal" as const }] },
@@ -154,7 +154,7 @@ describe("Windows investigation evidence helpers", () => {
     const lastHeader = (html: string) => [...html.matchAll(/<th[^>]*>(?:<button[^>]*>)?([^<]+)/gu)].map((match) => match[1]).at(-1);
     const noop = () => undefined;
     expect(lastHeader(renderToStaticMarkup(<WinIrNetwork snapshot={{ totalCount: 1, suspiciousCount: 0, connections: [{ protocol: "TCP", localAddress: "0.0.0.0", localPort: 1, remoteAddress: "0.0.0.0", remotePort: 0, state: "Listen", pid: 4, processName: "System", processPath: "", riskLevel: "normal", riskReason: "" }] }} focus={null} onCopy={noop} onProcess={noop} onFile={noop} />))).toBe("风险");
-    expect(lastHeader(renderToStaticMarkup(<WinIrStartup snapshot={{ totalCount: 1, suspiciousCount: 0, entries: [{ sourceType: "service", name: "x", location: "", command: "", runAs: "", state: "", riskLevel: "normal", riskReason: "" }] }} onCopy={noop} onFile={noop} onRegistry={noop} />))).toBe("风险");
+    expect(lastHeader(renderToStaticMarkup(<WinIrStartup snapshot={{ observedAt:"2026-10-27T00:00:00Z", truncated:false, warnings:[], categories:WINDOWS_STARTUP_CATEGORIES.map(category=>({category,count:category==="services"?1:0,status:"complete",message:"fixture"})), totalCount: 1, suspiciousCount: 0, entries: [{ category:"services", sourceType: "service", name: "x", location: "", command: "", runAs: "", state: "", riskLevel: "normal", riskReason: "" }] }} onCopy={noop} onFile={noop} onRegistry={noop} />))).toBe("风险");
     expect(lastHeader(renderToStaticMarkup(<WinIrAccounts snapshot={{ totalCount: 1, adminCount: 0, suspiciousCount: 0, accounts: [{ name: "a", fullName: "", enabled: true, isAdmin: false, sid: "S-1", rid: 1, lastLogon: "", passwordRequired: true, passwordExpires: true, riskLevel: "normal", riskReasons: [] }] }} onCopy={noop} onLogs={noop} />))).toBe("风险");
     expect(lastHeader(renderToStaticMarkup(<WinIrBaseline snapshot={{ totalChecks: 1, passedCount: 1, failedCount: 0, warningCount: 0, unknownCount: 0, notApplicableCount: 0, items: [{ id: "a", remediationAvailable: false, category: "c", title: "t", currentValue: "", expectedValue: "", status: "pass", severity: "normal", description: "", recommendation: "" }] }} onCopy={noop} />))).toBe("结果");
     expect(lastHeader(renderToStaticMarkup(<WinIrTimeline snapshots={{ processes: { totalCount: 1, suspiciousCount: 0, processes: [{ ...process(1), startTime: "2026-10-24T09:00:00Z" }] } }} onCopy={noop} onGo={noop} />))).toBe("风险");

@@ -29,6 +29,10 @@ export type WindowsRemoteIntent =
   | { action: "baseline-history" }
   | { action: "plan-baseline-restore"; recordId: string }
   | { action: "collect-inventory"; kind: WindowsInventoryKind }
+  | { action: "plan-control"; objectId: string; operation: WindowsControlOperation }
+  | { action: "apply-control" | "discard-control-plan"; planId: string }
+  | { action: "control-history" }
+  | { action: "plan-control-restore"; recordId: string }
   | { action: "plan-process-change"; pid: number; startTime: string; tree: boolean }
   | { action: "apply-process-plan" | "discard-process-plan"; planId: string }
   | { action: "kill-process"; pid: number; startTime: string }
@@ -180,7 +184,11 @@ export interface WindowsNetworkSnapshot {
   connections: WindowsNetworkEntry[];
 }
 
+export const WINDOWS_STARTUP_CATEGORIES = ["logon","explorer","internet-explorer","services","drivers","codecs","winsock","print","lsa","network","boot-execute","image-hijacks","app-init","known-dlls","winlogon","ime","tasks","gadgets","folder-extensions"] as const;
+export type WindowsStartupCategory = typeof WINDOWS_STARTUP_CATEGORIES[number];
+export interface WindowsStartupCategoryResult { category: WindowsStartupCategory; count: number; status: "complete" | "partial" | "unavailable"; message: string }
 export interface WindowsStartupEntry {
+  category: WindowsStartupCategory;
   sourceType: string;
   name: string;
   location: string;
@@ -195,6 +203,10 @@ export interface WindowsStartupSnapshot {
   totalCount: number;
   suspiciousCount: number;
   entries: WindowsStartupEntry[];
+  categories: WindowsStartupCategoryResult[];
+  warnings: string[];
+  observedAt: string;
+  truncated: boolean;
 }
 
 export interface WindowsAccountEntry {
@@ -294,12 +306,19 @@ export type WindowsBaselineChangeState = "pending" | "applying" | "verified" | "
 export interface WindowsBaselineChangeReport { id: string; target: string; createdAt: number; restoring: boolean; finished: boolean; recoveryAvailable: boolean; items: { id: string; title: string; state: WindowsBaselineChangeState }[]; message: string }
 
 export type WindowsInventoryKind = "services" | "drivers" | "tasks";
-export interface WindowsInventoryEntry { name: string; displayName: string; location: string; command: string; account: string; state: string; startMode: string; pid: number; details: string[]; riskLevel: WindowsRiskLevel; riskReason: string }
+export interface WindowsInventoryEntry { objectId: string | null; name: string; displayName: string; location: string; command: string; account: string; state: string; startMode: string; pid: number; details: string[]; riskLevel: WindowsRiskLevel; riskReason: string }
 export interface WindowsInventorySnapshot { kind: WindowsInventoryKind; observedAt: string; totalCount: number; truncated: boolean; warnings: string[]; entries: WindowsInventoryEntry[] }
 export interface WindowsProcessPlan { id: string; target: string; expiresAt: number; tree: boolean; items: { pid: number; ppid: number; name: string; startTime: string }[] }
 export interface WindowsProcessChangeReport { id: string; items: { pid: number; state: "verified" | "refused" | "failed" | "skipped" | "uncertain" }[]; message: string }
+export const WINDOWS_CONTROL_OPERATIONS = ["start","stop","restart","automatic","manual","enable","disable","run"] as const;
+export type WindowsControlOperation = typeof WINDOWS_CONTROL_OPERATIONS[number];
+export interface WindowsControlPlan { id: string; target: string; kind: WindowsInventoryKind; name: string; operation: WindowsControlOperation; command: string; currentState: string; beforeSetting: string; afterSetting: string; impact: string[]; restoring: boolean; expiresAt: number }
+export interface WindowsControlReport { id: string; target: string; kind: WindowsInventoryKind; name: string; operation: WindowsControlOperation; state: "verified" | "submitted" | "refused" | "uncertain"; message: string; canRestore: boolean; createdAt: number }
 
 export type WindowsIncidentResponse =
+  | { kind: "control-plan"; plan: WindowsControlPlan }
+  | { kind: "control-report"; report: WindowsControlReport }
+  | { kind: "control-history"; records: WindowsControlReport[] }
   | { kind: "inventory"; snapshot: WindowsInventorySnapshot }
   | { kind: "process-plan"; plan: WindowsProcessPlan }
   | { kind: "process-change"; report: WindowsProcessChangeReport }
@@ -433,6 +452,10 @@ export function isWindowsIncidentRequest(value: unknown): value is WindowsIncide
         !value.keyPath.includes("\r")
       );
     case "collect-inventory": return keys("kind") && ["services","drivers","tasks"].includes(value.kind as string);
+    case "plan-control": return keys("objectId","operation") && isWindowsFileId(value.objectId) && controlOperation(value.operation);
+    case "apply-control": case "discard-control-plan": return keys("planId") && isWindowsFileId(value.planId);
+    case "control-history": return keys();
+    case "plan-control-restore": return keys("recordId") && isWindowsFileId(value.recordId);
     case "apply-process-plan": case "discard-process-plan": return keys("planId") && isWindowsFileId(value.planId);
     case "plan-process-change":
       return keys("pid","startTime","tree") && typeof value.tree === "boolean" && isWindowsIncidentRequest({action:"kill-process",pid:value.pid,startTime:value.startTime,sessionId:value.sessionId});
@@ -556,13 +579,22 @@ const checkInspection = object({
   network: list(object({ protocol: shortText, localAddress: shortText, localPort: port, remoteAddress: shortText, remotePort: port, state: shortText, pid: uint, processName: shortText, processPath: text, riskLevel: risk, riskReason: shortText }), 2048),
   warnings: reasonList,
 });
-const checkStartup = object({
+const startupCategory: Check = (v) => typeof v === "string" && (WINDOWS_STARTUP_CATEGORIES as readonly string[]).includes(v);
+const checkStartupShape = object({
   totalCount: uint, suspiciousCount: uint,
   entries: list(object({
+    category: startupCategory,
     sourceType: shortText, name: shortText, location: text, command: text, runAs: shortText, state: shortText,
     riskLevel: risk, riskReason: shortText,
-  }), 8192),
+  }), 4000),
+  observedAt: shortText, truncated: boolean, warnings: reasonList,
+  categories: list(object({category:startupCategory,count:uint,status:(v)=>["complete","partial","unavailable"].includes(v as string),message:shortText}),19),
 });
+const checkStartup: Check = (value) => {
+  if (!checkStartupShape(value)) return false;
+  const s=value as WindowsStartupSnapshot;
+  return Number.isFinite(Date.parse(s.observedAt)) && s.totalCount===s.entries.length && s.categories.length===19 && new Set(s.categories.map(c=>c.category)).size===19 && s.categories.every(c=>c.count===s.entries.filter(e=>e.category===c.category).length);
+};
 const checkAccounts = object({
   totalCount: uint, adminCount: uint, suspiciousCount: uint,
   accounts: list(object({
@@ -616,8 +648,13 @@ export function matchesWindowsIncidentResponse(
   value: unknown,
 ): value is WindowsIncidentResponse {
   if (!isRecord(value) || typeof value.kind !== "string") return false;
-  if (["plan-process-change", "apply-process-plan", "discard-process-plan", "plan-baseline", "apply-baseline-plan", "discard-baseline-plan", "cancel-baseline-plan", "baseline-plan-progress", "baseline-history", "plan-baseline-restore"].includes(request.action) && value.kind === "baseline-change-error") return exactKeys(value,["kind","message"]) && isBoundedText(value.message,2048);
+  if (["plan-control","apply-control","discard-control-plan","control-history","plan-control-restore","plan-process-change", "apply-process-plan", "discard-process-plan", "plan-baseline", "apply-baseline-plan", "discard-baseline-plan", "cancel-baseline-plan", "baseline-plan-progress", "baseline-history", "plan-baseline-restore"].includes(request.action) && value.kind === "baseline-change-error") return exactKeys(value,["kind","message"]) && isBoundedText(value.message,2048);
   switch (request.action) {
+    case "plan-control": return value.kind==="control-plan" && exactKeys(value,["kind","plan"]) && isWindowsControlPlan(value.plan) && !value.plan.restoring && value.plan.operation===request.operation;
+    case "plan-control-restore": return value.kind==="control-plan" && exactKeys(value,["kind","plan"]) && isWindowsControlPlan(value.plan) && value.plan.restoring;
+    case "apply-control": return value.kind==="control-report" && exactKeys(value,["kind","report"]) && isWindowsControlReport(value.report) && value.report.id===request.planId;
+    case "discard-control-plan": return value.kind==="baseline-acknowledged" && exactKeys(value,["kind","accepted"]) && value.accepted===true;
+    case "control-history": return value.kind==="control-history" && exactKeys(value,["kind","records"]) && list(isWindowsControlReport,100)(value.records);
     case "collect-inventory": return value.kind === "inventory" && exactKeys(value,["kind","snapshot"]) && isWindowsInventorySnapshot(value.snapshot) && value.snapshot.kind === request.kind;
     case "plan-process-change": return value.kind === "process-plan" && exactKeys(value,["kind","plan"]) && isWindowsProcessPlan(value.plan) && value.plan.tree === request.tree && value.plan.items[0]?.pid === request.pid && value.plan.items[0]?.startTime === request.startTime;
     case "apply-process-plan": return value.kind === "process-change" && exactKeys(value,["kind","report"]) && isWindowsProcessChangeReport(value.report) && value.report.id === request.planId;
@@ -713,5 +750,14 @@ export function isWindowsProcessChangeReport(value: unknown): value is WindowsPr
 export function isWindowsInventorySnapshot(value: unknown): value is WindowsInventorySnapshot {
   if (!isRecord(value) || !exactKeys(value,["kind","observedAt","totalCount","truncated","warnings","entries"]) || !["services","drivers","tasks"].includes(value.kind as string) || !isBoundedText(value.observedAt,64) || !Number.isFinite(Date.parse(value.observedAt)) || !uint(value.totalCount) || typeof value.truncated !== "boolean" || !list((v) => isBoundedText(v,1024),32)(value.warnings) || !Array.isArray(value.entries) || value.entries.length > 2000 || (value.totalCount as number) < value.entries.length) return false;
   if ((value.totalCount as number) !== value.entries.length && !value.truncated && (value.warnings as string[]).length === 0) return false;
-  return value.entries.every(object({name:(v)=>isBoundedText(v,1024),displayName:(v)=>isBoundedText(v,1024,true),location:(v)=>isBoundedText(v,2048,true),command:(v)=>isBoundedText(v,8192,true),account:(v)=>isBoundedText(v,1024,true),state:(v)=>isBoundedText(v,256,true),startMode:(v)=>isBoundedText(v,256,true),pid:uint,details:list((v)=>isBoundedText(v,4096,true),32),riskLevel:risk,riskReason:(v)=>isBoundedText(v,1024,true)}));
+  return value.entries.every(object({objectId:nullable(isWindowsFileId),name:(v)=>isBoundedText(v,1024),displayName:(v)=>isBoundedText(v,1024,true),location:(v)=>isBoundedText(v,2048,true),command:(v)=>isBoundedText(v,8192,true),account:(v)=>isBoundedText(v,1024,true),state:(v)=>isBoundedText(v,256,true),startMode:(v)=>isBoundedText(v,256,true),pid:uint,details:list((v)=>isBoundedText(v,4096,true),32),riskLevel:risk,riskReason:(v)=>isBoundedText(v,1024,true)}));
+}
+function controlOperation(value:unknown): value is WindowsControlOperation {return typeof value==="string" && (WINDOWS_CONTROL_OPERATIONS as readonly string[]).includes(value);}
+function controlKind(value:unknown): value is WindowsInventoryKind {return typeof value==="string" && ["services","drivers","tasks"].includes(value);}
+function validControlOperation(kind: WindowsInventoryKind, operation: WindowsControlOperation): boolean { return (kind==="tasks"?["run","stop","enable","disable"]:["start","stop","restart","automatic","manual","disable"]).includes(operation); }
+export function isWindowsControlPlan(value:unknown):value is WindowsControlPlan {
+  return isRecord(value)&&exactKeys(value,["id","target","kind","name","operation","command","currentState","beforeSetting","afterSetting","impact","restoring","expiresAt"])&&isWindowsFileId(value.id)&&isBoundedText(value.target,255)&&controlKind(value.kind)&&isBoundedText(value.name,1024)&&controlOperation(value.operation)&&validControlOperation(value.kind,value.operation)&&isBoundedText(value.command,8192,true)&&isBoundedText(value.currentState,64,true)&&isBoundedText(value.beforeSetting,256)&&isBoundedText(value.afterSetting,256)&&list((v)=>isBoundedText(v,2048),12)(value.impact)&&typeof value.restoring==="boolean"&&(!value.restoring||["automatic","manual","enable","disable"].includes(value.operation))&&isEpoch(value.expiresAt);
+}
+export function isWindowsControlReport(value:unknown):value is WindowsControlReport {
+  return isRecord(value)&&exactKeys(value,["id","target","kind","name","operation","state","message","canRestore","createdAt"])&&isWindowsFileId(value.id)&&isBoundedText(value.target,255)&&controlKind(value.kind)&&isBoundedText(value.name,1024)&&controlOperation(value.operation)&&validControlOperation(value.kind,value.operation)&&["verified","submitted","refused","uncertain"].includes(value.state as string)&&(value.state!=="submitted"||value.kind==="tasks"&&value.operation==="run")&&!(value.operation==="run"&&value.state==="verified")&&isBoundedText(value.message,2048)&&typeof value.canRestore==="boolean"&&(!value.canRestore||value.state==="verified"&&["automatic","manual","enable","disable"].includes(value.operation))&&isEpoch(value.createdAt);
 }

@@ -9,6 +9,7 @@ import type {
   WindowsProcessesSnapshot,
   WindowsRegistrySnapshot,
   WindowsStartupSnapshot,
+  WindowsStartupCategory,
 } from "../shared/windows-incident-contract";
 
 export interface WinIrSnapshots {
@@ -108,6 +109,12 @@ export const STARTUP_SOURCE_LABELS: Readonly<Record<string, string>> = {
   "scheduled-task": "计划任务",
   service: "服务",
   services: "服务",
+  driver: "驱动服务",
+  "settings-file": "设置文件",
+};
+
+export const STARTUP_CATEGORY_LABELS: Record<WindowsStartupCategory, string> = {
+  logon:"登录", explorer:"资源管理器", "internet-explorer":"Internet Explorer", services:"系统服务", drivers:"驱动服务", codecs:"编解码器", winsock:"Winsock", print:"打印", lsa:"LSA 提供者", network:"网络", "boot-execute":"启动执行", "image-hijacks":"映像劫持", "app-init":"程序初始化", "known-dlls":"KnownDlls", winlogon:"Winlogon", ime:"输入法", tasks:"计划任务", gadgets:"小工具", "folder-extensions":"Folder Extensions",
 };
 
 export function startupSourceLabel(source: string): string {

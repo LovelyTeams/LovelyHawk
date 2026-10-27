@@ -3,7 +3,7 @@ import type { WindowsRdpRequest, WindowsRdpStatus } from "../src/shared/windows-
 // CDP in an isolated native window. It is never imported by the application.
 import { createRoot } from "react-dom/client";
 import { WindowsIncidentPage } from "../src/renderer/WindowsIncidentPage";
-import { matchesWindowsIncidentResponse, type WindowsProcessPlan, type WindowsInventoryKind, type WindowsInventorySnapshot, type WindowsBaselineChangePlan, type WindowsBaselineChangeReport, type DvcRuntimeStatus, type WindowsIncidentApi, type WindowsIncidentRequest, type WindowsIncidentResponse, type WindowsProcessEntry } from "../src/shared/windows-incident-contract";
+import { WINDOWS_STARTUP_CATEGORIES, type WindowsControlPlan, type WindowsControlReport, matchesWindowsIncidentResponse, type WindowsProcessPlan, type WindowsInventoryKind, type WindowsInventorySnapshot, type WindowsBaselineChangePlan, type WindowsBaselineChangeReport, type DvcRuntimeStatus, type WindowsIncidentApi, type WindowsIncidentRequest, type WindowsIncidentResponse, type WindowsProcessEntry } from "../src/shared/windows-incident-contract";
 import type { WinIrSnapshots } from "../src/renderer/win-ir-model";
 
 const firstSession = "00000000-0000-4000-8000-000000000001";
@@ -40,7 +40,7 @@ export function mount() {
       riskLevel: "high", riskReasons: ["编码 PowerShell 参数；需要核对父进程和启动来源。"] },
     ...Array.from({ length: 236 }, (_, index) => sampleProcess(1100 + index, 468, `worker-${String(index).padStart(3, "0")}.exe`)),
   ];
-  const inventory = (kind: WindowsInventoryKind): WindowsInventorySnapshot => ({kind,observedAt:stamp,totalCount:2,truncated:false,warnings:[],entries:[{name:`fixture-${kind}`,displayName:"Synthetic inventory",location:kind==="tasks"?"\\Fixture\\":`HKLM:\\SYSTEM\\CurrentControlSet\\Services\\fixture-${kind}`,command:"C:\\Users\\Public\\fixture.exe",account:"LocalSystem",state:"Running",startMode:"Auto",pid:kind==="services"?640:0,details:["Synthetic fixture only", "触发器：登录 · 操作：fixture.exe"],riskLevel:"medium",riskReason:"测试线索"},{name:`disabled-${kind}`,displayName:"Disabled fixture",location:"fixture",command:"",account:"",state:"Disabled",startMode:"Disabled",pid:0,details:[],riskLevel:"normal",riskReason:""}]});
+  const inventory = (kind: WindowsInventoryKind): WindowsInventorySnapshot => ({kind,observedAt:stamp,totalCount:2,truncated:false,warnings:[],entries:[{objectId:crypto.randomUUID(),name:`fixture-${kind}`,displayName:"Synthetic inventory",location:kind==="tasks"?"\\Fixture\\":`HKLM:\\SYSTEM\\CurrentControlSet\\Services\\fixture-${kind}`,command:"C:\\Users\\Public\\fixture.exe",account:"LocalSystem",state:"Running",startMode:"Auto",pid:kind==="services"?640:0,details:["Synthetic fixture only", "触发器：登录 · 操作：fixture.exe"],riskLevel:"medium",riskReason:"测试线索"},{objectId:crypto.randomUUID(),name:`disabled-${kind}`,displayName:"Disabled fixture",location:"fixture",command:"",account:"",state:"Disabled",startMode:"Disabled",pid:0,details:[],riskLevel:"normal",riskReason:""}]});
   const snapshots: Omit<WinIrSnapshots, "files" | "registry"> = {
     services:inventory("services"),drivers:inventory("drivers"),tasks:inventory("tasks"),
     overview: {
@@ -65,9 +65,9 @@ export function mount() {
       { protocol: "TCP", localAddress: "10.10.0.5", localPort: 53432, remoteAddress: "1.1.1.1", remotePort: 443, state: "Established", pid: 900, processName: "powershell.exe", processPath: "C:\\Users\\Public\\dropper.exe", riskLevel: "high", riskReason: "需结合进程上下文核实外联。" },
       { protocol: "TCP", localAddress: "0.0.0.0", localPort: 3389, remoteAddress: "0.0.0.0", remotePort: 0, state: "Listen", pid: 640, processName: "svchost.exe", processPath: "C:\\Windows\\System32\\svchost.exe", riskLevel: "normal", riskReason: "" },
     ] },
-    startup: { totalCount: 2, suspiciousCount: 1, entries: [
-      { sourceType: "Registry Run", name: "System Update", location: "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", command: "C:\\Users\\Public\\dropper.exe", runAs: "", state: "启用", riskLevel: "high", riskReason: "启动路径位于用户可写目录，需核实来源。" },
-      { sourceType: "Service", name: "WinDefend", location: "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\WinDefend", command: "C:\\Program Files\\Windows Defender\\MsMpEng.exe", runAs: "LocalSystem", state: "Running", riskLevel: "normal", riskReason: "" },
+    startup: { observedAt:stamp,truncated:false,warnings:[],categories:WINDOWS_STARTUP_CATEGORIES.map(category=>({category,count:["logon","services"].includes(category)?1:0,status:"complete",message:"合成数据：只用于界面验证。"})),totalCount: 2, suspiciousCount: 1, entries: [
+      { category:"logon", sourceType: "registry", name: "System Update", location: "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", command: "C:\\Users\\Public\\dropper.exe", runAs: "", state: "启用", riskLevel: "high", riskReason: "启动路径位于用户可写目录，需核实来源。" },
+      { category:"services", sourceType: "service", name: "fixture-services", location: "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\fixture-services", command: "C:\\Program Files\\Windows Defender\\MsMpEng.exe", runAs: "LocalSystem", state: "Running", riskLevel: "normal", riskReason: "" },
     ] },
     accounts: { totalCount: 2, adminCount: 1, suspiciousCount: 1, accounts: [
       { name: "support$", fullName: "", enabled: true, isAdmin: true, sid: "S-1-5-21-1001", rid: 1001, lastLogon: stamp, passwordRequired: true, passwordExpires: false, riskLevel: "high", riskReasons: ["名称带 $ 的本地管理员，需要核实创建来源。"] },
@@ -96,6 +96,8 @@ export function mount() {
   let failAction = "";
   let delayAction = "";
   let release: (() => void) | undefined;
+  const controlPlans = new Map<string, WindowsControlPlan>();
+  const controlHistory: WindowsControlReport[] = [];
   const processPlans = new Map<string, WindowsProcessPlan>();
   const baselinePlans = new Map<string, WindowsBaselineChangePlan>();
   const baselineHistory: WindowsBaselineChangeReport[] = [];
@@ -136,6 +138,25 @@ export function mount() {
           response = { kind: "logs", snapshot: { ...snapshots.logs, categoryFilter: request.category, totalCount: entries.length, highRiskCount: entries.filter((entry) => entry.riskLevel === "high").length, entries } }; break;
         }
         case "collect-inventory": response={kind:"inventory",snapshot:snapshots[request.kind]}; break;
+        case "plan-control": {
+          const kind=(["services","drivers","tasks"] as const).find(k=>snapshots[k].entries.some(e=>e.objectId===request.objectId));
+          if(!kind) throw new Error("对象过期");
+          const entry=snapshots[kind].entries.find(e=>e.objectId===request.objectId)!;
+          const plan:WindowsControlPlan={id:crypto.randomUUID(),target:snapshots.overview.hostname,kind,name:entry.name,operation:request.operation,command:entry.command,currentState:entry.state,beforeSetting:"自动",afterSetting:request.operation,impact:["合成界面测试，不操作实际主机。","仅所选对象，不级联处置依赖项。"],restoring:false,expiresAt:Math.floor(Date.now()/1000)+120};
+          controlPlans.clear();controlPlans.set(plan.id,plan);response={kind:"control-plan",plan};break;
+        }
+        case "apply-control": {
+          const plan=controlPlans.get(request.planId);if(!plan) throw new Error("计划已使用");controlPlans.delete(request.planId);
+          const report:WindowsControlReport={id:plan.id,target:plan.target,kind:plan.kind,name:plan.name,operation:plan.operation,state:plan.operation==="run"?"submitted":"verified",message:plan.operation==="run"?"调度器已接受请求，仍需复查任务结果。":"合成测试：已核实操作结果。",canRestore:!plan.restoring&&["manual","automatic","disable","enable"].includes(plan.operation),createdAt:Math.floor(Date.now()/1000)};
+          controlHistory.push(report);response={kind:"control-report",report};break;
+        }
+        case "discard-control-plan": controlPlans.delete(request.planId);response={kind:"baseline-acknowledged",accepted:true};break;
+        case "control-history": response={kind:"control-history",records:controlHistory};break;
+        case "plan-control-restore": {
+          const record=controlHistory.find(r=>r.id===request.recordId);if(!record?.canRestore)throw new Error("不可恢复");
+          const plan:WindowsControlPlan={id:crypto.randomUUID(),target:record.target,kind:record.kind,name:record.name,operation:record.kind==="tasks"?"enable":"automatic",command:"fixture",currentState:"Running",beforeSetting:"已修改",afterSetting:"原配置",impact:["恢复配置不等于业务恢复。"],restoring:true,expiresAt:Math.floor(Date.now()/1000)+120};
+          controlPlans.set(plan.id,plan);response={kind:"control-plan",plan};break;
+        }
         case "plan-process-change": {
           const process=snapshots.processes.processes.find((p)=>p.pid===request.pid && p.startTime===request.startTime); if(!process) throw new Error("进程已变化");
           const plan:WindowsProcessPlan={id:crypto.randomUUID(),target:snapshots.overview.hostname,tree:request.tree,expiresAt:Math.floor(Date.now()/1000)+120,items:[{pid:process.pid,ppid:process.ppid,name:process.name,startTime:process.startTime},...(request.tree?[{pid:999,ppid:process.pid,name:"fixture-child.exe",startTime:"2026-10-24T09:30:01+08:00"}]:[])]};
@@ -187,6 +208,7 @@ export function mount() {
             entries: snapshots.startup.entries.filter((e) => !(e.name === request.name && e.location === request.location)),
             totalCount: Math.max(0, snapshots.startup.totalCount - 1),
           };
+          snapshots.startup.categories=snapshots.startup.categories.map(c=>({...c,count:snapshots.startup.entries.filter(e=>e.category===c.category).length}));
           response = { kind: "startup", snapshot: snapshots.startup }; break;
         case "collect-accounts": response = { kind: "accounts", snapshot: snapshots.accounts }; break;
         case "disable-account":

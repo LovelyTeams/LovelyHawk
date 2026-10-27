@@ -22,6 +22,8 @@ impl WindowsInventoryKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WindowsInventoryEntry {
+    #[serde(default)]
+    pub object_id: Option<String>,
     pub name: String,
     pub display_name: String,
     pub location: String,
@@ -112,8 +114,10 @@ impl WindowsIncidentService {
     ) -> CoreResult<WindowsInventorySnapshot> {
         let script = include_str!("inventory.ps1").replace("__KIND__", kind.key());
         let raw =
-            self.run_native_or_ps(&format!("inventory-v1:{}", kind.key()), &script, session)?;
-        parse_inventory_json(&raw, kind)
+            self.run_native_or_ps(&format!("inventory-v2:{}", kind.key()), &script, session)?;
+        let mut snapshot = parse_inventory_json(&raw, kind)?;
+        self.bind_inventory(&mut snapshot, session);
+        Ok(snapshot)
     }
 }
 

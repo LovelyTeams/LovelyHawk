@@ -3,8 +3,25 @@ import { describe, expect, it } from "vitest";
 import {
   isWindowsIncidentRequest,
   matchesWindowsIncidentResponse,
+  WINDOWS_STARTUP_CATEGORIES,
 } from "./windows-incident-contract";
 const sessionId = "00000000-0000-4000-8000-000000000001";
+
+it("requires all startup categories and distinguishes incomplete coverage from empty data", () => {
+  const request={action:"collect-startup",sessionId} as const;
+  const snapshot={observedAt:"2026-10-27T00:00:00Z",truncated:false,warnings:[],totalCount:0,suspiciousCount:0,entries:[],categories:WINDOWS_STARTUP_CATEGORIES.map(category=>({category,count:0,status:"unavailable",message:"权限不足"}))};
+  expect(matchesWindowsIncidentResponse(request,{kind:"startup",snapshot})).toBe(true);
+  for(const changed of [{...snapshot,categories:[]},{...snapshot,categories:snapshot.categories.map((c,i)=>i===0?{...c,count:1}:c)},{...snapshot,categories:snapshot.categories.map(()=>snapshot.categories[0])},{...snapshot,observedAt:"unknown"}]) expect(matchesWindowsIncidentResponse(request,{kind:"startup",snapshot:changed})).toBe(false);
+});
+it("binds controls to captured ids and refuses invented scope or false task success", () => {
+  const request={action:"plan-control",sessionId,objectId:sessionId,operation:"stop"} as const;
+  expect(isWindowsIncidentRequest(request)).toBe(true);
+  for(const bad of [{...request,name:"RpcSs"},{...request,force:true},{...request,operation:"delete"},{...request,objectId:"service-name"},{action:"apply-control",sessionId,planId:sessionId,operation:"stop"}]) expect(isWindowsIncidentRequest(bad)).toBe(false);
+  const apply={action:"apply-control",sessionId,planId:sessionId} as const;
+  const report={id:sessionId,target:"lab",kind:"tasks",name:"owned",operation:"run",state:"submitted",message:"已接受请求",canRestore:false,createdAt:1790000000};
+  expect(matchesWindowsIncidentResponse(apply,{kind:"control-report",report})).toBe(true);
+  for(const bad of [{...report,state:"verified"},{...report,kind:"drivers"},{...report,canRestore:true},{...report,operation:"restart"},{...report,configHash:"private"}]) expect(matchesWindowsIncidentResponse(apply,{kind:"control-report",report:bad})).toBe(false);
+});
 
 describe("windows-incident contract", () => {
   it("keeps unknown and inapplicable baseline results out of pass counts and repair actions", () => {

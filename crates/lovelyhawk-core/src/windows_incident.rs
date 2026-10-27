@@ -20,17 +20,25 @@ use serde::{Deserialize, Serialize};
 use crate::{CoreError, CoreResult};
 mod baseline;
 mod baseline_change;
+mod control;
 mod inventory;
 mod process_change;
+mod script_transport;
+mod startup_catalog;
 pub use baseline_change::{
     BaselineChangeItem, BaselineChangePlan, BaselineChangeReport, BaselineChangeState,
     BaselinePlanItem, baseline_change_supported,
 };
+pub use control::{ControlOperation, ControlPlan, ControlReport, ControlResultState};
 pub use inventory::{
     WindowsInventoryEntry, WindowsInventoryKind, WindowsInventorySnapshot, parse_inventory_json,
 };
 pub use process_change::{
     ProcessChangeItem, ProcessChangePlan, ProcessChangeReport, ProcessChangeState, ProcessPlanItem,
+};
+pub use startup_catalog::{
+    STARTUP_CATEGORIES, StartupCategory, StartupCategoryResult, StartupCoverage,
+    parse_startup_catalog,
 };
 
 const DEFAULT_COLLECTION_TIMEOUT: Duration = Duration::from_secs(45);
@@ -229,6 +237,8 @@ pub struct WindowsNetworkSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WindowsStartupEntry {
+    #[serde(default)]
+    pub category: StartupCategory,
     pub source_type: String,
     pub name: String,
     pub location: String,
@@ -246,6 +256,10 @@ pub struct WindowsStartupSnapshot {
     pub total_count: u32,
     pub suspicious_count: u32,
     pub entries: Vec<WindowsStartupEntry>,
+    pub categories: Vec<StartupCategoryResult>,
+    pub warnings: Vec<String>,
+    pub observed_at: String,
+    pub truncated: bool,
 }
 
 /// One local Windows user account with security posture flags.
@@ -413,6 +427,7 @@ pub struct WindowsIncidentService {
     baseline_store: Option<crate::store::PortableStore>,
     baseline_changes: std::sync::Arc<baseline_change::BaselineChanges>,
     process_changes: std::sync::Arc<process_change::ProcessChanges>,
+    control_changes: std::sync::Arc<control::ControlChanges>,
 }
 
 impl WindowsIncidentService {
@@ -753,8 +768,7 @@ impl WindowsIncidentService {
     }
 
     pub fn collect_startup(&self, session_id: &str) -> CoreResult<WindowsStartupSnapshot> {
-        let json_str = self.run_native_or_ps("startup", PS_COLLECT_STARTUP, session_id)?;
-        parse_startup_json(&json_str)
+        self.collect_startup_catalog(session_id)
     }
 
     pub fn collect_accounts(&self, session_id: &str) -> CoreResult<WindowsAccountsSnapshot> {
@@ -2373,62 +2387,12 @@ fn evaluate_network_risk(
     (WindowsRiskLevel::Normal, String::new())
 }
 
-const PS_COLLECT_STARTUP: &str = r#"
-$items = New-Object System.Collections.Generic.List[object]
-$runKeys = @(
-  'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run',
-  'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce',
-  'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run',
-  'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce'
-)
-foreach ($rk in $runKeys) {
-  if (Test-Path $rk) {
-    $props = Get-ItemProperty $rk
-    foreach ($p in $props.PSObject.Properties) {
-      if ($p.Name -notin @('PSPath','PSParentPath','PSChildName','PSDrive','PSProvider')) {
-        $items.Add([ordered]@{
-          sourceType = 'registry'
-          name = [string]$p.Name
-          location = $rk
-          command = [string]$p.Value
-          runAs = ''
-          state = 'Enabled'
-        })
-      }
-    }
-  }
-}
-$wmiStart = Get-CimInstance Win32_StartupCommand | Select-Object -First 20
-foreach ($s in $wmiStart) {
-  $items.Add([ordered]@{
-    sourceType = 'startup-folder'
-    name = [string]$s.Name
-    location = [string]$s.Location
-    command = [string]$s.Command
-    runAs = [string]$s.User
-    state = 'Enabled'
-  })
-}
-$tasks = Get-ScheduledTask | Where-Object { $_.TaskPath -notlike '\Microsoft\*' -and $_.State -ne 'Disabled' } | Select-Object -First 15
-foreach ($t in $tasks) {
-  $act = ($t.Actions | Select-Object -First 1)
-  $cmd = if ($null -ne $act) { "$($act.Execute) $($act.Arguments)".Trim() } else { '' }
-  $items.Add([ordered]@{
-    sourceType = 'scheduled-task'
-    name = [string]$t.TaskName
-    location = [string]$t.TaskPath
-    command = $cmd
-    runAs = [string]$t.Principal.UserId
-    state = [string]$t.State
-  })
-}
-@($items | Select-Object -First 45) | ConvertTo-Json -Compress
-"#;
-
 pub fn parse_startup_json(json_str: &str) -> CoreResult<WindowsStartupSnapshot> {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct RawStartup {
+        #[serde(default)]
+        category: StartupCategory,
         #[serde(default)]
         source_type: String,
         #[serde(default)]
@@ -2473,6 +2437,7 @@ pub fn parse_startup_json(json_str: &str) -> CoreResult<WindowsStartupSnapshot> 
         };
 
         entries.push(WindowsStartupEntry {
+            category: item.category,
             source_type: item.source_type,
             name: item.name,
             location: item.location,
@@ -2488,6 +2453,10 @@ pub fn parse_startup_json(json_str: &str) -> CoreResult<WindowsStartupSnapshot> 
         total_count: entries.len() as u32,
         suspicious_count,
         entries,
+        categories: Vec::new(),
+        warnings: vec!["旧采集格式没有分类覆盖信息，不代表完整启动项清单。".into()],
+        observed_at: String::new(),
+        truncated: true,
     })
 }
 

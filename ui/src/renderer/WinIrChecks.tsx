@@ -3,12 +3,14 @@ import { useMemo, useState } from "react";
 import type {
   WindowsAccountEntry, WindowsAccountsSnapshot, WindowsBaselineItem, WindowsBaselineSnapshot,
   WindowsStartupEntry, WindowsStartupSnapshot,
+  WindowsStartupCategory, WindowsInventoryKind,
 } from "../shared/windows-incident-contract";
+import { WINDOWS_STARTUP_CATEGORIES } from "../shared/windows-incident-contract";
 import { DataTable, DetailPane, FilterChips, RiskBadge, RiskCell, SearchBox, StatStrip, riskChipOptions, riskSort, useFocusRequest, type Column } from "./WinIrKit";
 import { WinIrRelated, type RelatedContext } from "./WinIrRelated";
 import { commandExecutable, matchesQuery, riskCounts, toCsv, type RiskFilter } from "./win-ir-helpers";
 import { RELATED_ID, commandPath } from "./win-ir-links";
-import { startupKey, startupSourceLabel, type FocusTarget, type InvestigationFocus } from "./win-ir-model";
+import { STARTUP_CATEGORY_LABELS, startupKey, startupSourceLabel, type FocusTarget, type InvestigationFocus } from "./win-ir-model";
 
 const BASELINE_STATUS = { pass: "通过", fail: "不通过", warn: "需复核", unknown: "无法判断", "not-applicable": "不适用" } as const;
 
@@ -102,12 +104,14 @@ export function WinIrBaseline({ snapshot, focus, busy = false, connected = false
   );
 }
 
-export function WinIrStartup({ snapshot, focus, related, busy = false, connected = false, onCopy, onFile, onRegistry, onRemove }: {
+export function WinIrStartup({ snapshot, focus, related, busy = false, connected = false, onCopy, onFile, onRegistry, onRemove, onManage }: {
   snapshot: WindowsStartupSnapshot | null; focus?: Target<"startup">; related?: RelatedContext; busy?: boolean; connected?: boolean;
   onCopy: (text: string) => void; onFile: (path: string) => void; onRegistry: (path: string, valueName?: string) => void;
   onRemove?: (entry: WindowsStartupEntry) => void;
+  onManage?: (kind:WindowsInventoryKind, entry:WindowsStartupEntry)=>void;
 }) {
   const [query, setQuery] = useState("");
+  const [category, setCategory] = useState<WindowsStartupCategory|"all">("all");
   const [source, setSource] = useState("all");
   const [risk, setRisk] = useState<RiskFilter>("all");
   const [selected, setSelected] = useState<string | null>(null);
@@ -115,17 +119,19 @@ export function WinIrStartup({ snapshot, focus, related, busy = false, connected
   const entries = useMemo(() => (snapshot?.entries ?? []).map((entry, index) => ({ ...entry, rowId: `${startupKey(entry)}#${index}` })), [snapshot]);
   useFocusRequest(focus, snapshot !== null, (target) => {
     const found = entries.find((entry) => startupKey(entry) === target.key);
-    setQuery(""); setSource("all"); setRisk("all");
+    setQuery(""); setCategory("all"); setSource("all"); setRisk("all");
     setSelected(found?.rowId ?? null); setMissing(found === undefined);
   });
-  const visible = entries.filter((entry) => (source === "all" || source === entry.sourceType) && (risk === "all" || risk === entry.riskLevel) &&
+  const categoryEntries=entries.filter(entry=>category==="all"||entry.category===category);
+  const coverage=snapshot?.categories.find(c=>c.category===category);
+  const visible = categoryEntries.filter((entry) => (source === "all" || source === entry.sourceType) && (risk === "all" || risk === entry.riskLevel) &&
     matchesQuery(query, entry.name, entry.location, entry.command, entry.runAs, entry.riskReason));
   const current = entries.find((entry) => entry.rowId === selected);
   const sources = [...new Set(entries.map((entry) => entry.sourceType))];
   const executable = current ? commandExecutable(current.command) : null;
   const registryPath = current?.sourceType === "registry" ? current.location.replace(/^HKEY_LOCAL_MACHINE\\|^HKLM\\|^HKLM:\\/iu, "HKLM:\\").replace(/^HKEY_CURRENT_USER\\|^HKCU\\|^HKCU:\\/iu, "HKCU:\\") : null;
   const columns: Column<WindowsStartupEntry & { rowId: string }>[] = [
-    { key: "name", label: "名称 / 来源", width: "26%", sort: (entry) => entry.name, render: (entry) => <div className="wir-cell-stack"><strong>{entry.name}</strong><small>{startupSourceLabel(entry.sourceType)}</small></div> },
+    { key: "name", label: "名称 / 来源", width: "26%", sort: (entry) => entry.name, render: (entry) => <div className="wir-cell-stack"><strong>{entry.name||"（默认值）"}</strong><small>{STARTUP_CATEGORY_LABELS[entry.category]} · {startupSourceLabel(entry.sourceType)}</small></div> },
     { key: "command", label: "执行命令", mono: true, render: (entry) => <span className="wir-clip" title={entry.command}>{entry.command || "未取得"}</span> },
     { key: "account", label: "运行账户", width: "16%", sort: (entry) => entry.runAs, render: (entry) => entry.runAs || "未取得" },
     { key: "risk", label: "风险", width: "95px", sort: riskSort((entry) => entry.riskLevel), render: (entry) => <RiskCell level={entry.riskLevel} /> },
@@ -135,15 +141,24 @@ export function WinIrStartup({ snapshot, focus, related, busy = false, connected
       <StatStrip cards={[
         { label: "已取得启动项", value: snapshot?.totalCount ?? "—" },
         { label: "风险线索", value: snapshot?.suspiciousCount ?? "—", tone: "high" },
-        { label: "来源类型", value: snapshot ? sources.length : "—", hint: "以实际返回的来源为准" },
+        { label: "分类", value:19, hint: "机器与当前账户的常见启动位置" },
       ]} />
+      <div className="wir-startup-layout">
+      <nav className="wir-startup-categories" aria-label="启动项分类">
+        <button type="button" aria-pressed={category==="all"} onClick={()=>{setCategory("all");setSelected(null);}}>所有启动项 <span>{snapshot?.totalCount??"—"}</span></button>
+        {WINDOWS_STARTUP_CATEGORIES.map(key=>{const c=snapshot?.categories.find(item=>item.category===key);return <button key={key} type="button" aria-pressed={category===key} onClick={()=>{setCategory(key);setSelected(null);setSource("all");}} title={c?.message??"尚未采集"}>{STARTUP_CATEGORY_LABELS[key]}<span>{c?.count??"—"}{c&&c.status!=="complete"?" !":""}</span></button>;})}
+      </nav>
+      <div className="wir-startup-content">
+      {coverage?<p className={coverage.status==="complete"?"wir-query-scope":"wir-reader-warning"} role="status">{coverage.status==="complete"?"已读取所列位置":coverage.status==="partial"?"部分读取":"未能读取"}：{coverage.message}</p>:null}
+      {snapshot?.warnings.length?<details className="wir-collection-warnings"><summary>采集范围与缺口（{snapshot.warnings.length}）</summary>{snapshot.warnings.map((message,i)=><p key={i}>{message}</p>)}</details>:null}
+      {snapshot?.truncated?<p className="wir-reader-warning" role="status">清单或字段已截断；每类最多 500 条，总共最多 4000 条，不能视为完整清单。</p>:null}
       <div className="wir-toolbar">
         <SearchBox value={query} onChange={setQuery} placeholder="搜索名称、路径、运行账户或命令" />
         <select aria-label="持久化来源" className="win-ir-input wir-select" value={source} onChange={(event) => setSource(event.target.value)}>
           <option value="all">全部来源</option>{sources.map((value) => <option value={value} key={value}>{startupSourceLabel(value)}</option>)}
         </select>
       </div>
-      <FilterChips label="启动项风险" value={risk} onChange={setRisk} options={riskChipOptions(riskCounts(entries, (entry) => entry.riskLevel))} />
+      <FilterChips label="启动项风险" value={risk} onChange={setRisk} options={riskChipOptions(riskCounts(categoryEntries, (entry) => entry.riskLevel))} />
       <MissingFocus show={missing} what="启动项" />
       <div className={`wir-master${current ? " is-split" : ""}`}>
         <DataTable label="启动项与持久化" rows={visible} columns={columns} selectedKey={selected} rowKey={(entry) => entry.rowId} onSelect={(entry) => setSelected(entry?.rowId ?? null)} rowRisk={(entry) => entry.riskLevel} defaultSort={{ key: "risk", descending: true }} empty={snapshot ? "没有符合筛选条件的启动项。" : "采集注册表自启动、启动文件夹和计划任务记录。"} />
@@ -156,21 +171,22 @@ export function WinIrStartup({ snapshot, focus, related, busy = false, connected
           <button type="button" className="win-ir-btn" onClick={() => onCopy(current.command)}>复制命令</button>
           {executable ? <button type="button" className="win-ir-btn" onClick={() => onFile(executable)}>在文件排查中打开 ↗</button> : null}
           {registryPath && /^HK(LM|CU):\\/iu.test(registryPath) ? <button type="button" className="win-ir-btn" onClick={() => onRegistry(registryPath, current.name)}>在注册表中打开 ↗</button> : null}
-          {onRemove ? (
+          {onManage&&(current.category==="services"||current.category==="drivers"||current.category==="tasks")?<button type="button" className="win-ir-btn is-primary" disabled={busy||!connected} onClick={()=>onManage(current.category as WindowsInventoryKind,current)}>打开{STARTUP_CATEGORY_LABELS[current.category]}并处置 ↗</button>:null}
+          {onRemove && current.category==="logon" && current.sourceType==="registry" && /\\(?:Run|RunOnce)$/iu.test(current.location) ? (
             <button
               type="button"
               className="win-ir-btn is-danger"
-              disabled={busy || !connected || (/\\winlogon$/iu.test(current.location) && /^(winlogon\\)?(shell|userinit)$/iu.test(current.name))}
-              title={/\\winlogon$/iu.test(current.location) ? "Winlogon 核心登录键不支持直接删除，请在注册表模块核实后恢复默认值" : undefined}
+              disabled={busy || !connected}
               onClick={() => onRemove(current)}
             >
-              {current.sourceType.toLowerCase() === "service" ? "停止并禁用服务" : "清理启动项"}
+              清理启动项
             </button>
           ) : null}
         </>}>
           {related ? <WinIrRelated key={current.rowId} context={related} query={{ paths: [commandPath(current.command) ?? ""], exclude: RELATED_ID.startup(current) }} /> : null}
         </DetailPane> : null}
       </div>
+      </div></div>
       <p className="wir-footnote">列表是本次采集到的启动记录，权限和采集端支持的来源会影响覆盖范围。正常名称与签名也不能单独证明可信。</p>
     </div>
   );

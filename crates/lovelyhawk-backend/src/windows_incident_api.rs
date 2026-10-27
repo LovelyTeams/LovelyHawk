@@ -121,6 +121,26 @@ pub(crate) enum WindowsIncidentRequest {
         kind: lovelyhawk_core::windows_incident::WindowsInventoryKind,
         session_id: String,
     },
+    PlanControl {
+        object_id: String,
+        operation: lovelyhawk_core::windows_incident::ControlOperation,
+        session_id: String,
+    },
+    ApplyControl {
+        plan_id: String,
+        session_id: String,
+    },
+    DiscardControlPlan {
+        plan_id: String,
+        session_id: String,
+    },
+    ControlHistory {
+        session_id: String,
+    },
+    PlanControlRestore {
+        record_id: String,
+        session_id: String,
+    },
     PlanProcessChange {
         pid: u32,
         start_time: String,
@@ -189,6 +209,11 @@ impl WindowsIncidentRequest {
             | Self::BaselineHistory { session_id }
             | Self::PlanBaselineRestore { session_id, .. }
             | Self::CollectInventory { session_id, .. }
+            | Self::PlanControl { session_id, .. }
+            | Self::ApplyControl { session_id, .. }
+            | Self::DiscardControlPlan { session_id, .. }
+            | Self::ControlHistory { session_id }
+            | Self::PlanControlRestore { session_id, .. }
             | Self::PlanProcessChange { session_id, .. }
             | Self::ApplyProcessPlan { session_id, .. }
             | Self::DiscardProcessPlan { session_id, .. }
@@ -209,6 +234,15 @@ impl WindowsIncidentRequest {
     rename_all_fields = "camelCase"
 )]
 pub(crate) enum WindowsIncidentResponse {
+    ControlPlan {
+        plan: lovelyhawk_core::windows_incident::ControlPlan,
+    },
+    ControlReport {
+        report: lovelyhawk_core::windows_incident::ControlReport,
+    },
+    ControlHistory {
+        records: Vec<lovelyhawk_core::windows_incident::ControlReport>,
+    },
     Status {
         status: DvcRuntimeStatus,
         fileless_script: String,
@@ -696,6 +730,76 @@ impl WindowsIncidentApi {
                         .map_err(|_| WindowsIncidentError::Failed)?;
                 Ok(WindowsIncidentResponse::Inventory { snapshot })
             }
+            WindowsIncidentRequest::PlanControl {
+                object_id,
+                operation,
+                session_id,
+            } => {
+                if object_id.len() != 36 || uuid::Uuid::parse_str(&object_id).is_err() {
+                    return Err(WindowsIncidentError::Invalid);
+                }
+                let result = tokio::task::spawn_blocking(move || {
+                    svc.plan_control(&object_id, operation, &session_id)
+                })
+                .await
+                .map_err(|_| WindowsIncidentError::Failed)?;
+                Ok(match result {
+                    Ok(plan) => WindowsIncidentResponse::ControlPlan { plan },
+                    Err(e) => control_error(e),
+                })
+            }
+            WindowsIncidentRequest::PlanControlRestore {
+                record_id,
+                session_id,
+            } => {
+                if record_id.len() != 36 || uuid::Uuid::parse_str(&record_id).is_err() {
+                    return Err(WindowsIncidentError::Invalid);
+                }
+                let result = tokio::task::spawn_blocking(move || {
+                    svc.plan_control_restore(&record_id, &session_id)
+                })
+                .await
+                .map_err(|_| WindowsIncidentError::Failed)?;
+                Ok(match result {
+                    Ok(plan) => WindowsIncidentResponse::ControlPlan { plan },
+                    Err(e) => control_error(e),
+                })
+            }
+            WindowsIncidentRequest::ApplyControl {
+                plan_id,
+                session_id,
+            } => {
+                if plan_id.len() != 36 || uuid::Uuid::parse_str(&plan_id).is_err() {
+                    return Err(WindowsIncidentError::Invalid);
+                }
+                let result =
+                    tokio::task::spawn_blocking(move || svc.apply_control(&plan_id, &session_id))
+                        .await
+                        .map_err(|_| WindowsIncidentError::Failed)?;
+                Ok(match result {
+                    Ok(report) => WindowsIncidentResponse::ControlReport { report },
+                    Err(e) => control_error(e),
+                })
+            }
+            WindowsIncidentRequest::DiscardControlPlan {
+                plan_id,
+                session_id,
+            } => {
+                if plan_id.len() != 36 || uuid::Uuid::parse_str(&plan_id).is_err() {
+                    return Err(WindowsIncidentError::Invalid);
+                }
+                svc.discard_control_plan(&plan_id, &session_id);
+                Ok(WindowsIncidentResponse::BaselineAcknowledged { accepted: true })
+            }
+            WindowsIncidentRequest::ControlHistory { .. } => {
+                let result = tokio::task::spawn_blocking(move || svc.control_history())
+                    .await
+                    .map_err(|_| WindowsIncidentError::Failed)?;
+                Ok(match result {
+                    Ok(records) => WindowsIncidentResponse::ControlHistory { records },
+                    Err(e) => control_error(e),
+                })
+            }
             WindowsIncidentRequest::PlanProcessChange {
                 pid,
                 start_time,
@@ -853,6 +957,17 @@ fn process_change_error(error: lovelyhawk_core::CoreError) -> WindowsIncidentRes
     };
     WindowsIncidentResponse::BaselineChangeError { message }
 }
+fn control_error(error: lovelyhawk_core::CoreError) -> WindowsIncidentResponse {
+    let message = match error {
+        lovelyhawk_core::CoreError::Validation {
+            subject: "windows control" | "windows script",
+            message,
+        } => message,
+        _ => "无法完成操作或保存本机记录，请核对连接和数据目录；如操作已开始，请重新采集核实。"
+            .into(),
+    };
+    WindowsIncidentResponse::BaselineChangeError { message }
+}
 
 fn baseline_change_error(error: lovelyhawk_core::CoreError) -> WindowsIncidentResponse {
     let message=match error {
@@ -864,6 +979,21 @@ fn baseline_change_error(error: lovelyhawk_core::CoreError) -> WindowsIncidentRe
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn control_intents_accept_only_ids_and_closed_operations() {
+        let id = "00000000-0000-4000-8000-000000000001";
+        let request = serde_json::json!({"action":"plan-control","objectId":id,"sessionId":id,"operation":"stop"});
+        assert!(serde_json::from_value::<super::WindowsIncidentRequest>(request.clone()).is_ok());
+        for extra in ["name", "command", "force", "elevate"] {
+            let mut changed = request.clone();
+            changed[extra] = "injected".into();
+            assert!(serde_json::from_value::<super::WindowsIncidentRequest>(changed).is_err());
+        }
+        let mut changed = request;
+        changed["operation"] = "delete".into();
+        assert!(serde_json::from_value::<super::WindowsIncidentRequest>(changed).is_err());
+        assert!(serde_json::from_value::<super::WindowsIncidentRequest>(serde_json::json!({"action":"apply-control","planId":id,"sessionId":id,"operation":"disable"})).is_err());
+    }
     #[test]
     fn fixed_baseline_plans_and_file_diagnosis_reject_injected_parameters() {
         let session = "00000000-0000-4000-8000-000000000001";
