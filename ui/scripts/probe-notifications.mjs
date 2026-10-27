@@ -71,11 +71,13 @@ async function saveCompactToggle(session) {
 try {
   const { session } = await attach(port, (url) => /^https?:\/\/tauri\.localhost\/(index\.html)?$/u.test(url));
   session.onEvent((method, params) => {
-    if (method === "Runtime.exceptionThrown" || (method === "Runtime.consoleAPICalled" && params?.type === "error")) {
+    if (method === "Runtime.exceptionThrown" || (method === "Runtime.consoleAPICalled" && params?.type === "error") || (method === "Log.entryAdded" && params?.entry?.level === "error")) {
       errors.push(JSON.stringify(params).slice(0, 1_500));
     }
   });
   await session.send("Runtime.enable");
+  await session.send("Log.enable");
+  fs.writeFileSync(path.join(evidence,"observation.json"),JSON.stringify({observedAt:new Date().toISOString(),origin:"https://tauri.localhost"}));
   await waitFor(() => session.evaluate("document.querySelector('[data-testid=\"open-settings\"]') !== null"), { label: "the title bar" });
 
   let now = await saveCompactToggle(session);
@@ -107,7 +109,7 @@ try {
   await waitFor(() => session.evaluate("document.querySelector('[aria-labelledby=\"application-log-title\"]') !== null"), { timeoutMs: 10_000, label: "the log overlay" });
   for (let round = 0; round < 2; round += 1) {
     await waitFor(() => session.evaluate(clickText(".application-log-actions button", "复制筛选结果")), { timeoutMs: 10_000, label: "复制筛选结果" });
-    await waitFor(() => session.evaluate("document.querySelector('.application-log-notice')?.textContent.startsWith('已复制') === true"), { timeoutMs: 10_000, label: "the copy" });
+    await waitFor(() => session.evaluate("document.querySelector('.notification-stack .notification-card p')?.textContent === '已复制脱敏后的应用日志。'"), { timeoutMs: 10_000, label: "the copy" });
     await delay(200);
   }
   now = await session.evaluate(toasts);
@@ -116,6 +118,42 @@ try {
   now = await waitFor(() => session.evaluate(`(() => { const t = ${toasts}; return t.blocked === false ? t : null; })()`), { timeoutMs: 5_000, label: "the overlay to close" }).catch(() => null);
   check("after the overlay closes the renewed toast is the only one shown", now?.cards.length === 1, now?.cards);
 
+  await waitFor(()=>session.evaluate(`${toasts}.cards.length === 0`),{timeoutMs:6000,label:"toast expiry before history"});
+  await session.evaluate("(()=>{const b=document.querySelector('[data-testid=\"open-notifications\"]'); b.focus(); b.click(); return true;})()");
+  await waitFor(()=>session.evaluate("document.querySelector('.notification-center') !== null"),{label:"notification center"});
+  check("expired toasts remain in global history and opening marks them read",await session.evaluate("document.querySelector('.notification-center').textContent.includes('设置已安全保存') && document.querySelector('.notification-center').textContent.includes('已复制脱敏后的应用日志') && !document.querySelector('.notification-count')"));
+  check("notification entry is the leftmost status item",await session.evaluate("document.querySelector('.window-statusbar .statusbar-group').firstElementChild.dataset.testid === 'open-notifications'"));
+  check("center traps focus and the workspace is inert",await session.evaluate("document.querySelector('.notification-center').contains(document.activeElement) && document.querySelector('.workspace').inert"));
+  await session.screenshot(path.join(evidence,"notification-center.png"));
+  await escape(session);
+  check("Escape returns focus to notification entry",await session.evaluate("document.activeElement?.dataset.testid === 'open-notifications'"));
+  // Actual Windows page + host clipboard stub, without a remote target.
+  await session.evaluate("[...document.querySelectorAll('button')].find(b=>b.title==='切换至 Windows 应急响应工作台')?.click(),true");
+  await waitFor(()=>session.evaluate("document.querySelector('button[aria-label=\"远程桌面\"]') !== null"),{label:"Windows sidebar"});
+  await session.evaluate("document.querySelector('button[aria-label=\"远程桌面\"]').click(),true");
+  await waitFor(()=>session.evaluate(clickText(".wir-desktop header button","复制免落地 PowerShell")),{label:"fileless copy"});
+  await waitFor(()=>session.evaluate("document.querySelector('.notification-stack p')?.textContent==='已复制到剪贴板。'"),{label:"global Windows copy toast"});
+  check("Windows operation feedback no longer occupies a page banner",await session.evaluate("![...document.querySelectorAll('.win-ir-notice')].some(n=>n.textContent.includes('已复制到剪贴板'))"));
+  check("sidebar toast is small and on the left",await session.evaluate("(()=>{const r=document.querySelector('.notification-stack').getBoundingClientRect();return r.left<32 && r.width<=390 && r.height<200;})()"));
+  await session.screenshot(path.join(evidence,"windows-copy-toast.png"));
+  await waitFor(()=>session.evaluate(`${toasts}.cards.length === 0`),{timeoutMs:6000,label:"Windows toast expiry"});
+  await session.evaluate("document.querySelector('[data-testid=\"open-settings\"]').click(), true");
+  await waitFor(()=>session.evaluate(`(() => {
+    const toggle=[...document.querySelectorAll('.settings-toggle')].find(label=>label.textContent.includes('显示状态栏'));
+    if (!toggle) return false;
+    toggle.querySelector('input').click(); return true;
+  })()`),{label:"status bar preference"});
+  await waitFor(()=>session.evaluate(clickText(".settings-panel button","保存设置")),{label:"saving hidden status bar"});
+  await waitFor(()=>session.evaluate("document.querySelector('.notification-stack p')?.textContent==='设置已安全保存。'"),{label:"hidden status bar saved"});
+  await escape(session);
+  await waitFor(()=>session.evaluate("!document.querySelector('.settings-panel')"),{label:"settings closed"});
+  check("hidden status bar keeps a reachable notification entry in the sidebar",await session.evaluate("!document.querySelector('.window-statusbar') && document.querySelector('.sidebar-footer [data-testid=\"open-notifications\"]')?.getClientRects().length>0"));
+  await session.send("Emulation.setDeviceMetricsOverride",{width:640,height:640,deviceScaleFactor:1,mobile:false});
+  await session.evaluate("document.querySelector('[data-testid=\"open-notifications\"]').click(),true");
+  await waitFor(()=>session.evaluate("document.querySelector('.notification-center') !== null"),{label:"narrow notification center"});
+  check("notification history fits a narrow window",await session.evaluate("(()=>{const r=document.querySelector('.notification-center').getBoundingClientRect();return r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight;})()"));
+  await session.screenshot(path.join(evidence,"notification-center-narrow.png"));
+  await escape(session);
   check("no console errors", errors.length === 0, errors.slice(0, 3));
   await session.evaluate("document.querySelector('[data-testid=\"window-close\"]').click(), true");
   await waitFor(() => exitCode !== null, { timeoutMs: 15_000, label: "exit" }).catch(() => undefined);

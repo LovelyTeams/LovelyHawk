@@ -1,3 +1,4 @@
+import { TransientNotice } from "./NotificationCenter";
 import { useEffect, useReducer, useRef, useState } from "react";
 
 import {
@@ -238,8 +239,8 @@ export function AiHistoryPage({ api, writeClipboard }: AiHistoryPageProps) {
           </div>
         </header>
 
-        {notice !== null ? <div className="ai-history-notice" role="status">{notice}</div> : null}
-        {state.error !== null ? <div className="ai-history-notice error" role="alert">{state.error}</div> : null}
+        {notice !== null ? <TransientNotice source="AI 历史" message={notice ?? ""} severity="info"><div className="ai-history-notice" role="status">{notice}</div></TransientNotice> : null}
+        {state.error !== null ? <TransientNotice source="AI 历史" message={state.error ?? ""} severity="error"><div className="ai-history-notice error" role="alert">{state.error}</div></TransientNotice> : null}
 
         <div className="ai-history-workbench">
           <aside className="ai-history-list-panel">

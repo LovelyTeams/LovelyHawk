@@ -1,3 +1,4 @@
+import { TransientNotice } from "./NotificationCenter";
 import { useEffect, useReducer, useRef, useState } from "react";
 
 import type { EmergencyCommandApi, EmergencyCommandPathOffer } from "../shared/emergency-command-contract";
@@ -454,7 +455,7 @@ export function IntegrityPage({ bindingHandle, api, initialState }: IntegrityPag
         </p>
 
         {visibleState.error !== null && (
-          <p className="integrity-notice error" role="alert">{visibleState.error}</p>
+          <TransientNotice source="文件完整性" message={visibleState.error ?? ""} severity="error"><p className="integrity-notice error" role="alert">{visibleState.error}</p></TransientNotice>
         )}
 
         <section className="integrity-presets" aria-labelledby="integrity-catalog-title">
@@ -506,10 +507,10 @@ export function IntegrityPage({ bindingHandle, api, initialState }: IntegrityPag
             </p>
           )}
           {notice !== null && (
-            <p className={notice.ok ? "integrity-notice" : "integrity-notice error"} role={notice.ok ? "status" : "alert"}
+            <TransientNotice source="文件完整性" message={notice.text ?? ""} severity={(notice.ok ? "status" : "alert") === "alert" ? "error" : "info"}><p className={notice.ok ? "integrity-notice" : "integrity-notice error"} role={notice.ok ? "status" : "alert"}
               data-testid="integrity-create-notice">
               {notice.text}
-            </p>
+            </p></TransientNotice>
           )}
         </section>
 

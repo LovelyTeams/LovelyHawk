@@ -1,3 +1,4 @@
+import { TransientNotice } from "./NotificationCenter";
 import { useMemo, useState } from "react";
 
 import {
@@ -107,7 +108,7 @@ export function SecurityReference({
         ))}
       </div>
 
-      {notice === null ? null : <div className="inline-notice">{notice}</div>}
+      {notice === null ? null : <TransientNotice source="安全参考" message={notice ?? ""} severity="info"><div className="inline-notice">{notice}</div></TransientNotice>}
       <div className="snippet-grid">
         {filtered.map((snippet) => (
           <SnippetCard

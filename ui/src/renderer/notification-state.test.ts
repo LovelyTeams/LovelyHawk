@@ -40,7 +40,7 @@ describe("notification state", () => {
       "已复制脱敏后的应用日志。",
       "需要人工检查后再继续。",
       "操作失败；详细内容未显示。",
-      "需要人工处理；完成后请手动关闭此通知。",
+      "需要人工处理；请在通知中心查看并跟进。",
     ]);
     const action = {
       type: "show",
@@ -52,17 +52,16 @@ describe("notification state", () => {
       .toBe("设置已安全保存。");
   });
 
-  it("deduplicates intents, preserves ids, moves renewals first, and resets expiry", () => {
+  it("shows only the newest toast and retains earlier events in history", () => {
     const first = show(initialNotificationState, "settings-saved", 100);
     const id = first.notifications[0]!.id;
     const withNewer = show(first, "background-task-started", 200);
     const renewed = show(withNewer, "settings-saved", 2_000);
     expect(renewed.notifications.map(({ intent }) => intent)).toEqual([
       "settings-saved",
-      "background-task-started",
     ]);
+    expect(renewed.history.some((n) => n.id === id)).toBe(true);
     expect(renewed.notifications[0]).toMatchObject({
-      id,
       expiresAt: 5_000,
     });
     expect(notificationReducer(renewed, { type: "expire", now: 3_100 })).toBe(renewed);
@@ -70,7 +69,7 @@ describe("notification state", () => {
       .notifications.map(({ intent }) => intent)).toEqual([]);
   });
 
-  it("uses three seconds for timed non-errors, five seconds for errors, and supports persistent dismissal", () => {
+  it("all toasts expire, including notices requiring manual action; history remains", () => {
     expect(notificationTimeoutMs("info")).toBe(DEFAULT_NOTIFICATION_TIMEOUT_MS);
     expect(notificationTimeoutMs("success")).toBe(DEFAULT_NOTIFICATION_TIMEOUT_MS);
     expect(notificationTimeoutMs("warning")).toBe(DEFAULT_NOTIFICATION_TIMEOUT_MS);
@@ -78,7 +77,7 @@ describe("notification state", () => {
     const error = show(initialNotificationState, "operation-failed", 20);
     expect(error.notifications[0]?.expiresAt).toBe(5_020);
     const persistent = show(error, "manual-action-required", 30);
-    expect(persistent.notifications[0]?.expiresAt).toBeNull();
+    expect(persistent.notifications[0]?.expiresAt).toBe(3030);
     const dismissed = notificationReducer(persistent, {
       type: "dismiss",
       id: persistent.notifications[0]!.id,
@@ -87,7 +86,7 @@ describe("notification state", () => {
       .toBe(false);
   });
 
-  it("bounds malformed floods and evicts the oldest timed notification first", () => {
+  it("bounds history and visibly counts evicted old entries", () => {
     const notifications = Array.from({ length: MAX_NOTIFICATIONS }, (_, index): AppNotification => ({
       id: `existing-${index}`,
       intent: "attention-required",
@@ -95,8 +94,10 @@ describe("notification state", () => {
       message: "fixed",
       expiresAt: index === MAX_NOTIFICATIONS - 1 ? 10_000 : null,
     }));
-    const state = show({ nextId: MAX_NOTIFICATIONS, notifications }, "settings-saved", 0);
-    expect(state.notifications).toHaveLength(MAX_NOTIFICATIONS);
+    const state = show({ nextId: MAX_NOTIFICATIONS, notifications: [], history: notifications, omitted: 0 }, "settings-saved", 0);
+    expect(state.notifications).toHaveLength(1);
+    expect(state.history).toHaveLength(MAX_NOTIFICATIONS);
+    expect(state.omitted).toBe(1);
     expect(state.notifications[0]?.intent).toBe("settings-saved");
     expect(state.notifications.some(({ id }) => id === `existing-${MAX_NOTIFICATIONS - 1}`))
       .toBe(false);

@@ -1,3 +1,4 @@
+import { NotificationCenter, NotificationContext } from "./NotificationCenter";
 import {
   lazy,
   Suspense,
@@ -148,6 +149,7 @@ export function App() {
   const [commandHistoryOpen, setCommandHistoryOpen] = useState(false);
   const [disposalReportOpen, setDisposalReportOpen] = useState(false);
   const [applicationLogOpen, setApplicationLogOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notificationState, dispatchNotification] = useReducer(
     notificationReducer,
     initialNotificationState,
@@ -173,7 +175,7 @@ export function App() {
   const [pageModalOpen, setPageModalOpen] = useState(isModalScrimActive);
   // Declared with the state it derives from: the theme effect below depends on it.
   const overlayOpen = connectionManagerRequest !== undefined || settingsOpen || commandHistoryOpen ||
-    disposalReportOpen || applicationLogOpen;
+    disposalReportOpen || applicationLogOpen || notificationsOpen;
   const databaseRef = useRef<DatabasePageHandle>(null);
   const configurationRef = useRef<ConfigurationPageHandle>(null);
   const notesRef = useRef<NotesHandle>(null);
@@ -188,6 +190,13 @@ export function App() {
   const disposalReportReturnFocusRef = useRef<HTMLElement | null>(null);
   const applicationLogReturnFocusRef = useRef<HTMLElement | null>(null);
 
+  const publishNotification = useCallback((source: string, message: string, severity: import("./notification-state").NotificationSeverity) => {
+    dispatchNotification({type:"message",source,message,severity,now:Date.now()});
+  }, []);
+  useEffect(() => { if (notificationsOpen) dispatchNotification({type:"read"}); }, [notificationsOpen,notificationState.history]);
+  useEffect(() => { if (!overlayOpen && !pageModalOpen) dispatchNotification({type:"resume",now:Date.now()}); }, [overlayOpen,pageModalOpen]);
+  const unreadNotifications = notificationState.history.filter((item) => !item.read).length;
+  const notificationButton = <button type="button" className="statusbar-button" data-testid="open-notifications" aria-label={`通知${unreadNotifications ? `，${unreadNotifications} 条未读` : ""}`} aria-haspopup="dialog" onClick={() => setNotificationsOpen(true)}><svg aria-hidden="true" width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M3 11h10l-1.4-2V6a3.6 3.6 0 0 0-7.2 0v3L3 11Z"/><path d="M6.2 13a1.8 1.8 0 0 0 3.6 0"/></svg> 通知{unreadNotifications ? <b className="notification-count">{unreadNotifications}</b> : null}</button>;
   const showNotification = useCallback((intent: NotificationIntent) => {
     dispatchNotification({ type: "show", intent, now: Date.now() });
   }, []);
@@ -226,7 +235,7 @@ export function App() {
   }, []);
 
   useEffect(() => window.lovelyhawk.onBeforeClose(async ({ unsavedEditors }) => {
-    if (windowsBusy.current) { setError("Windows 任务尚未结束。请等待当前项返回，或先中止后续项并核对结果，再关闭窗口。"); return false; }
+    if (windowsBusy.current) { publishNotification("Windows 应急响应", "Windows 任务尚未结束。请等待当前项返回，或先中止后续项并核对结果，再关闭窗口。", "warning"); return false; }
     if (unsavedEditors > 0 && !(await unsavedEditorsConfirm.ask(
       "放弃编辑窗口里未保存的修改？",
       `还有 ${unsavedEditors} 个文件编辑窗口有没保存到服务器的修改。关闭 LovelyHawk 会一并关闭它们，这些修改会丢失。`,
@@ -534,8 +543,13 @@ export function App() {
   }
 
 
+  const sidebarActions = <div className="sidebar-footer">
+    {notificationButton}
+    <button type="button" data-testid="sidebar-open-application-log" onClick={(event) => openApplicationLog(event.currentTarget)}>应用日志</button>
+    <button type="button" data-testid="sidebar-open-disposal-report" onClick={(event) => openDisposalReport(event.currentTarget)}>处置报告</button>
+  </div>;
   return (
-    <div className={uiPreferences.showStatusBar ? "window-shell" : "window-shell no-statusbar"}>
+    <NotificationContext.Provider value={publishNotification}><div className={uiPreferences.showStatusBar ? "window-shell" : "window-shell no-statusbar"}>
       <AppTitleBar
         section={activePage === null ? "欢迎" : activePage.title}
         backgroundHidden={overlayOpen}
@@ -610,14 +624,7 @@ export function App() {
             </button>
           </div>
         ) : null}
-        {uiPreferences.showStatusBar ? null : (
-          // With the status bar hidden, its two entries move here so they
-          // stay one click away.
-          <div className="sidebar-footer">
-            <button type="button" data-testid="sidebar-open-application-log" onClick={(event) => openApplicationLog(event.currentTarget)}>应用日志</button>
-            <button type="button" data-testid="sidebar-open-disposal-report" onClick={(event) => openDisposalReport(event.currentTarget)}>处置报告</button>
-          </div>
-        )}
+        {!uiPreferences.showStatusBar && activePageId !== WINDOWS_INCIDENT_PAGE_ID ? sidebarActions : null}
       </aside>
 
       <div className="workspace" aria-hidden={overlayOpen ? true : undefined} inert={overlayOpen ? true : undefined}>
@@ -731,7 +738,8 @@ export function App() {
               api={window.lovelyhawk}
             />
           ) : activePage.id === "windows-incident" ? (
-            <WindowsIncidentPage onBusyChange={acceptWindowsBusy} onOpenSettings={openSettings} covered={overlayOpen || pageModalOpen} channelOpenRequest={windowsChannelRequest}
+            <WindowsIncidentPage onBusyChange={acceptWindowsBusy} onOpenSettings={openSettings} covered={overlayOpen || pageModalOpen || notificationState.notifications.length > 0} channelOpenRequest={windowsChannelRequest}
+              sidebarActions={uiPreferences.showStatusBar ? null : sidebarActions}
               api={window.lovelyhawk}
               writeClipboard={window.lovelyhawk.writeClipboard}
               onConnectionChange={acceptWindowsTarget}
@@ -796,9 +804,10 @@ export function App() {
           onCopied={() => showNotification("application-log-copied")}
         />
       ) : null}
+      {notificationsOpen ? <NotificationCenter history={notificationState.history} omitted={notificationState.omitted} onClose={() => setNotificationsOpen(false)} onClear={() => dispatchNotification({type:"clear"})} onRemove={(id) => dispatchNotification({type:"remove",id})} /> : null}
       <NotificationStack
         notifications={notificationState.notifications}
-        modalOpen={overlayOpen}
+        modalOpen={overlayOpen || pageModalOpen}
         onDismiss={dismissNotification}
         onExpire={expireNotifications}
       />
@@ -814,6 +823,7 @@ export function App() {
         inert={overlayOpen ? true : undefined}
       >
         <div className="statusbar-group">
+          {notificationButton}
           {activePageId === WINDOWS_INCIDENT_PAGE_ID ? <button type="button" className="statusbar-button" data-testid="open-windows-channel" onClick={() => setWindowsChannelRequest((n) => n + 1)}>通道与传输</button> : null}
           <button type="button" className="statusbar-button" data-testid="open-application-log" onClick={(event) => openApplicationLog(event.currentTarget)}>应用日志</button>
           <button type="button" className="statusbar-button" data-testid="open-disposal-report" onClick={(event) => openDisposalReport(event.currentTarget)}>处置报告</button>
@@ -839,7 +849,7 @@ export function App() {
         </div>
       </footer>
       ) : null}
-    </div>
+    </div></NotificationContext.Provider>
   );
 }
 

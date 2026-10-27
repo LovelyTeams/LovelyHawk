@@ -34,6 +34,7 @@ function collectionRequest(tab: CollectionTab, argument: string): WindowsRemoteI
     case "baseline": return { action: "collect-baseline" };
     case "processes": return { action: "collect-processes" };
     case "network": return { action: "collect-network" };
+    case "services": case "drivers": case "tasks": return { action:"collect-inventory",kind:tab };
     case "startup": return { action: "collect-startup" };
     case "accounts": return { action: "collect-accounts" };
     case "logs": return { action: "collect-logs", category: argument };
@@ -167,7 +168,7 @@ export function useWindowsIncident(api: WindowsIncidentApi) {
   }, [api, refresh]);
 
   const acceptCollection = useCallback((tab: CollectionTab, response: WindowsIncidentResponse) => {
-    if (response.kind !== tab || !("snapshot" in response)) throw new Error("采集结果类型不符，请重试。");
+    if (!("snapshot" in response) || (response.kind !== tab && !(response.kind === "inventory" && response.snapshot.kind === tab))) throw new Error("采集结果类型不符，请重试。");
     setSnapshots((previous) => ({ ...previous, [tab]: response.snapshot }));
     setCollectedAt((previous) => ({ ...previous, [tab]: new Date().toISOString() }));
     setCollectionErrors((previous) => { const next = { ...previous }; delete next[tab]; return next; });

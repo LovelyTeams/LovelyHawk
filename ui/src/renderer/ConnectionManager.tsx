@@ -1,3 +1,4 @@
+import { TransientNotice } from "./NotificationCenter";
 import {
   useEffect,
   useMemo,
@@ -719,8 +720,8 @@ export function ConnectionManager({
           </div>
         </header>
 
-        {error !== null ? <div className="connection-notice error" role="alert">{error}</div> : null}
-        {notice !== null ? <div className="connection-notice" role="status">{notice}</div> : null}
+        {error !== null ? <TransientNotice source="连接管理" message={error ?? ""} severity="error" inline><div className="connection-notice error" role="alert">{error}</div></TransientNotice> : null}
+        {notice !== null ? <TransientNotice source="连接管理" message={notice ?? ""} severity="info" inline><div className="connection-notice" role="status">{notice}</div></TransientNotice> : null}
 
         <div className="connection-manager-body">
           <aside className="connection-sidebar">
@@ -802,7 +803,7 @@ export function ConnectionManager({
             <h2 id="connection-delete-title">永久删除连接？</h2>
             <p id="connection-delete-description">{deletePrompt.confirmationText}</p>
             <small>删除后无法恢复。</small>
-            {error !== null ? <div className="danger-dialog-error" role="alert">{error}</div> : null}
+            {error !== null ? <TransientNotice source="连接管理" message={error ?? ""} severity="error" inline><div className="danger-dialog-error" role="alert">{error}</div></TransientNotice> : null}
             <div>
               <button ref={deleteCancelRef} type="button" disabled={busy} onClick={() => void cancelDelete()}>取消</button>
               <button type="button" className="danger-confirm" disabled={busy} onClick={() => void confirmDelete()}>确认永久删除</button>

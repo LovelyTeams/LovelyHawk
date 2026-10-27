@@ -1,3 +1,4 @@
+import { TransientNotice } from "./NotificationCenter";
 import { useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 
 import { targetFailureMessage } from "./target-lost";
@@ -634,9 +635,9 @@ export function LogResultCopy({ copy }: { copy: ResultCopy }) {
           </button>
         ) : null}
         {copy.notice !== null ? (
-          <p className={copy.notice.failed ? "is-failed" : undefined} role={copy.notice.failed ? "alert" : "status"}>
+          <TransientNotice source="日志分析" message={copy.notice.text ?? ""} severity={(copy.notice.failed ? "alert" : "status") === "alert" ? "error" : "info"}><p className={copy.notice.failed ? "is-failed" : undefined} role={copy.notice.failed ? "alert" : "status"}>
             {copy.notice.text}
-          </p>
+          </p></TransientNotice>
         ) : null}
       </div>
       {copy.ai?.open ? copy.ai.panel : null}
@@ -704,7 +705,7 @@ function BrowseView({ source, onKeep, draftFilter, onDraftFilter, queryError, on
           <PlayIcon />{status === "loading" ? "读取中…" : "读取日志"}
         </button>
       </form>
-      {queryError !== null && <p className="log-analysis-inline-error" role="alert">{queryError}</p>}
+      {queryError !== null && <TransientNotice source="日志分析" message={queryError ?? ""} severity="error" inline><p className="log-analysis-inline-error" role="alert">{queryError}</p></TransientNotice>}
       {status === "loading" && result === null ? <StatusPanel label="正在读取日志…" /> :
         status === "error" ? <ErrorPanel message={error ?? "日志读取失败。"} compact /> : result === null ?
           <EmptyPanel title="尚未读取" detail="结果将在这里以纯文本逐行显示。" compact /> : (
@@ -814,7 +815,7 @@ function IocView({ selected, draft, onDraft, inputError, status, error, result, 
       <label className="log-analysis-ioc-input">IOC（每行一个）
         <textarea value={draft} rows={5} maxLength={4_111} onChange={(event) => onDraft(event.target.value)} />
       </label>
-      {inputError !== null && <p className="log-analysis-inline-error" role="alert">{inputError}</p>}
+      {inputError !== null && <TransientNotice source="日志分析" message={inputError ?? ""} severity="error" inline><p className="log-analysis-inline-error" role="alert">{inputError}</p></TransientNotice>}
       <button className="log-analysis-run" type="button" disabled={selected.length < 1 || status === "loading"}
         onClick={onRun}>
         <PlayIcon />{status === "loading" ? "搜索中…" : "搜索 IOC"}

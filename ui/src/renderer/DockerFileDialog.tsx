@@ -1,3 +1,4 @@
+import { TransientNotice } from "./NotificationCenter";
 import { useEffect, useRef, useState } from "react";
 
 import type {
@@ -363,8 +364,8 @@ export function DockerFileDialog({
           </div>
         ) : null}
 
-        {notice !== null && error === null && receipt === null && plan === null ? <p className="docker-action-note" role="status">{notice}</p> : null}
-        {error !== null ? <p className="docker-action-error" role="alert">{error}</p> : null}
+        {notice !== null && error === null && receipt === null && plan === null ? <TransientNotice source="容器文件" message={notice ?? ""} severity="info" inline><p className="docker-action-note" role="status">{notice}</p></TransientNotice> : null}
+        {error !== null ? <TransientNotice source="容器文件" message={error ?? ""} severity="error" inline><p className="docker-action-error" role="alert">{error}</p></TransientNotice> : null}
 
         <footer>
           {plan !== null ? (

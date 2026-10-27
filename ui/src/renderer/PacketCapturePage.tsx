@@ -1,3 +1,4 @@
+import { TransientNotice } from "./NotificationCenter";
 import { useEffect, useReducer, useRef, useState, useSyncExternalStore } from "react";
 
 import type { PacketCaptureEvidenceApi } from "../shared/packet-capture-evidence-contract";
@@ -397,13 +398,13 @@ export function PacketCapturePage({
       </header>
 
       {visibleState.notice !== null ? (
-        <div className="packet-capture-notice" role="status">
+        <TransientNotice source="抓包" message={visibleState.notice}><div className="packet-capture-notice" role="status">
           <span>{visibleState.notice}</span>
           <button type="button" onClick={() => dispatch({ type: "notice-cleared" })}>关闭</button>
-        </div>
+        </div></TransientNotice>
       ) : null}
       {visibleState.error !== null ? (
-        <div className="packet-capture-notice error" role="alert">{visibleState.error}</div>
+        <TransientNotice source="抓包" message={visibleState.error ?? ""} severity="error"><div className="packet-capture-notice error" role="alert">{visibleState.error}</div></TransientNotice>
       ) : null}
 
       <section className="packet-capture-controls" aria-labelledby="packet-capture-controls-title">

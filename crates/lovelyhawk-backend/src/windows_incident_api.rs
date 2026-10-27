@@ -117,6 +117,24 @@ pub(crate) enum WindowsIncidentRequest {
         record_id: String,
         session_id: String,
     },
+    CollectInventory {
+        kind: lovelyhawk_core::windows_incident::WindowsInventoryKind,
+        session_id: String,
+    },
+    PlanProcessChange {
+        pid: u32,
+        start_time: String,
+        tree: bool,
+        session_id: String,
+    },
+    ApplyProcessPlan {
+        plan_id: String,
+        session_id: String,
+    },
+    DiscardProcessPlan {
+        plan_id: String,
+        session_id: String,
+    },
     KillProcess {
         pid: u32,
         start_time: String,
@@ -170,6 +188,10 @@ impl WindowsIncidentRequest {
             | Self::BaselinePlanProgress { session_id, .. }
             | Self::BaselineHistory { session_id }
             | Self::PlanBaselineRestore { session_id, .. }
+            | Self::CollectInventory { session_id, .. }
+            | Self::PlanProcessChange { session_id, .. }
+            | Self::ApplyProcessPlan { session_id, .. }
+            | Self::DiscardProcessPlan { session_id, .. }
             | Self::KillProcess { session_id, .. }
             | Self::RemoveStartup { session_id, .. }
             | Self::DisableAccount { session_id, .. }
@@ -197,6 +219,15 @@ pub(crate) enum WindowsIncidentResponse {
     },
     Overview {
         snapshot: WindowsOverviewSnapshot,
+    },
+    Inventory {
+        snapshot: lovelyhawk_core::windows_incident::WindowsInventorySnapshot,
+    },
+    ProcessPlan {
+        plan: lovelyhawk_core::windows_incident::ProcessChangePlan,
+    },
+    ProcessChange {
+        report: lovelyhawk_core::windows_incident::ProcessChangeReport,
     },
     BaselinePlan {
         plan: BaselineChangePlan,
@@ -657,6 +688,62 @@ impl WindowsIncidentApi {
                 .map_err(|_| WindowsIncidentError::Failed)?;
                 Ok(WindowsIncidentResponse::Registry { snapshot })
             }
+            WindowsIncidentRequest::CollectInventory { kind, session_id } => {
+                let snapshot =
+                    tokio::task::spawn_blocking(move || svc.collect_inventory(kind, &session_id))
+                        .await
+                        .map_err(|_| WindowsIncidentError::Failed)?
+                        .map_err(|_| WindowsIncidentError::Failed)?;
+                Ok(WindowsIncidentResponse::Inventory { snapshot })
+            }
+            WindowsIncidentRequest::PlanProcessChange {
+                pid,
+                start_time,
+                tree,
+                session_id,
+            } => {
+                if lovelyhawk_core::windows_incident::build_kill_process_ps_script(pid, &start_time)
+                    .is_none()
+                {
+                    return Err(WindowsIncidentError::Invalid);
+                }
+                let result = tokio::task::spawn_blocking(move || {
+                    svc.plan_process_change(pid, &start_time, tree, &session_id)
+                })
+                .await
+                .map_err(|_| WindowsIncidentError::Failed)?;
+                Ok(match result {
+                    Ok(plan) => WindowsIncidentResponse::ProcessPlan { plan },
+                    Err(error) => process_change_error(error),
+                })
+            }
+            WindowsIncidentRequest::ApplyProcessPlan {
+                plan_id,
+                session_id,
+            } => {
+                if plan_id.len() != 36 || uuid::Uuid::parse_str(&plan_id).is_err() {
+                    return Err(WindowsIncidentError::Invalid);
+                }
+                let result = tokio::task::spawn_blocking(move || {
+                    svc.apply_process_plan(&plan_id, &session_id)
+                })
+                .await
+                .map_err(|_| WindowsIncidentError::Failed)?;
+                Ok(match result {
+                    Ok(report) => WindowsIncidentResponse::ProcessChange { report },
+                    Err(error) => process_change_error(error),
+                })
+            }
+            WindowsIncidentRequest::DiscardProcessPlan {
+                plan_id,
+                session_id,
+            } => {
+                if plan_id.len() != 36 || uuid::Uuid::parse_str(&plan_id).is_err() {
+                    return Err(WindowsIncidentError::Invalid);
+                }
+                svc.discard_process_plan(&plan_id, &session_id);
+                Ok(WindowsIncidentResponse::BaselineAcknowledged { accepted: true })
+            }
             WindowsIncidentRequest::KillProcess {
                 pid,
                 start_time,
@@ -759,9 +846,17 @@ impl WindowsIncidentApi {
     }
 }
 
+fn process_change_error(error: lovelyhawk_core::CoreError) -> WindowsIncidentResponse {
+    let message=match error {
+        lovelyhawk_core::CoreError::Validation { subject:"windows process plan",message } => message,
+        _ => "进程计划或操作记录保存失败，请核对便携数据目录和连接；如果已经执行，请重新采集核对，不能重复旧计划。".into(),
+    };
+    WindowsIncidentResponse::BaselineChangeError { message }
+}
+
 fn baseline_change_error(error: lovelyhawk_core::CoreError) -> WindowsIncidentResponse {
     let message=match error {
-        lovelyhawk_core::CoreError::Validation { subject:"windows baseline plan", message } => message,
+        lovelyhawk_core::CoreError::Validation { subject:"windows baseline plan" | "windows process plan", message } => message,
         _ => "配置计划或历史保存失败。请核对便携数据目录的可写性与连接状态；如已开始执行，请先查看历史并复核目标，不要重复旧计划。".to_owned(),
     };
     WindowsIncidentResponse::BaselineChangeError { message }
@@ -786,6 +881,21 @@ mod tests {
     }
 
     use super::WindowsIncidentRequest;
+    #[test]
+    fn process_plans_and_inventory_scopes_reject_extra_or_open_ended_parameters() {
+        let session = "00000000-0000-4000-8000-000000000001";
+        for kind in ["services", "drivers", "tasks"] {
+            assert!(serde_json::from_value::<WindowsIncidentRequest>(serde_json::json!({"action":"collect-inventory","kind":kind,"sessionId":session})).is_ok());
+        }
+        for request in [
+            serde_json::json!({"action":"collect-inventory","kind":"services;cmd","sessionId":session}),
+            serde_json::json!({"action":"plan-process-change","pid":900,"startTime":"2026-10-27T00:00:00Z","tree":true,"sessionId":session,"pids":[123]}),
+            serde_json::json!({"action":"apply-process-plan","planId":session,"sessionId":session,"force":true}),
+        ] {
+            assert!(serde_json::from_value::<WindowsIncidentRequest>(request).is_err());
+        }
+    }
+
     #[test]
     fn local_intents_and_process_inspection_reject_extra_fields() {
         for action in [

@@ -1,139 +1,67 @@
 export const MAX_NOTIFICATIONS = 64;
 export const DEFAULT_NOTIFICATION_TIMEOUT_MS = 3_000;
 export const ERROR_NOTIFICATION_TIMEOUT_MS = 5_000;
-
 export type NotificationSeverity = "info" | "success" | "warning" | "error";
-
-/**
- * Renderer notifications carry no caller-provided text. Each intent resolves to a
- * fixed public message here so errors, handles, credentials, and paths cannot be
- * copied into the toast surface by mistake.
- */
-export type NotificationIntent =
-  | "background-task-started"
-  | "settings-saved"
-  | "application-log-copied"
-  | "attention-required"
-  | "operation-failed"
-  | "manual-action-required";
-
+/** Fixed intents never accept caller text. Explicit public page notices use a separate action. */
+export type NotificationIntent = "background-task-started" | "settings-saved" | "application-log-copied" | "attention-required" | "operation-failed" | "manual-action-required";
 export interface AppNotification {
-  id: string;
-  intent: NotificationIntent;
-  severity: NotificationSeverity;
-  message: string;
-  expiresAt: number | null;
+  id: string; intent: NotificationIntent | "page-message"; severity: NotificationSeverity; message: string;
+  expiresAt: number | null; source?: string; createdAt?: number; read?: boolean;
 }
-
 export interface NotificationState {
   nextId: number;
-  /** Newest first. */
+  /** Only the latest toast; expiry never deletes history. */
   notifications: AppNotification[];
+  history: AppNotification[];
+  omitted: number;
 }
-
 export type NotificationAction =
   | { type: "show"; intent: NotificationIntent; now: number }
-  | { type: "dismiss"; id: string }
-  | { type: "expire"; now: number }
-  | { type: "clear" };
-
-interface NotificationSpec {
-  severity: NotificationSeverity;
-  message: string;
-  timeoutMs: number | null;
-}
-
-export const initialNotificationState: NotificationState = {
-  nextId: 0,
-  notifications: [],
-};
-
+  | { type: "message"; source: string; message: string; severity: NotificationSeverity; now: number }
+  | { type: "dismiss" | "remove"; id: string }
+  | { type: "expire" | "resume"; now: number }
+  | { type: "read" | "clear" };
+interface NotificationSpec { severity: NotificationSeverity; message: string; timeoutMs: number | null }
+export const initialNotificationState: NotificationState = { nextId: 0, notifications: [], history: [], omitted: 0 };
 export function notificationTimeoutMs(severity: NotificationSeverity): number {
-  return severity === "error"
-    ? ERROR_NOTIFICATION_TIMEOUT_MS
-    : DEFAULT_NOTIFICATION_TIMEOUT_MS;
+  return severity === "error" ? ERROR_NOTIFICATION_TIMEOUT_MS : DEFAULT_NOTIFICATION_TIMEOUT_MS;
 }
-
-export function notificationReducer(
-  state: NotificationState,
-  action: NotificationAction,
-): NotificationState {
+/** Notices already intended for display; never pass command output, scripts or evidence here. */
+export function publicNotificationText(text: string): string {
+  const safe = text.replace(/[\u0000-\u0008\u000b-\u001f\u007f\u202a-\u202e\u2066-\u2069]/gu, "")
+    .replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?(?:-----END [^-]*PRIVATE KEY-----|$)/gu, "[私钥已隐藏]")
+    .replace(/(\b(?:password|passwd|pwd|token|secret|authorization|api[_-]?key)|密码|口令)(\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s;,]+)/giu, "$1$2[已隐藏]")
+    .replace(/(\b[a-z]+:\/\/)[^\s/@]+:[^\s/@]+@/giu, "$1[已隐藏]@");
+  return safe.length > 4000 ? `${safe.slice(0,4000)}\n【内容已截断】` : safe;
+}
+export function notificationReducer(state: NotificationState, action: NotificationAction): NotificationState {
   switch (action.type) {
-    case "show":
-      return showNotification(state, action.intent, action.now);
-    case "dismiss": {
-      const notifications = state.notifications.filter(({ id }) => id !== action.id);
-      return notifications.length === state.notifications.length
-        ? state
-        : { ...state, notifications };
+    case "show": case "message": {
+      if (!Number.isSafeInteger(action.now) || action.now < 0 || action.now > Number.MAX_SAFE_INTEGER - ERROR_NOTIFICATION_TIMEOUT_MS) return state;
+      const spec = action.type === "show" ? notificationSpec(action.intent) :
+        ["info","success","warning","error"].includes(action.severity) && typeof action.message === "string" && typeof action.source === "string" && action.source.length <= 80
+          ? {severity:action.severity,message:publicNotificationText(action.message),timeoutMs:notificationTimeoutMs(action.severity)} : null;
+      if (!spec || !spec.message) return state;
+      const source = action.type === "message" ? action.source : "应用";
+      const intent = action.type === "show" ? action.intent : "page-message";
+      const existing = state.notifications.find((n) => n.intent === intent && n.source === source && n.message === spec.message);
+      const nextId = existing ? state.nextId : state.nextId >= Number.MAX_SAFE_INTEGER ? 1 : state.nextId + 1;
+      const item: AppNotification = { id:existing?.id ?? `notification-${nextId}`,intent,source,severity:spec.severity,message:spec.message,createdAt:action.now,expiresAt:action.now + notificationTimeoutMs(spec.severity),read:false };
+      const history = [item,...state.history.filter((n) => n.id !== item.id)];
+      const excess = Math.max(0,history.length-MAX_NOTIFICATIONS);
+      return {nextId,notifications:[item],history:history.slice(0,MAX_NOTIFICATIONS),omitted:state.omitted+excess};
     }
+    case "dismiss": return {...state,notifications:state.notifications.filter((n) => n.id !== action.id)};
+    case "remove": return {...state,notifications:state.notifications.filter((n) => n.id !== action.id),history:state.history.filter((n) => n.id !== action.id)};
     case "expire": {
-      if (!isSafeTimestamp(action.now)) return state;
-      const notifications = state.notifications.filter(
-        ({ expiresAt }) => expiresAt === null || expiresAt > action.now,
-      );
-      return notifications.length === state.notifications.length
-        ? state
-        : { ...state, notifications };
+      if (!Number.isSafeInteger(action.now) || action.now < 0) return state;
+      const notifications=state.notifications.filter((n) => n.expiresAt === null || n.expiresAt > action.now);
+      return notifications.length === state.notifications.length ? state : {...state,notifications};
     }
-    case "clear":
-      return state.notifications.length === 0
-        ? state
-        : { ...state, notifications: [] };
+    case "resume": if (!Number.isSafeInteger(action.now) || action.now < 0 || action.now > Number.MAX_SAFE_INTEGER - ERROR_NOTIFICATION_TIMEOUT_MS) return state; return {...state,notifications:state.notifications.map((n) => ({...n,expiresAt:action.now+notificationTimeoutMs(n.severity)}))};
+    case "read": return !state.notifications.length && state.history.every((n) => n.read) ? state : {...state,notifications:[],history:state.history.map((n) => ({...n,read:true}))};
+    case "clear": return {...state,notifications:[],history:[],omitted:0};
   }
-}
-
-function showNotification(
-  state: NotificationState,
-  intent: NotificationIntent,
-  now: number,
-): NotificationState {
-  if (!isSafeTimestamp(now)) return state;
-  const spec = notificationSpec(intent);
-  if (spec === null) return state;
-  const expiresAt = spec.timeoutMs === null ? null : now + spec.timeoutMs;
-  const existingIndex = state.notifications.findIndex(
-    (notification) => notification.intent === intent,
-  );
-  if (existingIndex >= 0) {
-    const existing = state.notifications[existingIndex];
-    if (existing === undefined) return state;
-    const notifications = state.notifications.slice();
-    notifications.splice(existingIndex, 1);
-    notifications.unshift({
-      ...existing,
-      severity: spec.severity,
-      message: spec.message,
-      expiresAt,
-    });
-    return { ...state, notifications };
-  }
-
-  const nextId = state.nextId >= Number.MAX_SAFE_INTEGER ? 1 : state.nextId + 1;
-  const notifications = state.notifications.slice();
-  if (notifications.length >= MAX_NOTIFICATIONS) {
-    notifications.splice(oldestEvictionIndex(notifications), 1);
-  }
-  notifications.unshift({
-    id: `notification-${nextId}`,
-    intent,
-    severity: spec.severity,
-    message: spec.message,
-    expiresAt,
-  });
-  return { nextId, notifications };
-}
-
-function oldestEvictionIndex(notifications: readonly AppNotification[]): number {
-  for (let index = notifications.length - 1; index >= 0; index -= 1) {
-    if (notifications[index]?.expiresAt !== null) return index;
-  }
-  return notifications.length - 1;
-}
-
-function isSafeTimestamp(value: number): boolean {
-  return Number.isSafeInteger(value) && value >= 0 &&
-    value <= Number.MAX_SAFE_INTEGER - ERROR_NOTIFICATION_TIMEOUT_MS;
 }
 
 function notificationSpec(intent: NotificationIntent): NotificationSpec | null {
@@ -171,8 +99,8 @@ function notificationSpec(intent: NotificationIntent): NotificationSpec | null {
     case "manual-action-required":
       return {
         severity: "warning",
-        message: "需要人工处理；完成后请手动关闭此通知。",
-        timeoutMs: null,
+        message: "需要人工处理；请在通知中心查看并跟进。",
+        timeoutMs: DEFAULT_NOTIFICATION_TIMEOUT_MS,
       };
     default:
       return null;

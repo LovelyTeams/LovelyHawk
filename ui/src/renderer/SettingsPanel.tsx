@@ -1,3 +1,4 @@
+import { TransientNotice } from "./NotificationCenter";
 import {
   forwardRef,
   useCallback,
@@ -819,7 +820,7 @@ export const SettingsPanel = forwardRef<SettingsPanelHandle, SettingsPanelProps>
 
           <footer className="settings-footer">
             <div aria-live="polite">
-              {notice !== null && <p className={notice.error ? "is-error" : undefined}>{notice.text}</p>}
+              {notice !== null && <TransientNotice source="设置" message={saving || credentialBusy || planningMutation || confirmingMutation || notice.text === "设置已保存到程序目录下的 data 文件夹。" ? "" : notice.text} severity={notice.error ? "error" : "info"} inline><p className={notice.error ? "is-error" : undefined}>{notice.text}</p></TransientNotice>}
               {notice === null && dirty && <p>有未保存的更改</p>}
             </div>
             <div className="settings-footer-actions">

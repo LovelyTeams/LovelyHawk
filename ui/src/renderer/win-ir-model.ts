@@ -1,5 +1,6 @@
 import type {
   WindowsAccountsSnapshot,
+  WindowsInventorySnapshot,
   WindowsBaselineSnapshot,
   WindowsFilesSnapshot,
   WindowsLogsSnapshot,
@@ -16,6 +17,9 @@ export interface WinIrSnapshots {
   processes: WindowsProcessesSnapshot;
   network: WindowsNetworkSnapshot;
   startup: WindowsStartupSnapshot;
+  services: WindowsInventorySnapshot;
+  drivers: WindowsInventorySnapshot;
+  tasks: WindowsInventorySnapshot;
   accounts: WindowsAccountsSnapshot;
   logs: WindowsLogsSnapshot;
   files: WindowsFilesSnapshot;
@@ -40,6 +44,9 @@ export const WIN_IR_MODULES: ReadonlyArray<{
   { key: "processes", label: "进程分析", group: "调查", description: "从父子关系、执行路径和命令行定位可疑活动。", action: "刷新进程" },
   { key: "network", label: "网络连接", group: "调查", description: "区分监听、活动连接和公网地址，关联到所属进程。", action: "刷新连接" },
   { key: "startup", label: "启动项", group: "调查", description: "按持久化来源检查启动位置、执行命令与运行账户。", action: "采集启动项" },
+  { key: "services", label: "服务", group: "调查", description: "查看全部可读取服务的运行状态、启动方式、账户与执行路径。", action: "刷新服务" },
+  { key: "drivers", label: "驱动", group: "调查", description: "排查驱动服务、加载状态与文件路径，保留权限与采集缺口。", action: "刷新驱动" },
+  { key: "tasks", label: "计划任务", group: "调查", description: "查看系统与用户计划任务，核对操作、触发器和运行权限。", action: "刷新计划任务" },
   { key: "accounts", label: "本地账户", group: "调查", description: "核对管理员、账户状态、口令属性与最近登录。", action: "采集账户" },
   { key: "logs", label: "事件日志", group: "取证", description: "围绕登录、账户变更、服务安装和脚本执行筛选事件。", action: "读取事件日志" },
   { key: "files", label: "文件排查", group: "取证", description: "像文件管理器一样浏览远程目录，查看属性、预览内容并拉取取证文件。", action: "刷新目录" },

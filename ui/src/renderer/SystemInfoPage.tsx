@@ -1,3 +1,4 @@
+import { TransientNotice } from "./NotificationCenter";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import {
@@ -385,8 +386,8 @@ export function SystemInfoPage({ connection, api, writeClipboard }: SystemInfoPa
         inert={overlayOpen ? true : undefined}
       >
 
-        {notice !== null ? <div className="system-info-notice" role="status">{notice}</div> : null}
-        {visibleStatus === "error" ? <div className="system-info-notice error" role="alert">{state.error}</div> : null}
+        {notice !== null ? <TransientNotice source="系统信息" message={notice ?? ""} severity="info"><div className="system-info-notice" role="status">{notice}</div></TransientNotice> : null}
+        {visibleStatus === "error" ? <TransientNotice source="系统信息" message={state.error ?? ""} severity="error"><div className="system-info-notice error" role="alert">{state.error}</div></TransientNotice> : null}
 
         {visibleStatus === "loading" || visibleStatus === "idle" ? (
           <div className="system-info-loading" role="status">正在读取系统摘要…</div>
@@ -488,7 +489,7 @@ export function SystemInfoPage({ connection, api, writeClipboard }: SystemInfoPa
                   <div className="system-info-table-state" role="status">正在采集当前标签…</div>
                 ) : null}
                 {state.tableStatus === "error" ? (
-                  <div className="system-info-table-state error" role="alert">{state.error}</div>
+                  <TransientNotice source="系统信息" message={state.error ?? ""} severity="error"><div className="system-info-table-state error" role="alert">{state.error}</div></TransientNotice>
                 ) : null}
                 {/* "Nothing here" and "nobody could look" are opposite
                     findings. An empty firewall means act now; a machine with no
@@ -659,7 +660,7 @@ export function SystemInfoPage({ connection, api, writeClipboard }: SystemInfoPa
               <button ref={closeButtonRef} type="button" onClick={() => dispatch({ type: "detail-closed" })}>关闭</button>
             </header>
             {detailState.status === "loading" ? <div className="system-info-detail-state" role="status">正在读取详情…</div> : null}
-            {detailState.status === "error" ? <div className="system-info-detail-state error" role="alert">{detailState.error}</div> : null}
+            {detailState.status === "error" ? <TransientNotice source="系统信息" message={detailState.error ?? ""} severity="error"><div className="system-info-detail-state error" role="alert">{detailState.error}</div></TransientNotice> : null}
             {detailState.status === "ready" && detailState.detail !== null ? (
               <dl>
                 {detailState.detail.fields.map((field, index) => (

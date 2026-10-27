@@ -1,5 +1,8 @@
+import { WinIrInventory } from "./WinIrInventory";
+import { TransientNotice } from "./NotificationCenter";
+import { WinIrProcessChange } from "./WinIrProcessChange";
 import { WinIrDesktop } from "./WinIrDesktop";
-import { Activity, useEffect, useRef, useState } from "react";
+import { Activity, useEffect, useRef, useState, type ReactNode } from "react";
 
 import type {
   WindowsAccountEntry, WindowsFileEntry, WindowsIncidentApi,
@@ -39,11 +42,12 @@ export interface WindowsIncidentPageProps {
   onOpenSettings?: (returnFocus: HTMLElement) => void;
   channelOpenRequest?: number;
   covered?: boolean;
+  sidebarActions?: ReactNode;
   onBusyChange?: (busy: boolean) => void;
   onConnectionChange?: (connected: boolean, hostname: string | null) => void;
 }
 
-export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOpenSettings, onConnectionChange, onBusyChange, channelOpenRequest = 0, covered = false }: WindowsIncidentPageProps) {
+export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOpenSettings, onConnectionChange, onBusyChange, channelOpenRequest = 0, covered = false, sidebarActions }: WindowsIncidentPageProps) {
   const data = useWindowsIncident(api);
   const confirm = useConfirmDialog();
   const [baselineSelection, setBaselineSelection] = useState<{ ids: string[]; session: string } | null>(null);
@@ -106,6 +110,7 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOp
   async function copy(text: string) {
     if (!writeClipboard) { data.setError("当前窗口无法访问剪贴板。"); return; }
     if (new TextEncoder().encode(text).byteLength > 128 * 1024) { data.setError("内容超过 128 KB 剪贴板上限，请缩小筛选范围或复制单条记录。"); return; }
+    data.setNotice(null);
     try { await writeClipboard(text); data.setNotice("已复制到剪贴板。"); }
     catch (reason) { data.setError(errorText(reason, "复制失败，请重试。")); }
   }
@@ -165,6 +170,7 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOp
       case "processes": return data.snapshots.processes?.suspiciousCount;
       case "network": return data.snapshots.network?.suspiciousCount;
       case "startup": return data.snapshots.startup?.suspiciousCount;
+      case "services": case "drivers": case "tasks": return data.snapshots[tab]?.entries.filter((entry) => entry.riskLevel !== "normal").length;
       case "accounts": return data.snapshots.accounts?.suspiciousCount;
       case "logs": return data.snapshots.logs?.highRiskCount;
       case "files": return data.snapshots.files?.entries.filter((entry) => entry.riskLevel === "high" || entry.riskLevel === "medium").length;
@@ -174,16 +180,9 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOp
   const local = data.localAction;
   const targetHost = host || "当前远程会话";
   function configureBaseline(ids: string[] = []) { if (data.sessionKey && !busy) setBaselineSelection({ ids, session: data.sessionKey }); }
-  async function killProcess(process: WindowsProcessEntry) {
-    const capturedSession = data.sessionKey;
-    if (!capturedSession || busy) return;
-    if (await confirm.ask(
-      "确认结束远程进程",
-      `目标主机：${targetHost}\n进程名称：${process.name}\nPID：${process.pid}（PPID ${process.ppid}）\n启动时间：${process.startTime}\n执行路径：${process.executablePath || "未取得"}\n命令行：${process.commandLine || "未取得"}\n\n执行前将再次核对 PID 与启动时间以防误杀复用进程。强制终止进程可能导致关联服务中断或未保存数据丢失。`,
-      "确认结束进程",
-    )) {
-      await data.dispose("processes", { action: "kill-process", pid: process.pid, startTime: process.startTime }, capturedSession, `正在核对身份并结束进程 ${process.name} (PID ${process.pid})…`, `已终止进程 ${process.name} (PID ${process.pid}) 并刷新进程列表。`);
-    }
+  const [processSelection, setProcessSelection] = useState<{ process: WindowsProcessEntry; tree: boolean; session: string } | null>(null);
+  function killProcess(process: WindowsProcessEntry, tree = false) {
+    if (data.sessionKey && !busy) setProcessSelection({process,tree,session:data.sessionKey});
   }
   async function removeStartup(entry: WindowsStartupEntry) {
     const capturedSession = data.sessionKey;
@@ -272,6 +271,7 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOp
           {onBackToWelcome ? <button type="button" data-testid="windows-back-welcome" aria-label="返回模块选择 / 切换至 Linux" title="返回模块选择 / 切换至 Linux" disabled={busy} onClick={onBackToWelcome}><span aria-hidden="true">←</span><span>切换工作台</span></button> : null}
           <button type="button" aria-label={rail ? "展开导航" : "收起导航"} aria-pressed={rail} title={rail ? "展开导航" : "收起导航"} onClick={() => setRail(!rail)}><span aria-hidden="true">{rail ? "»" : "«"}</span><span>{rail ? "展开导航" : "收起导航"}</span></button>
         </div>
+        {sidebarActions}
       </aside>
 
       <div className={`win-ir-main${activeTab === "desktop" ? " is-desktop" : ""}`} ref={mainRef} onKeyDown={(event) => {
@@ -286,11 +286,11 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOp
         </div> : null}
         {data.statusError ? <details className="wir-collection-warnings" role="alert"><summary>连接状态待核实 · 远程操作已暂停</summary><span>{data.statusError}</span><button type="button" className="win-ir-btn" onClick={() => void data.refresh().catch(() => undefined)}>重试连接状态</button></details> : null}
         {data.reconnect?.phase === "verifying" ? <div className="win-ir-notice" role="status"><span>采集通道已重新连接，正在核对是否仍是 {data.reconnect.host}；核对完成前显示的是重连前的结果。</span></div> : null}
-        {data.reconnect?.phase === "kept" ? <div className="win-ir-notice is-ok" role="status"><span>已重新连接 {data.reconnect.host}（按主机名、域和系统版本核对），保留了重连前采集的结果；各模块的采集时间不变，可按需刷新。</span><button type="button" className="wir-icon-button" aria-label="关闭重连提示" onClick={data.dismissReconnect}>×</button></div> : null}
-        {data.reconnect?.phase === "replaced" ? <div className="win-ir-notice is-warn" role="status"><span>重新连接的主机（{data.reconnect.host}）与之前（{data.reconnect.previous}）不同，已清空旧结果。</span><button type="button" className="wir-icon-button" aria-label="关闭重连提示" onClick={data.dismissReconnect}>×</button></div> : null}
+        {data.reconnect?.phase === "kept" ? <TransientNotice source="Windows 应急响应" message={`已重新连接 ${data.reconnect.host}（按主机名、域和系统版本核对），保留原采集结果；可按需刷新。`} severity="success"><div className="win-ir-notice is-ok" role="status"><span>已重新连接 {data.reconnect.host}（按主机名、域和系统版本核对），保留了重连前采集的结果；各模块的采集时间不变，可按需刷新。</span><button type="button" className="wir-icon-button" aria-label="关闭重连提示" onClick={data.dismissReconnect}>×</button></div></TransientNotice> : null}
+        {data.reconnect?.phase === "replaced" ? <TransientNotice source="Windows 应急响应" message={`重新连接的主机 ${data.reconnect.host} 与之前 ${data.reconnect.previous} 不同，已清空旧结果。`} severity="warning"><div className="win-ir-notice is-warn" role="status"><span>重新连接的主机（{data.reconnect.host}）与之前（{data.reconnect.previous}）不同，已清空旧结果。</span><button type="button" className="wir-icon-button" aria-label="关闭重连提示" onClick={data.dismissReconnect}>×</button></div></TransientNotice> : null}
         {data.reconnect?.phase === "failed" ? <div className="win-ir-notice is-warn" role="alert"><span>采集通道已重新连接，但未能核对是否仍是 {data.reconnect.host}：{data.reconnect.message} 当前显示的是重连前的结果。</span><button type="button" className="win-ir-btn" onClick={data.retryReconnect}>重试核对</button><button type="button" className="win-ir-btn" onClick={data.discardPrevious}>清空旧结果</button></div> : null}
-        {data.error ? <div className="win-ir-notice is-error" role="alert"><span>{data.error}</span><button type="button" className="wir-icon-button" aria-label="关闭错误提示" onClick={data.dismissError}>×</button></div> : null}
-        {data.notice ? <div className="win-ir-notice" role="status"><span>{data.notice}</span><button type="button" className="wir-icon-button" aria-label="关闭操作提示" onClick={data.dismissNotice}>×</button></div> : null}
+        {data.error ? <TransientNotice source="Windows 应急响应" message={data.error} severity="error"><div className="win-ir-notice is-error" role="alert"><span>{data.error}</span><button type="button" className="wir-icon-button" aria-label="关闭错误提示" onClick={data.dismissError}>×</button></div></TransientNotice> : null}
+        {data.notice ? <TransientNotice source="Windows 应急响应" message={data.notice} severity="info"><div className="win-ir-notice" role="status"><span>{data.notice}</span><button type="button" className="wir-icon-button" aria-label="关闭操作提示" onClick={data.dismissNotice}>×</button></div></TransientNotice> : null}
         {busy ? <div className="wir-collection-progress" role="status"><span className="win-ir-spinner" aria-hidden="true" /><span>{data.busy}</span>{data.batch ? <><progress aria-label="核心模块采集进度" value={data.batch.done} max={data.batch.total} /><button type="button" className="win-ir-btn" disabled={data.batch.stopping} onClick={data.cancelBatch}>{data.batch.stopping ? "本项结束后停止…" : "停止后续采集"}</button></> : null}</div> : null}
         {setupView ? <section className="wir-setup-view" aria-label="接入被检主机">
           {showWorkspace ? <div className="wir-setup-bar">
@@ -311,11 +311,12 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOp
           {data.collectionErrors[activeTab as CollectionTab] ? <details className="wir-collection-warnings"><summary>上次采集未完成 · 查看原因与重试</summary><span>上次采集未完成：{data.collectionErrors[activeTab as CollectionTab]}{data.snapshots[activeTab as CollectionTab] ? " 下面保留上一次成功采集的结果。" : ""}</span><button type="button" className="win-ir-btn" disabled={busy || !connected} onClick={collectCurrent}>重试</button></details> : null}
           {WIN_IR_MODULES.filter((module) => visited.has(module.key)).map(({ key }) => <Activity key={key === "playbooks" ? key : `${data.snapshotKey}:${key}`} mode={key === activeTab ? "visible" : "hidden"}>
             {key === "playbooks" ? <WinIrPlaybooks connected={connected} busy={busy} onAction={openPlaybookAction} onCopy={(text) => void copy(text)} /> : null}
-            {key === "desktop" ? <WinIrDesktop api={api.windowsRdp} covered={covered || setupOpen} /> : null}
+            {key === "desktop" ? <WinIrDesktop api={api.windowsRdp} covered={covered || setupOpen} canCopyScript={Boolean(data.filelessScript && writeClipboard)} onCopyScript={() => void copy(data.filelessScript)} /> : null}
             {key === "overview" ? <WinIrOverview snapshots={data.snapshots} collectedAt={data.collectedAt} busy={busy || !connected} onNavigate={(tab) => navigate(tab, true)} onGo={goTo} onCollectAll={() => void data.collectAll()} /> : null}
             {key === "baseline" ? <WinIrBaseline snapshot={data.snapshots.baseline ?? null} focus={focusFor(focus, "baseline")} busy={busy} connected={connected} onCopy={(text) => void copy(text)} onRemediate={(item) => configureBaseline([item.id])} onConfigure={() => configureBaseline((data.snapshots.baseline?.items ?? []).filter((item) => item.remediationAvailable && item.status === "fail").map((item) => item.id))} /> : null}
-            {key === "processes" ? <WinIrProcesses busy={busy} connected={connected} onInspect={data.inspectProcess} onKill={(process) => void killProcess(process)} snapshot={data.snapshots.processes ?? null} network={data.snapshots.network ?? null} focus={focusFor(focus, "processes")} related={related} onCopy={(text) => void copy(text)} onFile={locateFile} onNetwork={(pid) => goTo({ tab: "network", pid })} /> : null}
+            {key === "processes" ? <WinIrProcesses busy={busy} connected={connected} onInspect={data.inspectProcess} onKill={(process) => killProcess(process)} onKillTree={(process) => killProcess(process, true)} snapshot={data.snapshots.processes ?? null} network={data.snapshots.network ?? null} focus={focusFor(focus, "processes")} related={related} onCopy={(text) => void copy(text)} onFile={locateFile} onNetwork={(pid) => goTo({ tab: "network", pid })} /> : null}
             {key === "network" ? <WinIrNetwork snapshot={data.snapshots.network ?? null} processes={data.snapshots.processes ?? null} busy={busy} connected={connected} focus={focusFor(focus, "network")} related={related} onCopy={(text) => void copy(text)} onProcess={(pid) => goTo({ tab: "processes", pid })} onFile={locateFile} onKillProcess={(process) => void killProcess(process)} /> : null}
+            {key === "services" || key === "drivers" || key === "tasks" ? <WinIrInventory kind={key} snapshot={data.snapshots[key] ?? null} onCopy={(text) => void copy(text)} onRegistry={locateRegistry} onProcess={(pid) => goTo({tab:"processes",pid})} onCommand={(id) => { setCommandSuggestion({id,request:++requestId.current}); openDock("command"); }} /> : null}
             {key === "startup" ? <WinIrStartup snapshot={data.snapshots.startup ?? null} busy={busy} connected={connected} focus={focusFor(focus, "startup")} related={related} onCopy={(text) => void copy(text)} onFile={locateFile} onRegistry={locateRegistry} onRemove={(entry) => void removeStartup(entry)} /> : null}
             {key === "accounts" ? <WinIrAccounts snapshot={data.snapshots.accounts ?? null} busy={busy} connected={connected} focus={focusFor(focus, "accounts")} related={related} onCopy={(text) => void copy(text)} onLogs={(query) => goTo({ tab: "logs", query })} onDisable={(entry) => void disableAccount(entry)} /> : null}
             {key === "logs" ? <WinIrLogs onDirectory={(path) => { if (!busy && connected) { navigate("files", true); void data.collect("files", path); } }} snapshot={data.snapshots.logs ?? null} busy={busy || !connected} category={data.snapshots.logs?.categoryFilter ?? "all"} onCategory={(category) => void data.collect("logs", category)} focus={focusFor(focus, "logs")} onCopy={(text) => void copy(text)} /> : null}
@@ -329,6 +330,7 @@ export function WindowsIncidentPage({ api, writeClipboard, onBackToWelcome, onOp
       <WinIrDock data={data} expanded={consoleOpen} tab={dockTab} onTab={openDock} onToggle={() => setConsoleOpen(!consoleOpen)}>
         <WinIrConsole suggestion={commandSuggestion} panel={dockTab} status={data.status} busy={busy} sessionKey={data.sessionKey} hostname={host || "当前远程会话"} output={data.commandOutput} savedFiles={data.savedFiles} canSave={api.saveWindowsFile !== undefined} onSave={(fileId) => void data.saveFile(fileId)} onCopy={(text) => void copy(text)} onSend={data.sendChat} onRun={data.runCommand} onUnregister={() => void local("unregister-plugin", "正在移除插件注册…", "当前用户的插件注册已移除。")} />
       </WinIrDock>
+      {processSelection ? <WinIrProcessChange {...processSelection} currentSession={data.sessionKey} onRequest={data.baselineRequest} onClose={() => setProcessSelection(null)} onRefresh={() => void data.collect("processes")} onResult={(message, failed) => failed ? data.setError(message) : data.setNotice(message)} /> : null}
       {baselineSelection ? <WinIrBaselineChanges items={data.snapshots.baseline?.items ?? []} initialIds={baselineSelection.ids} session={baselineSelection.session} currentSession={data.sessionKey} onRequest={data.baselineRequest} onClose={() => setBaselineSelection(null)} onRefresh={() => void data.collect("baseline")} /> : null}
       {confirm.dialog ? <DialogHost dialog={confirm.dialog} scrollMessage onResolve={confirm.resolve} /> : null}
     </section>

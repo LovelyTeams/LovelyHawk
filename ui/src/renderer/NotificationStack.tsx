@@ -37,6 +37,7 @@ export function NotificationStack({
   const returnFocusRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
+    if (modalOpen) return;
     const now = clock();
     const nextDeadline = notifications.reduce<number | null>((next, notification) => {
       if (notification.expiresAt === null) return next;
@@ -46,11 +47,14 @@ export function NotificationStack({
     }, null);
     if (nextDeadline === null) return;
     const timer = globalThis.setTimeout(
-      () => onExpire(clock()),
+      () => {
+        if (typeof document !== "undefined" && document.activeElement?.closest(".notification-stack")) restoreNotificationFocus(returnFocusRef.current);
+        onExpire(clock());
+      },
       Math.max(0, Math.min(nextDeadline - now, 2_147_483_647)),
     );
     return () => globalThis.clearTimeout(timer);
-  }, [clock, notifications, onExpire]);
+  }, [clock, notifications, onExpire, modalOpen]);
 
   return (
     <div
@@ -85,7 +89,7 @@ export function NotificationStack({
             >
               <span className="notification-marker" aria-hidden="true" />
               <div>
-                <strong>{severityLabels[notification.severity]}</strong>
+                <strong>{notification.source ?? severityLabels[notification.severity]}</strong>
                 <p>{notification.message}</p>
               </div>
               <button

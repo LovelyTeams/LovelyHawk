@@ -62,12 +62,13 @@ function Lineage({ current, processes, onReveal }: { current: WindowsProcessEntr
   </div>;
 }
 
-export function WinIrProcesses({ snapshot, network, focus, related, onCopy, onFile, onNetwork, busy, connected, onInspect, onKill }: {
+export function WinIrProcesses({ snapshot, network, focus, related, onCopy, onFile, onNetwork, busy, connected, onInspect, onKill, onKillTree }: {
   snapshot: WindowsProcessesSnapshot | null; network: WindowsNetworkSnapshot | null; focus: InvestigationFocus<ProcessTarget> | null;
   related?: RelatedContext;
   busy: boolean; connected: boolean; onInspect: (pid: number, startTime: string) => Promise<WindowsProcessInspection>;
   onCopy: (text: string) => void; onFile: (path: string) => void; onNetwork: (pid: number) => void;
   onKill?: (process: WindowsProcessEntry) => void;
+  onKillTree?: (process: WindowsProcessEntry) => void;
 }) {
   const [query, setQueryValue] = useState("");
   const [risk, setRiskValue] = useState<RiskFilter>("all");
@@ -268,6 +269,7 @@ export function WinIrProcesses({ snapshot, network, focus, related, onCopy, onFi
             {related ? <button type="button" className="win-ir-btn is-primary" onClick={() => setTab("related")}>查看关联线索</button> : null}
             <button type="button" className="win-ir-btn" onClick={() => onNetwork(current.pid)}>在网络连接中查看 ↗</button>
             {current.executablePath ? <button type="button" className="win-ir-btn" onClick={() => onFile(current.executablePath)}>在文件排查中打开 ↗</button> : null}
+            {onKillTree ? <button type="button" className="win-ir-btn is-danger" disabled={busy || !connected || !canKillProcess(current)} onClick={() => onKillTree(current)}>结束进程树</button> : null}
             {onKill ? (
               <button
                 type="button"

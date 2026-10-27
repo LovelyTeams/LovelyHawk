@@ -262,6 +262,8 @@ try {
   await screenshot("14-transfers");
 
   await module("远程桌面");
+  await clickText("复制免落地 PowerShell");
+  check("desktop copies the exact fileless script without executing it", await evaluate("window.__windowsFixture.copies.at(-1) === \"Write-Output 'fixture only'\" && window.__windowsFixture.calls.every(c=>c.action!=='run-command')"));
   await setInput('input[aria-label="远程桌面地址"]', "192.0.2.10");
   await clickText("连接");
   await wait("window.__windowsFixture.rdpCalls.some(c => c.action === 'start')", "RDP start intent");
@@ -451,12 +453,30 @@ try {
   await module("进程分析");
   await chooseRow("powershell.exe");
   await clickText("结束进程");
-  await wait(`${dialog} !== null`, "process kill confirmation");
-  check("process termination does not run before confirmation", await evaluate("window.__windowsFixture.calls.every(c => c.action !== 'kill-process')"));
-  check("the kill confirmation identifies pid and start time", await evaluate(`${dialog}.textContent.includes('900') && ${dialog}.textContent.includes('powershell.exe')`));
-  await clickText("确认结束进程");
-  await idle();
-  check("confirmed termination binds pid and start time then re-collects", await evaluate("window.__windowsFixture.calls.some(c => c.action === 'kill-process' && c.pid === 900 && typeof c.startTime === 'string' && c.startTime.length > 0)"));
+  await wait(`${dialog} !== null`, "process dialog");
+  await clickText("预览影响范围"); await idle();
+  check("single-process preview excludes descendants and has no mutation", await evaluate(`${dialog}.textContent.includes('共 1 个') && window.__windowsFixture.calls.every(c=>c.action!=='apply-process-plan')`));
+  await escapeDialog();
+  await clickText("结束进程树");
+  await clickText("预览影响范围"); await idle();
+  check("tree preview identifies all processes before confirmation", await evaluate(`${dialog}.textContent.includes('900') && ${dialog}.textContent.includes('999') && ${dialog}.textContent.includes('fixture-child.exe') && window.__windowsFixture.calls.every(c=>c.action!=='apply-process-plan')`));
+  check("tree confirmation focuses the readable scope, not the destructive button",await evaluate("document.activeElement?.getAttribute('aria-label') === '完整进程范围'"));
+  await session.send("Input.dispatchKeyEvent", {type:"keyDown",key:"Enter",code:"Enter",windowsVirtualKeyCode:13});
+  await session.send("Input.dispatchKeyEvent", {type:"keyUp",key:"Enter",code:"Enter",windowsVirtualKeyCode:13});
+  check("Enter while reading scope cannot terminate processes",await evaluate("window.__windowsFixture.calls.every(c=>c.action!=='apply-process-plan')"));
+  await screenshot("17a-process-tree-plan");
+  await clickText("确认结束这 2 个进程"); await idle();
+  check("confirmed tree termination sends only the immutable plan and reports every member", await evaluate(`window.__windowsFixture.calls.some(c=>c.action==='apply-process-plan' && typeof c.planId==='string' && !('pid' in c)) && ${dialog}.textContent.includes('已核实退出')`));
+  await clickText("刷新进程并复查"); await idle();
+  for (const [label,kind] of [["服务","services"],["驱动","drivers"],["计划任务","tasks"]]) {
+    await module(label);
+    await clickText(`刷新${label}`); await idle();
+    const inventoryState=await evaluate(`({requested:window.__windowsFixture.calls.some(c=>c.action==='collect-inventory' && c.kind===${JSON.stringify(kind)}),label:${scope}.querySelector('table[aria-label^="${label}清单"]')?.getAttribute('aria-label')})`);
+    check(`${label} has its own bounded inventory request and list`,inventoryState.requested && inventoryState.label===`${label}清单：↑↓ 选择，Enter 打开`,inventoryState);
+    await chooseRow(`fixture-${kind}`);
+    check(`${label} preserves object details and disabled entries`,await evaluate(`${visibleDetail}.textContent.includes('Synthetic fixture only') && ${scope}.textContent.includes('disabled-${kind}')`));
+    await screenshot(`17b-${kind}`);
+  }
 
   await module("文件排查");
   await chooseRow("evidence.txt");
@@ -519,7 +539,7 @@ try {
   await screenshot("22a-process-narrow-inspector");
   await clickLabel("关闭详情");
   check("closing the narrow inspector restores the table and keyboard focus", await evaluate(`getComputedStyle(${scope}.querySelector('.wir-process-list')).display !== 'none' && document.activeElement?.getAttribute('role') === 'grid'`));
-  check("collapsed navigation retains all investigation names and the desktop entry", await evaluate(`${scope}.querySelectorAll('.win-ir-nav-item[aria-label]').length === 11 && Boolean(${scope}.querySelector('button[aria-label="远程桌面"]'))`));
+  check("collapsed navigation retains all investigation names and the desktop entry", await evaluate(`${scope}.querySelectorAll('.win-ir-nav-item[aria-label]').length === 14 && Boolean(${scope}.querySelector('button[aria-label="远程桌面"]'))`));
   await screenshot("23-navigation-rail");
   await module("响应方案");
   await setInput(playbookSearch, "");

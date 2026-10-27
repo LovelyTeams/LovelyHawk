@@ -3,7 +3,7 @@ import type { WindowsRdpRequest, WindowsRdpStatus } from "../src/shared/windows-
 // CDP in an isolated native window. It is never imported by the application.
 import { createRoot } from "react-dom/client";
 import { WindowsIncidentPage } from "../src/renderer/WindowsIncidentPage";
-import { matchesWindowsIncidentResponse, type WindowsBaselineChangePlan, type WindowsBaselineChangeReport, type DvcRuntimeStatus, type WindowsIncidentApi, type WindowsIncidentRequest, type WindowsIncidentResponse, type WindowsProcessEntry } from "../src/shared/windows-incident-contract";
+import { matchesWindowsIncidentResponse, type WindowsProcessPlan, type WindowsInventoryKind, type WindowsInventorySnapshot, type WindowsBaselineChangePlan, type WindowsBaselineChangeReport, type DvcRuntimeStatus, type WindowsIncidentApi, type WindowsIncidentRequest, type WindowsIncidentResponse, type WindowsProcessEntry } from "../src/shared/windows-incident-contract";
 import type { WinIrSnapshots } from "../src/renderer/win-ir-model";
 
 const firstSession = "00000000-0000-4000-8000-000000000001";
@@ -40,7 +40,9 @@ export function mount() {
       riskLevel: "high", riskReasons: ["编码 PowerShell 参数；需要核对父进程和启动来源。"] },
     ...Array.from({ length: 236 }, (_, index) => sampleProcess(1100 + index, 468, `worker-${String(index).padStart(3, "0")}.exe`)),
   ];
+  const inventory = (kind: WindowsInventoryKind): WindowsInventorySnapshot => ({kind,observedAt:stamp,totalCount:2,truncated:false,warnings:[],entries:[{name:`fixture-${kind}`,displayName:"Synthetic inventory",location:kind==="tasks"?"\\Fixture\\":`HKLM:\\SYSTEM\\CurrentControlSet\\Services\\fixture-${kind}`,command:"C:\\Users\\Public\\fixture.exe",account:"LocalSystem",state:"Running",startMode:"Auto",pid:kind==="services"?640:0,details:["Synthetic fixture only", "触发器：登录 · 操作：fixture.exe"],riskLevel:"medium",riskReason:"测试线索"},{name:`disabled-${kind}`,displayName:"Disabled fixture",location:"fixture",command:"",account:"",state:"Disabled",startMode:"Disabled",pid:0,details:[],riskLevel:"normal",riskReason:""}]});
   const snapshots: Omit<WinIrSnapshots, "files" | "registry"> = {
+    services:inventory("services"),drivers:inventory("drivers"),tasks:inventory("tasks"),
     overview: {
       hostname: "UI-FIXTURE-01", osCaption: "Windows Server 2022 Datacenter", osVersion: "10.0.20348", architecture: "64-bit",
       domainOrWorkgroup: "IR-LAB", partOfDomain: true, currentUser: "IR-LAB\\Analyst", isElevated: true, sessionName: "RDP-Tcp#1",
@@ -94,6 +96,7 @@ export function mount() {
   let failAction = "";
   let delayAction = "";
   let release: (() => void) | undefined;
+  const processPlans = new Map<string, WindowsProcessPlan>();
   const baselinePlans = new Map<string, WindowsBaselineChangePlan>();
   const baselineHistory: WindowsBaselineChangeReport[] = [];
   const api: WindowsIncidentApi = {
@@ -131,6 +134,18 @@ export function mount() {
         case "collect-logs": {
           const entries = snapshots.logs.entries.filter((entry) => request.category === "all" || entry.category === request.category);
           response = { kind: "logs", snapshot: { ...snapshots.logs, categoryFilter: request.category, totalCount: entries.length, highRiskCount: entries.filter((entry) => entry.riskLevel === "high").length, entries } }; break;
+        }
+        case "collect-inventory": response={kind:"inventory",snapshot:snapshots[request.kind]}; break;
+        case "plan-process-change": {
+          const process=snapshots.processes.processes.find((p)=>p.pid===request.pid && p.startTime===request.startTime); if(!process) throw new Error("进程已变化");
+          const plan:WindowsProcessPlan={id:crypto.randomUUID(),target:snapshots.overview.hostname,tree:request.tree,expiresAt:Math.floor(Date.now()/1000)+120,items:[{pid:process.pid,ppid:process.ppid,name:process.name,startTime:process.startTime},...(request.tree?[{pid:999,ppid:process.pid,name:"fixture-child.exe",startTime:"2026-10-24T09:30:01+08:00"}]:[])]};
+          processPlans.set(plan.id,plan);response={kind:"process-plan",plan};break;
+        }
+        case "discard-process-plan": processPlans.delete(request.planId);response={kind:"baseline-acknowledged",accepted:true};break;
+        case "apply-process-plan": {
+          const plan=processPlans.get(request.planId);if(!plan)throw new Error("计划已使用");processPlans.delete(request.planId);
+          snapshots.processes.processes=snapshots.processes.processes.filter((p)=>!plan.items.some((item)=>item.pid===p.pid));snapshots.processes.totalCount=snapshots.processes.processes.length;
+          response={kind:"process-change",report:{id:plan.id,items:plan.items.map((item)=>({pid:item.pid,state:"verified"})),message:"合成测试：已核实计划内进程退出，仍需复查新建进程。"}};break;
         }
         case "collect-overview": response = { kind: "overview", snapshot: snapshots.overview }; break;
         case "collect-baseline": response = { kind: "baseline", snapshot: snapshots.baseline }; break;

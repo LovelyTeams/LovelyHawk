@@ -1,3 +1,4 @@
+import { TransientNotice } from "./NotificationCenter";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import {
@@ -170,7 +171,7 @@ export function LogRulesDialog({ api, returnFocus, onChanged, onClose }: {
         </header>
         <p>{"规则只保存在本机的程序数据文件夹里。读到的每一行日志会逐条比对规则，标出第一条命中的；"
           + "匹配不区分大小写，不会改动目标机。"}</p>
-        {loadError !== null ? <p className="emergency-path-error" role="alert">{loadError}</p> : null}
+        {loadError !== null ? <TransientNotice source="日志规则" message={loadError ?? ""} severity="error" inline><p className="emergency-path-error" role="alert">{loadError}</p></TransientNotice> : null}
         {rules !== null && rules.length === 0 ? <p className="log-rules-empty">还没有规则。在下面添加一条，例如名称“webshell”、模式 <code>eval\(|base64_decode</code>。</p> : null}
         {rules !== null && rules.length > 0 ? (
           <ul className="log-rules-list" aria-label="已保存的规则">
@@ -208,11 +209,11 @@ export function LogRulesDialog({ api, returnFocus, onChanged, onClose }: {
             {busy ? "处理中…" : "添加规则"}
           </button>
         </form>
-        {draftError !== null ? <p className="emergency-path-error" role="alert">{draftError}</p> : null}
+        {draftError !== null ? <TransientNotice source="日志规则" message={draftError ?? ""} severity="error" inline><p className="emergency-path-error" role="alert">{draftError}</p></TransientNotice> : null}
         {notice !== null ? (
-          <p className={notice.failed ? "emergency-path-error" : "log-rules-notice"} role={notice.failed ? "alert" : "status"}>
+          <TransientNotice source="日志规则" message={notice.text ?? ""} severity={(notice.failed ? "alert" : "status") === "alert" ? "error" : "info"} inline><p className={notice.failed ? "emergency-path-error" : "log-rules-notice"} role={notice.failed ? "alert" : "status"}>
             {notice.text}
-          </p>
+          </p></TransientNotice>
         ) : null}
         <footer><button type="button" onClick={onClose}>关闭</button></footer>
       </section>

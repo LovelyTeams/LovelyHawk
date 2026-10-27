@@ -1,3 +1,4 @@
+import { TransientNotice } from "./NotificationCenter";
 import { useEffect, useRef, useState } from "react";
 import { RDP_RESOLUTION_LIMITS, isWindowsRdpResolution, type WindowsRdpBounds, type WindowsRdpRequest, type WindowsRdpResolution, type WindowsRdpStatus } from "../shared/windows-rdp-contract";
 
@@ -14,7 +15,7 @@ function chosenResolution(mode: string, width: string, height: string): WindowsR
   return isWindowsRdpResolution(size) ? size : "invalid";
 }
 
-export function WinIrDesktop({ api, covered }: { api: ((request: WindowsRdpRequest) => Promise<WindowsRdpStatus>) | undefined; covered: boolean }) {
+export function WinIrDesktop({ api, covered, canCopyScript = false, onCopyScript }: { api: ((request: WindowsRdpRequest) => Promise<WindowsRdpStatus>) | undefined; covered: boolean; canCopyScript?: boolean; onCopyScript?: () => void }) {
   const [server, setServer] = useState("");
   const [clipboard, setClipboard] = useState(false);
   const [mode, setMode] = useState("fit");
@@ -100,7 +101,7 @@ export function WinIrDesktop({ api, covered }: { api: ((request: WindowsRdpReque
     finally { if (mounted.current) setBusy(false); }
   }
   return <section className="wir-desktop" aria-label="内嵌远程桌面">
-    <header><h1>远程桌面</h1><span>在工作台内查看与操作 Windows 会话</span></header>
+    <header><h1>远程桌面</h1><span>在工作台内查看与操作 Windows 会话</span><button type="button" className="win-ir-btn" disabled={!canCopyScript} onClick={onCopyScript} title="复制到本机剪贴板，随后可在远程会话中粘贴运行">复制免落地 PowerShell</button></header>
     <form className="wir-toolbar" onSubmit={(event) => { event.preventDefault(); void connect(); }}>
       <input className="win-ir-input" aria-label="远程桌面地址" value={server} onChange={(event) => setServer(event.target.value)} placeholder="主机名或 IP，可附 :端口" maxLength={253} disabled={Boolean(status?.clientId) || busy} />
       <select className="win-ir-input wir-select" aria-label="远程桌面分辨率" value={mode} disabled={Boolean(status?.clientId) || busy} onChange={(event) => setMode(event.target.value)}>
@@ -117,7 +118,7 @@ export function WinIrDesktop({ api, covered }: { api: ((request: WindowsRdpReque
       <button type="submit" className="win-ir-btn is-primary" disabled={!api || busy || !server.trim() || Boolean(status?.clientId)}>{busy ? "正在处理…" : "连接"}</button>
       <button type="button" className="win-ir-btn" disabled={!status?.clientId || busy} onClick={() => void disconnect()}>断开远程桌面</button>
     </form>
-    {error ? <p className="wir-preview-error" role="alert">{error}</p> : null}
+    {error ? <TransientNotice source="远程桌面" message={error ?? ""} severity="error"><p className="wir-preview-error" role="alert">{error}</p></TransientNotice> : null}
     {mode === "custom" && resolution === "invalid" ? <p className="wir-preview-error" role="status">宽度需为 {RDP_RESOLUTION_LIMITS.minWidth}–{RDP_RESOLUTION_LIMITS.max} 之间的偶数，高度为 {RDP_RESOLUTION_LIMITS.minHeight}–{RDP_RESOLUTION_LIMITS.max}。</p> : null}
     {!status?.clientId ? <p className="wir-footnote">{mode === "fit" ? "按当前显示区域的实际像素启动会话；目标支持动态分辨率时，窗口大小变化后远程分辨率随之调整。" : "固定远程分辨率：比显示区域大时按比例缩小显示，比显示区域小时居中显示。连接后如需更改，请断开后重新连接。"}</p> : null}
     <p className="wir-footnote">{status?.clientId ? `${status.server} · ${status.message}` : "密码与证书确认由系统客户端处理。目标使用自签名证书时会弹出证书警告，请先点「查看证书」核对名称与指纹，确认是要排查的主机再继续。连接后鼠标、键盘直接操作远程桌面；Ctrl+Alt+End 打开远程安全选项。"}</p>

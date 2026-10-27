@@ -1,3 +1,4 @@
+import { TransientNotice } from "./NotificationCenter";
 import { useEffect, useReducer, useRef, useState } from "react";
 
 import { targetFailureMessage } from "./target-lost";
@@ -658,15 +659,15 @@ export function KubernetesPage({ bindingHandle, api, initialState, onInvestigate
         <KubernetesUnavailable kubectlInstalled={visibleState.availability.kubectlInstalled}
           context={visibleState.availability.currentContext} />
       ) : visibleState.notice !== null ? (
-        <div className="kubernetes-notice" role="status">{visibleState.notice}</div>
+        <TransientNotice source="Kubernetes" message={visibleState.notice ?? ""} severity="info"><div className="kubernetes-notice" role="status">{visibleState.notice}</div></TransientNotice>
       ) : null}
       {visibleState.error !== null ? (
-        <div className="kubernetes-notice error" role="alert">{visibleState.error}</div>
+        <TransientNotice source="Kubernetes" message={visibleState.error ?? ""} severity="error"><div className="kubernetes-notice error" role="alert">{visibleState.error}</div></TransientNotice>
       ) : null}
       {terminalError !== null && terminalError.scope === scope ? (
-        <div className="kubernetes-notice error" role="alert" data-testid="kubernetes-terminal-error">
+        <TransientNotice source="Kubernetes" message={terminalError.message ?? ""} severity="error"><div className="kubernetes-notice error" role="alert" data-testid="kubernetes-terminal-error">
           {terminalError.message}
-        </div>
+        </div></TransientNotice>
       ) : null}
 
       <section className="kubernetes-scope" aria-label="Namespace 范围" hidden={unavailable}>
@@ -1121,11 +1122,11 @@ export function KubernetesPage({ bindingHandle, api, initialState, onInvestigate
           ) : null}
           {selectedRow !== null && exportNotice !== null && exportNotice.scope === scope &&
             exportNotice.rowHandle === selectedRow.rowHandle ? (
-              <p
+              <TransientNotice source="Kubernetes" message={exportNotice.message ?? ""} severity={(exportNotice.saved ? "status" : "alert") === "alert" ? "error" : "info"}><p
                 className={exportNotice.saved ? "kubernetes-export-notice" : "kubernetes-export-notice is-error"}
                 role={exportNotice.saved ? "status" : "alert"}
                 data-testid="kubernetes-export-notice"
-              >{exportNotice.message}</p>
+              >{exportNotice.message}</p></TransientNotice>
             ) : null}
           {visibleState.detailStatus === "loading" ? (
             <div className="kubernetes-state" role="status">正在读取并验证结果…</div>

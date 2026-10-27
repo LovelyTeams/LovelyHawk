@@ -1,3 +1,4 @@
+import { TransientNotice } from "./NotificationCenter";
 import { forwardRef, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
@@ -475,7 +476,7 @@ function ConfigVisualEditor({ api, initialView = null, modeSwitch, initialDirty 
       </header>
 
       {notice !== null ? (
-        <p className={`config-visual-notice ${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}</p>
+        <TransientNotice source="配置编辑" message={notice.text ?? ""} severity={(notice.tone === "error" ? "alert" : "status") === "alert" ? "error" : "info"} inline><p className={`config-visual-notice ${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}</p></TransientNotice>
       ) : null}
 
       {view === null && product === "database" ? (

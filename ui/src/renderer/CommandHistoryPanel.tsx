@@ -1,3 +1,4 @@
+import { TransientNotice } from "./NotificationCenter";
 import {
   forwardRef,
   useCallback,
@@ -347,8 +348,8 @@ export const CommandHistoryPanel = forwardRef<CommandHistoryPanelHandle, Command
             </div>
           </header>
 
-          {notice !== null ? <div className="command-history-notice" role="status">{notice}</div> : null}
-          {state.error !== null ? <div className="command-history-notice error" role="alert">{state.error}</div> : null}
+          {notice !== null ? <TransientNotice source="命令历史" message={notice ?? ""} severity="info"><div className="command-history-notice" role="status">{notice}</div></TransientNotice> : null}
+          {state.error !== null ? <TransientNotice source="命令历史" message={state.error ?? ""} severity="error"><div className="command-history-notice error" role="alert">{state.error}</div></TransientNotice> : null}
 
           {activeTarget === null ? (
             <div className="command-history-disconnected">请先在连接管理中连接 SSH 目标，再查看这台主机的命令历史。</div>

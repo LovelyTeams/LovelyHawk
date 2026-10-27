@@ -1,3 +1,4 @@
+import { TransientNotice } from "./NotificationCenter";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -308,8 +309,8 @@ export function JavaHotUpdatePage({ bindingHandle, api }: JavaHotUpdatePageProps
         </button>
       </header>
 
-      {error === null ? null : <p className="java-error" role="alert">{error}</p>}
-      {notice === null ? null : <p className="java-notice" role="status">{notice}</p>}
+      {error === null ? null : <TransientNotice source="Java 更新" message={error ?? ""} severity="error"><p className="java-error" role="alert">{error}</p></TransientNotice>}
+      {notice === null ? null : <TransientNotice source="Java 更新" message={notice ?? ""} severity="info"><p className="java-notice" role="status">{notice}</p></TransientNotice>}
 
       {scan === null ? (
         <p className="java-empty">{busy === "scan" ? "正在列出 Java 进程和可用的 JDK 工具…" : "先扫描这台主机上的 Java 进程。扫描只读取进程列表和 Java 版本，不改动任何东西。"}</p>
@@ -402,7 +403,7 @@ export function JavaHotUpdatePage({ bindingHandle, api }: JavaHotUpdatePageProps
                   onChange={(event) => { setTypedPath(event.target.value); setTypedError(null); }} /></label>
                 <button type="submit" disabled={busy !== null || jarTool === false || !isTypedJarPath(typedPath)}>打开</button>
               </form>
-              {typedError === null ? null : <p className="java-error" role="alert" data-testid="java-typed-jar-error">{typedError}</p>}
+              {typedError === null ? null : <TransientNotice source="Java 更新" message={typedError ?? ""} severity="error" inline><p className="java-error" role="alert" data-testid="java-typed-jar-error">{typedError}</p></TransientNotice>}
               <p className="java-count" id="java-typed-jar-hint">{typedPath !== "" && !isTypedJarPath(typedPath)
                 ? "需要以 / 开头、以 .jar 结尾的完整路径，不能含 .. 或首尾空格。"
                 : "列表里没有时用：例如 Tomcat 会关闭暂时不用的 WEB-INF/lib JAR。同样只读取，不改动。"}</p>
@@ -532,7 +533,7 @@ export function JavaPlanDialog({ state, onConfirm, onClose }: {
                 ? "执行前会再核对一次 JAR 与这个类的当前哈希，和生成计划时不同就不改动。替换只改磁盘上的 JAR，不会重启进程。"
                 : "只在 JAR 仍是当初替换后的样子时才恢复；之后被别人改过就不覆盖。恢复同样不会重启进程。"}</p>
             </div>
-            {error === null ? null : <p className="java-error" role="alert">{error}</p>}
+            {error === null ? null : <TransientNotice source="Java 更新" message={error ?? ""} severity="error"><p className="java-error" role="alert">{error}</p></TransientNotice>}
             {running ? <p className="java-note" role="status">{update ? "正在备份、替换并核对…" : "正在恢复并核对…"}</p> : null}
             <footer>
               <button ref={cancelRef} type="button" data-testid="java-plan-cancel" disabled={running} onClick={onClose}>取消</button>

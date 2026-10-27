@@ -99,14 +99,16 @@ describe("NotificationStack timer effect lifecycle", () => {
     expect(onExpire).not.toHaveBeenCalled();
   });
 
-  it("does not arm a timer for a persistent notification", () => {
+  it("expires manual-action toast but retains its history", () => {
     const state = notificationReducer(initialNotificationState, {
       type: "show",
       intent: "manual-action-required",
       now: 0,
     });
     const onExpire = vi.fn();
-    expect(renderTimerEffect(state.notifications, onExpire)).toBeUndefined();
-    expect(vi.getTimerCount()).toBe(0);
+    expect(renderTimerEffect(state.notifications, onExpire)).toBeTypeOf("function");
+    vi.advanceTimersByTime(3000);
+    expect(onExpire).toHaveBeenCalledOnce();
+    expect(notificationReducer(state,{type:"expire",now:3000}).history).toHaveLength(1);
   });
 });

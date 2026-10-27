@@ -28,6 +28,9 @@ export type WindowsRemoteIntent =
   | { action: "apply-baseline-plan" | "discard-baseline-plan" | "cancel-baseline-plan" | "baseline-plan-progress"; planId: string }
   | { action: "baseline-history" }
   | { action: "plan-baseline-restore"; recordId: string }
+  | { action: "collect-inventory"; kind: WindowsInventoryKind }
+  | { action: "plan-process-change"; pid: number; startTime: string; tree: boolean }
+  | { action: "apply-process-plan" | "discard-process-plan"; planId: string }
   | { action: "kill-process"; pid: number; startTime: string }
   | { action: "remove-startup"; sourceType: string; name: string; location: string }
   | { action: "disable-account"; name: string; sid: string }
@@ -290,7 +293,16 @@ export interface WindowsBaselineChangePlan { id: string; target: string; expires
 export type WindowsBaselineChangeState = "pending" | "applying" | "verified" | "restored" | "refused" | "uncertain" | "skipped";
 export interface WindowsBaselineChangeReport { id: string; target: string; createdAt: number; restoring: boolean; finished: boolean; recoveryAvailable: boolean; items: { id: string; title: string; state: WindowsBaselineChangeState }[]; message: string }
 
+export type WindowsInventoryKind = "services" | "drivers" | "tasks";
+export interface WindowsInventoryEntry { name: string; displayName: string; location: string; command: string; account: string; state: string; startMode: string; pid: number; details: string[]; riskLevel: WindowsRiskLevel; riskReason: string }
+export interface WindowsInventorySnapshot { kind: WindowsInventoryKind; observedAt: string; totalCount: number; truncated: boolean; warnings: string[]; entries: WindowsInventoryEntry[] }
+export interface WindowsProcessPlan { id: string; target: string; expiresAt: number; tree: boolean; items: { pid: number; ppid: number; name: string; startTime: string }[] }
+export interface WindowsProcessChangeReport { id: string; items: { pid: number; state: "verified" | "refused" | "failed" | "skipped" | "uncertain" }[]; message: string }
+
 export type WindowsIncidentResponse =
+  | { kind: "inventory"; snapshot: WindowsInventorySnapshot }
+  | { kind: "process-plan"; plan: WindowsProcessPlan }
+  | { kind: "process-change"; report: WindowsProcessChangeReport }
   | { kind: "baseline-plan"; plan: WindowsBaselineChangePlan }
   | { kind: "baseline-change"; report: WindowsBaselineChangeReport }
   | { kind: "baseline-progress"; report: WindowsBaselineChangeReport | null }
@@ -420,6 +432,10 @@ export function isWindowsIncidentRequest(value: unknown): value is WindowsIncide
         !value.keyPath.includes("\n") &&
         !value.keyPath.includes("\r")
       );
+    case "collect-inventory": return keys("kind") && ["services","drivers","tasks"].includes(value.kind as string);
+    case "apply-process-plan": case "discard-process-plan": return keys("planId") && isWindowsFileId(value.planId);
+    case "plan-process-change":
+      return keys("pid","startTime","tree") && typeof value.tree === "boolean" && isWindowsIncidentRequest({action:"kill-process",pid:value.pid,startTime:value.startTime,sessionId:value.sessionId});
     case "kill-process":
       return (
         keys("pid", "startTime") &&
@@ -600,8 +616,12 @@ export function matchesWindowsIncidentResponse(
   value: unknown,
 ): value is WindowsIncidentResponse {
   if (!isRecord(value) || typeof value.kind !== "string") return false;
-  if (["plan-baseline", "apply-baseline-plan", "discard-baseline-plan", "cancel-baseline-plan", "baseline-plan-progress", "baseline-history", "plan-baseline-restore"].includes(request.action) && value.kind === "baseline-change-error") return exactKeys(value,["kind","message"]) && isBoundedText(value.message,2048);
+  if (["plan-process-change", "apply-process-plan", "discard-process-plan", "plan-baseline", "apply-baseline-plan", "discard-baseline-plan", "cancel-baseline-plan", "baseline-plan-progress", "baseline-history", "plan-baseline-restore"].includes(request.action) && value.kind === "baseline-change-error") return exactKeys(value,["kind","message"]) && isBoundedText(value.message,2048);
   switch (request.action) {
+    case "collect-inventory": return value.kind === "inventory" && exactKeys(value,["kind","snapshot"]) && isWindowsInventorySnapshot(value.snapshot) && value.snapshot.kind === request.kind;
+    case "plan-process-change": return value.kind === "process-plan" && exactKeys(value,["kind","plan"]) && isWindowsProcessPlan(value.plan) && value.plan.tree === request.tree && value.plan.items[0]?.pid === request.pid && value.plan.items[0]?.startTime === request.startTime;
+    case "apply-process-plan": return value.kind === "process-change" && exactKeys(value,["kind","report"]) && isWindowsProcessChangeReport(value.report) && value.report.id === request.planId;
+    case "discard-process-plan": return value.kind === "baseline-acknowledged" && exactKeys(value,["kind","accepted"]) && typeof value.accepted === "boolean";
     case "inspect-file-access": return value.kind === "file-access" && exactKeys(value,["kind","inspection"]) && object({ path: shortText, observedAt: shortText, attributes: shortText, owner: shortText, accessRules: list(object({identity:shortText,rights:shortText,access:(v)=>v==="Allow"||v==="Deny",inherited:boolean}),64), processes:list(object({pid:uint,name:shortText}),256), services:list(object({name:shortText,displayName:shortText,state:shortText,startMode:shortText,path:text,kind:(v)=>v==="driver"||v==="service"}),256),warnings:list(shortText,16)})(value.inspection);
     case "plan-baseline": case "plan-baseline-restore":
       return value.kind === "baseline-plan" && exactKeys(value,["kind","plan"]) && isBaselineChangePlan(value.plan) && value.plan.restoring === (request.action === "plan-baseline-restore") && (request.action !== "plan-baseline" || value.plan.items.every((item) => request.ruleIds.includes(item.id)));
@@ -674,4 +694,24 @@ function isBaselineChangePlan(value: unknown): value is WindowsBaselineChangePla
 function isBaselineChangeReport(value: unknown): value is WindowsBaselineChangeReport {
   if (!isRecord(value) || !exactKeys(value,["id","target","createdAt","restoring","finished","recoveryAvailable","items","message"]) || !isWindowsFileId(value.id) || !isBoundedText(value.target,255) || !isEpoch(value.createdAt) || typeof value.restoring!=="boolean" || typeof value.finished!=="boolean" || typeof value.recoveryAvailable!=="boolean" || !isBoundedText(value.message,2048) || !Array.isArray(value.items) || value.items.length<1 || value.items.length>19) return false;
   return value.items.every((item) => isRecord(item) && exactKeys(item,["id","title","state"]) && isBaselineChangeId(item.id) && isBoundedText(item.title,256) && typeof item.state==="string" && ["pending","applying","verified","restored","refused","uncertain","skipped"].includes(item.state) && (!value.finished || !["pending","applying"].includes(item.state))) && new Set(value.items.map((v) => v.id)).size===value.items.length && value.recoveryAvailable===(!value.restoring && value.items.some((v) => v.state==="verified"));
+}
+
+export function isWindowsProcessPlan(value: unknown): value is WindowsProcessPlan {
+  if (!isRecord(value) || !exactKeys(value,["id","target","expiresAt","tree","items"]) || !isWindowsFileId(value.id) || !isBoundedText(value.target,255) || !isEpoch(value.expiresAt) || typeof value.tree !== "boolean" || !Array.isArray(value.items) || value.items.length < 1 || value.items.length > 64 || (!value.tree && value.items.length !== 1)) return false;
+  const seen = new Map<number, number>();
+  return value.items.every((item, index) => {
+    if (!isRecord(item) || !exactKeys(item,["pid","ppid","name","startTime"]) || !isBoundedText(item.name,260) || !uint(item.ppid) || !isWindowsIncidentRequest({action:"kill-process",pid:item.pid,startTime:item.startTime,sessionId:"00000000-0000-0000-0000-000000000000"})) return false;
+    const pid = item.pid as number, time = Date.parse(item.startTime as string) * 1000 + Number(((item.startTime as string).match(/\.(\d+)/u)?.[1] ?? "").padEnd(6,"0").slice(3,6));
+    if (seen.has(pid) || (index > 0 && (!seen.has(item.ppid as number) || seen.get(item.ppid as number)! >= time))) return false;
+    seen.set(pid,time); return true;
+  });
+}
+export function isWindowsProcessChangeReport(value: unknown): value is WindowsProcessChangeReport {
+  return isRecord(value) && exactKeys(value,["id","items","message"]) && isWindowsFileId(value.id) && isBoundedText(value.message,2048) && Array.isArray(value.items) && value.items.length > 0 && value.items.length <= 64 && value.items.every((item) => isRecord(item) && exactKeys(item,["pid","state"]) && uint(item.pid) && (item.pid as number)>4 && typeof item.state === "string" && ["verified","refused","failed","skipped","uncertain"].includes(item.state)) && new Set(value.items.map((item) => item.pid)).size===value.items.length;
+}
+
+export function isWindowsInventorySnapshot(value: unknown): value is WindowsInventorySnapshot {
+  if (!isRecord(value) || !exactKeys(value,["kind","observedAt","totalCount","truncated","warnings","entries"]) || !["services","drivers","tasks"].includes(value.kind as string) || !isBoundedText(value.observedAt,64) || !Number.isFinite(Date.parse(value.observedAt)) || !uint(value.totalCount) || typeof value.truncated !== "boolean" || !list((v) => isBoundedText(v,1024),32)(value.warnings) || !Array.isArray(value.entries) || value.entries.length > 2000 || (value.totalCount as number) < value.entries.length) return false;
+  if ((value.totalCount as number) !== value.entries.length && !value.truncated && (value.warnings as string[]).length === 0) return false;
+  return value.entries.every(object({name:(v)=>isBoundedText(v,1024),displayName:(v)=>isBoundedText(v,1024,true),location:(v)=>isBoundedText(v,2048,true),command:(v)=>isBoundedText(v,8192,true),account:(v)=>isBoundedText(v,1024,true),state:(v)=>isBoundedText(v,256,true),startMode:(v)=>isBoundedText(v,256,true),pid:uint,details:list((v)=>isBoundedText(v,4096,true),32),riskLevel:risk,riskReason:(v)=>isBoundedText(v,1024,true)}));
 }

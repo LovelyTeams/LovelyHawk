@@ -1,3 +1,4 @@
+import { TransientNotice } from "./NotificationCenter";
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { PostgresqlPasswordChange, PostgresqlProfileInput, PostgresqlRuntimeApi, PostgresqlRuntimeRow, PostgresqlSessionObservation } from "../shared/postgresql-runtime-contract";
 import { PostgresqlRuntimeController } from "./postgresql-runtime-controller";
@@ -183,8 +184,8 @@ export const DatabasePage = forwardRef<DatabasePageHandle, DatabasePageProps>(fu
         </div>}
         {!editor && state.profiles.length ? <p className="database-hint">“读取并留证”会把会话与进程对应状态、十项重点参数、访问诊断数量及检查结果保存到开始时的采集案件，未选择时创建案件。失败和取消也记录结果；普通读取仅在内存展示。</p> : null}
       </>}
-      {state.error ? <p role="alert" className="database-error">{state.error}</p> : null}
-      {state.notice ? <p role="status">{state.notice}</p> : null}
+      {state.error ? <TransientNotice source="数据库" message={state.error ?? ""} severity="error"><p role="alert" className="database-error">{state.error}</p></TransientNotice> : null}
+      {state.notice ? <TransientNotice source="数据库" message={state.notice ?? ""} severity="info"><p role="status">{state.notice}</p></TransientNotice> : null}
       {state.job ? <section className="database-result"><h3>{{ reading: "正在读取", completed: "读取完成", failed: "读取未完成", cancelled: "读取已取消", expired: "检查结果已过期" }[state.job.state]}</h3>
         <p role="status">{state.job.detail}</p><p>{state.job.profile.name} · 开始于 {new Date(state.job.startedAt).toLocaleString()}{state.job.finishedAt ? ` · 结束于 ${new Date(state.job.finishedAt).toLocaleString()}` : ""}</p>
         {state.job.retention ? <section className="database-retention" aria-label="案件留证"><h4>{{ pending: "正在准备留证", saved: "检查摘要已留证", unsaved: "检查摘要尚未保存" }[state.job.retention.state]}</h4>

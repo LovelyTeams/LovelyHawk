@@ -1,9 +1,12 @@
 .wir-places > * { flex: none; }
+.win-ir-sidebar .sidebar-footer { flex-direction: column; }
+.win-ir-sidebar.is-rail .sidebar-footer .statusbar-button { flex-wrap: wrap; justify-content: center; gap: 2px; }
 
 .windows-incident-page { position: relative; }
 .win-ir-main.is-desktop { overflow: hidden; }
 .wir-desktop { display: flex; flex: 1; flex-direction: column; gap: 10px; min-height: 0; }
-.wir-desktop > header { display: flex; align-items: baseline; gap: 12px; }
+.wir-desktop > header { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.wir-desktop > header button { margin-left: auto; }
 .wir-desktop h1 { margin: 0; font-size: var(--font-title); }
 .wir-desktop > header span { color: var(--muted); }
 .wir-desktop .wir-toolbar > input { flex: 1; }

@@ -20,9 +20,17 @@ use serde::{Deserialize, Serialize};
 use crate::{CoreError, CoreResult};
 mod baseline;
 mod baseline_change;
+mod inventory;
+mod process_change;
 pub use baseline_change::{
     BaselineChangeItem, BaselineChangePlan, BaselineChangeReport, BaselineChangeState,
     BaselinePlanItem, baseline_change_supported,
+};
+pub use inventory::{
+    WindowsInventoryEntry, WindowsInventoryKind, WindowsInventorySnapshot, parse_inventory_json,
+};
+pub use process_change::{
+    ProcessChangeItem, ProcessChangePlan, ProcessChangeReport, ProcessChangeState, ProcessPlanItem,
 };
 
 const DEFAULT_COLLECTION_TIMEOUT: Duration = Duration::from_secs(45);
@@ -404,6 +412,7 @@ pub struct WindowsIncidentService {
     hub: DvcHub,
     baseline_store: Option<crate::store::PortableStore>,
     baseline_changes: std::sync::Arc<baseline_change::BaselineChanges>,
+    process_changes: std::sync::Arc<process_change::ProcessChanges>,
 }
 
 impl WindowsIncidentService {

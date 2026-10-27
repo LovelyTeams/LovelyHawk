@@ -1,3 +1,4 @@
+import { TransientNotice } from "./NotificationCenter";
 import { useEffect, useReducer, useRef, useState, type MouseEvent } from "react";
 
 import { errorText } from "./error-text";
@@ -672,7 +673,7 @@ export function SftpBrowserPage({
               正在回到重新打开前所在的 {sftpTrailPath(returning.target)}…
             </p>
           ) : returnNotice !== null ? (
-            <p className="sftp-browser-return" role="status" data-testid="sftp-return">{returnNotice}</p>
+            <TransientNotice source="文件传输" message={returnNotice ?? ""} severity="info"><p className="sftp-browser-return" role="status" data-testid="sftp-return">{returnNotice}</p></TransientNotice>
           ) : null}
           <div className="sftp-browser-panes">
             <LocalFilePane
@@ -776,10 +777,10 @@ export function SftpBrowserPage({
             </p>
           )}
           {transferNotice === null || downloading !== null ? null : (
-            <p className="sftp-browser-transfer" role="status">{transferNotice}</p>
+            <TransientNotice source="文件传输" message={transferNotice ?? ""} severity="info"><p className="sftp-browser-transfer" role="status">{transferNotice}</p></TransientNotice>
           )}
           {windowError === null ? null : (
-            <p className="sftp-browser-transfer is-error" role="alert" data-testid="sftp-window-error">{windowError}</p>
+            <TransientNotice source="文件传输" message={windowError ?? ""} severity="error"><p className="sftp-browser-transfer is-error" role="alert" data-testid="sftp-window-error">{windowError}</p></TransientNotice>
           )}
 
           {menu === null ? null : (

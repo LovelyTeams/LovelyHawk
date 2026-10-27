@@ -1,3 +1,4 @@
+import { TransientNotice } from "./NotificationCenter";
 import {
   forwardRef,
   useCallback,
@@ -235,8 +236,8 @@ export const DisposalReportOverlay = forwardRef<
           </div>
         </header>
 
-        {notice !== null ? <div className="disposal-report-notice" role="status">{notice}</div> : null}
-        {state.error !== null ? <div className="disposal-report-notice error" role="alert">{state.error}</div> : null}
+        {notice !== null ? <TransientNotice source="处置报告" message={notice ?? ""} severity="info"><div className="disposal-report-notice" role="status">{notice}</div></TransientNotice> : null}
+        {state.error !== null ? <TransientNotice source="处置报告" message={state.error ?? ""} severity="error"><div className="disposal-report-notice error" role="alert">{state.error}</div></TransientNotice> : null}
 
         {bindingHandle === null ? (
           <div className="disposal-report-empty">请先建立 SSH 连接，再生成处置报告。</div>

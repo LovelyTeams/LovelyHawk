@@ -1,3 +1,4 @@
+import { TransientNotice } from "./NotificationCenter";
 import {
   Fragment,
   forwardRef,
@@ -968,13 +969,13 @@ function ConfigGeneratorPage({ api, embedded = false, modeSwitch, onOpenVisual, 
       </header>
 
       {notice === null ? null : (
-        <div
+        <TransientNotice source="配置生成" message={notice.message ?? ""} severity={(notice.tone === "error" ? "alert" : "status") === "alert" ? "error" : "info"}><div
           className={`config-notice ${notice.tone}`}
           role={notice.tone === "error" ? "alert" : "status"}
           aria-live={notice.tone === "error" ? "assertive" : "polite"}
         >
           {notice.message}
-        </div>
+        </div></TransientNotice>
       )}
 
       <label className="config-search">

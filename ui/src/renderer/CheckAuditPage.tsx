@@ -1,3 +1,4 @@
+import { TransientNotice } from "./NotificationCenter";
 import { createContext, useContext, useEffect, useReducer, useRef, useState } from "react";
 
 import { targetFailureMessage } from "./target-lost";
@@ -399,7 +400,7 @@ export function CommandsView({ catalog, statusKind, status, error, search, selec
           <button type="submit">加入检查列表</button>
         </form>
       </div>
-      {customError !== null && <p className="check-audit-inline-error" role="alert">{customError}</p>}
+      {customError !== null && <TransientNotice source="安全检查" message={customError ?? ""} severity="error" inline><p className="check-audit-inline-error" role="alert">{customError}</p></TransientNotice>}
       {customCommands.length > 0 && <div className="check-audit-custom-list" aria-label="自定义命令">
         {customCommands.map((name) => <span key={name}>{name}<button type="button" aria-label={`移除 ${name}`}
           onClick={() => onRemoveCustom(name)}>×</button></span>)}
@@ -453,7 +454,7 @@ export function LogsView({ status, result, error, searchDraft, limitDraft, input
       <button className="check-audit-primary" type="submit" disabled={status === "loading" || expired}
         title={expired ? EXPIRED_TITLE : undefined}>应用并读取</button>
     </form>
-    {inputError !== null && <p className="check-audit-inline-error" role="alert">{inputError}</p>}
+    {inputError !== null && <TransientNotice source="安全检查" message={inputError ?? ""} severity="error" inline><p className="check-audit-inline-error" role="alert">{inputError}</p></TransientNotice>}
     {status === "loading" && result === null ? <StatusPanel label="正在读取审计日志…" /> :
       status === "error" ? <ErrorPanel message={error ?? "审计日志读取失败。"} compact /> : result === null ?
         <EmptyPanel title="尚未读取日志" detail="点“刷新”读取，或调整搜索条件。" compact /> :
@@ -473,8 +474,8 @@ export function LogsView({ status, result, error, searchDraft, limitDraft, input
             <div className="check-audit-copy">
               <button type="button" data-testid="check-audit-copy" onClick={() => onCopy(result)}>复制显示的记录（TSV）</button>
               {copyNotice === null ? null : (
-                <span className={copyNotice.ok ? "is-ok" : "is-error"} role={copyNotice.ok ? "status" : "alert"}
-                  data-testid="check-audit-copy-notice">{copyNotice.text}</span>
+                <TransientNotice source="安全检查" message={copyNotice.text ?? ""} severity={(copyNotice.ok ? "status" : "alert") === "alert" ? "error" : "info"}><span className={copyNotice.ok ? "is-ok" : "is-error"} role={copyNotice.ok ? "status" : "alert"}
+                  data-testid="check-audit-copy-notice">{copyNotice.text}</span></TransientNotice>
               )}
             </div>
           )}

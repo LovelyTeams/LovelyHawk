@@ -1,3 +1,4 @@
+import { TransientNotice } from "./NotificationCenter";
 import { useEffect, useLayoutEffect, useReducer, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 
@@ -546,7 +547,7 @@ export function DockerPage({ bindingHandle, api, initialState, onInvestigate }: 
       {/* When nothing could be listed at all, one panel says why and what to
           do; the error line above a second empty box said it twice. */}
       {visibleState.error !== null && !(visibleState.snapshotStatus === "error" && visibleState.snapshot === null) &&
-        <p className="docker-error" role="alert">{visibleState.error}</p>}
+        <TransientNotice source="容器管理" message={visibleState.error ?? ""} severity="error"><p className="docker-error" role="alert">{visibleState.error}</p></TransientNotice>}
       {visibleState.snapshotStatus === "loading" && visibleState.snapshot === null && (
         <StatusPanel label="正在读取这台主机上的容器…" />
       )}
@@ -749,7 +750,7 @@ function ContainersView({
         status={state.collectionStatus.stats ?? "idle"}
         onRefresh={onRefresh}
       />
-      {terminalError !== null && <p className="docker-error" role="alert">{terminalError}</p>}
+      {terminalError !== null && <TransientNotice source="容器管理" message={terminalError ?? ""} severity="error"><p className="docker-error" role="alert">{terminalError}</p></TransientNotice>}
       {/* Free text plus the two things worth narrowing by that the snapshot
           actually knows. Labels and nodes are not offered: the runtime gives
           neither on this page, and an empty dropdown is worse than no

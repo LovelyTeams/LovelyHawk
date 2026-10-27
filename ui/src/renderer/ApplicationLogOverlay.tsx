@@ -1,3 +1,4 @@
+import { TransientNotice } from "./NotificationCenter";
 import {
   forwardRef,
   useCallback,
@@ -309,9 +310,9 @@ export const ApplicationLogOverlay = forwardRef<
         </header>
 
         {notice !== null ? (
-          <div className={`application-log-notice${notice.error ? " error" : ""}`} role={notice.error ? "alert" : "status"}>
+          <TransientNotice source="应用日志" message={notice.error ? notice.text : ""} severity={(notice.error ? "alert" : "status") === "alert" ? "error" : "info"}><div className={`application-log-notice${notice.error ? " error" : ""}`} role={notice.error ? "alert" : "status"}>
             {notice.text}
-          </div>
+          </div></TransientNotice>
         ) : null}
 
         <div className="application-log-toolbar">
@@ -362,7 +363,7 @@ export const ApplicationLogOverlay = forwardRef<
         </div>
 
         <section className="application-log-list" aria-busy={state.status === "loading"} aria-label="应用日志">
-          {state.error !== null ? <p className="application-log-state error" role="alert">{state.error}</p> : null}
+          {state.error !== null ? <TransientNotice source="应用日志" message={state.error ?? ""} severity="error"><p className="application-log-state error" role="alert">{state.error}</p></TransientNotice> : null}
           {state.status === "loading" && snapshot === null ? <p className="application-log-state" role="status">正在读取日志…</p> : null}
           {snapshot !== null && snapshot.entries.length === 0 ? <p className="application-log-state">当前缓冲中没有符合筛选条件的日志。</p> : null}
           {snapshot?.entries.map((entry) => (

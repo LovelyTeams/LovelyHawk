@@ -1,3 +1,4 @@
+import { TransientNotice } from "./NotificationCenter";
 import {
   forwardRef,
   useCallback,
@@ -629,8 +630,8 @@ export const Notes = forwardRef<NotesHandle>(function Notes(_props, ref) {
         </div>
       </header>
 
-      {error !== null ? <div className="notes-notice error" role="alert">{error}</div> : null}
-      {notice !== null ? <div className="notes-notice" role="status">{notice}</div> : null}
+      {error !== null ? <TransientNotice source="笔记" message={error ?? ""} severity="error"><div className="notes-notice error" role="alert">{error}</div></TransientNotice> : null}
+      {notice !== null ? <TransientNotice source="笔记" message={notice ?? ""} severity="info"><div className="notes-notice" role="status">{notice}</div></TransientNotice> : null}
 
       <div className="notes-workbench">
         <aside className="notes-list-panel">
@@ -815,7 +816,7 @@ export const Notes = forwardRef<NotesHandle>(function Notes(_props, ref) {
                 <h2 id="note-delete-title">永久删除这条笔记？</h2>
                 <p id="note-delete-description">{deleteProposal.summary}</p>
                 <small id="note-delete-expiry">本次确认将在 {planExpiryLabel(deleteProposal.expiresInSeconds)}后失效。</small>
-                {error !== null ? <p className="danger-dialog-error" role="alert">{error}</p> : null}
+                {error !== null ? <TransientNotice source="笔记" message={error ?? ""} severity="error"><p className="danger-dialog-error" role="alert">{error}</p></TransientNotice> : null}
                 <div>
                   <button ref={cancelDeleteButtonRef} type="button" disabled={busy} onClick={() => void cancelDeleteProposal()}>取消</button>
                   <button type="button" className="danger-confirm" disabled={busy} onClick={() => void confirmDelete()}>确认永久删除</button>
