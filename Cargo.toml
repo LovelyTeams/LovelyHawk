@@ -22,7 +22,7 @@ edition = "2024"
 rust-version = "1.93.1"
 license = "AGPL-3.0-only"
 authors = ["Tokeii"]
-repository = "https://github.com/Tokeii0/LovelyHawk"
+repository = "https://github.com/LovelyTeams/LovelyHawk"
 
 [workspace.dependencies]
 aes-gcm = "0.10"
