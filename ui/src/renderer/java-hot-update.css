@@ -1,0 +1,542 @@
+.java-hot-update-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.java-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.java-section h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-subtitle);
+  font-weight: 650;
+}
+
+.java-section > p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-small);
+  overflow-wrap: anywhere;
+}
+
+.java-empty,
+.java-count {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+
+.java-error,
+.java-warning {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--danger-border);
+  border-radius: 8px;
+  color: var(--danger-text);
+  background: var(--danger-soft);
+  font-size: var(--font-small);
+}
+
+.java-notice {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--info-border);
+  border-radius: 8px;
+  color: var(--info-text);
+  background: var(--info-soft);
+  font-size: var(--font-small);
+}
+
+.java-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.java-tools li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text);
+  background: var(--surface-alt);
+  font: var(--font-caption) "Cascadia Mono", monospace;
+}
+
+.java-tools li span {
+  font-family: inherit;
+  color: var(--success-text);
+}
+
+.java-tools li.is-missing span {
+  color: var(--muted);
+}
+
+.java-table-wrap {
+  overflow-x: auto;
+}
+
+.java-processes {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-small);
+}
+
+.java-processes th,
+.java-processes td {
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text);
+  text-align: left;
+  vertical-align: top;
+}
+
+.java-processes th {
+  color: var(--muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.java-processes code,
+.java-facts code {
+  font: var(--font-caption) "Cascadia Mono", monospace;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  user-select: text;
+}
+
+.java-processes small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+}
+
+.java-jar-button,
+.java-classes button,
+.java-actions button,
+.java-records button {
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  font-size: var(--font-small);
+  cursor: pointer;
+}
+
+.java-jar-button {
+  flex: none;
+}
+
+.java-process-jars {
+  min-height: 26px;
+  padding: 2px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  font-size: var(--font-caption);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.java-process-jars[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: var(--accent-soft);
+}
+
+.java-jar-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.java-jar-toolbar .java-filter {
+  flex: 1 1 320px;
+}
+
+.java-jar-toolbar > button {
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  font-size: var(--font-small);
+  cursor: pointer;
+}
+
+.java-typed-jar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+.java-typed-jar .java-filter {
+  flex: 1 1 360px;
+}
+
+.java-typed-jar input {
+  font: var(--font-caption) "Cascadia Mono", monospace;
+}
+
+.java-typed-jar button {
+  min-height: 30px;
+  padding: 4px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  font-size: var(--font-small);
+  cursor: pointer;
+}
+
+.java-typed-jar button:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+.java-jars {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 320px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+/* A scrolling column squeezes its rows unless they pin their own height. */
+.java-jars li {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 4px 4px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  background: var(--surface-alt);
+}
+
+.java-jars code {
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  font: var(--font-caption) "Cascadia Mono", monospace;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.java-jars small {
+  flex: none;
+  max-width: 30%;
+  color: var(--muted);
+  font-size: var(--font-caption);
+  overflow-wrap: anywhere;
+}
+
+.java-jar-button[aria-pressed="true"],
+.java-classes button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: var(--accent-soft);
+}
+
+.java-jar-button:disabled,
+.java-actions button:disabled,
+.java-records button:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+.java-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 14px;
+  margin: 0;
+}
+
+.java-facts > div {
+  display: contents;
+}
+
+.java-facts dt {
+  color: var(--muted);
+  font-size: var(--font-caption);
+}
+
+.java-facts dd {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-small);
+  overflow-wrap: anywhere;
+}
+
+.java-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+
+.java-filter input {
+  flex: 1;
+  min-width: 0;
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  color: var(--text);
+  background: var(--input-bg);
+  font: inherit;
+}
+
+.java-classes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 320px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+/* A scrolling column squeezes its rows unless they pin their own height. */
+.java-classes li {
+  flex: none;
+}
+
+.java-classes button {
+  width: 100%;
+  text-align: left;
+  font: var(--font-caption) "Cascadia Mono", monospace;
+  overflow-wrap: anywhere;
+}
+
+.java-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.java-actions button.is-primary {
+  border-color: var(--accent);
+  color: var(--on-accent);
+  background: var(--accent);
+  font-weight: 650;
+}
+
+.java-records {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.java-records li {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 9px;
+  background: var(--surface-alt);
+}
+
+.java-records li > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.java-records strong {
+  color: var(--text);
+  font: var(--font-small) "Cascadia Mono", monospace;
+  overflow-wrap: anywhere;
+}
+
+.java-records p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-small);
+  overflow-wrap: anywhere;
+}
+
+.java-records small {
+  color: var(--muted);
+  font-size: var(--font-caption);
+}
+
+.java-records button {
+  align-self: flex-start;
+}
+
+.java-state {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: var(--font-caption);
+}
+
+.java-state.is-applied {
+  color: var(--warning-text);
+  background: var(--warning-soft);
+}
+
+.java-state.is-restored {
+  color: var(--success-text);
+  background: var(--success-soft);
+}
+
+.java-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--backdrop);
+}
+
+.java-dialog {
+  display: flex;
+  width: min(560px, 100%);
+  max-height: 100%;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+  padding: 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.java-dialog > * {
+  flex: none;
+}
+
+.java-dialog h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-subtitle);
+}
+
+.java-dialog header p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: var(--font-caption);
+  word-break: break-all;
+}
+
+.java-panel {
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface-alt);
+}
+
+.java-panel.is-dangerous {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+}
+
+.java-panel dl {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+}
+
+.java-panel dt {
+  color: var(--muted);
+  font-size: var(--font-caption);
+}
+
+.java-panel dd {
+  margin: 2px 0 0;
+  color: var(--text);
+  font-size: var(--font-caption);
+  word-break: break-all;
+}
+
+.java-panel code {
+  font: var(--font-caption) "Cascadia Mono", monospace;
+}
+
+.java-summary {
+  margin: 0 0 10px;
+  color: var(--text);
+  font-size: var(--font-small);
+  line-height: 1.6;
+}
+
+.java-note {
+  margin: 10px 0 0;
+  color: var(--text-secondary);
+  font-size: var(--font-caption);
+  line-height: 1.6;
+}
+
+.java-dialog footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.java-dialog footer button {
+  min-height: 32px;
+  padding: 6px 15px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  font-size: var(--font-small);
+  cursor: pointer;
+}
+
+.java-dialog footer button.is-primary {
+  border-color: var(--accent);
+  color: var(--on-accent);
+  background: var(--accent);
+  font-weight: 650;
+}
+
+.java-dialog footer button.is-dangerous {
+  border-color: var(--danger);
+  color: var(--on-accent);
+  background: var(--danger);
+  font-weight: 650;
+}
+
+.java-dialog footer button:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}

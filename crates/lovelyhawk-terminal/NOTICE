@@ -1,0 +1,13 @@
+LovelyHawk native terminal foundation
+Copyright LovelyHawk contributors
+
+The architecture starts from concepts in gpui-terminal 0.1.0 by Leonard
+Seibold, licensed MIT OR Apache-2.0. No code is taken from GPL-licensed
+terminal_view projects.
+
+ANSI parsing and terminal grid behavior are provided by alacritty_terminal
+0.25.1 from the Alacritty project, licensed Apache-2.0.
+
+VTE parsing is provided transitively by vte 0.15.0 from the Alacritty project,
+licensed Apache-2.0 OR MIT.
+

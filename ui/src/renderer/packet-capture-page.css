@@ -1,0 +1,568 @@
+.packet-capture-page {
+  background: var(--console-bg);
+  color: var(--console-text);
+  min-height: 100%;
+}
+
+.packet-capture-heading,
+.packet-capture-controls > header,
+.packet-capture-table-panel > header {
+  align-items: center;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.packet-capture-page .packet-capture-heading h1 {
+  color: var(--console-text);
+}
+
+.packet-capture-page .packet-capture-heading p {
+  color: var(--console-muted);
+}
+
+.packet-capture-page .packet-capture-heading .eyebrow {
+  color: var(--console-accent) !important;
+}
+
+.packet-capture-page button {
+  background: var(--console-surface);
+  border: 1px solid var(--console-border);
+  border-radius: 8px;
+  color: var(--console-text);
+  cursor: pointer;
+  padding: 8px 12px;
+}
+
+.packet-capture-page button:hover:not(:disabled),
+.packet-capture-page button.active {
+  background: var(--console-accent-surface);
+  border-color: var(--console-accent);
+}
+
+.packet-capture-page button:focus-visible,
+.packet-capture-page input:focus-visible {
+  outline: 2px solid var(--console-accent);
+  outline-offset: 2px;
+}
+
+.packet-capture-page button:disabled {
+  cursor: not-allowed;
+  opacity: .52;
+}
+
+.packet-capture-page .primary {
+  background: var(--accent);
+  border-color: var(--console-accent);
+  color: var(--on-accent);
+}
+
+.packet-capture-page .danger {
+  background: var(--console-danger-surface);
+  border-color: var(--console-danger-border);
+  color: var(--console-danger-text);
+}
+
+.packet-capture-status {
+  background: var(--console-surface);
+  border: 1px solid var(--console-border);
+  border-radius: 999px;
+  color: var(--console-muted);
+  font-size: var(--font-small);
+  padding: 7px 11px;
+}
+
+.packet-capture-status.running {
+  background: var(--console-success-surface);
+  border-color: var(--console-success-border);
+  color: var(--console-success-text);
+}
+
+.packet-capture-status.failed {
+  background: var(--console-danger-surface);
+  border-color: var(--console-danger-border);
+  color: var(--console-danger-text);
+}
+
+.packet-capture-connect-state {
+  align-items: center;
+  color: var(--console-muted);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 58vh;
+  padding: 30px;
+  text-align: center;
+  background: var(--console-surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.packet-capture-connect-state > span {
+  color: var(--console-accent);
+  font-size: var(--font-hero);
+}
+
+.packet-capture-notice,
+.packet-capture-info,
+.packet-capture-truncated {
+  align-items: center;
+  background: var(--console-accent-surface);
+  border: 1px solid var(--console-accent);
+  border-radius: 9px;
+  color: var(--console-text);
+  display: flex;
+  justify-content: space-between;
+  margin: 11px 0;
+  padding: 10px 13px;
+}
+
+.packet-capture-notice.error {
+  background: var(--console-danger-surface);
+  border-color: var(--console-danger-border);
+  color: var(--console-danger-text);
+}
+
+.packet-capture-truncated {
+  background: var(--console-warning-surface);
+  border-color: var(--console-warning-border);
+  color: var(--console-warning-text);
+}
+
+.packet-capture-controls,
+.packet-capture-table-panel,
+.packet-capture-detail {
+  background: var(--console-bg);
+  border: 1px solid var(--console-border);
+  border-radius: 12px;
+  min-width: 0;
+  padding: 16px;
+}
+
+.packet-capture-controls {
+  margin: 16px 0 12px;
+}
+
+.packet-capture-controls header p,
+.packet-capture-table-panel header p,
+.packet-capture-detail header p {
+  color: var(--console-accent);
+  font-size: var(--font-caption);
+  letter-spacing: .1em;
+  margin: 0 0 4px;
+}
+
+.packet-capture-controls h2,
+.packet-capture-table-panel h2,
+.packet-capture-detail h2 {
+  margin: 0;
+}
+
+.packet-capture-inline-state,
+.packet-capture-empty {
+  color: var(--console-muted);
+  padding: 18px;
+  text-align: center;
+}
+
+.packet-capture-interface-list {
+  display: flex;
+  gap: 7px;
+  margin: 12px 0;
+  overflow-x: auto;
+  padding: 2px;
+}
+
+.packet-capture-interface-list button {
+  flex: 0 0 auto;
+}
+
+.packet-capture-interface-list em {
+  color: var(--console-warning-text);
+  display: block;
+  font-size: var(--font-small);
+  font-style: normal;
+}
+
+.packet-capture-form {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(220px, 1fr) 150px 130px auto;
+}
+
+.packet-capture-form label,
+.packet-capture-search {
+  color: var(--console-muted);
+  display: grid;
+  font-size: var(--font-caption);
+  gap: 5px;
+}
+
+.packet-capture-form input,
+.packet-capture-search input {
+  background: var(--console-bg);
+  border: 1px solid var(--console-border);
+  border-radius: 7px;
+  color: var(--console-text);
+  min-width: 0;
+  padding: 9px 10px;
+}
+
+.packet-capture-form input::placeholder,
+.packet-capture-search input::placeholder {
+  color: var(--console-muted);
+}
+
+.packet-capture-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.packet-capture-validation {
+  color: var(--console-warning-text);
+  font-size: var(--font-small);
+  margin-bottom: 0;
+}
+
+.packet-capture-metrics {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  margin: 12px 0;
+}
+
+.packet-capture-metrics > div {
+  background: var(--console-bg);
+  border: 1px solid var(--console-border);
+  border-radius: 9px;
+  display: grid;
+  gap: 6px;
+  padding: 13px;
+}
+
+.packet-capture-metrics span {
+  color: var(--console-muted);
+  font-size: var(--font-caption);
+}
+
+/* Text on the console surface: on-accent is for text on the accent colour and
+   all but vanished here in the light theme. */
+.packet-capture-metrics strong {
+  color: var(--console-text);
+  font-size: var(--font-title);
+}
+
+.packet-capture-protocols {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.packet-capture-protocols > span:not(:first-child) {
+  background: var(--console-surface);
+  border: 1px solid var(--console-border);
+  border-radius: 999px;
+  color: var(--console-text);
+  display: flex;
+  gap: 7px;
+  padding: 5px 9px;
+}
+
+.packet-capture-protocols > em {
+  color: var(--console-muted);
+  font-style: normal;
+}
+
+/* Sized by the room the page actually has, not by the window: the sidebar
+   takes its share first, and a two-column grid needing 993px ran past the
+   right edge of a 1280px window. The detail drops below the table when the
+   two no longer fit side by side; the table scrolls inside its own box. */
+.packet-capture-workbench {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 13px;
+}
+
+.packet-capture-workbench > .packet-capture-table-panel {
+  flex: 3 1 560px;
+}
+
+.packet-capture-workbench > .packet-capture-detail {
+  flex: 1 1 300px;
+}
+
+.packet-capture-table-panel > header {
+  margin-bottom: 12px;
+}
+
+.packet-capture-search {
+  width: min(280px, 45%);
+}
+
+.packet-capture-table {
+  border: 1px solid var(--console-border);
+  border-radius: 8px;
+  max-height: 58vh;
+  overflow: auto;
+}
+
+.packet-capture-table-head,
+.packet-capture-table > button {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 58px 150px 80px 150px 150px 62px minmax(220px, 1fr);
+  min-width: 940px;
+}
+
+.packet-capture-table-head {
+  background: var(--console-surface);
+  color: var(--console-text);
+  font-size: var(--font-caption);
+  font-weight: 600;
+  padding: 9px 10px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.packet-capture-table > button {
+  background: var(--console-bg);
+  border: 0;
+  border-bottom: 1px solid var(--console-border);
+  border-radius: 0;
+  color: var(--console-text);
+  font-size: var(--font-small);
+  padding: 9px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.packet-capture-table > button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.packet-capture-table .protocol {
+  color: var(--console-accent);
+  font-weight: 600;
+}
+
+.packet-capture-detail {
+  align-self: start;
+}
+
+.packet-capture-detail dl {
+  margin: 12px 0;
+}
+
+.packet-capture-detail dl > div {
+  border-bottom: 1px solid var(--console-border);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 78px minmax(0, 1fr);
+  padding: 7px 0;
+}
+
+.packet-capture-detail dt,
+.packet-capture-detail-content > p {
+  color: var(--console-muted);
+  font-size: var(--font-caption);
+}
+
+.packet-capture-detail dd {
+  color: var(--console-text);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.packet-capture-detail pre {
+  background: var(--console-bg);
+  border: 1px solid var(--console-border);
+  border-radius: 7px;
+  color: var(--console-text);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  max-height: 220px;
+  overflow: auto;
+  padding: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.packet-capture-detail-content > span {
+  color: var(--console-warning-text);
+  font-size: var(--font-small);
+}
+
+.packet-capture-boundary-note {
+  color: var(--console-muted);
+  font-size: var(--font-small);
+  margin-top: 12px;
+}
+
+@media (max-width: 1120px) {
+  .packet-capture-form {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .packet-capture-heading,
+  .packet-capture-controls > header,
+  .packet-capture-table-panel > header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .packet-capture-form,
+  .packet-capture-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .packet-capture-search {
+    width: 100%;
+  }
+}
+.packet-capture-connect-state h1, .packet-capture-connect-state h2, .packet-capture-connect-state strong { color: var(--console-text); }
+
+/* Keeping a capture as a file ------------------------------------------- */
+
+.packet-capture-evidence {
+  background: var(--console-bg);
+  border: 1px solid var(--console-border);
+  border-radius: 12px;
+  margin: 0 0 12px;
+  min-width: 0;
+  padding: 16px;
+}
+
+.packet-capture-evidence > header {
+  align-items: center;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.packet-capture-evidence > header p {
+  color: var(--console-accent);
+  font-size: var(--font-caption);
+  letter-spacing: .1em;
+  margin: 0 0 4px;
+}
+
+.packet-capture-evidence > header h2 {
+  font-size: var(--font-subtitle);
+  margin: 0;
+}
+
+.packet-capture-evidence-lead,
+.packet-capture-evidence-blocked {
+  color: var(--console-muted);
+  font-size: var(--font-small);
+  line-height: 1.6;
+  margin: 10px 0 0;
+}
+
+.packet-capture-evidence-error {
+  background: var(--console-danger-surface);
+  border: 1px solid var(--console-danger-border);
+  border-radius: 9px;
+  color: var(--console-danger-text);
+  margin: 10px 0 0;
+  padding: 9px 12px;
+}
+
+.packet-capture-evidence-result {
+  border-top: 1px solid var(--console-border);
+  font-size: var(--font-small);
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.packet-capture-evidence-result p {
+  line-height: 1.6;
+  margin: 0 0 8px;
+  overflow-wrap: anywhere;
+}
+
+.packet-capture-evidence-phase {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.packet-capture-evidence-phase span {
+  color: var(--console-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.packet-capture-evidence-result.completed .packet-capture-evidence-phase strong {
+  color: var(--console-success-text);
+}
+
+.packet-capture-evidence-result.failed .packet-capture-evidence-phase strong,
+.packet-capture-evidence-result.cancelled .packet-capture-evidence-phase strong,
+.packet-capture-evidence-result.saved-unlinked .packet-capture-evidence-phase strong {
+  color: var(--console-warning-text);
+}
+
+.packet-capture-evidence-quote {
+  margin: 0 0 10px;
+}
+
+.packet-capture-evidence-quote figcaption {
+  color: var(--console-muted);
+  font-size: var(--font-caption);
+  margin-bottom: 4px;
+}
+
+.packet-capture-evidence-quote pre {
+  background: var(--console-surface);
+  border: 1px solid var(--console-border);
+  border-radius: 8px;
+  color: var(--console-text);
+  font-family: "Cascadia Mono", ui-monospace, monospace;
+  font-size: var(--font-small);
+  margin: 0;
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
+  white-space: pre-wrap;
+}
+
+.packet-capture-evidence-result dl {
+  display: grid;
+  gap: 6px 16px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  margin: 4px 0 0;
+}
+
+.packet-capture-evidence-result dl > div {
+  min-width: 0;
+}
+
+.packet-capture-evidence-result dt {
+  color: var(--console-muted);
+  font-size: var(--font-caption);
+}
+
+.packet-capture-evidence-result dd {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.packet-capture-evidence-result code {
+  font-family: "Cascadia Mono", ui-monospace, monospace;
+  font-size: var(--font-caption);
+}
+
+.packet-capture-evidence-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}

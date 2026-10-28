@@ -1,0 +1,777 @@
+/* The SSH window: its own title bar, the shell, and the file panel. */
+
+.ssh-window {
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+  box-sizing: border-box;
+  flex-direction: column;
+  color: var(--text);
+  background: var(--bg);
+}
+
+.ssh-window *,
+.ssh-window *::before,
+.ssh-window *::after {
+  box-sizing: border-box;
+}
+
+/* Title bar ------------------------------------------------------------- */
+
+.ssh-window-titlebar {
+  display: flex;
+  height: 40px;
+  flex: none;
+  align-items: stretch;
+  padding-left: 10px;
+  border-bottom: 1px solid var(--chrome-border);
+  background: var(--chrome-bg);
+}
+
+.ssh-window-tabs {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.ssh-window-tab {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 260px;
+  flex: 0 1 auto;
+  align-items: center;
+  border: 1px solid var(--chrome-border);
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  overflow: hidden;
+  color: var(--chrome-muted);
+  background: transparent;
+  font-size: var(--font-small);
+}
+
+.ssh-window-tab.is-active {
+  color: var(--chrome-text);
+  background: var(--bg);
+  font-weight: 650;
+}
+
+/* The tab itself is a button, so it is reachable and named for the keyboard;
+   it keeps the look the single tab had. */
+.ssh-window-tab-select {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 13px;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.ssh-window-tab-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ssh-window-tab-close,
+.ssh-window-tab-add {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  color: var(--chrome-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.ssh-window-tab-close {
+  width: 20px;
+  height: 20px;
+  margin-right: 6px;
+}
+
+.ssh-window-tab-add {
+  width: 26px;
+  height: 26px;
+}
+
+.ssh-window-tab-close:hover,
+.ssh-window-tab-add:hover:not(:disabled) {
+  color: var(--chrome-text);
+  background: var(--surface-hover);
+}
+
+.ssh-window-tab-add:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.ssh-window-tab-select:focus-visible,
+.ssh-window-tab-close:focus-visible,
+.ssh-window-tab-add:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.ssh-window-tab-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--success-bright);
+}
+
+/* Not connected (yet, or any more): the dot must not claim a live session. */
+.ssh-window-tab-dot.is-off {
+  background: var(--border-strong);
+}
+
+.ssh-window-tab-dot.is-failed {
+  background: var(--danger-border);
+}
+
+.ssh-window-tab-hint {
+  overflow: hidden;
+  color: var(--chrome-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-caption);
+}
+
+/* Body ------------------------------------------------------------------ */
+
+.ssh-window-body {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  gap: 10px;
+  padding: 10px;
+}
+
+.ssh-window-shell {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 47%;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ssh-window-shell-bar {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.ssh-window-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text);
+  background: var(--surface);
+  white-space: nowrap;
+  font-size: var(--font-caption);
+  font-weight: 650;
+}
+
+.ssh-window-chip.is-quiet {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.ssh-window-files-toggle {
+  min-height: 28px;
+  margin-left: auto;
+  padding: 4px 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  font-size: var(--font-caption);
+  cursor: pointer;
+}
+
+.ssh-window-files-note {
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--font-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ssh-window-files-toggle:hover {
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.ssh-window-files-toggle:focus-visible,
+.command-assistant button:focus-visible {
+  outline: 3px solid var(--console-accent);
+  outline-offset: 2px;
+}
+
+.ssh-window-terminal {
+  position: relative;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+  border: 1px solid var(--term-border);
+  border-radius: 10px;
+  background: var(--term-bg);
+}
+
+/* Every tab's terminal fills the same box, stacked. The ones behind are
+   hidden, not removed and not display:none: their shells keep running, and
+   their grids keep the size of the box, so nothing reflows when one comes to
+   the front. */
+.ssh-window-terminal-panel {
+  position: absolute;
+  inset: 0;
+}
+
+.ssh-window-terminal-panel.is-behind {
+  visibility: hidden;
+}
+
+.ssh-window-terminal .terminal-surface {
+  height: 100%;
+  border: 0;
+}
+
+.ssh-window-status {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  background: var(--surface);
+  font-size: var(--font-caption);
+}
+
+.ssh-window-status-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* Command assistant ------------------------------------------------------ */
+
+.command-assistant {
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.command-assistant-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+.command-assistant-toggle {
+  min-height: 26px;
+  padding: 3px 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface-alt);
+  font: inherit;
+  font-size: var(--font-caption);
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.command-assistant-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.command-assistant-groups button {
+  min-height: 26px;
+  padding: 3px 12px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--muted);
+  background: transparent;
+  font: inherit;
+  font-size: var(--font-caption);
+  cursor: pointer;
+}
+
+.command-assistant-groups button.is-active {
+  border-color: var(--accent);
+  color: var(--on-accent);
+  background: var(--accent);
+  font-weight: 650;
+}
+
+.command-assistant-snippets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 10px 10px;
+}
+
+.command-assistant-snippets button {
+  min-height: 28px;
+  padding: 4px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface-alt);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: var(--font-caption);
+  cursor: pointer;
+}
+
+.command-assistant-snippets button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: var(--accent-soft);
+}
+
+.command-assistant-snippets button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Terminal chrome: a floating toolbar over the output, nothing above it. */
+
+.ssh-window-terminal .terminal-surface {
+  position: relative;
+  display: block;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: var(--term-bg);
+}
+
+.terminal-surface-tools {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.terminal-surface-tools .terminal-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--term-border);
+  border-radius: 8px;
+  background: var(--term-panel);
+}
+
+.terminal-surface-tools .terminal-search input[type="search"] {
+  width: 150px;
+  min-height: 22px;
+  padding: 2px 8px;
+  border: 1px solid var(--term-border);
+  border-radius: 6px;
+  color: var(--term-text);
+  background: var(--term-bg);
+  font: inherit;
+  font-size: var(--font-caption);
+}
+
+.terminal-surface-tools .terminal-search label {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--term-muted);
+  font-size: var(--font-caption);
+}
+
+.terminal-surface-tools .terminal-search button {
+  min-height: 22px;
+  padding: 2px 8px;
+  border: 1px solid var(--term-border);
+  border-radius: 6px;
+  color: var(--term-text);
+  background: var(--term-bg);
+  font: inherit;
+  font-size: var(--font-caption);
+  cursor: pointer;
+}
+
+.ssh-window-terminal .terminal-xterm-host {
+  height: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 0;
+}
+
+.ssh-window-terminal .terminal-error {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  left: 12px;
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: var(--font-caption);
+}
+
+/* File panel ------------------------------------------------------------- */
+
+.ssh-window-files {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 53%;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.ssh-window-files > .sftp-browser-page {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  margin: 0;
+  padding: 12px;
+}
+
+/* Context menu ----------------------------------------------------------- */
+
+.sftp-context-menu {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  min-width: 168px;
+  flex-direction: column;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+  /* Placement pins a menu taller than the window to the margin; this is what
+     turns the remainder into a scroll instead of a clip. The item that used to
+     fall off the bottom edge was 删除. See menu-placement.ts. */
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.sftp-context-menu-title {
+  margin: 2px 8px 4px;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-caption);
+}
+
+.sftp-context-menu button {
+  /* The menu scrolls when it is taller than the window, and a scrolling flex
+     column shrinks its children by default. */
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 9px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text);
+  background: transparent;
+  font: inherit;
+  font-size: var(--font-caption);
+  text-align: left;
+  cursor: pointer;
+}
+
+.sftp-context-menu button:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.sftp-context-menu button.is-dangerous {
+  color: var(--danger-text);
+}
+
+.sftp-context-menu button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Operation dialog ------------------------------------------------------- */
+
+.sftp-operation-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--backdrop);
+}
+
+.sftp-operation-dialog {
+  display: flex;
+  width: min(460px, 100%);
+  max-height: 100%;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+  padding: 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+/* A scrolling column shrinks its children by default, which squeezed the plan
+   summary against the footer as soon as a plan had more than a line of it. */
+.sftp-operation-dialog > * {
+  flex: none;
+}
+
+.sftp-operation-dialog h2 {
+  margin: 0;
+  font-size: var(--font-subtitle);
+}
+
+.sftp-operation-dialog header p {
+  margin: 4px 0 0;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  font-size: var(--font-caption);
+}
+
+.sftp-operation-fields {
+  display: grid;
+  gap: 10px;
+}
+
+.sftp-operation-fields label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: var(--font-caption);
+}
+
+.sftp-operation-fields input,
+.sftp-operation-fields select {
+  min-height: 32px;
+  padding: 5px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  font-size: var(--font-small);
+}
+
+.sftp-operation-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-caption);
+}
+
+.sftp-operation-plan {
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface-alt);
+}
+
+.sftp-operation-plan.is-dangerous {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+}
+
+.sftp-operation-summary {
+  margin: 0 0 10px;
+  color: var(--text);
+  font-size: var(--font-small);
+  line-height: 1.6;
+}
+
+.sftp-operation-plan dl {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+}
+
+.sftp-operation-plan dt {
+  color: var(--muted);
+  font-size: var(--font-caption);
+}
+
+.sftp-operation-plan dd {
+  margin: 2px 0 0;
+  color: var(--text);
+  font-size: var(--font-caption);
+}
+
+.sftp-operation-receipt {
+  padding: 12px;
+  border: 1px solid var(--danger-border);
+  border-radius: 10px;
+  color: var(--danger-text);
+  background: var(--danger-soft);
+}
+
+.sftp-operation-receipt.is-passed {
+  border-color: var(--success-border);
+  color: var(--success-text);
+  background: var(--success-soft);
+}
+
+/* Stopped on purpose, not broken: the operator's own choice reads as a notice. */
+.sftp-operation-receipt.is-cancelled {
+  border-color: var(--info-border);
+  color: var(--info-text);
+  background: var(--info-soft);
+}
+
+.sftp-operation-receipt p {
+  margin: 6px 0 0;
+  font-size: var(--font-caption);
+  line-height: 1.6;
+}
+
+.sftp-operation-restored {
+  font-weight: 650;
+}
+
+.sftp-operation-error {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--danger-border);
+  border-radius: 8px;
+  color: var(--danger-text);
+  background: var(--danger-soft);
+  font-size: var(--font-caption);
+}
+
+.sftp-operation-dialog footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.sftp-operation-dialog footer button {
+  min-height: 32px;
+  padding: 6px 15px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  font-size: var(--font-small);
+  cursor: pointer;
+}
+
+.sftp-operation-dialog footer button.is-primary {
+  border-color: var(--accent);
+  color: var(--on-accent);
+  background: var(--accent);
+  font-weight: 650;
+}
+
+.sftp-operation-dialog footer button.is-dangerous {
+  border-color: var(--danger);
+  color: var(--on-accent);
+  background: var(--danger);
+  font-weight: 650;
+}
+
+.sftp-operation-dialog footer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.sftp-browser-preview-name {
+  margin: 0 0 6px;
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-caption);
+  font-weight: 650;
+}
+
+.sftp-properties-dialog h2 { display: inline-flex; align-items: center; gap: 7px; }
+.sftp-properties-list { display: grid; margin: 0; gap: 0; border: 1px solid var(--border); border-radius: 9px; }
+.sftp-properties-list > div { display: grid; align-items: baseline; grid-template-columns: 92px minmax(0, 1fr); gap: 12px; padding: 7px 11px; border-bottom: 1px solid var(--border); }
+.sftp-properties-list > div:last-child { border-bottom: 0; }
+.sftp-properties-list dt { color: var(--muted); font-size: var(--font-caption); }
+.sftp-properties-list dd { margin: 0; color: var(--text); font-family: "Cascadia Mono", monospace; font-size: var(--font-small); overflow-wrap: anywhere; white-space: pre-wrap; }
+.sftp-properties-flag { display: block; margin-top: 3px; color: var(--danger-text); font-family: inherit; font-size: var(--font-caption); font-style: normal; font-weight: 700; }
+
+/* Asking an AI provider to explain what is selected in the terminal. Always
+   offered, so it can be found; without a selection it says how to make one. */
+.ssh-window-ai {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  font-size: var(--font-caption);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ssh-window-ai:hover {
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.ssh-window-ai:focus-visible {
+  outline: 3px solid var(--console-accent);
+  outline-offset: 2px;
+}
+
+.ssh-window-ai-hint {
+  flex: none;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-caption);
+}
+
+/* The answer sits under the terminal and scrolls on its own, so the shell
+   keeps most of the window. */
+.ssh-window-ai-panel {
+  display: flex;
+  max-height: 45%;
+  min-height: 0;
+  flex: none;
+  flex-direction: column;
+  overflow: auto;
+}

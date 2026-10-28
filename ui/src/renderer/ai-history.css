@@ -1,0 +1,59 @@
+/* The page fills the window, as 主机全景 does: the record list and the text
+   each scroll on their own instead of growing the page, so a long history
+   no longer pushes the panels under the status bar. */
+.ai-history-page { display: flex; height: 100%; min-height: 520px; flex-direction: column; }
+.ai-history-background { display: flex; min-height: 0; flex: 1; flex-direction: column; }
+.ai-history-background > * { flex: none; }
+.ai-history-heading { margin-bottom: 17px; }
+.ai-history-actions { display: flex; flex: none; gap: 7px; }
+.ai-history-actions button,
+.ai-history-detail header button { padding: 7px 10px; color: var(--accent-text); background: var(--surface); border: 1px solid var(--border); border-radius: 7px; font-size: var(--font-small); }
+.ai-history-actions .danger,
+.ai-history-detail header .danger,
+.ai-history-modal .danger { color: var(--on-accent); background: var(--danger); border-color: var(--danger); }
+.ai-history-notice { margin-bottom: 12px; padding: 9px 12px; color: var(--success-text); background: var(--success-soft); border: 1px solid var(--success-border); border-radius: 8px; font-size: var(--font-small); }
+.ai-history-notice.error,
+.ai-history-detail-state.error { color: var(--danger-text); background: var(--danger-soft); border-color: var(--danger-border); }
+.ai-history-workbench { display: grid; min-height: 0; flex: 1 1 auto; grid-template-columns: 350px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); overflow: hidden; background: var(--surface); border: 1px solid var(--border); border-radius: 15px; box-shadow: var(--shadow-sm); }
+.ai-history-list-panel { display: flex; min-height: 0; flex-direction: column; padding: 12px; background: var(--surface-alt); border-right: 1px solid var(--border); }
+.ai-history-search { display: flex; align-items: center; gap: 7px; min-height: 38px; padding: 0 10px; color: var(--accent-text); background: var(--surface); border: 1px solid var(--border); border-radius: 9px; }
+.ai-history-search input { min-width: 0; flex: 1; background: transparent; border: 0; outline: 0; font-size: var(--font-small); }
+.ai-history-list { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 7px; overflow: auto; margin-top: 10px; scrollbar-width: thin; }
+.ai-history-row { display: flex; width: 100%; flex: none; flex-direction: column; gap: 5px; padding: 10px; color: var(--text-secondary); text-align: left; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; }
+.ai-history-row.active { background: var(--accent-soft); border-color: var(--accent-soft-border); box-shadow: inset 2px 0 var(--accent); }
+.ai-history-row > span { display: flex; min-width: 0; justify-content: space-between; gap: 8px; }
+.ai-history-row strong { overflow: hidden; font-size: var(--font-small); text-overflow: ellipsis; white-space: nowrap; }
+.ai-history-row time,
+.ai-history-row small { color: var(--faint); font-size: var(--font-caption); }
+.ai-history-row p { display: -webkit-box; overflow: hidden; margin: 0; color: var(--muted); font-size: var(--font-caption); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.ai-history-empty { margin: auto; max-width: 260px; padding: 14px 16px; color: var(--muted); text-align: center; font-size: var(--font-small); line-height: 1.6;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.ai-history-list-panel footer { display: flex; align-items: center; justify-content: space-between; padding-top: 9px; color: var(--faint); border-top: 1px solid var(--border); font-size: var(--font-caption); }
+.ai-history-list-panel footer div { display: flex; gap: 5px; }
+.ai-history-list-panel footer button { padding: 4px 7px; color: var(--accent-text); background: var(--accent-soft); border: 1px solid var(--border); border-radius: 5px; font-size: var(--font-caption); }
+.ai-history-detail { display: flex; min-width: 0; min-height: 0; flex-direction: column; padding: 15px; }
+.ai-history-detail > header { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.ai-history-detail h2 { margin: 0 0 3px; font-size: var(--font-subtitle); }
+.ai-history-detail header p { margin: 0; color: var(--faint); font-size: var(--font-caption); }
+.ai-history-detail header > div:last-child { display: flex; gap: 6px; }
+.ai-history-detail-state { display: grid; min-height: 320px; flex: 1; place-items: center; color: var(--faint); border: 1px dashed var(--border); border-radius: 10px; font-size: var(--font-small); }
+.ai-history-text { min-height: 0; overflow: auto; padding-top: 13px; scrollbar-width: thin; }
+.ai-history-text article + article { margin-top: 14px; }
+.ai-history-text h3 { margin: 0; padding: 8px 10px; color: var(--accent-text); background: var(--accent-soft); border: 1px solid var(--border); border-bottom: 0; border-radius: 8px 8px 0 0; font-size: var(--font-small); }
+.ai-history-text pre { overflow: auto; min-height: 100px; margin: 0; padding: 12px; color: var(--text-secondary); background: var(--surface-alt); border: 1px solid var(--border); border-radius: 0 0 8px 8px; font-family: "Cascadia Mono", monospace; font-size: var(--font-small); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ai-history-modal-backdrop { position: fixed; z-index: 80; display: grid; inset: 0; place-items: center; padding: 28px; background: var(--backdrop); backdrop-filter: blur(3px); }
+.ai-history-modal { width: min(430px, 100%); padding: 22px; background: var(--surface); border: 1px solid var(--border); border-radius: 15px; box-shadow: var(--shadow-sm); }
+.ai-history-modal > p { margin: 0 0 5px; color: var(--danger-text); font-size: var(--font-caption); font-weight: 700; letter-spacing: .12em; }
+.ai-history-modal h2 { margin: 0 0 12px; font-size: var(--font-subtitle); }
+.ai-history-modal > div { color: var(--muted); font-size: var(--font-small); line-height: 1.6; }
+.ai-history-modal > small { display: block; margin-top: 10px; color: var(--faint); font-size: var(--font-caption); }
+.ai-history-modal footer { display: flex; justify-content: flex-end; gap: 7px; margin-top: 18px; }
+.ai-history-modal button { padding: 7px 11px; color: var(--accent-text); background: var(--accent-soft); border: 1px solid var(--border); border-radius: 7px; font-size: var(--font-small); }
+
+@media (max-width: 1180px) {
+  .ai-history-workbench { grid-template-columns: 310px minmax(0, 1fr); }
+}
+.ai-history-empty h1, .ai-history-empty h2, .ai-history-empty strong { color: var(--text); }

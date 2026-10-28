@@ -1,0 +1,172 @@
+.terminal-window-root {
+  width: 100vw;
+  height: 100vh;
+  padding: 12px;
+  background: var(--term-panel);
+}
+
+.terminal-window-root .terminal-surface {
+  height: 100%;
+}
+
+.terminal-surface {
+  display: grid;
+  min-width: 0;
+  min-height: 420px;
+  grid-template-rows: auto auto minmax(300px, 1fr) auto auto;
+  gap: 10px;
+  padding: 14px;
+  color: var(--term-text);
+  background: var(--term-bg);
+  border: 1px solid var(--term-border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-md);
+}
+
+.terminal-surface-header,
+.terminal-search {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+}
+
+.terminal-surface-header {
+  justify-content: space-between;
+}
+
+.terminal-surface-header p,
+.terminal-surface-header h2,
+.terminal-status,
+.terminal-error,
+.terminal-ime-note {
+  margin: 0;
+}
+
+.terminal-surface-header p {
+  color: var(--term-muted);
+  font-size: var(--font-small);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+
+.terminal-surface-header h2 {
+  overflow: hidden;
+  max-width: min(60vw, 760px);
+  margin-top: 2px;
+  font-size: var(--font-subtitle);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-surface button,
+.terminal-search input[type="search"] {
+  min-height: 32px;
+  color: var(--term-text);
+  background: var(--term-control-bg);
+  border: 1px solid var(--term-control-border);
+  border-radius: 7px;
+}
+
+.terminal-surface button {
+  padding: 0 11px;
+  cursor: pointer;
+}
+
+.terminal-surface button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.terminal-surface button:focus-visible,
+.terminal-search input:focus-visible {
+  outline: 2px solid var(--term-accent);
+  outline-offset: 2px;
+}
+
+.terminal-search {
+  flex-wrap: wrap;
+  font-size: var(--font-caption);
+}
+
+.terminal-search > label:first-child {
+  flex: 1 1 240px;
+}
+
+.terminal-search input[type="search"] {
+  width: 100%;
+  padding: 0 10px;
+  font-family: "Cascadia Mono", monospace;
+}
+
+.terminal-search > label:not(:first-child) {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.terminal-xterm-host {
+  /* clip, not hidden: a hidden box still scrolls to keep the focused input in
+     view, and an input method composing near the right edge shifted the whole
+     grid left, hiding the first columns. */
+  overflow: clip;
+  display: grid;
+  /* One cell that the grid cannot widen: xterm's content must not push it. */
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  min-width: 0;
+  min-height: 300px;
+  padding: 8px;
+  background: var(--term-bg);
+  border: 1px solid var(--term-border);
+  border-radius: 8px;
+}
+
+/* No padding or border of its own: the grid is fitted to exactly this box. */
+.terminal-xterm-mount {
+  min-width: 0;
+  min-height: 0;
+  overflow: clip;
+}
+
+.terminal-xterm-host .xterm,
+.terminal-xterm-host .xterm-viewport,
+.terminal-xterm-host .xterm-screen {
+  height: 100%;
+}
+
+/* xterm paints its viewport black; the rows rarely fill the box to the last
+   pixel, and the strip below them showed as a dark bar in light themes. */
+.terminal-xterm-host .xterm .xterm-viewport {
+  background-color: var(--term-bg);
+}
+
+.terminal-xterm-host .xterm-osc-link {
+  color: inherit;
+  text-decoration: none;
+  pointer-events: none;
+}
+
+.terminal-ime-note,
+.terminal-status {
+  color: var(--term-muted);
+  font-size: var(--font-caption);
+}
+
+.terminal-error {
+  color: var(--term-error);
+  font-size: var(--font-caption);
+}
+
+.terminal-sr-only {
+  position: absolute;
+  overflow: hidden;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+

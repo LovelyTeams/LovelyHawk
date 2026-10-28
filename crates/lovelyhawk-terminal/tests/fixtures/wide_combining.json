@@ -1,0 +1,16 @@
+{
+  "name": "wide-cjk-and-combining-cells",
+  "initial_size": { "columns": 12, "rows": 2 },
+  "steps": [
+    { "output": "A界é" }
+  ],
+  "expected": {
+    "size": { "columns": 12, "rows": 2 },
+    "visible_line_prefixes": ["A界é"],
+    "cells": [
+      { "row": 0, "column": 1, "character": "界", "combining": "", "wide": true, "wide_spacer": false },
+      { "row": 0, "column": 2, "character": " ", "combining": "", "wide": false, "wide_spacer": true },
+      { "row": 0, "column": 3, "character": "e", "combining": "́", "wide": false, "wide_spacer": false }
+    ]
+  }
+}

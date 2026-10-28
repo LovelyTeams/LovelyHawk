@@ -1,0 +1,46 @@
+[package]
+name = "lovelyhawk-desktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "LovelyHawk desktop application: Tauri 2 host for the LovelyHawk backend"
+
+[lib]
+name = "lovelyhawk_desktop"
+path = "src/lib.rs"
+
+[[bin]]
+name = "lovelyhawk"
+path = "src/main.rs"
+
+[features]
+# Serve the embedded UI build. Always on: a release build has no development
+# server and uses the same assets and CSP every time. Only a debug build
+# started by `pnpm desktop:hot` loads the pages from local Vite instead.
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[dependencies]
+lovelyhawk-backend = { path = "../lovelyhawk-backend" }
+lovelyhawk-win-dvc = { path = "../lovelyhawk-win-dvc" }
+parking_lot.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tauri.workspace = true
+tauri-plugin-clipboard-manager.workspace = true
+tauri-plugin-dialog.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+
+# A second copy says why it is exiting before any window exists.
+[target.'cfg(windows)'.dependencies]
+rfd.workspace = true

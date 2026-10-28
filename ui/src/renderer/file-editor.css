@@ -1,0 +1,209 @@
+/* One remote file in a window of its own. */
+
+.file-editor {
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+  box-sizing: border-box;
+  flex-direction: column;
+  color: var(--text);
+  background: var(--bg);
+}
+
+.file-editor *,
+.file-editor *::before,
+.file-editor *::after {
+  box-sizing: border-box;
+}
+
+.file-editor-bar {
+  display: flex;
+  height: 40px;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--chrome-border);
+  background: var(--chrome-bg);
+}
+
+.file-editor-identity {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.file-editor-identity strong {
+  overflow: hidden;
+  color: var(--chrome-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-small);
+}
+
+.file-editor-identity span {
+  flex: none;
+  color: var(--chrome-muted);
+  white-space: nowrap;
+  font-size: var(--font-caption);
+}
+
+.file-editor-actions {
+  display: flex;
+  flex: none;
+  gap: 8px;
+}
+
+/* The editor's own buttons only: written as `.file-editor button`, this also
+   boxed in the shared minimise / maximise / close controls, which looked like
+   no other window's. */
+.file-editor-actions button,
+.file-editor-dialog-actions button {
+  min-height: 26px;
+  padding: 3px 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  font-size: var(--font-caption);
+  cursor: pointer;
+}
+
+.file-editor-actions button:hover:not(:disabled),
+.file-editor-dialog-actions button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.file-editor-actions button:disabled,
+.file-editor-dialog-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.file-editor .file-editor-save {
+  border-color: var(--accent-strong);
+  color: var(--on-accent);
+  background: var(--accent);
+}
+
+.file-editor .file-editor-save:hover:not(:disabled) {
+  color: var(--on-accent);
+  background: var(--accent-strong);
+}
+
+.file-editor-actions button:focus-visible,
+.file-editor-dialog-actions button:focus-visible,
+.file-editor textarea:focus-visible {
+  outline: 3px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+
+.file-editor-notice,
+.file-editor-error {
+  flex: none;
+  margin: 8px 10px 0;
+  padding: 7px 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  background: var(--surface);
+  font-size: var(--font-caption);
+  line-height: 1.6;
+}
+
+.file-editor-error {
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+  background: var(--danger-soft);
+}
+
+/* The file itself, given the whole window. This is the point of the window. */
+.file-editor-text {
+  min-height: 0;
+  flex: 1;
+  margin: 8px 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--console-border);
+  border-radius: 9px;
+  color: var(--console-text);
+  background: var(--console-bg);
+  font-family: "Cascadia Mono", Consolas, ui-monospace, monospace;
+  font-size: var(--font-small);
+  line-height: 1.65;
+  resize: none;
+  tab-size: 4;
+  white-space: pre;
+  overflow: auto;
+}
+
+.file-editor-text[readonly] {
+  color: var(--console-text);
+  background: var(--console-surface);
+}
+
+.file-editor-status {
+  display: flex;
+  flex: none;
+  gap: 16px;
+  padding: 0 12px 8px;
+  color: var(--muted);
+  font-size: var(--font-caption);
+}
+
+.file-editor-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--backdrop);
+}
+
+.file-editor-dialog {
+  display: flex;
+  width: min(520px, 100%);
+  max-height: 100%;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+  padding: 18px 20px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+}
+
+.file-editor-dialog > * {
+  flex: none;
+}
+
+.file-editor-dialog h2 {
+  margin: 0;
+  font-size: var(--font-subtitle);
+}
+
+.file-editor-plan,
+.file-editor-restore {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-small);
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.file-editor-restore {
+  color: var(--muted);
+  font-size: var(--font-caption);
+}
+
+.file-editor-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}

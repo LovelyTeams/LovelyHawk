@@ -1,0 +1,633 @@
+.baseline-page {
+  min-height: 100%;
+  padding: 22px;
+  color: var(--text);
+  background: var(--bg);
+}
+
+.baseline-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 20px 22px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-sm);
+}
+
+.baseline-kicker { margin: 0; color: var(--accent-text); font-size: var(--font-small); font-weight: 700; letter-spacing: .12em; }
+.baseline-header h1 { margin: 5px 0 3px; color: var(--text); font-size: var(--page-title-size); }
+.baseline-target { margin: 0; color: var(--muted); font-size: var(--font-small); }
+.baseline-header button, .baseline-view-header button {
+  flex: none;
+  padding: 9px 14px;
+  color: var(--on-accent);
+  background: var(--accent);
+  border: 1px solid var(--accent-strong);
+  border-radius: 8px;
+  font-size: var(--font-caption);
+  font-weight: 700;
+}
+.baseline-header button:disabled, .baseline-view-header button:disabled { cursor: not-allowed; opacity: .55; }
+
+.baseline-readonly-banner {
+  margin: 12px 0;
+  padding: 10px 13px;
+  color: var(--info-text);
+  background: var(--info-soft);
+  border: 1px solid var(--info-border);
+  border-radius: 9px;
+  font-size: var(--font-caption);
+  line-height: 1.55;
+}
+
+/* Wraps rather than overflows: beside the four-way mode switch the two view
+   tabs ran past the card at a 960px window and put a scroll bar under the
+   whole page. On a narrow window they drop to their own line, still at the
+   card's right corner. */
+.baseline-tabs { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; margin: 12px 0 0; }
+/* The half-switch leads the row the view tabs already need; the tabs then sit
+   at the far end, over the corner of the card they belong to. */
+.baseline-tabs .configuration-modes { margin-right: auto; }
+.baseline-page.is-embedded .baseline-tabs { margin-top: 0; }
+.baseline-tabs button {
+  min-width: 112px;
+  padding: 10px 15px;
+  color: var(--muted);
+  background: var(--surface-inset);
+  border: 1px solid var(--border);
+  border-radius: 9px 9px 0 0;
+  font-size: var(--font-caption);
+  font-weight: 700;
+}
+.baseline-tabs button.is-active { color: var(--accent-text); background: var(--surface); border-bottom-color: var(--surface); }
+
+.baseline-content {
+  padding: 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0 12px 12px;
+}
+
+.baseline-view-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.baseline-view-header h2 { margin: 0; color: var(--text); font-size: var(--font-subtitle); }
+.baseline-view-header p { margin: 4px 0 0; color: var(--muted); font-size: var(--font-small); }
+.baseline-connection-note { margin: 12px 0 0; padding: 9px 11px; color: var(--warning-text); background: var(--warning-soft); border: 1px solid var(--warning-border); border-radius: 8px; font-size: var(--font-small); }
+
+.baseline-filters { display: grid; grid-template-columns: minmax(240px, 2fr) minmax(150px, 1fr) minmax(150px, 1fr); gap: 10px; margin: 15px 0; }
+.baseline-filters label { display: flex; flex-direction: column; gap: 5px; color: var(--text-secondary); font-size: var(--font-small); font-weight: 700; }
+.baseline-filters input, .baseline-filters select { min-height: 36px; padding: 7px 9px; color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 7px; font-size: var(--font-small); outline: 0; }
+.baseline-filters input:focus, .baseline-filters select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus-ring) 16%, transparent); }
+
+/* One row however many counters there are, rather than four per row with the
+   fifth stranded underneath. */
+.baseline-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 8px; margin-bottom: 14px; }
+.baseline-summary article { display: flex; align-items: baseline; gap: 7px; padding: 10px 12px; background: var(--surface-inset); border: 1px solid var(--border); border-radius: 8px; }
+.baseline-summary strong { color: var(--text); font-size: var(--font-title); }
+.baseline-summary span { color: var(--muted); font-size: var(--font-small); }
+
+.baseline-card-grid {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+  background: var(--surface-inset);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+/* Category branch ---------------------------------------------------------
+   Thirty-eight checks in one flat list is a scroll, not a picture. Grouped,
+   the failure count per category is the first thing that reads. */
+
+.baseline-check-group { flex: none; }
+/* Software the target does not run: still listed, so the operator can see the
+   check exists, but dimmed so it does not read as a row that needs work. */
+.baseline-check-group.is-absent { opacity: .55; }
+
+.baseline-check-group header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 8px 5px;
+}
+
+.baseline-check-group header strong {
+  color: var(--text);
+  font-size: var(--font-small);
+  font-weight: 700;
+}
+
+.baseline-group-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--font-caption);
+}
+
+.baseline-group-failing { color: var(--danger-text); font-style: normal; }
+
+/* One check ------------------------------------------------------------- */
+
+.baseline-card-slot { position: relative; }
+
+.baseline-card {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.baseline-card:disabled { cursor: default; }
+.baseline-card:hover:not(:disabled) { background: var(--surface); }
+
+.baseline-card.is-selected {
+  border-color: var(--accent);
+  background: var(--info-soft);
+}
+
+.baseline-card.is-selected .baseline-card-body strong { color: var(--info-text); }
+
+/* A dot rather than a word: the risk is a rank, and a rank reads faster as
+   a colour than as another label competing with the verdict. */
+.baseline-card-risk {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+
+.baseline-card.risk-critical .baseline-card-risk { background: var(--danger); }
+.baseline-card.risk-high .baseline-card-risk { background: var(--warning); }
+.baseline-card.risk-medium .baseline-card-risk { background: var(--accent); }
+
+.baseline-card-body {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 1px;
+}
+
+.baseline-card-body strong {
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-small);
+  font-weight: 650;
+}
+
+.baseline-card-values {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "Cascadia Mono", monospace;
+  font-size: var(--font-caption);
+}
+
+.baseline-card-verdict {
+  flex: none;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: var(--font-caption);
+  white-space: nowrap;
+}
+
+.baseline-card-verdict.is-compliant { color: var(--success-text); background: var(--success-soft); }
+.baseline-card-verdict.is-noncompliant { color: var(--danger-text); background: var(--danger-soft); }
+.baseline-card-verdict.is-review { color: var(--warning-text); background: var(--warning-soft); }
+.baseline-scope-note { margin: 0 0 8px; color: var(--muted); font-size: var(--font-caption); line-height: 1.6; }
+.baseline-file-text .is-mentioned { color: var(--warning-text); background: var(--warning-soft); }
+.baseline-card-verdict.is-unscanned { color: var(--text-secondary); background: var(--surface); }
+
+/* What the row had no room for --------------------------------------------
+   The wording of a check and the values it accepts only matter once the
+   operator has stopped on one, so they wait here rather than taking a third
+   of the list. */
+
+.baseline-card-bubble {
+  position: absolute;
+  top: 100%;
+  left: 8px;
+  z-index: 30;
+  display: grid;
+  width: max-content;
+  max-width: 340px;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 11px 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+.baseline-card-slot:hover .baseline-card-bubble,
+.baseline-card-slot:focus-within .baseline-card-bubble { opacity: 1; }
+
+/* Near the bottom of the list the bubble opens upward instead of off-screen. */
+.baseline-check-group:last-child .baseline-card-slot:nth-last-child(-n + 3) .baseline-card-bubble {
+  top: auto;
+  bottom: 100%;
+  margin: 0 0 4px;
+}
+
+.baseline-card-bubble strong { color: var(--text); font-size: var(--font-small); }
+.baseline-card-bubble-risk { color: var(--muted); font-size: var(--font-caption); }
+.baseline-card-bubble p { margin: 0; color: var(--muted); font-size: var(--font-caption); line-height: 1.6; }
+.baseline-card-bubble dl { display: grid; gap: 4px; margin: 2px 0 0; }
+.baseline-card-bubble dl div { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 9px; }
+.baseline-card-bubble dt { color: var(--muted); font-size: var(--font-caption); }
+.baseline-card-bubble dd { min-width: 0; margin: 0; color: var(--text); font-size: var(--font-caption); overflow-wrap: anywhere; }
+.baseline-card-bubble code {
+  color: var(--console-text);
+  background: var(--console-bg);
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-family: "Cascadia Mono", monospace;
+}
+.baseline-card-bubble em { color: var(--warning-text); font-size: var(--font-caption); font-style: normal; }
+
+.baseline-history-list { display: grid; gap: 9px; margin-top: 14px; }
+.baseline-history-list article { padding: 13px 14px; background: var(--surface-inset); border: 1px solid var(--border); border-radius: 9px; }
+.baseline-history-list header { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: var(--font-small); }
+.baseline-history-list header strong { color: var(--accent-text); }
+.baseline-history-list time { margin-left: auto; }
+.baseline-history-list p { margin: 9px 0 5px; color: var(--text); font-size: var(--font-small); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.baseline-history-list small { display: block; color: var(--muted); font-size: var(--font-caption); }
+
+.baseline-status-panel, .baseline-empty, .baseline-error { margin-top: 14px; padding: 42px 20px; text-align: center; border-radius: 10px; }
+.baseline-status-panel { color: var(--info-text); background: var(--info-soft); border: 1px dashed var(--info-border); font-size: var(--font-small); }
+.baseline-status-panel span { display: inline-block; width: 8px; height: 8px; margin-right: 8px; background: var(--accent); border-radius: 50%; }
+.baseline-empty { color: var(--muted); background: var(--surface-inset); border: 1px dashed var(--border); }
+.baseline-empty strong { color: var(--text); font-size: var(--font-small); }
+.baseline-empty p { margin: 5px 0 0; font-size: var(--font-small); }
+.baseline-error { color: var(--danger-text); background: var(--danger-soft); border: 1px solid var(--danger-border); font-size: var(--font-small); }
+.baseline-empty.is-compact, .baseline-error.is-compact { padding: 24px 16px; }
+.baseline-warning { margin: 12px 0 0; padding: 9px 11px; color: var(--warning-text); background: var(--warning-soft); border: 1px solid var(--warning-border); border-radius: 8px; font-size: var(--font-small); }
+.baseline-page button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Checks on the left, the file they read on the right --------------------- */
+
+.baseline-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  /* One row, explicitly capped. A max-height alone leaves the row sized to its
+     content, so the columns grow to the full height of the card list and their
+     own `overflow: auto` never engages — which drew the file pane's centred
+     empty state four thousand pixels below anything on screen. */
+  grid-template-rows: minmax(0, 1fr);
+  gap: 14px;
+  margin-top: 14px;
+  /* Definite, not just a ceiling, so the row has something to resolve against.
+     Both columns then scroll on their own: a long file does not push the list
+     out of reach, and a long list does not push the file down. */
+  height: min(68vh, 720px);
+}
+
+/* A grid item will not shrink below its content unless told to, so without
+   this the row grows to the full height of the card list, `overflow: auto`
+   never engages, and the file pane's centred empty state ends up drawn below
+   anything the operator can see. */
+.baseline-workbench > * { min-height: 0; }
+
+/* A scrolling flex column shrinks its children by default, which squeezes the
+   cards until their titles overlap the next row. */
+.baseline-card-grid > * { flex: none; }
+
+.baseline-card button {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.baseline-card button:disabled { cursor: default; }
+.baseline-card.is-selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+
+.baseline-file-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  overflow: auto;
+  padding: 14px;
+  background: var(--surface-inset);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.baseline-file-pane > * { flex: none; }
+
+.baseline-file-pane header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.baseline-file-pane header h2 { margin: 3px 0 0; color: var(--text); font-size: var(--font-subtitle); }
+.baseline-file-pane header button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  min-height: 28px;
+  padding: 4px 11px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  font: inherit;
+  font-size: var(--font-small);
+  cursor: pointer;
+}
+.baseline-file-pane header button:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.baseline-file-path {
+  margin: 0;
+  color: var(--muted);
+  font-family: "Cascadia Mono", monospace;
+  font-size: var(--font-caption);
+  overflow-wrap: anywhere;
+}
+
+/* The change itself, next to the file it goes in. */
+.baseline-fix { flex: none; padding: 10px 12px; background: var(--surface-inset); border: 1px solid var(--border); border-radius: 9px; }
+.baseline-fix > header { display: flex; gap: 10px; align-items: baseline; justify-content: space-between; }
+.baseline-fix > header strong { color: var(--text); font-size: var(--font-small); }
+/* No right-to-left trick to keep the tail visible: it moved the leading slash
+   to the end and turned an absolute path into something that is not one. */
+.baseline-fix > header code { min-width: 0; overflow: hidden; color: var(--muted); font-size: var(--font-caption); text-overflow: ellipsis; white-space: nowrap; }
+.baseline-fix pre { margin: 7px 0 0; padding: 8px 10px; overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-secondary); background: var(--surface); border: 1px solid var(--border-subtle); border-radius: 7px; font: var(--font-caption) "Cascadia Mono", monospace; }
+.baseline-fix-reload { margin: 7px 0 0; color: var(--muted); font-size: var(--font-caption); }
+.baseline-fix-reload code { color: var(--text-secondary); font-family: "Cascadia Mono", monospace; }
+.baseline-fix-manual { margin: 7px 0 0; color: var(--warning-text); font-size: var(--font-caption); }
+
+.baseline-file-facts { display: grid; gap: 6px; margin: 0; }
+.baseline-file-facts div { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 10px; align-items: baseline; }
+.baseline-file-facts dt { color: var(--muted); font-size: var(--font-caption); }
+.baseline-file-facts dd { min-width: 0; margin: 0; color: var(--text); font-size: var(--font-small); overflow-wrap: anywhere; }
+.baseline-file-facts code { color: var(--console-text); background: var(--console-bg); border-radius: 4px; padding: 2px 5px; font-family: "Cascadia Mono", monospace; }
+
+.baseline-file-verdict {
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: var(--font-small);
+  line-height: 1.6;
+}
+
+.baseline-file-note { margin: 0; color: var(--muted); font-size: var(--font-small); line-height: 1.6; }
+.baseline-file-error {
+  margin: 0;
+  padding: 9px 11px;
+  color: var(--danger-text);
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-border);
+  border-radius: 8px;
+  font-size: var(--font-small);
+}
+
+.baseline-file-empty { margin: auto; padding: 32px 18px; text-align: center; color: var(--muted); }
+.baseline-file-empty span { display: block; margin-bottom: 10px; color: var(--border-strong); font-family: "Cascadia Mono", monospace; font-size: var(--font-display); }
+.baseline-file-empty h2 { margin: 0; color: var(--text); font-size: var(--font-subtitle); }
+.baseline-file-empty p { margin: 6px 0 0; font-size: var(--font-small); line-height: 1.6; }
+
+.baseline-file-text {
+  display: flex;
+  flex: 1 1 auto;
+  /* Long guidance must not collapse the evidence into an empty scrollbar. */
+  min-height: 160px;
+  overflow: auto;
+  background: var(--console-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: "Cascadia Mono", monospace;
+  font-size: var(--font-small);
+  line-height: 1.7;
+}
+
+.baseline-file-gutter {
+  position: sticky;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 10px;
+  color: var(--muted);
+  background: var(--console-bg);
+  border-right: 1px solid var(--border);
+  text-align: right;
+  user-select: none;
+}
+
+.baseline-file-text pre {
+  flex: 1 1 auto;
+  margin: 0;
+  padding: 12px 14px;
+  color: var(--console-text);
+  font: inherit;
+  white-space: pre;
+}
+
+/* The line the program on the host actually obeys. */
+.baseline-file-text pre span.is-effective,
+.baseline-file-gutter span.is-effective {
+  color: var(--danger-text);
+  background: var(--danger-soft);
+  font-weight: 650;
+}
+
+/* Named here, but commented out, so it sets nothing. */
+.baseline-file-text pre span.is-commented,
+.baseline-file-gutter span.is-commented {
+  color: var(--muted);
+  background: var(--surface-inset);
+}
+
+/* Named and active, but another line won. */
+.baseline-file-text pre span.is-inert,
+.baseline-file-gutter span.is-inert {
+  color: var(--warning-text);
+  background: var(--warning-soft);
+}
+
+.baseline-file-text pre span.is-effective,
+.baseline-file-text pre span.is-commented,
+.baseline-file-text pre span.is-inert {
+  margin: 0 -14px;
+  padding: 0 14px;
+}
+
+@media (max-width: 1000px) {
+  /* Too narrow for two columns, so the file goes under the list and the whole
+     thing grows with the page rather than scrolling in two boxes. */
+  .baseline-workbench {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) auto;
+    height: auto;
+  }
+  .baseline-card-grid { max-height: 380px; }
+  .baseline-file-pane { max-height: 420px; }
+  .baseline-filters { grid-template-columns: 1fr 1fr; }
+  .baseline-filters label:first-child { grid-column: 1 / -1; }
+}
+
+@media (max-width: 680px) {
+  .baseline-page { padding: 12px; }
+  .baseline-header, .baseline-view-header { align-items: flex-start; flex-direction: column; }
+  .baseline-summary { grid-template-columns: 1fr 1fr; }
+  .baseline-filters { grid-template-columns: 1fr; }
+  .baseline-filters label:first-child { grid-column: auto; }
+}
+
+/* The selected setting's change controls above the file it changes. The column
+   keeps the workbench row's height; the file pane takes what is left and
+   scrolls on its own. */
+.baseline-side {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.baseline-side > .baseline-file-pane {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.baseline-change {
+  display: grid;
+  gap: 8px;
+  flex: none;
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: var(--font-small);
+}
+
+.baseline-change header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.baseline-change header span {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.baseline-change-fields {
+  display: grid;
+  gap: 8px;
+}
+
+.baseline-change-fields label {
+  display: grid;
+  gap: 4px;
+  color: var(--text);
+}
+
+.baseline-change-fields fieldset {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.baseline-change-fields fieldset label {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.baseline-change-fields legend {
+  padding: 0 4px;
+  color: var(--muted);
+}
+
+.baseline-change-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.baseline-change-blocked {
+  margin: 0;
+  color: var(--muted);
+}
+
+.baseline-change-error {
+  margin: 0;
+  color: var(--danger-text);
+}
+
+.baseline-action-receipt {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+
+.baseline-action-receipt.is-verified {
+  color: var(--success-text);
+  background: var(--surface-inset);
+}
+
+.baseline-action-receipt.is-failed {
+  color: var(--warning-text);
+  background: var(--warning-soft);
+}
+
+.baseline-action-receipt span {
+  color: var(--text);
+}
+
+/* The restore receipt sits above the history list, outside the change panel
+   that otherwise sets its size. */
+.baseline-view-header + .baseline-action-receipt {
+  margin-top: 14px;
+  padding: 9px 11px;
+  font-size: var(--font-small);
+  line-height: 1.6;
+}
+
+.baseline-restore {
+  display: grid;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.baseline-restore button {
+  justify-self: start;
+}
+
+.baseline-restore-blocked {
+  color: var(--muted);
+  font-size: var(--font-caption);
+}

@@ -1,0 +1,36 @@
+[package]
+name = "lovelyhawk-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+aes-gcm.workspace = true
+async-channel.workspace = true
+async-trait.workspace = true
+base64.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+futures.workspace = true
+flate2.workspace = true
+lovelyhawk-win-dvc = { path = "../lovelyhawk-win-dvc" }
+parking_lot.workspace = true
+native-tls.workspace = true
+postgres-native-tls.workspace = true
+reqwest.workspace = true
+regex.workspace = true
+russh.workspace = true
+russh-sftp.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-postgres.workspace = true
+tracing.workspace = true
+url.workspace = true
+uuid.workspace = true
+zeroize.workspace = true

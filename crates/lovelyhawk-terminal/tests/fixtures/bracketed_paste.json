@@ -1,0 +1,15 @@
+{
+  "name": "bracketed-paste-wraps-and-strips-embedded-terminator",
+  "initial_size": { "columns": 20, "rows": 2 },
+  "steps": [
+    { "output": "\u001b[?2004h", "bracketed_paste": true }
+  ],
+  "expected": {
+    "size": { "columns": 20, "rows": 2 },
+    "visible_line_prefixes": [""],
+    "paste": {
+      "input": "safe\u001b[201~tail",
+      "bytes": "\u001b[200~safetail\u001b[201~"
+    }
+  }
+}

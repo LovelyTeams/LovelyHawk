@@ -1,0 +1,429 @@
+.sftp-browser-page {
+  min-height: 100%;
+  padding: 24px;
+  color: var(--text);
+  background: var(--bg);
+}
+
+.sftp-browser-page h1,
+.sftp-browser-page h2,
+.sftp-browser-page p {
+  margin: 0;
+}
+
+.sftp-browser-disconnected {
+  display: grid;
+  min-height: 420px;
+  place-content: center;
+  gap: 10px;
+  text-align: center;
+}
+
+.sftp-browser-disconnected p,
+.sftp-browser-header p,
+.sftp-browser-toolbar > span,
+.sftp-browser-entry small,
+.sftp-browser-detail-header p,
+.sftp-browser-preview header span {
+  color: var(--muted);
+}
+
+.sftp-browser-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 14px;
+}
+
+.sftp-browser-header > div {
+  display: grid;
+  gap: 6px;
+}
+
+.sftp-browser-header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.sftp-browser-kicker {
+  color: var(--accent-text);
+  font-size: var(--font-small);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.sftp-browser-page button,
+.sftp-browser-page input,
+.sftp-browser-page select {
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+}
+
+.sftp-browser-page button {
+  min-height: 36px;
+  padding: 7px 13px;
+  cursor: pointer;
+}
+
+.sftp-browser-page button:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--surface-inset);
+}
+
+.sftp-browser-page button:focus-visible,
+.sftp-browser-page input:focus-visible,
+.sftp-browser-page select:focus-visible {
+  outline: 3px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+
+.sftp-browser-page button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.sftp-browser-boundary {
+  border: 1px solid var(--console-accent);
+  border-radius: 9px;
+  padding: 10px 12px;
+  color: var(--info-text);
+  background: var(--info-soft);
+}
+
+.sftp-browser-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0;
+  flex-wrap: wrap;
+}
+
+.sftp-browser-navigation {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 7px;
+}
+
+.sftp-browser-navigation strong {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sftp-browser-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+
+.sftp-browser-toolbar input,
+.sftp-browser-toolbar select {
+  padding: 8px 10px;
+}
+
+.sftp-browser-toolbar input {
+  width: min(260px, 40vw);
+}
+
+.sftp-browser-toolbar > span {
+  margin-left: auto;
+  font-size: var(--font-small);
+}
+
+.sftp-browser-workbench {
+  display: grid;
+  grid-template-columns: minmax(280px, 390px) minmax(0, 1fr);
+  gap: 14px;
+  min-height: 520px;
+}
+
+.sftp-browser-list,
+.sftp-browser-detail {
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.sftp-browser-list {
+  max-height: 680px;
+  overflow: auto;
+}
+
+.sftp-browser-entry {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  width: 100%;
+  gap: 5px 9px;
+  border: 0;
+  border-bottom: 1px solid var(--border-strong);
+  border-radius: 0;
+  padding: 12px 14px;
+  text-align: left;
+}
+
+.sftp-browser-entry.is-selected {
+  box-shadow: inset 4px 0 var(--accent);
+  background: var(--info-soft);
+}
+
+.sftp-browser-entry strong,
+.sftp-browser-entry small,
+.sftp-browser-entry em {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.sftp-browser-entry small,
+.sftp-browser-entry em {
+  grid-column: 2;
+}
+
+.sftp-browser-entry em {
+  color: var(--danger-text);
+  font-size: var(--font-caption);
+  font-style: normal;
+}
+
+.sftp-browser-entry-kind {
+  align-self: start;
+  border-radius: 999px;
+  padding: 3px 7px;
+  color: var(--text);
+  background: var(--surface-inset);
+  font-size: var(--font-caption);
+}
+
+.sftp-browser-entry-kind.is-directory {
+  color: var(--info-text);
+  background: var(--info-soft);
+}
+
+.sftp-browser-entry-kind.is-symlink {
+  color: var(--warning-text);
+  background: var(--warning-soft);
+}
+
+.sftp-browser-detail {
+  min-width: 0;
+  padding: 16px;
+  overflow: auto;
+}
+
+.sftp-browser-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.sftp-browser-detail-header > div {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.sftp-browser-detail-header h2 {
+  overflow-wrap: anywhere;
+}
+
+.sftp-browser-detail-header > button {
+  flex: 0 0 auto;
+  color: var(--on-accent);
+  background: var(--accent);
+}
+
+.sftp-browser-preview {
+  display: grid;
+  gap: 10px;
+}
+
+.sftp-browser-preview > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sftp-browser-preview-text {
+  max-height: 520px;
+  margin: 0;
+  border-radius: 9px;
+  padding: 14px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--console-text);
+  background: var(--console-bg);
+  font: var(--font-small)/1.55 "Cascadia Mono", Consolas, monospace;
+}
+
+.sftp-browser-warning,
+.sftp-browser-redacted {
+  margin: 10px 0;
+  border-radius: 8px;
+  padding: 9px 11px;
+}
+
+.sftp-browser-warning {
+  color: var(--warning-text);
+  background: var(--warning-soft);
+}
+
+.sftp-browser-redacted {
+  color: var(--danger-text);
+  background: var(--danger-soft);
+}
+
+.sftp-browser-status,
+.sftp-browser-empty,
+.sftp-browser-error {
+  display: grid;
+  min-height: 180px;
+  place-content: center;
+  gap: 7px;
+  padding: 18px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.sftp-browser-status > span {
+  width: 28px;
+  height: 28px;
+  margin: 0 auto;
+  border: 3px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+}
+
+.sftp-browser-status.is-compact,
+.sftp-browser-empty.is-compact,
+.sftp-browser-error.is-compact {
+  min-height: 130px;
+}
+
+.sftp-browser-empty strong,
+.sftp-browser-error strong {
+  color: var(--text);
+}
+
+.sftp-browser-error {
+  border: 1px solid var(--danger-border);
+  border-radius: 9px;
+  color: var(--danger-text);
+  background: var(--danger-soft);
+}
+
+@media (max-width: 900px) {
+  .sftp-browser-page {
+    padding: 16px;
+  }
+
+  .sftp-browser-header,
+  .sftp-browser-workbench {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .sftp-browser-list {
+    max-height: 280px;
+  }
+
+  .sftp-browser-toolbar > span {
+    margin-left: 0;
+  }
+}
+
+/* File-management panel chrome. */
+.sftp-browser-actions { display: flex; flex: none; flex-wrap: wrap; align-items: center; gap: 6px; margin: 10px 0; }
+.sftp-browser-action { min-height: 30px; padding: 5px 12px; border: 1px solid var(--border-strong); border-radius: 8px; color: var(--text); background: var(--surface); font: inherit; font-size: var(--font-caption); cursor: pointer; }
+.sftp-browser-action:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-text); background: var(--accent-soft); }
+.sftp-browser-action:disabled { cursor: not-allowed; opacity: 0.55; }
+/* The one way on once the list has expired, so it is the button that stands out. */
+.sftp-browser-action.is-attention { border-color: var(--warning-border); color: var(--warning-text); background: var(--warning-soft); font-weight: 600; }
+.sftp-browser-expired { color: var(--warning-text); font-weight: 600; }
+.sftp-browser-action-divider { width: 1px; height: 20px; background: var(--border-strong); }
+.sftp-browser-summary { display: flex; flex: none; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-bottom: 8px; color: var(--muted); font-size: var(--font-caption); }
+.sftp-browser-queue { flex: none; margin-top: 10px; border: 1px dashed var(--border-strong); border-radius: 10px; padding: 10px 12px; }
+.sftp-browser-queue header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; }
+.sftp-browser-queue strong { color: var(--text); font-size: var(--font-small); }
+.sftp-browser-queue span { color: var(--muted); font-size: var(--font-caption); }
+
+/* Dual-pane file manager ------------------------------------------------- */
+/* Rows are caption-sized; measured in the app font at that size a time
+   ("2026-07-30 00:02") needs 107px and the widest size ("12.3 MiB") 48px. */
+.sftp-browser-page { font-size: var(--font-small); --sftp-columns: minmax(0, 1fr) 56px 108px; }
+.sftp-browser-page h1 { font-size: var(--font-subtitle); }
+.sftp-browser-header { display: flex; flex: none; align-items: center; gap: 10px; margin: 0 0 10px; }
+.sftp-browser-panes { display: flex; min-height: 0; flex: 1 1 58%; gap: 8px; }
+.sftp-browser-pane { display: flex; min-width: 0; min-height: 0; flex: 1 1 0; flex-direction: column; border: 1px solid var(--border-strong); border-radius: 9px; overflow: hidden; background: var(--surface); }
+
+.sftp-browser-pane-head { display: flex; flex: none; align-items: center; gap: 6px; padding: 6px 9px; border-bottom: 1px solid var(--border); background: var(--surface-alt); }
+.sftp-browser-pane-head strong { flex: none; font-size: var(--font-caption); }
+.sftp-browser-pane.is-local .sftp-browser-pane-head strong { margin-right: auto; }
+.sftp-browser-pane-head button { display: inline-flex; min-height: 24px; align-items: center; gap: 5px; padding: 2px 8px; border: 1px solid var(--border-strong); border-radius: 6px; color: var(--text); background: var(--surface); font: inherit; font-size: var(--font-caption); cursor: pointer; }
+.sftp-browser-pane-head button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.sftp-browser-pane-head button:disabled { cursor: not-allowed; opacity: 0.5; }
+.sftp-browser-filter { min-width: 0; flex: 1; }
+.sftp-browser-filter input { width: 100%; min-height: 24px; padding: 2px 8px; border: 1px solid var(--border-strong); border-radius: 6px; color: var(--text); background: var(--surface); font: inherit; font-size: var(--font-caption); }
+.sftp-browser-pane-head select { min-height: 24px; padding: 2px 6px; border: 1px solid var(--border-strong); border-radius: 6px; color: var(--text); background: var(--surface); font: inherit; font-size: var(--font-caption); }
+.sftp-browser-pathbar { display: flex; flex: none; align-items: center; gap: 6px; padding: 5px 9px; border-bottom: 1px solid var(--border); }
+.sftp-browser-pathbar button { min-height: 22px; padding: 1px 8px; border: 1px solid var(--border-strong); border-radius: 6px; color: var(--text); background: var(--surface); font: inherit; font-size: var(--font-caption); cursor: pointer; }
+.sftp-browser-pathbar button:disabled { cursor: not-allowed; opacity: 0.5; }
+.sftp-browser-path-value { min-width: 0; flex: 1; overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; font-family: "Cascadia Mono", Consolas, monospace; font-size: var(--font-caption); }
+.sftp-browser-path-value.is-muted { color: var(--muted); font-family: inherit; }
+.sftp-browser-table-head { position: sticky; top: 0; z-index: 1; display: grid; flex: none; grid-template-columns: var(--sftp-columns); gap: 6px; padding: 4px 9px; border-bottom: 1px solid var(--border); color: var(--muted); background: var(--surface-alt); font-size: var(--font-caption); }
+.sftp-browser-pane-body { min-width: 0; min-height: 0; flex: 1; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
+.sftp-browser-rows { display: flex; flex-direction: column; }
+.sftp-browser-rows .sftp-browser-row { display: grid; width: 100%; margin: 0; flex: none; grid-template-columns: var(--sftp-columns); align-items: center; gap: 6px; padding: 5px 9px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; font: inherit; font-size: var(--font-caption); text-align: left; cursor: pointer; }
+.sftp-browser-rows .sftp-browser-row:hover:not(:disabled) { background: var(--surface-hover); }
+.sftp-browser-rows .sftp-browser-row.is-selected { background: var(--info-soft); box-shadow: inset 3px 0 var(--accent); }
+.sftp-browser-row-name { display: flex; min-width: 0; align-items: center; gap: 7px; }
+.sftp-browser-row-label { overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
+.sftp-browser-row-name em { flex: none; color: var(--warning-text); font-size: var(--font-caption); font-style: normal; }
+.sftp-browser-row-kind { display: inline-flex; flex: none; align-items: center; color: var(--muted); }
+.sftp-browser-row-kind.is-directory { color: var(--accent); }
+.sftp-browser-row-kind.is-file { color: var(--success-text); }
+.sftp-browser-row-kind.is-symlink { color: var(--warning-text); }
+.sftp-browser-action svg, .sftp-browser-pathbar svg { flex: none; }
+.sftp-browser-pathbar button { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; }
+.sftp-browser-row-size, .sftp-browser-row-time { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-caption); }
+/* A narrow pane — the terminal window shares its width between the terminal
+   and two of these — left the name column four characters wide while the
+   date kept all of its own. There the size and date move under the name,
+   which gets the whole row. */
+.sftp-browser-pane { container: sftp-pane / inline-size; }
+@container sftp-pane (max-width: 380px) {
+  .sftp-browser-table-head { grid-template-columns: minmax(0, 1fr); }
+  .sftp-browser-table-head > span:not(:first-child) { display: none; }
+  .sftp-browser-rows .sftp-browser-row { grid-template-columns: auto minmax(0, 1fr); row-gap: 1px; }
+  .sftp-browser-row-name { grid-column: 1 / -1; }
+  .sftp-browser-row-size { padding-left: 21px; }
+  .sftp-browser-row-time { text-align: right; }
+}
+.sftp-browser-pane-foot { display: flex; flex: none; flex-wrap: wrap; justify-content: space-between; gap: 6px; padding: 4px 9px; border-top: 1px solid var(--border); color: var(--muted); background: var(--surface-alt); font-size: var(--font-caption); }
+.sftp-browser-page .sftp-browser-detail { flex: 0 1 auto; max-height: 38%; margin-top: 8px; overflow: auto; }
+.sftp-browser-page .sftp-browser-detail-header h2 { font-size: var(--font-subtitle); }
+
+.sftp-browser-pane .sftp-browser-empty { min-width: 0; min-height: 90px; padding: 12px; border: 0; }
+.sftp-browser-transfer { margin: 6px 0 0; padding: 6px 10px; border: 1px solid var(--info-border); border-radius: 8px; color: var(--info-text); background: var(--info-soft); font-size: var(--font-caption); }
+.sftp-browser-transfer.is-running { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sftp-browser-transfer.is-running span { min-width: 0; overflow-wrap: anywhere; }
+.sftp-browser-transfer.is-running button { flex: none; padding: 3px 9px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); background: var(--surface); font-size: var(--font-caption); cursor: pointer; }
+.sftp-browser-transfer.is-running button:disabled { cursor: not-allowed; opacity: .55; }
+.sftp-browser-transfer.is-error { border-color: var(--danger-border); color: var(--danger-text); background: var(--danger-soft); overflow-wrap: anywhere; }
+
+/* Where reopening an expired list brought the operator back to, or why it stopped short. */
+.sftp-browser-return {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-caption);
+}

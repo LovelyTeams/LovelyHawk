@@ -1,0 +1,24 @@
+[package]
+name = "lovelyhawk-terminal"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Headless terminal model and transport foundation for LovelyHawk"
+
+[dependencies]
+alacritty_terminal.workspace = true
+async-channel.workspace = true
+async-trait.workspace = true
+parking_lot.workspace = true
+regex.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+unicode-width.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+futures.workspace = true
+serde_json.workspace = true

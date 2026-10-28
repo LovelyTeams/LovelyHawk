@@ -1,0 +1,23 @@
+# A small Compose project, so the Compose tab has a real one to read rather
+# than an empty list. The labels Compose writes are what LovelyHawk groups by,
+# so this has to be brought up by `docker compose`, not by `docker run`.
+services:
+  # Writes to stdout continuously, so the log reader has something to page.
+  # Every other container here is a `sleep`, and a log pane verified against a
+  # silent container only proves it does not crash.
+  collector:
+    image: alpine:3.20
+    container_name: incident-collector
+    command: sh -c 'i=0; while true; do i=$$((i+1)); echo "$$(date -Iseconds) collected batch=$$i rows=42"; sleep 2; done'
+    restart: unless-stopped
+
+  # Deliberately bad inside the project too: a Compose file is exactly where a
+  # privileged service tends to hide, and the audit has to see through the
+  # project boundary.
+  shipper:
+    image: alpine:3.20
+    container_name: incident-shipper
+    command: sh -c "sleep infinity"
+    privileged: true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock

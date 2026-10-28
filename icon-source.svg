@@ -1,0 +1,62 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <title>LovelyRes flat anime responder icon</title>
+  <defs>
+    <clipPath id="app-frame">
+      <rect x="32" y="32" width="960" height="960" rx="216"/>
+    </clipPath>
+  </defs>
+
+  <rect width="1024" height="1024" fill="#ff00ff"/>
+  <g clip-path="url(#app-frame)">
+    <rect x="32" y="32" width="960" height="960" fill="#071b35"/>
+
+    <!-- Protective shield -->
+    <path d="M512 91 854 246v267c0 207-132 360-342 437-210-77-342-230-342-437V246Z"
+          fill="#0d3566" stroke="#20d7ec" stroke-width="38" stroke-linejoin="round"/>
+    <path d="M512 145 803 278v229c0 169-103 296-291 371-188-75-291-202-291-371V278Z"
+          fill="#1264d8" stroke="#f4f8ff" stroke-width="23" stroke-linejoin="round"/>
+
+    <!-- Hair behind the face -->
+    <path d="M291 477c-20-193 75-316 225-316 155 0 247 116 222 320l-32 223-389 1Z"
+          fill="#081f4b" stroke="#06162f" stroke-width="23" stroke-linejoin="round"/>
+    <path d="M317 415c-40 78-39 185 9 275 30-18 52-51 63-91l-7-184Zm390 0c39 82 37 190-12 276-29-19-50-52-60-92l7-184Z"
+          fill="#0b2f70" stroke="#06162f" stroke-width="20" stroke-linejoin="round"/>
+
+    <!-- Neck and shoulders -->
+    <path d="M443 642h138l17 104-86 74-86-74Z" fill="#ffd4b5" stroke="#06162f" stroke-width="20"/>
+    <path d="M235 937c22-133 105-202 205-222l72 86 72-86c100 20 183 89 205 222Z"
+          fill="#082554" stroke="#06162f" stroke-width="24" stroke-linejoin="round"/>
+    <path d="m439 715 73 86-80 95-97-142Zm146 0-73 86 80 95 97-142Z"
+          fill="#12cde4" stroke="#06162f" stroke-width="20" stroke-linejoin="round"/>
+    <path d="m432 896 80-95 80 95-31 42h-98Z" fill="#0b1835" stroke="#06162f" stroke-width="18"/>
+
+    <!-- Face -->
+    <path d="M353 347c-2 65 1 166 21 222 16 45 50 87 86 112 20 14 37 23 52 27 15-4 32-13 52-27 36-25 70-67 86-112 20-56 23-157 21-222-40-55-95-82-159-82s-119 27-159 82Z"
+          fill="#ffd4b5" stroke="#06162f" stroke-width="22" stroke-linejoin="round"/>
+
+    <!-- Flat fringe and cyan identity lock -->
+    <path d="M324 382c11-147 84-218 198-218 109 0 184 62 199 190-40-39-73-69-126-87-5 82-65 135-129 157 22-48 27-88 19-127-42 62-89 97-161 115Z"
+          fill="#0b2f70" stroke="#06162f" stroke-width="22" stroke-linejoin="round"/>
+    <path d="M435 201c-52 45-81 107-87 187 31-12 58-29 80-50 14-53 38-99 72-139-21-2-44-1-65 2Z"
+          fill="#20d7ec" stroke="#06162f" stroke-width="16" stroke-linejoin="round"/>
+
+    <!-- Eyes and brows -->
+    <path d="M382 469c33-30 79-30 111 2-32 34-78 35-111-2Z" fill="#f7fbff" stroke="#06162f" stroke-width="12"/>
+    <path d="M531 471c32-32 78-32 111-2-33 37-79 36-111 2Z" fill="#f7fbff" stroke="#06162f" stroke-width="12"/>
+    <ellipse cx="445" cy="474" rx="24" ry="30" fill="#20d7ec" stroke="#06162f" stroke-width="10"/>
+    <ellipse cx="579" cy="474" rx="24" ry="30" fill="#20d7ec" stroke="#06162f" stroke-width="10"/>
+    <circle cx="445" cy="479" r="10" fill="#071b35"/>
+    <circle cx="579" cy="479" r="10" fill="#071b35"/>
+    <circle cx="436" cy="464" r="6" fill="#f7fbff"/>
+    <circle cx="570" cy="464" r="6" fill="#f7fbff"/>
+    <path d="M382 430c33-22 72-24 105-5m50 0c33-19 72-17 105 5" fill="none" stroke="#06162f" stroke-width="16" stroke-linecap="round"/>
+
+    <!-- Nose and expression -->
+    <path d="m509 520-5 24 12 2" fill="none" stroke="#b96761" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M470 591c27 24 57 24 84 0" fill="none" stroke="#8f3948" stroke-width="11" stroke-linecap="round"/>
+
+    <!-- Coral alert hair clip -->
+    <path d="m648 287 52 75h-104Z" fill="#ff5f63" stroke="#06162f" stroke-width="14" stroke-linejoin="round"/>
+    <path d="M648 315v20m0 13v2" fill="none" stroke="#06162f" stroke-width="10" stroke-linecap="round"/>
+  </g>
+</svg>

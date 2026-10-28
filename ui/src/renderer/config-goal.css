@@ -1,0 +1,64 @@
+/* Goals found by the generator's search box, and the assignment card shared
+   with the visual editor. Colours come from the theme tokens only. */
+
+.config-goal-results { display: grid; gap: 8px; margin-bottom: 6px; }
+.config-goal-hint { margin: 0; color: var(--muted); font-size: var(--font-small); line-height: 1.6; }
+.config-goal-blocking { margin: 0; padding: 8px 11px; color: var(--warning-text); background: var(--warning-soft); border: 1px solid var(--warning-border); border-radius: 8px; font-size: var(--font-small); line-height: 1.6; }
+
+.config-goal-group { display: grid; gap: 6px; padding: 8px 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+.config-goal-group h3 { margin: 0; color: var(--text-secondary); font-size: var(--font-small); font-weight: 600; }
+.config-goal-group > ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.config-goal-group > ul > li { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 6px 12px; padding: 8px 10px; background: var(--surface-alt); border-radius: 7px; }
+.config-goal-group > ul > li > div:first-child { display: grid; flex: 1 1 320px; gap: 3px; min-width: 0; }
+.config-goal-group strong { color: var(--text); font-size: var(--font-small); overflow-wrap: anywhere; }
+.config-goal-group span { color: var(--accent-text); font-size: var(--font-caption); overflow-wrap: anywhere; }
+.config-goal-group p { margin: 0; color: var(--text-secondary); font-size: var(--font-small); line-height: 1.6; overflow-wrap: anywhere; }
+.config-goal-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.config-goal-group > ul > li > button,
+.config-goal-actions button { flex: none; white-space: nowrap; }
+
+.config-goal-steps { display: grid; gap: 4px; margin: 4px 0 0; padding-left: 20px; }
+.config-goal-steps li { display: grid; gap: 1px; color: var(--text); font-size: var(--font-small); }
+.config-goal-steps li strong { font-size: var(--font-small); }
+.config-goal-steps li span { color: var(--text-secondary); font-family: "Cascadia Mono", ui-monospace, monospace; font-size: var(--font-caption); }
+.config-goal-steps li small { color: var(--muted); font-size: var(--font-caption); line-height: 1.5; }
+.config-goal-steps li.is-outside span { color: var(--warning-text); font-family: inherit; }
+
+.config-goal-gap { display: grid; gap: 2px; padding: 6px 9px; background: var(--surface-inset); border: 1px solid var(--border); border-radius: 7px; }
+.config-goal-group .config-goal-gap strong { color: var(--warning-text); font-size: var(--font-small); }
+.config-goal-group .config-goal-gap span { color: var(--muted); font-size: var(--font-caption); line-height: 1.5; }
+
+.config-goal-assignment { display: grid; gap: 8px; padding: 10px 12px; background: var(--accent-soft); border: 1px solid var(--accent-soft-border); border-radius: 8px; }
+.config-goal-assignment.is-blocked { background: var(--warning-soft); border-color: var(--warning-border); }
+.config-goal-assignment.is-done { background: var(--surface-alt); border-color: var(--border); }
+.config-goal-assignment h3 { margin: 0; color: var(--text); font-size: var(--font-body); overflow-wrap: anywhere; }
+.config-goal-assignment p { margin: 0; color: var(--text-secondary); font-size: var(--font-small); line-height: 1.6; overflow-wrap: anywhere; }
+.config-goal-assignment form { display: grid; gap: 8px; }
+.config-goal-facts { color: var(--muted); }
+.config-goal-value { display: grid; gap: 4px; color: var(--muted); font-size: var(--font-caption); }
+.config-goal-value input { width: 100%; padding: 6px 9px; color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 7px; font-family: "Cascadia Mono", ui-monospace, monospace; font-size: var(--font-small); }
+.config-goal-value input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.config-goal-candidates { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+
+/* The goal area sits inside the generator's search panel, whose own buttons
+   are laid out as catalogue rows; these are plain buttons. */
+.config-search-results .config-goal-results button,
+.config-goal-box button { display: inline-flex; align-items: center; justify-content: center; width: auto; max-width: 100%; padding: 6px 12px; color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 7px; font-size: var(--font-small); text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.config-search-results .config-goal-results button:hover:enabled,
+.config-goal-box button:hover:enabled { background: var(--surface-hover); }
+.config-search-results .config-goal-results button:focus-visible,
+.config-goal-box button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.config-search-results .config-goal-results button:disabled,
+.config-goal-box button:disabled { cursor: default; opacity: .55; }
+.config-search-results .config-goal-results button.primary,
+.config-goal-box button.primary { justify-self: start; color: var(--on-accent); background: var(--accent); border-color: var(--accent); font-weight: 600; }
+.config-search-results .config-goal-results button.primary:hover:enabled,
+.config-goal-box button.primary:hover:enabled { background: var(--accent-strong); }
+.config-search-results .config-goal-candidates button,
+.config-goal-box .config-goal-candidates button { display: grid; justify-content: start; gap: 2px; width: 100%; }
+.config-goal-candidates button span { color: var(--muted); font-size: var(--font-caption); }
+
+/* With goals in it, the search panel grows a little for a card, but never so far
+   that it squeezes the three columns below; its own list scrolls instead. */
+.config-search-results:has(.config-goal-results) { max-height: min(36vh, 340px); }
+.config-goal-results > .config-goal-hint { padding: 2px 6px; }

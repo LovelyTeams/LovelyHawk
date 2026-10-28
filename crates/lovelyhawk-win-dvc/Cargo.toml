@@ -1,0 +1,31 @@
+[package]
+name = "lovelyhawk-win-dvc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Windows RDP Dynamic Virtual Channel (DVC) COM plugin host and remote session agent for LovelyHawk"
+
+[lib]
+name = "lovelyhawk_win_dvc"
+path = "src/lib.rs"
+
+[[bin]]
+name = "lovelyhawk-win-agent"
+path = "src/bin/lovelyhawk-win-agent.rs"
+
+[dependencies]
+base64.workspace = true
+chrono.workspace = true
+parking_lot.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows.workspace = true
+windows-core.workspace = true

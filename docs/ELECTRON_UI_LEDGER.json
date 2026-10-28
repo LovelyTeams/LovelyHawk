@@ -1,0 +1,2632 @@
+{
+ "$schema": "lovelyres-electron-ui-ledger/v1",
+ "schemaVersion": 1,
+ "title": "LovelyRes GPUI to Electron UI migration ledger",
+ "snapshot": {
+  "capturedOn": "2026-08-24",
+  "timezone": "Asia/Taipei",
+  "gitCommit": "fb3ac95577d244cbf505ddfadc3ccdc503111adf",
+  "gitBranch": "lovelyres-rs-main",
+  "worktreeWasDirty": true,
+  "scope": "Complete removal of the GPUI frontend and replacement by the Electron frontend. lovelyres-core remains the owner of domain rules and remote effects.",
+  "truthRule": "Only Electron shell, the bounded Electron-to-Rust backend boundary, and security-reference are currently Completed. Every other migration item remains Pending even when scaffolding or copied assets already exist.",
+  "debugRule": "Electron UI validation uses Electron webContents.debugger/CDP and Electron-native capture APIs. computer-use is not an accepted migration test or release-gate mechanism."
+ },
+ "entryContract": {
+  "requiredFields": [
+   "id",
+   "owner",
+   "source",
+   "replacement",
+   "status",
+   "acceptance",
+   "tests"
+  ],
+  "statusValues": [
+   "Completed",
+   "Pending"
+  ],
+  "replacementStates": [
+   "implemented",
+   "planned",
+   "mixed"
+  ],
+  "testsSemantics": "required lists the evidence that must pass before an item can become Completed; evidence lists only verification runs actually observed against this worktree snapshot."
+ },
+ "verificationRuns": [
+  {
+   "id": "electron-check-2026-08-24",
+   "command": "pnpm --filter @lovelyres/electron check",
+   "result": "Passed",
+   "observed": "TypeScript checks passed; 3 Vitest files and 6 tests passed; Electron main and renderer production builds completed."
+  },
+  {
+   "id": "electron-backend-tests-2026-08-24",
+   "command": "cargo test --locked --package lovelyres-electron-backend",
+   "result": "Passed",
+   "observed": "6 backend library tests passed; 0 failed; 0 ignored. This observation applies to the backend contents at the time of the run."
+  },
+  {
+   "id": "electron-cdp-smoke-2026-08-24",
+   "command": "pnpm --filter @lovelyres/electron test:debug",
+   "result": "Passed",
+   "observed": "Electron launched and its webContents.debugger/CDP probe verified the custom origin, 20 navigation entries, one ready page, backend handshake, sandbox boundary, local-only resources, security-reference catalog/search/accessibility, screenshot capture, and zero captured console errors.",
+   "nonVersionedEvidence": "target/electron-debug/e242d1b5-45d6-4f6e-bc47-005a8303ada9/evidence"
+  },
+  {
+   "id": "dirty-config-generator-tests-2026-08-24",
+   "command": "cargo test --locked --package lovelyres-gpui config_generator::tests",
+   "result": "Failed",
+   "observed": "The current protected worktree snapshot 7d66302eb9d58a09b09cc95f7b074057357d11c1f1f158ec37a6de56d37ac19e was rerun: 90 tests collected, 88 passed, 2 failed, 0 ignored, and 252 filtered out. Its 90 ordered test IDs match the prior c7c9a262 snapshot exactly; the source was not reset or overwritten.",
+   "failures": [
+    {
+     "test": "config_generator::tests::postgresql_and_mariadb_catalogs_render_versions_search_and_inline_editors",
+     "sourceLineAtSnapshot": 15234,
+     "message": "config-generator-postgresql-version-V14 must be explicitly selectable"
+    },
+    {
+     "test": "config_generator::tests::unified_goal_search_opens_database_guidance_and_explains_unavailable_products",
+     "sourceLineAtSnapshot": 16374,
+     "message": "catalogued configuration artifacts must be discoverable by product"
+    }
+   ],
+   "truthRule": "The 90-test inventory exists, but it is not a passing baseline and must never be reported as passing."
+  },
+  {
+   "id": "electron-check-command-history-2026-08-24",
+   "command": "pnpm --filter @lovelyres/electron check",
+   "result": "Passed",
+   "observed": "TypeScript checks passed; 48 Vitest files and 207 tests passed; Electron main and renderer production builds completed after the Command History central wiring and light-theme token repair."
+  },
+  {
+   "id": "electron-backend-command-history-2026-08-24",
+   "command": "cargo test --locked --package lovelyres-electron-backend --all-targets",
+   "result": "Passed",
+   "observed": "184 sidecar library and integration tests passed for the Command History central wiring snapshot; no ignored scenario is counted as real-target evidence."
+  },
+  {
+   "id": "electron-source-gate-command-history-2026-08-24",
+   "command": "pwsh -NoProfile -File ./scripts/electron-source-gate.ps1 -RepositoryRoot .",
+   "result": "Passed",
+   "observed": "The source gate accepted the exact 58-method frozen preload API, fixed Command History RPC/IPC signatures, non-executable replay intent, local-only resources, and Settings phase-two write-only secret rules."
+  },
+  {
+   "id": "electron-cdp-command-history-2026-08-24",
+   "command": "pnpm --filter @lovelyres/electron test:debug",
+   "result": "Passed",
+   "observed": "Electron webContents.debugger/CDP verified exactly 58 public API methods, forged Command History binding rejection, no command execution surface, the disconnected empty overlay, focus/inert/Escape restoration, zero console errors, an opaque white panel, 15.045:1 panel contrast, and 5.076:1 prompt contrast. This is not populated-history or real-SSH evidence.",
+   "nonVersionedEvidence": "target/electron-debug/d4a93ffb-2bcd-49dc-9f04-31c7c69d0459/evidence"
+  },
+  {
+   "id": "electron-check-docker-read-2026-08-24",
+   "command": "pnpm --filter @lovelyres/electron check",
+   "result": "Passed",
+   "observed": "TypeScript checks passed; 54 Vitest files and 240 tests passed; Electron main and renderer production builds completed with the standalone Docker read-only phase-one files present but not centrally exposed."
+  },
+  {
+   "id": "electron-backend-docker-read-2026-08-24",
+   "command": "cargo test --locked --package lovelyres-electron-backend --test docker_read_api_standalone",
+   "result": "Passed",
+   "observed": "29 standalone Docker read-only backend tests passed. This is bounded contract and fake-transport evidence, not real Linux/SSH/Docker evidence."
+  },
+  {
+   "id": "electron-backend-kubernetes-read-2026-08-24",
+   "command": "cargo test --locked --package lovelyres-electron-backend --test kubernetes_read_api_standalone",
+   "result": "Passed",
+   "observed": "33 standalone Kubernetes read-only backend tests passed; unrelated unwired Settings methods still emitted dead-code warnings. This is bounded fake-transport evidence, not real Linux/SSH/Kubernetes evidence."
+  },
+  {
+   "id": "electron-renderer-kubernetes-read-2026-08-24",
+   "command": "pnpm --filter @lovelyres/electron exec vitest run src/shared/kubernetes-read-contract.test.ts src/renderer/kubernetes-read-state.test.ts src/renderer/kubernetes-read-helpers.test.ts src/renderer/kubernetes-page.test.tsx",
+   "result": "Passed",
+   "observed": "Four Kubernetes renderer/contract test files and 23 tests passed while the page remained intentionally absent from the central App registry."
+  },
+  {
+   "id": "electron-check-disposal-report-2026-08-24",
+   "command": "pnpm --filter @lovelyres/electron check",
+   "result": "Passed",
+   "observed": "TypeScript checks passed; 56 Vitest files and 252 tests passed; Electron main and renderer production builds completed after the Disposal Report central wiring."
+  },
+  {
+   "id": "electron-backend-disposal-report-2026-08-24",
+   "command": "cargo test --locked --package lovelyres-electron-backend --all-targets",
+   "result": "Passed",
+   "observed": "304 sidecar library and integration tests passed, including the three fixed Disposal Report RPCs and all present standalone slices; 0 failed and 0 ignored. This is not real-target evidence."
+  },
+  {
+   "id": "electron-source-gate-disposal-report-2026-08-24",
+   "command": "pwsh -NoProfile -File ./scripts/electron-source-gate.ps1 -RepositoryRoot .",
+   "result": "Passed",
+   "observed": "The source gate accepted the exact 61-method frozen preload API, three fixed Disposal Report RPC/IPC signatures, main-only native export boundary, no renderer report body/path/detection input, 77 renderer-reachable files, and 6 pinned assets."
+  },
+  {
+   "id": "electron-cdp-disposal-report-2026-08-24",
+   "command": "pnpm --filter @lovelyres/electron test:debug",
+   "result": "Passed",
+   "observed": "Electron webContents.debugger/CDP verified exactly 61 public API methods, forged Disposal Report binding rejection without echo, no renderer report-body/path/detection creator, disconnected empty overlay, one enabled close action, modal focus, inert/aria-hidden ownership, Escape restoration, zero console errors, an opaque white panel, 15.045:1 panel contrast, 5.076:1 prompt contrast, and capturePage evidence. This is not populated-journal, native-save, or real-SSH evidence.",
+   "nonVersionedEvidence": "target/electron-debug/9ee75f99-9cac-4059-80c0-2b7026ea7f36/evidence"
+  },
+  {
+   "id": "electron-backend-log-analysis-read-2026-08-24",
+   "command": "cargo test --locked --package lovelyres-electron-backend --test log_analysis_read_api_standalone",
+   "result": "Passed",
+   "observed": "28 standalone log-analysis read-only backend tests passed. This proves bounded capability and fake-transport behavior only, not real Linux/SSH log collection."
+  },
+  {
+   "id": "electron-renderer-log-analysis-read-2026-08-24",
+   "command": "pnpm --filter @lovelyres/electron exec vitest run src/shared/log-analysis-read-contract.test.ts src/renderer/log-analysis-read-state.test.ts src/renderer/log-analysis-page.test.tsx",
+   "result": "Passed",
+   "observed": "Three log-analysis contract/state/page test files and 23 tests passed while the page remained intentionally absent from the central App registry."
+  },
+  {
+   "id": "electron-backend-packet-capture-live-2026-08-24",
+   "command": "cargo test --locked --package lovelyres-electron-backend --test packet_capture_live_api_standalone",
+   "result": "Passed",
+   "observed": "29 standalone packet-capture live backend tests passed. This proves bounded capability/event behavior with fake transports only, not real SSH/tcpdump/privilege/cancellation behavior."
+  },
+  {
+   "id": "electron-renderer-packet-capture-live-2026-08-24",
+   "command": "pnpm --filter @lovelyres/electron exec vitest run src/shared/packet-capture-live-contract.test.ts src/renderer/packet-capture-live-helpers.test.ts src/renderer/packet-capture-live-state.test.ts src/renderer/packet-capture-page.test.tsx",
+   "result": "Passed",
+   "observed": "Four packet-capture live contract/helpers/state/page test files and 23 tests passed while the page remained intentionally absent from the central App registry."
+  },
+  {
+   "id": "electron-check-settings-secret-lifecycle-2026-08-24",
+   "command": "pnpm --filter @lovelyres/electron check",
+   "result": "Passed",
+   "observed": "TypeScript checks passed; 69 Vitest files and 335 tests passed; Electron main and renderer production builds completed after the five Settings secret-lifecycle methods were centrally wired."
+  },
+  {
+   "id": "electron-backend-settings-secret-lifecycle-2026-08-24",
+   "command": "cargo test --locked --package lovelyres-electron-backend --all-targets",
+   "result": "Passed",
+   "observed": "360 sidecar library and integration tests passed with 0 failures and 0 ignored, including write-only replacement and single-use clear/remove plans. This is not real-provider or real-SSH evidence."
+  },
+  {
+   "id": "electron-source-gate-settings-secret-lifecycle-2026-08-24",
+   "command": "pwsh -NoProfile -File ./scripts/electron-source-gate.ps1 -RepositoryRoot .",
+   "result": "Passed",
+   "observed": "The source gate accepted the exact 66-method frozen preload API, five fixed Settings secret-lifecycle signatures, 97 renderer-reachable files, 6 pinned assets, and no generic secret writer."
+  },
+  {
+   "id": "electron-cdp-settings-secret-lifecycle-2026-08-24",
+   "command": "pnpm --filter @lovelyres/electron test:debug",
+   "result": "Passed",
+   "observed": "Electron webContents.debugger/CDP verified exactly 66 public methods, write-only replacement with an immediately cleared password input, clear/remove cancel then confirm with opaque single-use handles, focus/inert/Escape restoration, local-only resources, capturePage, and zero console errors. The unique secret marker was absent from DOM, snapshot, report, PNG, and console.",
+   "nonVersionedEvidence": "target/electron-debug/c107f18e-ec9e-44b0-bf47-4c7576d72482/evidence"
+  },
+  {
+   "id": "electron-backend-check-audit-firewall-read-2026-08-24",
+   "command": "cargo test --locked --package lovelyres-electron-backend --test check_audit_read_api_standalone --test firewall_read_api_standalone",
+   "result": "Passed",
+   "observed": "The independently rerun standalone suites passed 27 Check Audit tests and 28 Firewall tests with 0 failures and 0 ignored. These use bounded fake transports and are not real Linux/SSH evidence."
+  },
+  {
+   "id": "electron-renderer-check-audit-firewall-read-2026-08-24",
+   "command": "pnpm --filter @lovelyres/electron exec vitest run src/shared/check-audit-read-contract.test.ts src/renderer/check-audit-read-state.test.ts src/renderer/check-audit-page.test.tsx src/shared/firewall-read-contract.test.ts src/renderer/firewall-read-helpers.test.ts src/renderer/firewall-read-state.test.ts src/renderer/firewall-page.test.tsx",
+   "result": "Passed",
+   "observed": "Seven standalone contract/state/helpers/page test files and 45 tests passed while both pages remained intentionally absent from the central App registry."
+  },
+  {
+   "id": "electron-backend-snapshot-read-standalone-2026-08-24",
+   "command": "cargo test --locked --package lovelyres-electron-backend --test snapshot_read_api_standalone",
+   "result": "Passed",
+   "observed": "The independently rerun standalone suite passed 26 tests with 0 failures and 0 ignored. It validates opaque target-scoped handles, guard checks, response redaction and bounds against fake transports; it is not real Linux/SSH or corrupted-store evidence."
+  },
+  {
+   "id": "electron-renderer-snapshot-read-standalone-2026-08-24",
+   "command": "pnpm --dir electron exec vitest run src/shared/snapshot-read-contract.test.ts src/renderer/snapshot-read-state.test.ts src/renderer/snapshot-page.test.tsx",
+   "result": "Passed",
+   "observed": "Three standalone contract/state/page files and 20 tests passed while Snapshot remained intentionally absent from the central App registry."
+  },
+  {
+   "id": "electron-backend-baseline-read-standalone-2026-08-24",
+   "command": "cargo test --locked --package lovelyres-electron-backend --test baseline_read_api_standalone",
+   "result": "Passed",
+   "observed": "The independently rerun standalone suite passed 27 tests with 0 failures and 0 ignored. It validates the three read-only service calls, opaque target-scoped snapshots, guard/TTL/concurrency failure closure and redaction against fake transports; it is not real Linux/OpenSSH evidence."
+  },
+  {
+   "id": "electron-renderer-baseline-read-standalone-2026-08-24",
+   "command": "pnpm --dir electron exec vitest run src/shared/baseline-read-contract.test.ts src/renderer/baseline-read-helpers.test.ts src/renderer/baseline-read-state.test.ts src/renderer/baseline-page.test.tsx",
+   "result": "Passed",
+   "observed": "Four standalone Baseline contract/helpers/state/page files and 19 tests passed while the page remained intentionally absent from the central App registry."
+  },
+  {
+   "id": "lovelyres-core-emergency-history-hardening-2026-08-24",
+   "command": "cargo test --locked --package lovelyres-core command_workbench::tests",
+   "result": "Passed",
+   "observed": "Six command-workbench tests passed. The execution test proves raw shell, catalog ID, password marker and live hostile output remain available only to the immediate caller and are absent from the portable history file, while existing detail/search parsing remains compatible and replay fails closed as dangerous."
+  },
+  {
+   "id": "electron-backend-emergency-command-standalone-2026-08-24",
+   "command": "cargo test --locked --package lovelyres-electron-backend --test emergency_command_api_standalone",
+   "result": "Passed",
+   "observed": "The independently rerun standalone suite passed 29 tests with 0 failures and 0 ignored. It validates the two future methods, closed core calls, opaque handles, guard/TTL/concurrency bounds and immediate-output redaction against fake transports; it is not real Linux/SSH command evidence."
+  },
+  {
+   "id": "electron-renderer-emergency-command-standalone-2026-08-24",
+   "command": "pnpm --dir electron exec vitest run src/shared/emergency-command-contract.test.ts src/renderer/emergency-command-state.test.ts src/renderer/emergency-commands-page.test.tsx",
+   "result": "Passed",
+   "observed": "Three standalone Emergency Commands contract/state/page files and 18 tests passed while the page remained intentionally absent from the central App registry."
+  },
+  {
+   "id": "electron-check-ssh-terminal-2026-08-24",
+   "command": "pnpm --filter @lovelyres/electron check",
+   "result": "Passed",
+   "observed": "TypeScript checks passed; 88 Vitest files and 451 tests passed; Electron main and the separate terminal renderer production builds completed. Terminal copy tests prove bounded hostile plain text uses the fixed writer, oversized selections do not write, selected copy is intercepted, and no-selection Ctrl+C is not consumed."
+  },
+  {
+   "id": "electron-backend-ssh-terminal-2026-08-24",
+   "command": "cargo test --locked --package lovelyres-electron-backend --all-targets",
+   "result": "Passed",
+   "observed": "510 sidecar library and integration tests passed with 0 failures and 0 ignored. Terminal tests cover the fixed seven internal RPC routes, registry bounds, binary input, poll ordering/backpressure, bounded snapshot/search, hostile failure redaction, binding cleanup, and shutdown; this is not real SSH/PTY evidence."
+  },
+  {
+   "id": "electron-source-gate-ssh-terminal-2026-08-24",
+   "command": "pwsh -NoProfile -File ./scripts/electron-source-gate.ps1 -RepositoryRoot .",
+   "result": "Passed",
+   "observed": "The source gate and its fault-injection self-test accepted 122 renderer-reachable files and 6 pinned assets. It pins the main LovelyRes API to 67 methods, the dedicated terminal preload to seven methods, exact sender/arity/DTO checks, failed-open cleanup, write-only 128 KiB selection copy, the exact terminal entry URL, and the sole terminal-only inline-CSS exception while rejecting any loosened main or script CSP."
+  },
+  {
+   "id": "electron-cdp-ssh-terminal-2026-08-24",
+   "command": "pnpm --filter @lovelyres/electron test:debug",
+   "result": "Passed",
+   "observed": "Electron webContents.debugger/CDP verified main LovelyRes exact67 and terminal preload exact7 separately. Disconnected main launch and all seven methods in a real unauthorized hardened terminal BrowserWindow failed closed; URL/query/hash/window.name, DOM snapshot, report and console contained no binding/session/guard/token or hostile copy marker. Eight resources were lovelyres://app-only, terminal/global console errors were zero, panel/error contrast was 15.922:1/9.005:1, capturePage succeeded, and the probe window was destroyed. Real SSH/PTY and production keyed reuse/disconnect success paths remain NOT_RUN.",
+   "nonVersionedEvidence": "target/electron-debug/f5e6c534-72f6-4f24-9796-cfd98ababf16/evidence"
+  },
+  {
+   "id": "lovelyres-core-snapshot-preprojection-2026-08-25",
+   "command": "cargo test --locked --package lovelyres-core --all-targets",
+   "result": "Passed",
+   "observed": "915 core tests passed with 0 failures; 6 real-environment scenarios remained ignored and are not counted as passing. Snapshot tests include encoded portable-document rejection before deserialization, exact 64/10 index caps, and per-field/aggregate forensic-diff line budgets. cargo fmt --all --check and core/sidecar clippy -D warnings also passed."
+  },
+  {
+   "id": "electron-check-snapshot-central-2026-08-25",
+   "command": "pnpm --filter @lovelyres/electron check",
+   "result": "Passed",
+   "observed": "TypeScript checks passed; 89 Vitest files and 462 tests passed; Electron main, App renderer and terminal renderer production builds completed. Three targeted Snapshot contract/state/page files and 23 tests pin the fail-closed collector projection and diff validation."
+  },
+  {
+   "id": "electron-backend-snapshot-central-2026-08-25",
+   "command": "cargo test --locked --package lovelyres-electron-backend --all-targets",
+   "result": "Passed",
+   "observed": "520 sidecar library and integration tests passed with 0 failures and 0 ignored. Six targeted Snapshot tests pin all three RPC names, real binding scope, exact seven whole-redacted collectors and five bounded plain-text collectors; mysql -p, whitespace PASSWORD assignment, multiline PEM, remote paths and old/new diff contents cannot cross the public projection. This is not real SSH or populated-snapshot evidence."
+  },
+  {
+   "id": "electron-source-gate-snapshot-central-2026-08-25",
+   "command": "pwsh -NoProfile -File ./scripts/electron-source-gate.ps1 -RepositoryRoot .",
+   "result": "Passed",
+   "observed": "The source gate and fixture self-test accepted 124 renderer-reachable source files and 6 pinned assets. It pins the main LovelyRes API to exactly 70 methods, the dedicated terminal preload to seven methods, the three fixed Snapshot RPC/IPC signatures, opaque binding-only page composition, core pre-projection caps, and the exact 7/5 collector public policy."
+  },
+  {
+   "id": "electron-cdp-snapshot-central-2026-08-25",
+   "command": "pnpm --filter @lovelyres/electron test:debug",
+   "result": "Passed",
+   "observed": "Electron webContents.debugger/CDP verified main LovelyRes exact70, rejection without echo for forged list/detail/diff capabilities and hostile extra fields, no mutation/export/path/command creator, disconnected plain empty state, clean navigation unmount/remount, 14.028:1 page contrast, 5.936:1 prompt contrast, capturePage, and zero console errors. No Snapshot or SSH record was fabricated; real SSH, populated portable data, TTL and target-switch success paths remain NOT_RUN.",
+   "nonVersionedEvidence": "target/electron-debug/a1590d43-5edf-40db-bfcc-b0710dc6a3c8/evidence"
+  },
+  {
+   "id": "lovelyres-core-firewall-portable-bounds-2026-08-25",
+   "command": "cargo test --locked --package lovelyres-core --all-targets",
+   "result": "Passed",
+   "observed": "921 core tests passed with 0 failures; 6 real-environment SSH scenarios remained ignored and are not counted as passing. Firewall tests reject a portable document above the 4 MiB encoded-byte cap before serde allocation, reject exactly 257 changes, accept exactly 256, and apply the same fail-closed load validation to list, insert, lookup and transition paths. Real Linux firewall execution was not run."
+  },
+  {
+   "id": "electron-backend-firewall-central-read-2026-08-25",
+   "command": "cargo test --locked --package lovelyres-electron-backend --all-targets",
+   "result": "Passed",
+   "observed": "529 sidecar tests passed with 0 failures and 0 ignored. Nine central Firewall library tests pin the two exact RPC names, deny unknown params without echoing hostile input, validate fixed redacted errors, close Firewall capabilities before the real SSH disconnect, and immediately invalidate only the closed binding's inspection/history capabilities. This is not real SSH or real iptables/nftables/UFW/firewalld evidence."
+  },
+  {
+   "id": "electron-check-firewall-central-2026-08-25",
+   "command": "pnpm --filter @lovelyres/electron check",
+   "result": "Passed",
+   "observed": "TypeScript checks passed; 91 Vitest files and 474 tests passed; Electron main, App renderer and terminal renderer production builds completed. Seven targeted Firewall files and 52 tests pin the exact two contract/client/preload methods, strict DTO validators, opaque binding-only App composition, UTF-8-safe 128 KiB clipboard truncation, explicit truncation notice, deactivation/scope cleanup and late-result rejection."
+  },
+  {
+   "id": "electron-source-gate-firewall-central-2026-08-25",
+   "command": "pwsh -NoProfile -File ./scripts/electron-source-gate.ps1 -RepositoryRoot .",
+   "result": "Passed",
+   "observed": "The source gate accepted 124 renderer-reachable source files and 6 pinned assets. It pins the main LovelyRes API to exactly 72 methods, the dedicated terminal preload to seven methods, Firewall exact2 RPC/IPC signatures, one canonical binding parameter, eager disconnect cleanup, opaque-only App composition, and the existing 128 KiB clipboard bound. The fixture self-test also passed."
+  },
+  {
+   "id": "electron-cdp-firewall-central-2026-08-25",
+   "command": "pnpm --filter @lovelyres/electron test:debug",
+   "result": "Passed",
+   "observed": "Electron webContents.debugger/CDP verified main LovelyRes exact72; both forged Firewall capabilities and hostile extra ingredients were rejected without echo. Firewall mutation, generic, file, terminal and export methods were undefined. The disconnected page loaded only lovelyres://app resources, remounted without remote rows, had 16.250:1 page and 10.015:1 prompt contrast, capturePage succeeded, and console errors were zero. Real iptables/nftables/UFW/firewalld, root/non-root/sudo, connected data and target-switch paths remain NOT_RUN.",
+   "nonVersionedEvidence": "target/electron-debug/efc63e90-2557-4342-9f80-92a40484d088/evidence"
+  },
+  {
+   "id": "electron-cdp-baseline-central-invalid-2026-08-25",
+   "command": "pnpm --filter @lovelyres/electron test:debug",
+   "result": "Failed",
+   "observed": "The preliminary report has status FAIL because it incorrectly assumed a contextBridge proxy would preserve scanBaseline function arity. It contains no completed Baseline acceptance checks and must never be cited as passing evidence.",
+   "nonVersionedEvidence": "target/electron-debug/c7f9b277-006c-4f00-9fb1-7c503928d857/evidence"
+  },
+  {
+   "id": "lovelyres-core-baseline-portable-bounds-2026-08-25",
+   "command": "cargo test --locked --package lovelyres-core --all-targets",
+   "result": "Passed",
+   "observed": "926 core tests passed with 0 failures; 6 real-environment scenarios remained ignored and are not counted as passing. Baseline history tests reject a portable document above the 4 MiB encoded-byte cap before serde allocation, reject exactly 257 records, accept exactly 256, and apply the same fail-closed load validation to list, insert, lookup and transition paths. cargo fmt --all --check and core all-target clippy -D warnings also passed. Real Linux/OpenSSH was not run."
+  },
+  {
+   "id": "electron-backend-baseline-central-read-2026-08-25",
+   "command": "cargo test --locked --package lovelyres-electron-backend --all-targets",
+   "result": "Passed",
+   "observed": "544 sidecar library and integration tests passed with 0 failures and 0 ignored. Nine central Baseline tests pin the three exact RPC names, deny unknown parameters without echoing hostile input, use fixed redacted failures, eagerly close Baseline capabilities before real SSH disconnect, immediately invalidate only the closed binding's scan/history capabilities, and fail closed on late scope changes. Sidecar all-target clippy -D warnings also passed. This is not real SSH or actual Baseline scan/history evidence."
+  },
+  {
+   "id": "electron-check-baseline-central-2026-08-25",
+   "command": "pnpm --filter @lovelyres/electron check",
+   "result": "Passed",
+   "observed": "TypeScript checks passed; 93 Vitest files and 486 tests passed; Electron main, App renderer and terminal renderer production builds completed. Baseline tests pin the exact three contract/client/preload methods, strict request and response validators, opaque binding-only App composition, deactivation and scope cleanup, and rejection of late results."
+  },
+  {
+   "id": "electron-source-gate-baseline-central-2026-08-25",
+   "command": "pwsh -NoProfile -File ./scripts/electron-source-gate.ps1 -RepositoryRoot .",
+   "result": "Passed",
+   "observed": "The source gate accepted the then-current frozen main API, the dedicated terminal preload, Baseline exact3 RPC/IPC signatures, strict binding and response validators, eager disconnect cleanup, opaque-only App composition, page lifecycle cleanup, core pre-serde bounds, and absence of mutation/generic/file/terminal/export surfaces. The fixture self-test also passed. This historical run is superseded for the current public API count and predates Log Analysis central wiring."
+  },
+  {
+   "id": "electron-cdp-baseline-central-2026-08-25",
+   "command": "pnpm --filter @lovelyres/electron test:debug",
+   "result": "Passed",
+   "observed": "Electron webContents.debugger/CDP verified the then-current pre-LogAnalysis main LovelyRes API and the local Baseline catalog contained 38 items. Forged and unknown scan/history inputs were rejected without echo; Baseline mutation, generic, file, terminal and export methods were undefined. The disconnected page exposed no remote compliance or history rows, disabled scan, loaded only lovelyres://app resources, remounted without remote rows, had 15.168:1 page and 5.936:1 prompt contrast, capturePage succeeded, and console errors were zero. This historical run does not prove the current exact85 API. Real Linux/OpenSSH, actual scan/history results, permissions, cancellation, disconnect races and target-switch success paths remain NOT_RUN.",
+   "nonVersionedEvidence": "target/electron-debug/526e344c-a5f5-499d-9a17-ab4c0bf4defe/evidence"
+  },
+  {
+   "id": "electron-cdp-middleware-check-audit-central-2026-08-25",
+   "command": "pnpm --filter @lovelyres/electron test:debug",
+   "result": "Passed",
+   "observed": "Electron webContents.debugger/CDP verified the then-current pre-LogAnalysis main LovelyRes API. Middleware discover/configuration/history and Check Audit catalog/status/log forged or unknown calls were rejected without echo; plan/confirm/execute/restore/file/terminal/export/generic surfaces were undefined. Both disconnected pages loaded only local resources, exposed no internal identity or remote rows, and remounted without remote rows. capturePage evidence was produced and console errors were zero. This historical run does not prove the current exact85 API. Real Linux/OpenSSH/systemd/SFTP/auditd, connected data, permissions, cancellation, disconnect races, target-switch, mutation, restore and export remain NOT_RUN or Pending.",
+   "nonVersionedEvidence": "target/electron-debug/526e344c-a5f5-499d-9a17-ab4c0bf4defe/evidence"
+  },
+  {
+   "id": "electron-backend-log-analysis-central-2026-08-25",
+   "command": "cargo test --locked --package lovelyres-electron-backend --all-targets",
+   "result": "Passed",
+   "observed": "583 sidecar library and integration tests passed with 0 failures and 0 ignored. Log Analysis exact4 RPC dispatch, fixed redacted failures, unknown and forged parameter rejection without echo, complete target guard checks before dispatch and result application, bounded registries and results, cancellation, TTL and late target-switch rejection, and eager Log Analysis binding cleanup before real SSH disconnect are covered. The standalone Log Analysis suite passed 29/29. Real Linux/OpenSSH/journal was NOT_RUN."
+  },
+  {
+   "id": "electron-check-log-analysis-central-2026-08-25",
+   "command": "pnpm --filter @lovelyres/electron check",
+   "result": "Passed",
+   "observed": "TypeScript checks passed; 96 Vitest files and 509 tests passed; Electron main, App renderer and terminal renderer production builds completed. Log Analysis tests pin exact4 contract/client/preload methods, strict exact-object request and response validators, opaque binding-only App composition, deactivation and scope cleanup, bounded hostile-text rendering, and stale-result rejection."
+  },
+  {
+   "id": "electron-source-gate-log-analysis-central-2026-08-25",
+   "command": "pwsh -NoProfile -File ./scripts/electron-source-gate.ps1 -RepositoryRoot .; pwsh -NoProfile -File ./scripts/electron-source-gate.ps1 -RepositoryRoot . -SelfTest",
+   "result": "Passed",
+   "observed": "The source gate and fixture self-test accepted the frozen main exact85 API, terminal exact7 API, Log Analysis exact4 files/RPC/preload/main signatures, strict validators, backend guard and bounds markers, opaque-only App composition, page forbidden mutation/file/terminal/export/generic surfaces, and eager Log Analysis close-before-disconnect. The exact85 Log Analysis Electron-native CDP scenario is implemented but was deliberately NOT_RUN in this integration step."
+  },
+  {
+   "id": "electron-cdp-log-analysis-central-2026-08-25",
+   "command": "pnpm --filter @lovelyres/electron test:debug",
+   "result": "Passed",
+   "observed": "Electron webContents.debugger/CDP verified the frozen exact85 main API. Log Analysis discover/read/correlate/IOC search forged and unknown requests were rejected without echo; mutation, rules, AI, file, terminal, export and generic methods were undefined. The disconnected page exposed zero source, entry, IOC and selector rows, loaded only local resources, exposed no internal identity, remounted without remote rows, produced log-analysis-disconnected.png through capturePage, and the global console error array was empty. Real Linux/OpenSSH/journal, connected data, permissions, cancellation, disconnect races, target-switch and phase-two rules/AI/export remain NOT_RUN or Pending.",
+   "nonVersionedEvidence": "target/electron-debug/c7b33682-bc4d-4f91-bd63-8990152a2987/evidence"
+  },
+  {
+   "id": "electron-backend-kubernetes-central-2026-08-25",
+   "command": "cargo test --locked --package lovelyres-electron-backend --lib; cargo test --locked --package lovelyres-electron-backend --test kubernetes_read_api_standalone",
+   "result": "Passed",
+   "observed": "177/177 sidecar library tests and 38/38 standalone Kubernetes read tests passed. The exact4 RPCs, fixed redacted failures, strict parameter parsing, full target guard checks before dispatch and result application, bounded and redacted snapshots/details/logs, concurrency, TTL, stale target rejection, and eager Kubernetes binding cleanup before real SSH disconnect are covered. Real Linux/OpenSSH/Kubernetes was NOT_RUN."
+  },
+  {
+   "id": "electron-check-kubernetes-central-2026-08-25",
+   "command": "pnpm --filter @lovelyres/electron check",
+   "result": "Passed",
+   "observed": "TypeScript checks passed; 97 Vitest files and 522 tests passed; Electron main, App renderer and terminal renderer production builds completed. Kubernetes tests pin exact4 contract/client/preload methods, strict exact-object request and response validators, opaque binding-only App composition, bounded redacted hostile text, deactivation and scope cleanup, and stale-result rejection."
+  },
+  {
+   "id": "electron-source-gate-kubernetes-central-2026-08-25",
+   "command": "pwsh -NoProfile -File ./scripts/electron-source-gate.ps1 -RepositoryRoot .; pwsh -NoProfile -File ./scripts/electron-source-gate.ps1 -RepositoryRoot . -SelfTest",
+   "result": "Passed",
+   "observed": "The source gate and fixture self-test accepted the frozen main exact89 API, terminal exact7 API, Kubernetes exact4 files/RPC/preload/main signatures, strict validators, backend redaction, target guard and bounds markers, opaque-only App composition, page forbidden scale/restart/delete/cordon/drain/exec/file/terminal/export/generic surfaces, and eager Kubernetes close-before-disconnect. The exact89 Kubernetes Electron-native CDP scenario is implemented but was deliberately NOT_RUN in this integration step."
+  },
+  {
+   "id": "electron-cdp-exact89-kubernetes-central-2026-08-25",
+   "command": "pnpm --filter @lovelyres/electron test:debug",
+   "result": "Passed",
+   "observed": "Electron webContents.debugger/CDP verified the frozen exact89 main API. All eight Kubernetes forged or unknown availability/list/detail/log requests were rejected without echo; scale, restart, delete, cordon, drain, exec, file, terminal, export and generic methods were undefined. The disconnected page exposed zero namespace, resource, detail and tab rows, loaded only local resources, exposed no internal identity, remounted without remote rows, and produced kubernetes-disconnected.png through capturePage. Kubernetes and global console errors were zero; title and prompt contrast were 14.02:1 and 4.73:1. The intermediate cbfa320f probe report is Failed and is not passing evidence. Real Linux/OpenSSH/Kubernetes and mutation/export parity remain NOT_RUN or Pending.",
+   "nonVersionedEvidence": "target/electron-debug/0ad5379b-1186-4f2c-892e-0b54a87cd4d1/evidence"
+  },
+  {
+   "id": "electron-backend-emergency-command-central-2026-08-25",
+   "command": "cargo test --locked --package lovelyres-electron-backend --all-targets; cargo test --locked --package lovelyres-electron-backend --test emergency_command_api_standalone",
+   "result": "Passed",
+   "observed": "The backend all-target run passed, including 190/190 library tests, and the independently rerun Emergency Commands standalone suite passed 31/31. Tests cover the exact two RPCs, strict unknown-field rejection, fixed no-echo failures, complete TargetGuard checks, bounded TTL/capacity/concurrency/output, credential and target-literal redaction, stale/late-result rejection, and eager capability cleanup before SSH disconnect. Real Linux/OpenSSH command execution was NOT_RUN."
+  },
+  {
+   "id": "electron-check-emergency-command-central-2026-08-25",
+   "command": "pnpm --filter @lovelyres/electron check",
+   "result": "Passed",
+   "observed": "TypeScript checks passed; 98 Vitest files and 532 tests passed; Electron main, App renderer and terminal renderer production builds completed. The tests freeze exact91, the exact two Emergency Commands client/main/preload methods, strict opaque-only params and bounded response validators, binding-only App composition, target-switch/unmount cancellation, hostile plain-text rendering, and forbidden generic shell/file/terminal/export/mutation surfaces."
+  },
+  {
+   "id": "electron-source-gate-emergency-command-central-2026-08-25",
+   "command": "pwsh -NoProfile -File ./scripts/electron-source-gate.ps1 -RepositoryRoot .; pwsh -NoProfile -File ./scripts/electron-source-gate.ps1 -SelfTest",
+   "result": "Passed",
+   "observed": "The source gate and fixture self-test accepted 124 renderer-reachable files, 6 pinned assets, the frozen main exact91 API, terminal exact7 API, Emergency Commands exact2 RPC/preload/main signatures, strict validators, backend guard/redaction/bounds markers, opaque binding-only App composition, page forbidden command/shell/path/target/session/file/terminal/export/mutation/generic surfaces, and eager Emergency Commands close-before-disconnect."
+  },
+  {
+   "id": "electron-cdp-exact91-emergency-command-central-2026-08-25",
+   "command": "pnpm --filter @lovelyres/electron test:debug",
+   "result": "Passed",
+   "observed": "Electron webContents.debugger/CDP verified the frozen exact91 main API. The four direct or unknown-field catalog/run requests were rejected without echo; custom, shell, file, terminal, export, mutation and generic methods were undefined. The disconnected page exposed zero command/category/result/output rows, loaded only local resources, exposed no internal identity, remounted without remote rows, and produced emergency-commands-disconnected.png through capturePage. Emergency Commands and global console errors were zero; title and prompt contrast were 14.15:1 and 4.77:1. The earlier 136bb2ce report is Failed because the probe still expected the old sorted API list and is not passing evidence. Real Linux/OpenSSH, connected catalog/run, permissions, timeout, cancellation, disconnect races, target-switch and dangerous mutation/restore parity remain NOT_RUN or Pending.",
+   "nonVersionedEvidence": "target/electron-debug/38fc68d4-41d7-43fc-ace8-ef4afdf08da5/evidence"
+  },
+  {
+   "id": "electron-backend-docker-central-2026-08-25",
+   "command": "cargo test --locked --package lovelyres-electron-backend; cargo test --locked --package lovelyres-electron-backend --test docker_read_api_standalone",
+   "result": "Passed",
+   "observed": "The backend package passed, including 206/206 library tests, 15 targeted Docker library tests and all integration/doc targets; the independently rerun Docker standalone suite passed 35/35. Tests cover the exact five RPCs, deny-unknown params, fixed no-echo failures, complete TargetGuard checks, bounded snapshots/collections/inspect/audit/logs, credential/URI/target-literal redaction, close/late-result rejection, TTL/capacity/concurrency, and eager Docker cleanup before SSH disconnect. Real Linux/OpenSSH/Docker was NOT_RUN."
+  },
+  {
+   "id": "electron-check-docker-central-2026-08-25",
+   "command": "pnpm --filter @lovelyres/electron check",
+   "result": "Passed",
+   "observed": "TypeScript checks passed; 99 Vitest files and 542 tests passed; Electron main, App renderer and terminal renderer production builds completed. The tests freeze exact96, the exact five Docker client/main/preload methods, exact-own-key requests, strict correlated bounded responses, binding-only App composition, lifecycle cleanup, hostile plain text, and forbidden mutation/exec/file/terminal/export/generic surfaces."
+  },
+  {
+   "id": "electron-source-gate-docker-central-2026-08-25",
+   "command": "pwsh -NoProfile -File ./scripts/electron-source-gate.ps1 -RepositoryRoot .; pwsh -NoProfile -File ./scripts/electron-source-gate.ps1 -SelfTest",
+   "result": "Passed",
+   "observed": "The source gate and fixture self-test accepted 124 renderer-reachable files, 6 pinned assets, the frozen main exact96 API, terminal exact7 API, Docker exact5 RPC/preload/main signatures, strict kind/tail/opaque validators, backend guard/redaction/bounds markers, binding-only App composition, page forbidden mutation/exec/file/terminal/export/generic surfaces, and eager Docker close-before-disconnect."
+  },
+  {
+   "id": "electron-cdp-exact96-docker-central-2026-08-25",
+   "command": "pnpm --filter @lovelyres/electron test:debug",
+   "result": "Passed",
+   "observed": "Electron webContents.debugger/CDP verified the frozen exact96 main API. All ten direct or unknown-field refresh/collection/inspect/audit/log requests were rejected without echo; start, stop, restart, remove, exec, file, terminal, export, mutation and generic methods were undefined. The disconnected page exposed zero table/resource/card/finding/inspection/log/tab rows, loaded only local resources, exposed no internal identity, remounted without remote rows, and produced docker-disconnected.png through capturePage. Docker and global console errors were zero; title and prompt contrast were 15.05:1 and 6.37:1. Real Linux/OpenSSH/Docker, connected/populated data, permissions, timeout, cancellation, disconnect races, target-switch, mutations and container-terminal parity remain NOT_RUN or Pending.",
+   "nonVersionedEvidence": "target/electron-debug/b3e44b7a-7a8f-481d-be9d-26521d5cbfea/evidence"
+  },
+  {
+   "id": "electron-backend-quick-detection-phase0-2026-08-25",
+   "command": "cargo test --locked --package lovelyres-electron-backend --test quick_detection_api_standalone; cargo clippy --locked --package lovelyres-electron-backend --all-targets -- -D warnings",
+   "result": "Passed",
+   "observed": "The Quick Detection standalone suite passed 31 tests, including 10 Quick Detection tests, and backend all-target Clippy passed. The future exact7 surface is covered with immutable core plans, opaque binding/plan/scan/report handles, TargetGuard checks at dispatch/event/final apply, bounded TTL/capacity/concurrency/report bytes, fixed whole-field redaction, cancellation, close-binding cleanup and late-result rejection. This was pre-central Phase0 evidence and is superseded for wiring status by the exact112 runs below; real Linux/OpenSSH remained NOT_RUN."
+  },
+  {
+   "id": "electron-renderer-quick-detection-phase0-2026-08-25",
+   "command": "pnpm --filter @lovelyres/electron exec vitest run src/shared/quick-detection-contract.test.ts src/renderer/quick-detection-state.test.ts src/renderer/quick-detection-page.test.tsx; pnpm --filter @lovelyres/electron typecheck",
+   "result": "Passed",
+   "observed": "Three Quick Detection contract/state/page files and 19 tests passed, followed by main and renderer typecheck. Tests pin the standalone exact7 interface, binding-only renderer state, closed-enum events, opaque bounded history, active cancellation on unmount or binding switch, request/cursor correlation and hostile plain-text projection. This historical Phase0 observation predates and is superseded for central App status by the exact112 runs below."
+  },
+  {
+   "id": "electron-backend-packet-capture-central-2026-08-25",
+   "command": "cargo test --locked --package lovelyres-electron-backend --lib; cargo test --locked --package lovelyres-electron-backend --test packet_capture_live_api_standalone; cargo clippy --locked --package lovelyres-electron-backend --all-targets -- -D warnings",
+   "result": "Passed",
+   "observed": "The backend library passed 221/221 and the independently rerun Packet Capture standalone suite passed 33/33; all-target check and Clippy also passed. Tests cover the exact four RPCs, exact deny-unknown params, fixed no-echo failures, complete TargetGuard checks, opaque interface/capture handles, bounded cursor/event/byte/concurrency/TTL state, fixed redaction, stop/cancel, late-result rejection and awaited close-binding cleanup before SSH disconnect. Real Linux/OpenSSH/tcpdump/sudo was NOT_RUN."
+  },
+  {
+   "id": "electron-check-packet-capture-central-2026-08-25",
+   "command": "pnpm --filter @lovelyres/electron check",
+   "result": "Passed",
+   "observed": "TypeScript checks passed; 100 Vitest files and 562 tests passed; Electron main, App renderer and terminal renderer production builds completed. Tests freeze exact100, the exact four Packet Capture client/main/preload methods, exact-own-key inputs, strict correlated bounded responses, binding-only App composition, active stop on deactivation/unmount, hostile plain text and forbidden command/file/terminal/download/export/AI/mutation/generic surfaces."
+  },
+  {
+   "id": "electron-source-gate-packet-capture-central-2026-08-25",
+   "command": "pwsh -NoProfile -File ./scripts/electron-source-gate.ps1 -RepositoryRoot .; pwsh -NoProfile -File ./scripts/electron-source-gate.ps1 -RepositoryRoot . -SelfTest",
+   "result": "Passed",
+   "observed": "The source gate and fixture self-test accepted 124 renderer-reachable files, 6 pinned assets, frozen main exact100 and terminal exact7 APIs, Packet Capture exact4 RPC/preload/main signatures, strict handle/input/cursor and response validators, backend guard/redaction/bounds markers, binding-only App composition, page forbidden command/file/terminal/download/export/AI/mutation/generic surfaces and awaited Packet Capture close-before-disconnect."
+  },
+  {
+   "id": "electron-cdp-exact100-packet-capture-central-2026-08-25",
+   "command": "pnpm --filter @lovelyres/electron test:debug",
+   "result": "Passed",
+   "observed": "Electron webContents.debugger/CDP verified the frozen exact100 main API. All eight direct or unknown-field interface/start/poll/stop requests were rejected without echo; command, file, terminal, download, export, AI, mutation and generic methods were undefined. The disconnected page exposed zero interface/packet/metric/protocol/detail/control rows, loaded only local resources, exposed no internal identity, remounted without remote rows and produced packet-capture-disconnected.png through capturePage. Packet Capture and global console errors were zero; title and prompt contrast were both 11.10:1. Real Linux/OpenSSH/tcpdump/sudo, connected live events, permissions, backpressure, cancellation, disconnect races, target-switch and PCAP evidence/export parity remain NOT_RUN or Pending.",
+   "nonVersionedEvidence": "target/electron-debug/2d9db536-7817-4047-9c41-87e90a2e48d9/evidence"
+  },
+  {
+   "id": "electron-backend-integrity-read-phase0-2026-08-25",
+   "command": "cargo test --locked --package lovelyres-electron-backend --test integrity_api_standalone; cargo clippy --locked --package lovelyres-electron-backend --all-targets -- -D warnings; cargo fmt --all --check",
+   "result": "Passed",
+   "observed": "The standalone suite passed 29 tests with 7 Integrity-specific tests, followed by backend all-target Clippy and workspace rustfmt. The future read-only exact5 surface covers presets, baseline listing, comparison start/poll/cancel, opaque capabilities, TargetGuard validation before dispatch and apply, bounded TTL/capacity/concurrency/event cursor state, fixed redaction, cancellation, close-binding cleanup and late-result rejection. Baseline creation and quarantine were deliberately removed from this phase because they mutate remote state. Central wiring and real Linux/OpenSSH were NOT_RUN."
+  },
+  {
+   "id": "electron-renderer-integrity-read-phase0-2026-08-25",
+   "command": "pnpm --filter @lovelyres/electron exec vitest run src/shared/integrity-contract.test.ts src/renderer/integrity-state.test.ts src/renderer/integrity-helpers.test.ts src/renderer/integrity-page.test.tsx; pnpm --filter @lovelyres/electron check",
+   "result": "Passed",
+   "observed": "Four Integrity contract/state/helpers/page files and 18 tests passed. The full Electron check then passed 100 files and 563 tests, typecheck, main/renderer/terminal production builds. Tests pin the standalone read-only exact5 interface, binding-only renderer state, active cancel on unmount or binding switch, response correlation, bounded hostile plain text and absence of create/quarantine mutation controls. The page remained intentionally absent from the central App registry."
+  },
+  {
+   "id": "electron-backend-quick-detection-central-2026-08-25",
+   "command": "cargo test --locked --package lovelyres-electron-backend --lib; cargo test --locked --package lovelyres-electron-backend --test quick_detection_api_standalone; cargo clippy --workspace --all-targets --locked -- -D warnings; cargo fmt --all --check",
+   "result": "Passed",
+   "observed": "The backend library passed 235/235 and the Quick Detection standalone suite passed 31/31. The central exact7 RPC surface rejects unknown params without echo, preserves opaque binding/plan/scan/report handles, validates TargetGuard before dispatch/event/final apply, bounds TTL/capacity/concurrency/events/history/report bytes, cancels and clears capabilities before SSH disconnect, and rejects late resurrection. Workspace Clippy and rustfmt passed. Real Linux/OpenSSH and connected scans were NOT_RUN."
+  },
+  {
+   "id": "electron-check-quick-detection-central-2026-08-25",
+   "command": "pnpm --filter @lovelyres/electron check",
+   "result": "Passed",
+   "observed": "The full Electron check passed 101 files and 579 tests, typecheck and all production builds. Tests freeze main/preload exact107, Quick Detection exact7 strict main/client/preload methods, exact-own-key inputs, bounded correlated responses, binding-only App composition, active cancellation on target switch/unmount, hostile plain-text projection, and absence of remediation, shell, path, file, terminal, export, mutation and generic renderer capabilities."
+  },
+  {
+   "id": "electron-source-gate-quick-detection-central-2026-08-25",
+   "command": "pwsh -NoProfile -File ./scripts/electron-source-gate.ps1 -RepositoryRoot .; pwsh -NoProfile -File ./scripts/electron-source-gate.ps1 -SelfTest",
+   "result": "Passed",
+   "observed": "The source gate and fixture self-test accepted 124 renderer-reachable files, 6 pinned assets, frozen main exact107 and terminal exact7 APIs, Quick Detection exact7 RPC/preload/main signatures, exact input/cursor/opaque validators, backend target-guard/redaction/bounds markers, binding-only App composition, lifecycle cancellation and close-before-disconnect, and forbidden remediation/shell/path/file/terminal/export/mutation/generic surfaces."
+  },
+  {
+   "id": "electron-backend-application-log-phase0-2026-08-25",
+   "command": "cargo test --locked --package lovelyres-electron-backend --test diagnostic_log_api_standalone; cargo check --workspace --all-targets --locked; cargo clippy --workspace --all-targets --locked -- -D warnings; cargo fmt --all --check",
+   "result": "Passed",
+   "observed": "The Application Log standalone suite passed 11/11 and workspace check, Clippy and rustfmt passed. The future exact5 list/level/clear/preview/export surface bounds a 500-record ring and 100 displayed rows, saturates public sequence/generation at the JavaScript safe integer, keeps clear/write atomic, avoids evaluating arbitrary Debug/Error values, projects C0/C1 and credential/URI material, and keeps export payload main-only behind create-only wx, mode 0600 and fsync. This was pre-central Phase0 evidence and is superseded for wiring status by the exact112 runs below; rolling-file output remained NOT_RUN."
+  },
+  {
+   "id": "electron-renderer-application-log-phase0-2026-08-25",
+   "command": "pnpm --filter @lovelyres/electron exec vitest run src/shared/application-log-contract.test.ts src/renderer/application-log-state.test.ts src/renderer/application-log-helpers.test.ts src/renderer/application-log-overlay.test.tsx src/main/application-log-export-boundary.test.ts; pnpm --filter @lovelyres/electron check",
+   "result": "Passed",
+   "observed": "Five Application Log contract/state/overlay/export-boundary files and 23 targeted tests passed; the contemporaneous full Electron check passed 101 files and 579 tests, typecheck and production builds. Tests freeze the standalone exact5 future API, bounded/redacted exact-object responses, main-only export payload, create-only native export boundary, list/operation invalidation on close or unmount, clear late-result rejection, focus/inert/aria restoration and hostile plain-text rendering. This historical Phase0 observation predates and is superseded for central/CDP status by the exact112 runs below."
+  },
+  {
+   "id": "electron-backend-exact112-quick-detection-application-log-2026-08-25",
+   "command": "cargo test --locked --package lovelyres-electron-backend --all-targets; cargo check --locked --package lovelyres-electron-backend --all-targets; cargo clippy --locked --package lovelyres-electron-backend --all-targets -- -D warnings; cargo fmt --all --check",
+   "result": "Passed",
+   "observed": "The current backend run passed 248/248 library tests and 451/451 tests across 16 standalone targets, for 699 total tests with 0 failed and 0 ignored; check, all-target Clippy -D warnings and workspace rustfmt also passed. Quick Detection exact7 remains target-guarded, bounded, cancellable and close-before-disconnect. Application Log exact5 is centrally composed through one DiagnosticLogApi and the single tracing subscriber, with the fmt stderr EnvFilter isolated to that layer, strict no-echo RPC failures, a bounded process-local ring and main-only export payload. Real Linux/OpenSSH scans and the portable rolling writer were NOT_RUN."
+  },
+  {
+   "id": "electron-check-exact112-quick-detection-application-log-2026-08-25",
+   "command": "pnpm --filter @lovelyres/electron check",
+   "result": "Passed",
+   "observed": "The latest full Electron check passed typecheck, 102 Vitest files and 594 tests, and the main/renderer/terminal production builds. The frozen main preload is exact112. Quick Detection exact7 remains binding-only with correlated bounded responses and lifecycle cancellation; Application Log exact5 is process-local, path/payload/stderr-free at the renderer boundary, invalidates late overlay work and keeps native export bytes in main."
+  },
+  {
+   "id": "electron-source-gate-exact112-quick-detection-application-log-2026-08-25",
+   "command": "pwsh -NoProfile -File ./scripts/electron-source-gate.ps1 -RepositoryRoot .; pwsh -NoProfile -File ./scripts/electron-source-gate.ps1 -RepositoryRoot . -SelfTest",
+   "result": "Passed",
+   "observed": "The source gate and fixture self-test accepted the frozen main exact112 and terminal exact7 preload APIs, Quick Detection exact7 and Application Log exact5 RPC/IPC/preload/main signatures, strict request and response validators, target-guard or process-local composition as applicable, bounded redaction, lifecycle cleanup, the single shared tracing subscriber and main-only create-new export. Renderer-reachable remediation, shell, path, target/session identity, file, terminal, internal export payload, stderr-read and generic invoke surfaces remain forbidden."
+  },
+  {
+   "id": "electron-cdp-exact112-quick-detection-application-log-2026-08-25",
+   "command": "pnpm --filter @lovelyres/electron test:debug",
+   "result": "Passed",
+   "observed": "Electron webContents.debugger/CDP verified the frozen exact112 main API. Quick Detection plan/start/poll/cancel/history/report direct and unknown-field forged requests were rejected without echo, the closed catalog exposed 13 modules and 2 profiles, and remediation/auto-fix/command/file/terminal/export/mutation/generic methods were undefined. Its disconnected page exposed zero module/profile/progress/history/report/action rows, loaded only local resources, exposed no internal identity, remounted empty, produced quick-detection-disconnected.png and had zero console errors. Application Log list/level/preview/export unknown-field requests were rejected without echo; stderr/file/path/internal-payload/generic methods were undefined. Its bounded empty overlay exposed no internal payload, trapped and restored focus/inert state, remounted cleanly, produced application-log-overlay.png and had zero console errors. Real Linux/OpenSSH connected scans and remediation, the portable rolling writer, and a packaged native save-dialog/export smoke were NOT_RUN, so both entries remain Pending.",
+   "nonVersionedEvidence": "target/electron-debug/19adbfae-598c-4eee-b7f1-cc2a666e3ac7/evidence"
+  }
+ ],
+ "foundations": [
+  {
+   "id": "electron-shell",
+   "owner": [
+    "electron-main",
+    "electron-renderer"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/main.rs",
+    "crates/lovelyres-gpui/src/app.rs",
+    "crates/lovelyres-gpui/src/portable.rs",
+    "crates/lovelyres-gpui/src/assets.rs"
+   ],
+   "replacement": {
+    "state": "implemented",
+    "targets": [
+     "electron/src/main/index.ts",
+     "electron/src/main/renderer-protocol.ts",
+     "electron/src/main/debug-probe.ts",
+     "electron/src/preload/index.ts",
+     "electron/src/renderer/App.tsx",
+     "electron/src/renderer/styles.css"
+    ]
+   },
+   "status": "Completed",
+   "acceptance": [
+    "One sandboxed main BrowserWindow loads only the packaged lovelyres://app origin.",
+    "contextIsolation, sandbox, webSecurity, navigation denial, window-open denial, permission denial, strict CSP, single-instance behavior, and executable-adjacent portable Electron paths are enforced.",
+    "The preload exposes a frozen finite API and renderer code has no Node process or require access.",
+    "This completion covers the shell foundation only; page parity, secondary windows, overlays, packaging, and GPUI retirement remain separate Pending entries."
+   ],
+   "tests": {
+    "required": [
+     "pnpm --filter @lovelyres/electron check",
+     "pnpm --filter @lovelyres/electron test:debug"
+    ],
+    "evidence": [
+     "electron-check-2026-08-24",
+     "electron-cdp-smoke-2026-08-24"
+    ]
+   }
+  },
+  {
+   "id": "typed-backend-boundary",
+   "owner": [
+    "rust-backend",
+    "electron-main",
+    "lovelyres-core"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/app.rs",
+    "crates/lovelyres-gpui/src/runtime.rs",
+    "crates/lovelyres-core/src/lib.rs"
+   ],
+   "replacement": {
+    "state": "implemented",
+    "targets": [
+     "crates/lovelyres-electron-backend/src/lib.rs",
+     "crates/lovelyres-electron-backend/src/main.rs",
+     "electron/src/main/backend-client.ts",
+     "electron/src/shared/contract.ts",
+     "electron/src/preload/index.ts"
+    ]
+   },
+   "status": "Completed",
+   "acceptance": [
+    "Electron talks to a dedicated Rust child process through a versioned, newline-framed, bounded request/response protocol.",
+    "The method set is an explicit allowlist with typed parameter parsing; unknown methods and fields fail closed.",
+    "Public connection summaries contain no plaintext or ciphertext secrets.",
+    "The boundary does not expose a generic shell.execute, filesystem, process-spawn, or arbitrary core-call primitive.",
+    "The backend receives one explicit absolute archive root and constructs shared core services once."
+   ],
+   "tests": {
+    "required": [
+     "cargo test --locked --package lovelyres-electron-backend",
+     "pnpm --filter @lovelyres/electron check",
+     "pnpm --filter @lovelyres/electron test:debug"
+    ],
+    "evidence": [
+     "electron-backend-tests-2026-08-24",
+     "electron-check-2026-08-24",
+     "electron-cdp-smoke-2026-08-24"
+    ]
+   }
+  }
+ ],
+ "protectedWorktree": [
+  {
+   "id": "dirty-config-generator-baseline",
+   "owner": [
+    "migration-lead",
+    "config-generator",
+    "lovelyres-core"
+   ],
+   "source": [
+    "docs/legacy/config-generator-baseline.rs.txt",
+    "Cargo.toml",
+    "Cargo.lock",
+    "crates/lovelyres-core/src/error.rs",
+    "crates/lovelyres-core/src/lib.rs",
+    "crates/lovelyres-core/src/nginx_config.rs",
+    "crates/lovelyres-core/src/apache_config.rs",
+    "crates/lovelyres-core/src/haproxy_config.rs",
+    "crates/lovelyres-core/src/mariadb_config.rs",
+    "crates/lovelyres-core/src/mongodb_config.rs",
+    "crates/lovelyres-core/src/mysql_config.rs",
+    "crates/lovelyres-core/src/postgresql_config.rs",
+    "crates/lovelyres-core/src/redis_config.rs",
+    "crates/lovelyres-core/src/tomcat_config.rs"
+   ],
+   "replacement": {
+    "state": "planned",
+    "targets": [
+     "Electron config-generator renderer page",
+     "Typed lovelyres-electron-backend config-generator methods",
+     "UI-independent rules retained in lovelyres-core",
+     "One explicit replacement-test mapping for every protected test ID below"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "The dirty GPUI source was recoverably preserved verbatim at docs/legacy/config-generator-baseline.rs.txt (SHA-256 7d66302eb9d58a09b09cc95f7b074057357d11c1f1f158ec37a6de56d37ac19e) before crates/lovelyres-gpui was removed on 2026-08-25.",
+    "Map all 90 protected test IDs to core, backend-contract, renderer-component, or Electron CDP replacement tests; the outstanding checklist lives in docs/CONFIG_GENERATOR_TEST_BACKLOG.md.",
+    "Every replacement test must pass. The two legacy-failing GPUI tests must be repaired or receive an explicit reviewed migration disposition; they may not disappear silently.",
+    "Preserve bounded previews, hostile-text handling, secret redaction, read-only/vendor-document rules, stale lifecycle rejection, typed configuration generation, import/save behavior, and the tested layout/interaction semantics."
+   ],
+   "tests": {
+    "required": [
+     "Verify docs/legacy/config-generator-baseline.rs.txt still hashes to the recorded snapshot SHA-256 before relying on it as the behavior reference.",
+     "Run all mapped core/backend/renderer/CDP replacement tests and require 90 reviewed dispositions with no unmapped ID (see docs/CONFIG_GENERATOR_TEST_BACKLOG.md)."
+    ],
+    "evidence": [
+     "dirty-config-generator-tests-2026-08-24"
+    ]
+   },
+   "snapshot": {
+    "sha256": "7d66302eb9d58a09b09cc95f7b074057357d11c1f1f158ec37a6de56d37ac19e",
+    "gitBlob": "28fa3179c28423fab0d4dd67ce0c61489881279b",
+    "headGitBlob": "8820497114d4390439da11aa93baadaaf0e960f0",
+    "bytes": 866081,
+    "lines": 19991,
+    "diffAgainstHead": {
+     "insertions": 11229,
+     "deletions": 2743
+    },
+    "testCount": 90,
+    "plainTestCount": 60,
+    "gpuiTestCount": 30,
+    "orderedTestIdSha256": "058ec2ed7386b2c0bff39cd1b225d4179263853ee42b94c0e6fecaa5f96b6214",
+    "testInventoryJoinRule": "UTF-8 names in source order joined by LF with no trailing LF",
+    "testIds": [
+     "database_bundle_parameter_labels_disambiguate_every_mariadb_container",
+     "goal_catalog_product_search_and_subject_inference_are_bounded_and_exact",
+     "nginx_configuration_catalog_has_a_useful_baseline_and_searchable_rows",
+     "apache_configuration_catalog_has_a_useful_baseline_and_searchable_rows",
+     "mysql_configuration_catalog_has_an_immutable_searchable_baseline",
+     "postgresql_and_mariadb_quick_catalogs_are_closed_searchable_and_typed",
+     "redis_configuration_catalog_and_latest_empty_instance_baseline_are_searchable",
+     "tomcat_configuration_catalog_and_default_three_artifact_baseline_are_searchable",
+     "goal_catalog_middleware_groups_cover_the_registered_products_exactly_once",
+     "quick_configuration_source_does_not_restore_the_removed_legacy_filter_badges",
+     "goal_catalog_reference_viewport_keeps_three_columns_visible_and_non_overlapping",
+     "nginx_quick_configurations_stack_and_remove_independently",
+     "nginx_remove_button_click_removes_feature_and_updates_preview_and_row_state",
+     "apache_quick_configurations_stack_remove_reset_and_open_visual",
+     "mysql_quick_configurations_stack_remove_reset_preview_save_and_open_visual",
+     "postgresql_and_mariadb_quick_interactions_are_isolated_and_save_create_new",
+     "redis_quick_configurations_stack_remove_reset_and_save_without_overwrite",
+     "tomcat_quick_bundle_stacks_excludes_removes_resets_copies_and_saves_without_overwrite",
+     "quick_configuration_search_and_product_switches_never_leak_another_preview",
+     "reset_only_restores_the_selected_product_family",
+     "redis_reset_is_isolated_from_mysql_and_web_state",
+     "tomcat_reset_is_isolated_and_other_product_resets_preserve_tomcat_state",
+     "apache_catalog_renders_inline_editor_and_preview_in_the_three_column_workspace",
+     "mysql_catalog_renders_inline_editor_and_preview_in_the_three_column_workspace",
+     "postgresql_and_mariadb_catalogs_render_versions_search_and_inline_editors",
+     "redis_catalog_renders_editor_directly_below_the_selected_row",
+     "tomcat_catalog_renders_editor_directly_below_the_selected_row",
+     "nginx_spa_fallback_swaps_with_static_404_and_removal_restores_baseline",
+     "nginx_reset_restores_every_checked_in_default",
+     "nginx_quick_preview_scrolls_independently_through_long_output",
+     "redis_quick_preview_scrolls_to_the_last_generated_directive",
+     "mariadb_quick_preview_scrolls_independently_through_all_fifteen_features",
+     "tomcat_three_artifact_preview_scrolls_independently_to_the_last_file",
+     "visual_workspace_layout_keeps_small_windows_scrollable_and_panels_bounded",
+     "short_viewport_scrolls_page_from_header_to_full_preview",
+     "nginx_403_goal_is_discoverable_and_drives_the_typed_preview",
+     "nginx_import_result_replaces_a_stale_apache_visual_document",
+     "unified_goal_search_opens_database_guidance_and_explains_unavailable_products",
+     "database_assignment_previews_then_atomically_confirms_a_typed_local_draft",
+     "database_assignment_ambiguity_rejection_and_failed_stage_never_mutate_the_document",
+     "database_assignment_schema_revision_and_dirty_version_mismatch_fail_closed",
+     "database_assignment_writer_preserves_product_tokens_and_equals_inside_the_value",
+     "config_preview_colors_are_readable_on_every_current_theme",
+     "nginx_goal_search_recognizes_403_intent_and_extracts_only_typed_paths",
+     "nginx_403_goal_generates_and_reloads_as_an_exact_visual_tree",
+     "visual_search_is_bounded_ascii_case_insensitive_and_keeps_only_parent_chains",
+     "visual_search_uses_reviewed_schema_meaning_but_never_defaults_or_row_values",
+     "schema_value_domains_are_detailed_and_reviewed_literals_are_searchable",
+     "schema_catalog_covers_parameters_absent_from_the_document_without_mutation",
+     "search_never_indexes_sensitive_text_from_any_visual_document_source",
+     "hidden_and_stale_search_selections_fail_closed",
+     "configuration_explanations_use_fail_closed_meaning_levels_without_values",
+     "form_translation_generates_both_closed_templates",
+     "form_translation_rejects_nginx_directive_injection",
+     "model_starts_with_independent_quick_and_competition_documents",
+     "quick_result_can_become_a_structured_visual_document",
+     "schema_selection_rejects_cross_artifact_and_resets_when_artifact_changes",
+     "partial_schema_is_metadata_only_and_preserves_local_draft_permission",
+     "schema_metadata_lookup_is_path_qualified_and_redacts_before_ui_copy",
+     "documented_defaults_show_for_five_goldendb_matches_without_changing_document",
+     "documented_defaults_render_empty_text_but_hide_invalid_sensitive_metadata",
+     "schemas_never_change_vendor_or_generated_local_draft_permission",
+     "apache_competition_skeleton_is_available_through_visual_facade",
+     "supported_database_starters_remain_structured",
+     "compatible_and_domestic_starters_do_not_guess_upstream_defaults",
+     "local_visual_selection_hides_managed_runtime_cloud_binary_and_unparsed_artifacts",
+     "unparsed_vendor_text_never_reaches_visual_rows_or_copy_boundaries",
+     "dm_dcr_array_and_startup_command_payloads_never_reach_the_generic_ini_editor",
+     "dm_init_password_is_redacted_non_copyable_and_rejects_ordinary_updates",
+     "gbase_8s_known_text_grammars_remain_byte_exact_visual_and_read_only",
+     "gbase_8s_visual_text_authkey_is_redacted_and_blocks_whole_document_copy",
+     "readable_generated_json_pg_auto_yaml_and_xml_enter_the_selector",
+     "mysql_auto_cnf_is_selectable_byte_exact_non_secret_and_fully_read_only",
+     "readable_read_only_documents_preserve_bytes_and_reject_every_mutation",
+     "tidb_auxiliary_toml_catalog_is_byte_exact_read_only_and_schema_isolated",
+     "gbase_8a_cluster_common_json_keeps_component_identity_and_read_only_boundaries",
+     "gbase_8a_generated_json_authkey_is_redacted_and_blocks_whole_document_copy",
+     "yashandb_23_5_4_100_schema_is_exact_read_only_metadata_and_never_serialized",
+     "yashandb_23_5_yasdb_ini_is_selectable_byte_exact_and_fully_read_only",
+     "yashandb_23_5_vendor_binary_artifacts_never_enter_or_read_as_text",
+     "gcware_catalog_document_is_nested_byte_exact_and_never_deployable",
+     "sequoia_quick_deploy_catalog_artifacts_are_selectable_read_only_and_byte_exact",
+     "sequoia_quick_deploy_cross_role_imports_are_whole_sensitive_opaque_and_keep_catalog_name",
+     "sequoia_quick_deploy_sensitive_and_local_opaque_rows_block_copy_but_keep_safe_sibling",
+     "sequoia_quick_deploy_opaque_rows_redact_and_all_mutation_starter_deploy_paths_stay_closed",
+     "read_only_status_distinguishes_generated_and_vendor_schema_artifacts",
+     "sensitive_structured_documents_remain_non_copyable_and_redacted",
+     "foreign_document_node_ids_fail_closed_without_mutation",
+     "lifecycle_rejects_late_save_completions",
+     "preview_is_bounded_and_never_interprets_text"
+    ]
+   }
+  }
+ ],
+ "pages": [
+  {
+   "id": "system-info",
+   "owner": [
+    "electron-renderer",
+    "rust-backend",
+    "lovelyres-core"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/system_info.rs",
+    "crates/lovelyres-core/src/system_info.rs"
+   ],
+   "replacement": {
+    "state": "mixed",
+    "targets": [
+     "electron/src/renderer/SystemInfoPage.tsx",
+     "electron/src/renderer/system-info-state.ts",
+     "crates/lovelyres-electron-backend/src/system_info_api.rs",
+     "Pending full GPUI interaction parity and real-target validation"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "System overview, CPU/memory, disk/network, refresh, export/copy, bounded hostile text, loading/error/empty states, and target-generation rejection match the GPUI behavior."
+   ],
+   "tests": {
+    "required": [
+     "Core system-info tests",
+     "Backend contract tests",
+     "Renderer interaction tests",
+     "Electron CDP page smoke"
+    ],
+    "evidence": []
+   }
+  },
+  {
+   "id": "docker",
+   "owner": [
+    "electron-renderer",
+    "rust-backend",
+    "lovelyres-core"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/docker.rs",
+    "crates/lovelyres-gpui/src/container_terminal.rs",
+    "crates/lovelyres-core/src/docker.rs"
+   ],
+   "replacement": {
+    "state": "mixed",
+    "targets": [
+     "electron/src/renderer/DockerPage.tsx",
+     "electron/src/shared/docker-read-contract.ts",
+     "crates/lovelyres-electron-backend/src/docker_read_api.rs",
+     "Five fixed central methods for refresh/collection/inspect/security-audit/logs behind frozen main exact96",
+     "Strict main/RPC validators, eager disconnect cleanup and Electron-native CDP/capturePage evidence",
+     "Pending phase-two mutations/container terminal and real Linux/OpenSSH/Docker validation"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "Containers, images, networks, logs, inspect, lifecycle actions, file edit/copy plans, dangerous confirmation, verification/restore, and container terminal launch retain exact target/container/lifecycle guards."
+   ],
+   "tests": {
+    "required": [
+     "Core Docker safety tests",
+     "Backend exact5 method, guard, bounds and hostile-input tests",
+     "Renderer lifecycle and hostile plain-text tests",
+     "Electron webContents.debugger/CDP disconnected and forged-capability smoke",
+     "Real Docker and container-terminal smoke"
+    ],
+    "evidence": [
+     "electron-check-docker-read-2026-08-24",
+     "electron-backend-docker-read-2026-08-24",
+     "electron-backend-docker-central-2026-08-25",
+     "electron-check-docker-central-2026-08-25",
+     "electron-source-gate-docker-central-2026-08-25",
+     "electron-cdp-exact96-docker-central-2026-08-25"
+    ]
+   }
+  },
+  {
+   "id": "kubernetes",
+   "owner": [
+    "electron-renderer",
+    "rust-backend",
+    "lovelyres-core"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/kubernetes.rs",
+    "crates/lovelyres-core/src/kubernetes.rs"
+   ],
+   "replacement": {
+    "state": "mixed",
+    "targets": [
+     "electron/src/renderer/KubernetesPage.tsx",
+     "electron/src/renderer/App.tsx passes only an opaque bindingHandle",
+     "electron/src/shared/kubernetes-read-contract.ts",
+     "electron/src/main/backend-client.ts exact4 fixed RPC methods",
+     "electron/src/main/index.ts exact4 strict IPC validators",
+     "electron/src/preload/index.ts exact4 frozen methods",
+     "crates/lovelyres-electron-backend/src/kubernetes_read_api.rs",
+     "scripts/electron-source-gate.ps1 exact89/exact4 boundary",
+     "electron/src/main/debug-probe.ts exact89 Kubernetes disconnected scenario",
+     "Pending mutation parity and real Linux/OpenSSH/Kubernetes validation"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "Phase 1 availability, namespace-scoped resource lists, bounded resource detail, recent Pod logs, hostile plain text, cancellation, TTL and target-generation handling use exact4 finite read-only methods.",
+    "Scale, restart, delete, cordon, drain, exec, file, terminal, export and generic mutation surfaces remain Pending and must not be exposed by Phase 1.",
+    "Real Linux/OpenSSH/Kubernetes permissions, unavailable and populated clusters, bounds, log truncation, cancellation, disconnect and target-switch cases remain NOT_RUN."
+   ],
+   "tests": {
+    "required": [
+     "Core Kubernetes tests",
+     "Backend exact4 RPC, target guard, redaction, bounds, concurrency, TTL and eager disconnect cleanup tests",
+     "Main/preload strict exact-object boundary and renderer lifecycle tests",
+     "Electron CDP exact89 Kubernetes disconnected boundary smoke",
+     "Real Linux/OpenSSH/Kubernetes phase 1 matrix (NOT_RUN)",
+     "Mutation and export parity acceptance (NOT_RUN)"
+    ],
+    "evidence": [
+     "electron-backend-kubernetes-read-2026-08-24",
+     "electron-renderer-kubernetes-read-2026-08-24",
+     "electron-backend-kubernetes-central-2026-08-25",
+     "electron-check-kubernetes-central-2026-08-25",
+     "electron-source-gate-kubernetes-central-2026-08-25",
+     "electron-cdp-exact89-kubernetes-central-2026-08-25"
+    ]
+   }
+  },
+  {
+   "id": "security-reference",
+   "owner": [
+    "electron-renderer",
+    "rust-backend",
+    "lovelyres-core"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/security_reference.rs",
+    "crates/lovelyres-gpui/assets/security_reference.json"
+   ],
+   "replacement": {
+    "state": "implemented",
+    "targets": [
+     "electron/src/renderer/SecurityReference.tsx",
+     "electron/src/renderer/catalog.ts",
+     "electron/assets/security_reference.json",
+     "security-reference.set-favorites backend method",
+     "lovelyres:clipboard:write-text main-process handler"
+    ]
+   },
+   "status": "Completed",
+   "acceptance": [
+    "The frozen 107-entry, 13-language catalog is validated, searchable, filterable, expandable, copyable, and rendered only as hostile plain text.",
+    "Favorites persist through the core-owned settings store and invalid IDs fail closed.",
+    "Copy is bounded and implemented in the trusted main process.",
+    "The page is keyboard/accessibility discoverable and loads no remote resource."
+   ],
+   "tests": {
+    "required": [
+     "pnpm --filter @lovelyres/electron check",
+     "cargo test --locked --package lovelyres-electron-backend",
+     "pnpm --filter @lovelyres/electron test:debug"
+    ],
+    "evidence": [
+     "electron-check-2026-08-24",
+     "electron-backend-tests-2026-08-24",
+     "electron-cdp-smoke-2026-08-24"
+    ]
+   }
+  },
+  {
+   "id": "emergency-commands",
+   "owner": [
+    "electron-renderer",
+    "rust-backend",
+    "lovelyres-core"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/command_workbench.rs",
+    "crates/lovelyres-core/src/command_workbench.rs"
+   ],
+   "replacement": {
+    "state": "mixed",
+    "targets": [
+     "electron/src/renderer/EmergencyCommandsPage.tsx",
+     "electron/src/shared/emergency-command-contract.ts",
+     "crates/lovelyres-electron-backend/src/emergency_command_api.rs",
+     "Two fixed central methods: loadEmergencyCommandCatalog and runEmergencyCommand",
+     "Frozen main exact91 preload, strict main/RPC validators, eager disconnect cleanup and Electron-native CDP/capturePage evidence",
+     "Pending real Linux/OpenSSH validation and dangerous mutation/restore parity"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "Closed commands, immutable plans, exact dangerous confirmation, audit/journal, verification, restore where supported, bounded output, cancellation, and target guards are retained without a generic shell IPC."
+   ],
+   "tests": {
+    "required": [
+     "Core command-workbench safety tests",
+     "Backend exact2 allowlist, guard, bounds and hostile-input tests",
+     "Renderer lifecycle and hostile plain-text tests",
+     "Electron webContents.debugger/CDP disconnected and forged-capability smoke",
+     "Real Linux VM destructive-flow validation where required"
+    ],
+    "evidence": [
+     "lovelyres-core-emergency-history-hardening-2026-08-24",
+     "electron-backend-emergency-command-standalone-2026-08-24",
+     "electron-renderer-emergency-command-standalone-2026-08-24",
+     "electron-backend-emergency-command-central-2026-08-25",
+     "electron-check-emergency-command-central-2026-08-25",
+     "electron-source-gate-emergency-command-central-2026-08-25",
+     "electron-cdp-exact91-emergency-command-central-2026-08-25"
+    ]
+   }
+  },
+  {
+   "id": "log-analysis",
+   "owner": [
+    "electron-renderer",
+    "rust-backend",
+    "lovelyres-core"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/log_analysis.rs",
+    "crates/lovelyres-core/src/log_analysis.rs"
+   ],
+   "replacement": {
+    "state": "mixed",
+    "targets": [
+     "electron/src/renderer/LogAnalysisPage.tsx",
+     "electron/src/renderer/App.tsx passes only an opaque bindingHandle",
+     "electron/src/shared/log-analysis-read-contract.ts",
+     "electron/src/main/backend-client.ts exact4 fixed RPC methods",
+     "electron/src/main/index.ts exact4 strict IPC validators",
+     "electron/src/preload/index.ts exact4 frozen methods",
+     "crates/lovelyres-electron-backend/src/log_analysis_read_api.rs",
+     "scripts/electron-source-gate.ps1 exact89/exact4 boundary",
+     "electron/src/main/debug-probe.ts exact89 Log Analysis disconnected scenario",
+     "Pending phase 2 rules/AI/export parity and real Linux/OpenSSH/journal validation"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "Phase 1 source discovery, bounded source reads, multi-source correlation, IOC search, hostile plain text, cancellation, TTL and target-generation handling use exact4 finite read-only methods.",
+    "Phase 2 rules, AI analysis and export remain Pending and must not be exposed through mutation, file, terminal, export or generic invocation surfaces.",
+    "Real Linux/OpenSSH/journal permissions, unavailable and populated sources, bounds, timeout, disconnect and target-switch cases remain NOT_RUN."
+   ],
+   "tests": {
+    "required": [
+     "Core log-analysis tests",
+     "Backend exact4 RPC, target guard, bounds, cancellation, TTL and eager disconnect cleanup tests",
+     "Main/preload strict exact-object boundary and renderer lifecycle tests",
+     "Electron CDP exact89 Log Analysis disconnected boundary smoke",
+     "Real Linux/OpenSSH/journal phase 1 matrix (NOT_RUN)",
+     "Phase 2 rules/AI/export acceptance (NOT_RUN)"
+    ],
+    "evidence": [
+     "electron-backend-log-analysis-read-2026-08-24",
+     "electron-renderer-log-analysis-read-2026-08-24",
+     "electron-backend-log-analysis-central-2026-08-25",
+     "electron-check-log-analysis-central-2026-08-25",
+     "electron-source-gate-log-analysis-central-2026-08-25",
+     "electron-cdp-log-analysis-central-2026-08-25",
+     "electron-cdp-exact89-kubernetes-central-2026-08-25"
+    ]
+   }
+  },
+  {
+   "id": "packet-capture",
+   "owner": [
+    "electron-renderer",
+    "rust-backend",
+    "lovelyres-core"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/packet_capture.rs",
+    "crates/lovelyres-core/src/packet_capture.rs"
+   ],
+   "replacement": {
+    "state": "mixed",
+    "targets": [
+     "electron/src/renderer/PacketCapturePage.tsx",
+     "electron/src/shared/packet-capture-live-contract.ts",
+     "crates/lovelyres-electron-backend/src/packet_capture_live_api.rs",
+     "Central exact4 list/start/poll/stop RPC/preload/App wiring",
+     "Pending PCAP evidence/download/export phase, Electron CDP, and real Linux/SSH/tcpdump validation"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "Capture planning, interface selection, bounded live events, cancellation, staged download, exact marker/SHA-256 verification, evidence export, and stale-session failure are retained."
+   ],
+   "tests": {
+    "required": [
+     "Core packet-capture tests",
+     "Backend stream/backpressure tests",
+     "Renderer interaction tests",
+     "Real Linux VM capture validation"
+    ],
+    "evidence": [
+     "electron-backend-packet-capture-live-2026-08-24",
+     "electron-renderer-packet-capture-live-2026-08-24",
+     "electron-backend-packet-capture-central-2026-08-25",
+     "electron-check-packet-capture-central-2026-08-25",
+     "electron-source-gate-packet-capture-central-2026-08-25",
+     "electron-cdp-exact100-packet-capture-central-2026-08-25"
+    ]
+   }
+  },
+  {
+   "id": "check-audit",
+   "owner": [
+    "electron-renderer",
+    "rust-backend",
+    "lovelyres-core"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/check_audit.rs",
+    "crates/lovelyres-core/src/audit.rs",
+    "crates/lovelyres-core/src/compliance.rs"
+   ],
+   "replacement": {
+    "state": "mixed",
+    "targets": [
+     "electron/src/renderer/CheckAuditPage.tsx",
+     "electron/src/shared/check-audit-read-contract.ts",
+     "crates/lovelyres-electron-backend/src/check_audit_read_api.rs",
+     "electron/src/main/backend-client.ts plus exact main IPC/preload bridge",
+     "App registry branch receives only the opaque bindingHandle",
+     "Three centrally wired read-only methods: getCheckAuditCatalog, collectCheckAuditStatus, and readCheckAuditLog",
+     "Pending phase-two mutation/restore/export and real Linux/SSH/auditd validation"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "Account, service, network and security checks; findings; recommendations; evidence; export; bounds; cancellation; and target guards match the existing page."
+   ],
+   "tests": {
+    "required": [
+     "Core audit/compliance tests",
+     "Backend exact read RPC and eager disconnect-cleanup tests",
+     "Renderer exact contract, opaque lifecycle and late-result tests",
+     "Electron CDP disconnected-page and boundary smoke",
+     "Phase-two mutation/restore/export tests",
+     "Real Linux/SSH/auditd validation"
+    ],
+    "evidence": [
+     "electron-backend-check-audit-firewall-read-2026-08-24",
+     "electron-renderer-check-audit-firewall-read-2026-08-24",
+     "electron-cdp-middleware-check-audit-central-2026-08-25"
+    ]
+   }
+  },
+  {
+   "id": "integrity",
+   "owner": [
+    "electron-renderer",
+    "rust-backend",
+    "lovelyres-core"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/integrity.rs",
+    "crates/lovelyres-core/src/integrity.rs"
+   ],
+   "replacement": {
+    "state": "mixed",
+    "targets": [
+     "electron/src/renderer/IntegrityPage.tsx",
+     "electron/src/shared/integrity-contract.ts",
+     "crates/lovelyres-electron-backend/src/integrity_api.rs",
+     "Standalone read-only exact5 preset/list/start/poll/cancel surface",
+     "Pending central wiring, baseline creation and quarantine plan/confirm/verify/recovery phase, SFTP integration, Electron CDP, and real-target validation"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "Baseline creation, comparison, history, validated paths, bounded results, cancellation, and stale-target rejection retain the GPUI safety model."
+   ],
+   "tests": {
+    "required": [
+     "Core integrity/path tests",
+     "Backend contract tests",
+     "Renderer interaction tests",
+     "Electron CDP page smoke"
+    ],
+    "evidence": [
+     "electron-backend-integrity-read-phase0-2026-08-25",
+     "electron-renderer-integrity-read-phase0-2026-08-25"
+    ]
+   }
+  },
+  {
+   "id": "notes",
+   "owner": [
+    "electron-renderer",
+    "rust-backend",
+    "lovelyres-core"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/notes.rs",
+    "crates/lovelyres-core/src/investigation.rs"
+   ],
+   "replacement": {
+    "state": "planned",
+    "targets": [
+     "Electron NotesPage",
+     "Typed notes backend methods"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "List/search, create/edit, pin, tags, bounded content, export, exact delete plan/confirmation, persistence, empty/error states, and lifecycle behavior are wired through the finite preload contract."
+   ],
+   "tests": {
+    "required": [
+     "Core notes tests",
+     "Backend notes contract tests",
+     "Renderer notes interaction tests",
+     "Electron CDP page smoke"
+    ],
+    "evidence": []
+   }
+  },
+  {
+   "id": "baseline-quick-edit",
+   "owner": [
+    "electron-renderer",
+    "rust-backend",
+    "lovelyres-core"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/baseline.rs",
+    "crates/lovelyres-core/src/baseline.rs"
+   ],
+   "replacement": {
+    "state": "mixed",
+    "targets": [
+     "electron/src/renderer/BaselinePage.tsx",
+     "electron/src/shared/baseline-read-contract.ts",
+     "electron/src/shared/contract.ts",
+     "electron/src/main/backend-client.ts",
+     "electron/src/main/index.ts",
+     "electron/src/preload/index.ts",
+     "electron/src/renderer/App.tsx",
+     "crates/lovelyres-electron-backend/src/baseline_read_api.rs",
+     "crates/lovelyres-electron-backend/src/lib.rs",
+     "Three fixed current read-only methods: getBaselineCatalog, scanBaseline, listBaselineHistory",
+     "Typed baseline plan/confirm/verify/restore methods remain planned"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "Baseline selection, immutable change plan, exact confirmation, verification, recovery commands, audit, target guards, and stale-result rejection are equivalent."
+   ],
+   "tests": {
+    "required": [
+     "Core baseline tests",
+     "Backend plan/confirm tests",
+     "Renderer dangerous-flow tests",
+     "Applicable real Linux VM validation"
+    ],
+    "evidence": [
+     "electron-backend-baseline-read-standalone-2026-08-24",
+     "electron-renderer-baseline-read-standalone-2026-08-24",
+     "lovelyres-core-baseline-portable-bounds-2026-08-25",
+     "electron-backend-baseline-central-read-2026-08-25",
+     "electron-check-baseline-central-2026-08-25",
+     "electron-source-gate-baseline-central-2026-08-25",
+     "electron-cdp-baseline-central-2026-08-25"
+    ]
+   }
+  },
+  {
+   "id": "database",
+   "owner": [
+    "electron-renderer",
+    "rust-backend",
+    "lovelyres-core"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/database.rs",
+    "crates/lovelyres-core/src/database.rs",
+    "crates/lovelyres-core/src/database_config.rs"
+   ],
+   "replacement": {
+    "state": "planned",
+    "targets": [
+     "Electron DatabasePage",
+     "Typed database backend methods"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "Connection selection, safe query execution, inspection, history, service plans/readback, configuration artifacts, bounded rows/output, cancellation, and target guards are retained."
+   ],
+   "tests": {
+    "required": [
+     "Core database/config tests",
+     "Backend bounds and secret tests",
+     "Renderer interaction tests",
+     "Applicable real database target validation"
+    ],
+    "evidence": []
+   }
+  },
+  {
+   "id": "java-hot-update",
+   "owner": [
+    "electron-renderer",
+    "rust-backend",
+    "lovelyres-core"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/java.rs",
+    "crates/lovelyres-core/src/java.rs"
+   ],
+   "replacement": {
+    "state": "planned",
+    "targets": [
+     "Electron JavaHotUpdatePage",
+     "Typed Java update backend methods"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "JVM/process analysis, class/method selection, deployment plan, exact confirmation, audit, verification/recovery, bounded output, and target/process lifecycle guards are retained."
+   ],
+   "tests": {
+    "required": [
+     "Core Java tests",
+     "Backend plan/confirm tests",
+     "Renderer interaction tests",
+     "Applicable real JVM validation"
+    ],
+    "evidence": []
+   }
+  },
+  {
+   "id": "ai-history",
+   "owner": [
+    "electron-renderer",
+    "rust-backend",
+    "lovelyres-core"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/ai_history.rs",
+    "crates/lovelyres-core/src/ai.rs"
+   ],
+   "replacement": {
+    "state": "mixed",
+    "targets": [
+     "electron/src/renderer/AiHistoryPage.tsx",
+     "electron/src/renderer/ai-history-state.ts",
+     "crates/lovelyres-electron-backend/src/ai_history_api.rs",
+     "Pending provider/streaming workflow parity and real-provider validation"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "Offline history, filtering, bounded/redacted prompts/results, explicit opt-in networking, provider policy, streaming cancellation/backpressure, and secret isolation are retained."
+   ],
+   "tests": {
+    "required": [
+     "Core AI/network-policy tests",
+     "Backend stream and secret tests",
+     "Renderer interaction tests",
+     "Electron CDP page smoke"
+    ],
+    "evidence": []
+   }
+  },
+  {
+   "id": "config-generator",
+   "owner": [
+    "electron-renderer",
+    "rust-backend",
+    "lovelyres-core",
+    "migration-lead"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/config_generator.rs",
+    "protectedWorktree:dirty-config-generator-baseline"
+   ],
+   "replacement": {
+    "state": "planned",
+    "targets": [
+     "Electron ConfigGeneratorPage",
+     "Typed config-generator backend methods",
+     "UI-independent configuration rules in lovelyres-core"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "All quick, goal, visual editor, database artifact, import/save/copy, read-only, redaction, bounded preview, accessibility/layout, and stale-lifecycle contracts are ported.",
+    "All 90 protected test IDs have reviewed replacements and pass before the GPUI source is removed.",
+    "The two currently failing tests are resolved explicitly and are never hidden by deleting the source."
+   ],
+   "tests": {
+    "required": [
+     "All requirements in protectedWorktree:dirty-config-generator-baseline",
+     "Core generator/parser tests",
+     "Backend contract tests",
+     "Renderer component tests",
+     "Electron CDP layout/interaction smoke"
+    ],
+    "evidence": [
+     "dirty-config-generator-tests-2026-08-24"
+    ]
+   }
+  }
+ ],
+ "connections": [
+  {
+   "id": "connection-list-and-landing",
+   "owner": [
+    "electron-renderer",
+    "rust-backend",
+    "lovelyres-core"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/connection_ui.rs",
+    "crates/lovelyres-core/src/connections.rs"
+   ],
+   "replacement": {
+    "state": "mixed",
+    "targets": [
+     "Existing connections.list backend method",
+     "Planned Electron connection landing/list/detail/filter/refresh UI"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "Renderer lists at most the bounded credential-free summaries, supports select/filter/refresh and empty/error/loading states, and never receives stored secrets or archive paths."
+   ],
+   "tests": {
+    "required": [
+     "Backend connection-summary bounds/redaction tests",
+     "Renderer list/detail tests",
+     "Electron CDP disconnected landing smoke"
+    ],
+    "evidence": []
+   }
+  },
+  {
+   "id": "connection-create-edit-save",
+   "owner": [
+    "electron-renderer",
+    "rust-backend",
+    "lovelyres-core"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/connection_ui.rs",
+    "crates/lovelyres-core/src/connections.rs",
+    "crates/lovelyres-core/src/crypto.rs"
+   ],
+   "replacement": {
+    "state": "planned",
+    "targets": [
+     "Electron connection editor",
+     "Typed connection get/upsert and credential-path methods"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "All authentication modes, jump host, metadata/tags, credential path selection, write-only secret changes/removal, host-key pin rules, validation, save, cancel, and input clearing match GPUI without exposing secrets to snapshots/logs."
+   ],
+   "tests": {
+    "required": [
+     "Core connection/crypto tests",
+     "Backend secret non-disclosure tests",
+     "Renderer editor tests",
+     "Electron native file-dialog integration tests"
+    ],
+    "evidence": []
+   }
+  },
+  {
+   "id": "connection-probe-host-key-mfa",
+   "owner": [
+    "electron-renderer",
+    "rust-backend",
+    "lovelyres-core"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/connection_ui.rs",
+    "crates/lovelyres-core/src/connections.rs",
+    "crates/lovelyres-core/src/ssh.rs"
+   ],
+   "replacement": {
+    "state": "planned",
+    "targets": [
+     "Typed probe-plan session API",
+     "Electron host-key confirmation and keyboard-interactive/MFA UI"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "Probe does not persist before success, exact host/jump-host fingerprints require independent confirmation, changed pins fail closed, MFA prompts are bounded and role-bound, retries keep exact authorization state, and cancellation closes test sessions."
+   ],
+   "tests": {
+    "required": [
+     "Core SSH/probe tests",
+     "Backend session-state tests",
+     "Renderer host-key/MFA tests",
+     "SSH compatibility target validation"
+    ],
+    "evidence": []
+   }
+  },
+  {
+   "id": "connection-connect-disconnect-target",
+   "owner": [
+    "electron-renderer",
+    "rust-backend",
+    "lovelyres-core"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/connection_ui.rs",
+    "crates/lovelyres-core/src/ssh.rs",
+    "crates/lovelyres-core/src/target.rs"
+   ],
+   "replacement": {
+    "state": "planned",
+    "targets": [
+     "Typed connect/disconnect session API",
+     "Electron active-target state and capability routing"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "Connect generation, cancellation, target activation, connection mark/readback, shared active session, disconnect, stale completion cleanup, capability routing, and all TargetGuard checks are equivalent."
+   ],
+   "tests": {
+    "required": [
+     "Core SSH/target lifecycle tests",
+     "Backend session cancellation tests",
+     "Renderer routing tests",
+     "SSH compatibility matrix"
+    ],
+    "evidence": []
+   }
+  },
+  {
+   "id": "connection-import-export",
+   "owner": [
+    "electron-renderer",
+    "electron-main",
+    "rust-backend",
+    "lovelyres-core"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/connection_ui.rs",
+    "crates/lovelyres-core/src/connections.rs"
+   ],
+   "replacement": {
+    "state": "planned",
+    "targets": [
+     "Electron native import/export dialogs",
+     "Typed bounded connection import/export methods"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "Native dialogs return validated absolute JSON paths, exports create new files and omit every secret, imports are size/count/schema bounded and atomic, duplicates are reported, cancellation/late results are ignored, and no renderer-supplied arbitrary write primitive exists."
+   ],
+   "tests": {
+    "required": [
+     "Core import/export safety tests",
+     "Backend path/bounds tests",
+     "Main-process dialog tests",
+     "Electron integration smoke"
+    ],
+    "evidence": []
+   }
+  },
+  {
+   "id": "connection-dangerous-delete",
+   "owner": [
+    "electron-renderer",
+    "rust-backend",
+    "lovelyres-core"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/connection_ui.rs",
+    "crates/lovelyres-core/src/connections.rs",
+    "crates/lovelyres-core/src/operations.rs"
+   ],
+   "replacement": {
+    "state": "planned",
+    "targets": [
+     "Typed connection-delete plan/confirm methods",
+     "Electron exact dangerous confirmation UI"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "Delete uses an immutable snapshot-bound plan, exact confirmation, journal, independent absence verification, single-use/expiring handle, concurrent-edit rejection, and explicit irreversibility."
+   ],
+   "tests": {
+    "required": [
+     "Core delete-plan tests",
+     "Backend single-use/expiry/concurrency tests",
+     "Renderer dangerous-confirmation tests",
+     "Electron CDP flow smoke"
+    ],
+    "evidence": []
+   }
+  }
+ ],
+ "windows": [
+  {
+   "id": "main",
+   "owner": [
+    "electron-main",
+    "electron-renderer"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/app.rs",
+    "crates/lovelyres-gpui/src/windows.rs"
+   ],
+   "replacement": {
+    "state": "mixed",
+    "targets": [
+     "Existing secure Electron main BrowserWindow shell",
+     "Pending full main-window navigation, controls, status bar, overlays, lifecycle, and release packaging parity"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "The completed secure shell is extended to full main-window parity; close/second-instance/backend shutdown, minimum sizing, navigation, status, theme, keyboard shortcuts, accessibility, and all page/overlay lifecycles are verified in packaged builds."
+   ],
+   "tests": {
+    "required": [
+     "Electron main-process unit tests",
+     "Electron CDP full-shell smoke",
+     "Packaged Windows/macOS/Linux window smoke"
+    ],
+    "evidence": [
+     "electron-cdp-smoke-2026-08-24"
+    ]
+   }
+  },
+  {
+   "id": "ssh-terminal",
+   "owner": [
+    "electron-main",
+    "electron-renderer",
+    "rust-backend",
+    "lovelyres-terminal"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/windows.rs",
+    "crates/lovelyres-terminal"
+   ],
+   "replacement": {
+    "state": "mixed",
+    "targets": [
+     "Main-owned binding launch state and keyed Electron SSH terminal BrowserWindow with failed-open and disconnect cleanup",
+     "electron/terminal.html and terminal-main.tsx with bundled offline xterm, exact local entry mapping, and a terminal-only dynamic-style CSP exception",
+     "electron/src/preload/terminal.ts exact seven-method handle-free API plus bounded main-owned selection copy",
+     "crates/lovelyres-electron-backend/src/terminal_api.rs fixed seven internal RPC routes with binding/session cleanup",
+     "Central window/preload/RPC/renderer wiring is present; real SSH/PTY, production keyed reuse/disconnect, IME/CJK and packaged lifecycle validation remain NOT_RUN"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "Single keyed window lifecycle, tabs, terminal protocol/model behavior, input, resize, search, selection, completion, directory launch, AI controls, backpressure, cancellation, and stale-session cleanup are equivalent without GPUI view code."
+   ],
+   "tests": {
+    "required": [
+     "Terminal conformance tests retained or replaced",
+     "Backend stream/backpressure tests",
+     "Renderer terminal interaction tests",
+     "Electron multi-window CDP smoke",
+     "SSH compatibility matrix"
+    ],
+    "evidence": [
+     "electron-check-ssh-terminal-2026-08-24",
+     "electron-backend-ssh-terminal-2026-08-24",
+     "electron-source-gate-ssh-terminal-2026-08-24",
+     "electron-cdp-ssh-terminal-2026-08-24"
+    ]
+   }
+  },
+  {
+   "id": "sftp",
+   "owner": [
+    "electron-main",
+    "electron-renderer",
+    "rust-backend",
+    "lovelyres-core"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/windows.rs",
+    "crates/lovelyres-gpui/src/sftp.rs",
+    "crates/lovelyres-core/src/sftp.rs"
+   ],
+   "replacement": {
+    "state": "planned",
+    "targets": [
+     "Read-only browser inside the SSH window (shipped: sftp-browser.open/directory.list/text.read, window-scoped so the renderer never holds a binding handle)",
+     "Typed SFTP transfer/plan backend methods (upload, download, atomic write, backup/restore) are still unbuilt"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "Shipped: navigation, listing, validated remote paths bounded to opaque per-browser handles, UTF-8 text preview, stale-target and session cleanup on disconnect.",
+    "Still pending: upload/download, atomic writes, overwrite-race prevention, backup/restore, transfer bounds and cancellation, and the directory terminal intent."
+   ],
+   "tests": {
+    "required": [
+     "Core SFTP/path tests",
+     "Backend transfer/bounds tests",
+     "Renderer SFTP interaction tests",
+     "Electron multi-window CDP smoke",
+     "SSH/SFTP compatibility matrix"
+    ],
+    "evidence": []
+   }
+  },
+  {
+   "id": "container-terminal",
+   "owner": [
+    "electron-main",
+    "electron-renderer",
+    "rust-backend",
+    "lovelyres-terminal"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/container_terminal.rs",
+    "crates/lovelyres-gpui/src/windows.rs",
+    "crates/lovelyres-terminal"
+   ],
+   "replacement": {
+    "state": "planned",
+    "targets": [
+     "Electron BrowserWindow keyed by target identity, generation, and container identity",
+     "Typed bounded container-terminal stream/input/resize/cancel backend methods"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "Multiple distinct containers may open independently, duplicate exact keys are suppressed/focused, all events bind exact target generation/container/session, close cancels work, and no late output reaches a replacement window."
+   ],
+   "tests": {
+    "required": [
+     "Core Docker/container identity tests",
+     "Backend session-key tests",
+     "Renderer terminal tests",
+     "Electron multi-window CDP smoke"
+    ],
+    "evidence": []
+   }
+  }
+ ],
+ "overlays": [
+  {
+   "id": "settings-panel",
+   "owner": [
+    "electron-renderer",
+    "rust-backend",
+    "lovelyres-core"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/settings_panel.rs",
+    "crates/lovelyres-gpui/src/interaction.rs",
+    "crates/lovelyres-core/src/settings.rs"
+   ],
+   "replacement": {
+    "state": "mixed",
+    "targets": [
+     "electron/src/renderer/SettingsPanel.tsx",
+     "crates/lovelyres-electron-backend/src/settings_api.rs",
+     "Five fixed Settings secret-lifecycle methods centrally wired through RPC/main/preload with exact 66-method public API and Electron CDP evidence",
+     "Pending remaining full GPUI settings parity and real portable-store/provider validation"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "Open/cancel/save, draft isolation, validation, theme/UI/terminal/logging/AI/proxy/notification settings, write-only secrets, focus restoration, Escape handling, and persistence match GPUI."
+   ],
+   "tests": {
+    "required": [
+     "Core settings/crypto tests",
+     "Backend settings contract tests",
+     "Renderer focus/validation tests",
+     "Electron CDP overlay smoke"
+    ],
+    "evidence": [
+     "electron-check-settings-secret-lifecycle-2026-08-24",
+     "electron-backend-settings-secret-lifecycle-2026-08-24",
+     "electron-source-gate-settings-secret-lifecycle-2026-08-24",
+     "electron-cdp-settings-secret-lifecycle-2026-08-24"
+    ]
+   }
+  },
+  {
+   "id": "command-history",
+   "owner": [
+    "electron-renderer",
+    "rust-backend",
+    "lovelyres-core"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/command_history.rs"
+   ],
+   "replacement": {
+    "state": "mixed",
+    "targets": [
+     "electron/src/renderer/CommandHistoryPanel.tsx",
+     "crates/lovelyres-electron-backend/src/command_history_api.rs",
+     "Seven fixed sidecar/IPC/preload methods with non-executable replay intent",
+     "Pending populated-history and real-target lifecycle validation"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "Search/filter/pagination, bounded records, replay confirmation, mutation, lifecycle lease, stale-result rejection, close/focus behavior, and hostile text are equivalent."
+   ],
+   "tests": {
+    "required": [
+     "Core history tests",
+     "Backend contract tests",
+     "Renderer overlay tests",
+     "Electron CDP overlay smoke"
+    ],
+    "evidence": [
+     "electron-check-command-history-2026-08-24",
+     "electron-backend-command-history-2026-08-24",
+     "electron-source-gate-command-history-2026-08-24",
+     "electron-cdp-command-history-2026-08-24"
+    ]
+   }
+  },
+  {
+   "id": "disposal-report",
+   "owner": [
+    "electron-renderer",
+    "rust-backend",
+    "lovelyres-core"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/disposal_report.rs",
+    "crates/lovelyres-core/src/report.rs"
+   ],
+   "replacement": {
+    "state": "mixed",
+    "targets": [
+     "electron/src/renderer/DisposalReportOverlay.tsx",
+     "crates/lovelyres-electron-backend/src/disposal_report_api.rs",
+     "crates/lovelyres-electron-backend/src/lib.rs fixed Disposal Report RPCs",
+     "electron/src/main/backend-client.ts and electron/src/main/index.ts native export boundary",
+     "electron/src/preload/index.ts and electron/src/renderer/App.tsx central overlay host",
+     "Pending populated-journal/native-save and real SSH validation"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "Report selection/generation/preview/export, bounds, redaction, hostile plain text, cancellation, stale-result rejection, and close/focus behavior are equivalent."
+   ],
+   "tests": {
+    "required": [
+     "Core report tests",
+     "Backend export/bounds tests",
+     "Renderer overlay tests",
+     "Electron CDP overlay smoke"
+    ],
+    "evidence": [
+     "electron-check-disposal-report-2026-08-24",
+     "electron-backend-disposal-report-2026-08-24",
+     "electron-source-gate-disposal-report-2026-08-24",
+     "electron-cdp-disposal-report-2026-08-24"
+    ]
+   }
+  },
+  {
+   "id": "application-log",
+   "owner": [
+    "electron-renderer",
+    "electron-main",
+    "rust-backend"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/app.rs",
+    "crates/lovelyres-gpui/src/logging.rs",
+    "crates/lovelyres-gpui/src/diagnostics.rs"
+   ],
+   "replacement": {
+    "state": "mixed",
+    "targets": [
+     "electron/src/renderer/ApplicationLogOverlay.tsx",
+     "crates/lovelyres-electron-backend/src/diagnostic_log_api.rs",
+     "electron/src/main/application-log-export-boundary.ts",
+     "Central exact5 list/level/volatile-clear/preview/export RPC/main/preload/App overlay surface",
+     "Single sidecar tracing subscriber with an independently filtered fmt stderr layer and process-local capture",
+     "Electron CDP exact112 overlay/forged/lifecycle evidence",
+     "Pending portable rolling writer and packaged native save-dialog/export validation"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "Bounded native tracing records, level controls, copy/export, redaction, hostile text, lifecycle, close/focus, and errors are preserved without exposing arbitrary local file reads."
+   ],
+   "tests": {
+    "required": [
+     "Backend diagnostics bounds/redaction tests",
+     "Renderer overlay tests",
+     "Electron CDP overlay smoke"
+    ],
+    "evidence": [
+     "electron-backend-application-log-phase0-2026-08-25",
+     "electron-renderer-application-log-phase0-2026-08-25",
+     "electron-backend-exact112-quick-detection-application-log-2026-08-25",
+     "electron-check-exact112-quick-detection-application-log-2026-08-25",
+     "electron-source-gate-exact112-quick-detection-application-log-2026-08-25",
+     "electron-cdp-exact112-quick-detection-application-log-2026-08-25"
+    ]
+   }
+  },
+  {
+   "id": "dialogs",
+   "owner": [
+    "electron-renderer",
+    "lovelyres-core"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/interaction.rs",
+    "crates/lovelyres-gpui/src/app.rs"
+   ],
+   "replacement": {
+    "state": "mixed",
+    "targets": [
+     "electron/src/renderer/DialogHost.tsx",
+     "electron/src/renderer/dialog-state.ts",
+     "Pending App integration and workflow-level CDP validation"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "Only one typed dialog is active, outcomes are routed to the requesting workflow, dangerous confirmation is exact and immutable-plan-bound, prompt text is bounded, Escape/Enter rules are explicit, focus is trapped/restored, and hostile text is never markup."
+   ],
+   "tests": {
+    "required": [
+     "Core plan/confirmation tests",
+     "Renderer dialog/focus/keyboard tests",
+     "Electron CDP dialog smoke"
+    ],
+    "evidence": []
+   }
+  },
+  {
+   "id": "notifications",
+   "owner": [
+    "electron-renderer"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/src/interaction.rs",
+    "crates/lovelyres-gpui/src/app.rs"
+   ],
+   "replacement": {
+    "state": "mixed",
+    "targets": [
+     "electron/src/renderer/NotificationStack.tsx",
+     "electron/src/renderer/notification-state.ts",
+     "Pending App integration and workflow-level CDP validation"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "Keyed deduplication, capacity bounds, info/error lifetimes, manual dismiss, accessibility announcements, overlay stacking, and hostile plain-text rendering match GPUI."
+   ],
+   "tests": {
+    "required": [
+     "Renderer notification model tests",
+     "Renderer accessibility/timer tests",
+     "Electron CDP toast smoke"
+    ],
+    "evidence": []
+   }
+  }
+ ],
+ "assets": [
+  {
+   "id": "application-icon-and-brand",
+   "owner": [
+    "electron-main",
+    "release"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/assets/app.ico",
+    "crates/lovelyres-gpui/assets/logo.png",
+    "icon-source.svg"
+   ],
+   "replacement": {
+    "state": "mixed",
+    "targets": [
+     "electron/assets/app.ico",
+     "electron/assets/logo.png",
+     "Electron package icon/resources configuration"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "Current Electron copies are byte-identical to GPUI assets, but packaged Windows/macOS/Linux artifacts must embed the correct icons and logo before GPUI assets are retired."
+   ],
+   "tests": {
+    "required": [
+     "Asset SHA-256 parity check",
+     "Packaged artifact resource inspection",
+     "Electron CDP local-resource check"
+    ],
+    "evidence": [
+     "electron-cdp-smoke-2026-08-24"
+    ]
+   }
+  },
+  {
+   "id": "embedded-fonts",
+   "owner": [
+    "electron-renderer",
+    "release"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/assets/fonts/Inter-Regular.ttf",
+    "crates/lovelyres-gpui/assets/fonts/Inter-SemiBold.ttf",
+    "crates/lovelyres-gpui/assets/fonts/CascadiaMono.ttf",
+    "crates/lovelyres-gpui/assets/fonts/README.md"
+   ],
+   "replacement": {
+    "state": "mixed",
+    "targets": [
+     "electron/assets/fonts/Inter-Regular.ttf",
+     "electron/assets/fonts/Inter-SemiBold.ttf",
+     "electron/assets/fonts/CascadiaMono.ttf",
+     "electron/assets/fonts/README.md",
+     "electron/src/renderer/styles.css"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "Current copies are byte-identical and locally referenced; packaged builds must prove all fonts resolve from lovelyres://app with correct licenses and no system/remote fallback required for intended typography."
+   ],
+   "tests": {
+    "required": [
+     "Asset SHA-256 parity check",
+     "Font license/notices gate",
+     "Packaged Electron CDP resource and computed-style check"
+    ],
+    "evidence": [
+     "electron-cdp-smoke-2026-08-24"
+    ]
+   }
+  },
+  {
+   "id": "security-reference-catalog",
+   "owner": [
+    "electron-renderer",
+    "lovelyres-core",
+    "release"
+   ],
+   "source": [
+    "crates/lovelyres-gpui/assets/security_reference.json"
+   ],
+   "replacement": {
+    "state": "mixed",
+    "targets": [
+     "electron/assets/security_reference.json",
+     "electron/src/renderer/catalog.ts"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "The Electron copy is currently byte-identical and the page tests pass; final packaging must establish one maintained source of truth, catalog schema validation, bundled availability, notices, and a post-GPUI update workflow."
+   ],
+   "tests": {
+    "required": [
+     "Catalog SHA-256/schema/count tests",
+     "Packaged Electron CDP catalog smoke"
+    ],
+    "evidence": [
+     "electron-check-2026-08-24",
+     "electron-cdp-smoke-2026-08-24"
+    ]
+   }
+  },
+  {
+   "id": "component-iconography",
+   "owner": [
+    "electron-renderer",
+    "release"
+   ],
+   "source": [
+    "gpui-component-assets embedded icon set",
+    "crates/lovelyres-gpui/src/buttons.rs"
+   ],
+   "replacement": {
+    "state": "planned",
+    "targets": [
+     "Bundled local Electron icon assets or reviewed inline SVG React components",
+     "One finite semantic icon registry"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "Every action keeps a meaningful accessible label and locally packaged icon where required; no CDN, remote icon font, remote SVG, raw hostile path, or text-only ambiguous action replaces the GPUI registry."
+   ],
+   "tests": {
+    "required": [
+     "Icon registry completeness tests",
+     "Offline source/resource gate",
+     "Renderer accessibility tests",
+     "Electron CDP resource audit"
+    ],
+    "evidence": []
+   }
+  }
+ ],
+ "gates": [
+  {
+   "id": "source-and-dependency-gate",
+   "owner": [
+    "release",
+    "migration-lead"
+   ],
+   "source": [
+    "scripts/gpui-source-gate.ps1",
+    "scripts/gpui-dependency-gate.ps1"
+   ],
+   "replacement": {
+    "state": "planned",
+    "targets": [
+     "Electron source/resource gate",
+     "Electron/Cargo dependency allowlist gate",
+     "Explicit no-GPUI dependency/source audit"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "Release fails on GPUI crates/dependencies/runtime entry points, WebView/remote runtime escapes outside the approved Electron architecture, CDN/remote fonts/images/scripts/styles, unapproved renderer Node access, missing lockfiles, or unbounded IPC methods."
+   ],
+   "tests": {
+    "required": [
+     "Gate self-tests with positive and negative fixtures",
+     "Run gate against root Cargo.toml, Cargo.lock, package.json, pnpm-lock.yaml, Electron source, and packaged resources"
+    ],
+    "evidence": []
+   }
+  },
+  {
+   "id": "quality-gate",
+   "owner": [
+    "release",
+    "all-code-owners"
+   ],
+   "source": [
+    "scripts/gpui-quality-gates.ps1",
+    "AGENTS.md required checks"
+   ],
+   "replacement": {
+    "state": "planned",
+    "targets": [
+     "cargo fmt --all --check",
+     "cargo clippy --workspace --all-targets --locked -- -D warnings",
+     "cargo test --workspace --all-targets --locked",
+     "pnpm --filter @lovelyres/electron check",
+     "Electron source/dependency gates"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "One documented root command runs all Rust and Electron formatting, lint, type, unit, integration, build, source, and dependency checks and propagates any failure."
+   ],
+   "tests": {
+    "required": [
+     "Full root quality gate",
+     "Failure-propagation self-test"
+    ],
+    "evidence": [
+     "electron-check-2026-08-24"
+    ]
+   }
+  },
+  {
+   "id": "electron-debug-smoke-gate",
+   "owner": [
+    "electron-main",
+    "qa"
+   ],
+   "source": [
+    "scripts/gpui-portable-smoke.ps1",
+    "GPUI manual window inspection practices"
+   ],
+   "replacement": {
+    "state": "mixed",
+    "targets": [
+     "electron/scripts/run-debug-smoke.cjs",
+     "electron/src/main/debug-probe.ts",
+     "Expanded Electron webContents.debugger/CDP page/window/overlay probes"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "The existing Electron-native smoke is expanded to all 20 pages, four window kinds, overlays, connection flows, accessibility, console/network errors, screenshots, cancellation, and packaged builds. computer-use is not used."
+   ],
+   "tests": {
+    "required": [
+     "pnpm --filter @lovelyres/electron test:debug",
+     "Packaged Windows/macOS/Linux CDP smoke"
+    ],
+    "evidence": [
+     "electron-cdp-smoke-2026-08-24"
+    ]
+   }
+  },
+  {
+   "id": "test-migration-ledger-gate",
+   "owner": [
+    "qa",
+    "migration-lead"
+   ],
+   "source": [
+    "docs/GPUI_TEST_MIGRATION_LEDGER.json",
+    "scripts/gpui-test-migration-ledger.ps1"
+   ],
+   "replacement": {
+    "state": "planned",
+    "targets": [
+     "docs/ELECTRON_UI_LEDGER.json validator",
+     "Per-feature legacy-to-Electron test mapping",
+     "Protected dirty config-generator 90-test mapping"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "Every legacy GPUI behavior/test receives a reviewed Ported, Replaced, or intentionally Removed disposition with replacement IDs and passing evidence; Pending, ignored, NOT_RUN, and failing tests never count as passed."
+   ],
+   "tests": {
+    "required": [
+     "Ledger schema/completeness validator",
+     "Source/test inventory reconciliation",
+     "Negative self-tests for missing evidence, duplicate IDs, and false pass claims"
+    ],
+    "evidence": []
+   }
+  },
+  {
+   "id": "portable-release-and-smoke-gate",
+   "owner": [
+    "release",
+    "electron-main",
+    "rust-backend"
+   ],
+   "source": [
+    "docs/GPUI_PORTABLE_RELEASE.md",
+    "scripts/gpui-portable-smoke.ps1",
+    "scripts/gpui-verify-windows-binary.ps1"
+   ],
+   "replacement": {
+    "state": "planned",
+    "targets": [
+     "Electron portable-release documentation",
+     "Packaged Electron plus lovelyres-backend smoke",
+     "Executable-adjacent data-root and binary/resource verification"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "A clean extracted bundle runs without installation or network, keeps all state under executable-adjacent data, locates the backend and assets, survives paths with spaces/non-ASCII, leaves no user-profile state, shuts down child processes, and produces recoverable logs/evidence."
+   ],
+   "tests": {
+    "required": [
+     "Clean-machine packaged smoke",
+     "Portable path matrix",
+     "No-user-profile-write audit",
+     "Backend shutdown/restart smoke"
+    ],
+    "evidence": []
+   }
+  },
+  {
+   "id": "platform-packaging-gate",
+   "owner": [
+    "release"
+   ],
+   "source": [
+    "scripts/gpui-package-windows.ps1",
+    "scripts/gpui-package-macos.sh",
+    "scripts/gpui-package-linux.sh"
+   ],
+   "replacement": {
+    "state": "planned",
+    "targets": [
+     "Locked Electron packaging configuration",
+     "Windows/macOS/Linux package scripts",
+     "Platform artifact verification/signing/notarization checks as applicable"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "Each supported platform bundles the correct Electron runtime, renderer, local assets, licenses, and matching Rust backend; artifacts are reproducibly versioned and pass native launch/security/resource checks."
+   ],
+   "tests": {
+    "required": [
+     "Windows package and verify",
+     "macOS package and verify",
+     "Linux package and verify",
+     "Packaged CDP smoke on each platform"
+    ],
+    "evidence": []
+   }
+  },
+  {
+   "id": "sbom-and-notices-gate",
+   "owner": [
+    "release",
+    "legal"
+   ],
+   "source": [
+    "scripts/gpui-prepare-sbom-input.ps1",
+    "scripts/gpui-validate-sbom.ps1",
+    "scripts/gpui-third-party-notices.ps1",
+    "crates/lovelyres-gpui/THIRD_PARTY_NOTICES.md"
+   ],
+   "replacement": {
+    "state": "mixed",
+    "targets": [
+     "Cargo plus pnpm/Electron SBOM generation",
+     "electron/THIRD_PARTY_NOTICES.md",
+     "Packaged notices/licenses verification"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "SBOM and notices cover Rust crates, Electron/Chromium/Node, npm packages, fonts, icons, and bundled data; removed GPUI dependencies disappear; every packaged dependency/resource has required license evidence."
+   ],
+   "tests": {
+    "required": [
+     "SBOM schema and package reconciliation",
+     "Notices dependency/resource reconciliation",
+     "Packaged license-file inspection"
+    ],
+    "evidence": []
+   }
+  },
+  {
+   "id": "real-environment-gate",
+   "owner": [
+    "qa",
+    "release",
+    "lovelyres-core"
+   ],
+   "source": [
+    "docs/SSH_COMPATIBILITY.md",
+    "tests/ssh-compat/matrix.json",
+    "scripts/start-ssh-compat-target.sh"
+   ],
+   "replacement": {
+    "state": "planned",
+    "targets": [
+     "Electron-driven SSH/SFTP/terminal compatibility matrix",
+     "Real Linux VM destructive and recovery matrix"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "OpenSSH/Dropbear/authentication/host-key/MFA/terminal/SFTP behavior and every destructive remote one-liner/recovery flow required for release are actually run in the applicable environment; ignored or NOT_RUN rows remain non-passing."
+   ],
+   "tests": {
+    "required": [
+     "SSH compatibility matrix",
+     "SFTP/terminal integration matrix",
+     "Destructive/recovery real Linux VM matrix"
+    ],
+    "evidence": []
+   }
+  },
+  {
+   "id": "gpui-retirement-gate",
+   "owner": [
+    "migration-lead",
+    "release"
+   ],
+   "source": [
+    "crates/lovelyres-gpui",
+    "crates/lovelyres-terminal GPUI view code",
+    "Cargo.toml GPUI dependencies",
+    "GPUI launch/package/gate documentation and scripts"
+   ],
+   "replacement": {
+    "state": "planned",
+    "targets": [
+     "Electron as the only supported frontend and launch path",
+     "Rust backend/core crates with no GPUI runtime dependency",
+     "Electron-named release documentation and gates"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "crates/lovelyres-gpui is removed from disk and the Cargo workspace.",
+    "gpui, gpui-component, gpui-component-assets, and UI-only raw-window/platform dependencies are absent from active manifests and Cargo.lock.",
+    "lovelyres-terminal is removed or refactored so no GPUI view/runtime dependency remains.",
+    "No supported command, README, AGENTS.md rule, CI job, packaging script, release document, asset loader, native window implementation, or test gate still launches or requires GPUI.",
+    "Historical migration evidence may mention GPUI, but cannot be an active build/release path.",
+    "All other ledger entries are Completed and all required tests/gates pass before this entry becomes Completed."
+   ],
+   "tests": {
+    "required": [
+     "Repository source/manifests/lockfile audit",
+     "Cargo dependency tree audit",
+     "Root build/test/package commands",
+     "Clean packaged Electron launch with GPUI sources absent"
+    ],
+    "evidence": []
+   }
+  }
+ ],
+ "finalAcceptance": [
+  {
+   "id": "only-electron-frontend",
+   "owner": [
+    "migration-lead",
+    "release"
+   ],
+   "source": [
+    "Entire repository"
+   ],
+   "replacement": {
+    "state": "planned",
+    "targets": [
+     "Electron renderer/main/preload plus lovelyres-electron-backend"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "The GPUI retirement gate is Completed and Electron is the only supported desktop frontend, development command, packaged binary, and release path."
+   ],
+   "tests": {
+    "required": [
+     "gpui-retirement-gate"
+    ],
+    "evidence": []
+   }
+  },
+  {
+   "id": "complete-ui-parity",
+   "owner": [
+    "electron-renderer",
+    "electron-main",
+    "qa"
+   ],
+   "source": [
+    "20 page entries",
+    "6 connection entries",
+    "4 window entries",
+    "6 overlay entries",
+    "4 asset entries"
+   ],
+   "replacement": {
+    "state": "planned",
+    "targets": [
+     "Completed Electron UI ledger entries"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "All listed pages, connection flows, windows, overlays, and asset contracts are Completed with passing evidence; placeholders and migration-state badges are gone."
+   ],
+   "tests": {
+    "required": [
+     "Ledger completeness validator",
+     "Full Electron unit/integration/CDP suite"
+    ],
+    "evidence": []
+   }
+  },
+  {
+   "id": "security-and-safety-parity",
+   "owner": [
+    "lovelyres-core",
+    "rust-backend",
+    "electron-main",
+    "qa"
+   ],
+   "source": [
+    "AGENTS.md architecture and safety rules",
+    "Core security-sensitive modules",
+    "Electron process boundary"
+   ],
+   "replacement": {
+    "state": "planned",
+    "targets": [
+     "Typed finite IPC/RPC contracts",
+     "Core-owned plans, guards, secrets, audit, verification, and restore",
+     "Sandboxed renderer"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "No renderer or main-process convenience path bypasses typed core safety boundaries; secrets, hostile text, paths, commands, target guards, bounds, cancellation, dangerous confirmation, audit, verification, and restore contracts remain enforced."
+   ],
+   "tests": {
+    "required": [
+     "Full core security tests",
+     "Backend hostile-input/allowlist/bounds tests",
+     "Electron security/CDP audit",
+     "Real-environment dangerous-flow gates"
+    ],
+    "evidence": []
+   }
+  },
+  {
+   "id": "portable-offline-release",
+   "owner": [
+    "release",
+    "electron-main"
+   ],
+   "source": [
+    "Portable stores and current GPUI release gates"
+   ],
+   "replacement": {
+    "state": "planned",
+    "targets": [
+     "Electron portable packages and release gates"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "All supported platform packages run offline from a clean extraction, keep runtime state beside the executable under data, include matching backend/assets/licenses, and pass package/resource/security smoke."
+   ],
+   "tests": {
+    "required": [
+     "portable-release-and-smoke-gate",
+     "platform-packaging-gate",
+     "sbom-and-notices-gate"
+    ],
+    "evidence": []
+   }
+  },
+  {
+   "id": "test-evidence-honesty",
+   "owner": [
+    "qa",
+    "migration-lead"
+   ],
+   "source": [
+    "Legacy and current test inventories"
+   ],
+   "replacement": {
+    "state": "planned",
+    "targets": [
+     "Validated Electron migration ledger and release evidence"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "No Pending, failing, ignored, skipped, NOT_RUN, or merely present test is reported as passing; every completion claim cites an actual passing run against the final candidate."
+   ],
+   "tests": {
+    "required": [
+     "test-migration-ledger-gate",
+     "Final-candidate rerun of every cited command"
+    ],
+    "evidence": []
+   }
+  },
+  {
+   "id": "electron-native-debugging",
+   "owner": [
+    "qa",
+    "electron-main"
+   ],
+   "source": [
+    "UI validation workflow"
+   ],
+   "replacement": {
+    "state": "planned",
+    "targets": [
+     "Electron webContents.debugger/CDP",
+     "Electron webContents.capturePage",
+     "Main-process and renderer test harnesses"
+    ]
+   },
+   "status": "Pending",
+   "acceptance": [
+    "Final UI and release validation is automated through Electron-native debugging/test mechanisms and does not depend on computer-use."
+   ],
+   "tests": {
+    "required": [
+     "electron-debug-smoke-gate"
+    ],
+    "evidence": [
+     "electron-cdp-smoke-2026-08-24"
+    ]
+   }
+  }
+ ]
+}

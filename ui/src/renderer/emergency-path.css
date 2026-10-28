@@ -1,0 +1,209 @@
+/* The file-action menu and dialogs: the command workbench, file integrity
+   and log analysis all open them, so they carry their own styles instead of
+   borrowing the workbench page's. */
+
+.emergency-path-menu {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  min-width: 208px;
+  max-width: 320px;
+  flex-direction: column;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+  /* Placement pins a too-tall menu to the margin; this is what turns the
+     remainder into a scroll instead of a clip. See menu-placement.ts. */
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.emergency-path-menu-title {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 2px 8px 5px;
+  color: var(--muted);
+  font-size: var(--font-caption);
+  line-height: 1.45;
+  word-break: break-all;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.emergency-path-menu button {
+  /* Same reason as the SFTP menu: the column scrolls, so the rows must not
+     be squeezed to make room. */
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text);
+  background: transparent;
+  font: inherit;
+  font-size: var(--font-caption);
+  text-align: left;
+  cursor: pointer;
+}
+
+.emergency-path-menu button span {
+  display: grid;
+  gap: 1px;
+}
+
+.emergency-path-menu button em {
+  color: var(--muted);
+  font-size: var(--font-caption);
+  font-style: normal;
+}
+
+.emergency-path-menu button:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.emergency-path-menu button.is-dangerous {
+  color: var(--danger-text);
+}
+
+.emergency-path-menu button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.emergency-path-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--backdrop);
+}
+
+.emergency-path-dialog {
+  display: flex;
+  width: min(480px, 100%);
+  max-height: 100%;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+  padding: 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+/* A scrolling column shrinks its children by default, which would squeeze the
+   plan summary against the footer as soon as it ran past one line. */
+.emergency-path-dialog > * {
+  flex: none;
+}
+
+.emergency-path-dialog h2 {
+  margin: 0;
+  font-size: var(--font-subtitle);
+}
+
+.emergency-path-dialog header p {
+  margin: 4px 0 0;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  font-size: var(--font-caption);
+  word-break: break-all;
+}
+
+.emergency-path-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-caption);
+}
+
+.emergency-path-panel {
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface-alt);
+}
+
+.emergency-path-panel.is-dangerous {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+}
+
+.emergency-path-summary {
+  margin: 0 0 10px;
+  color: var(--text);
+  font-size: var(--font-small);
+  line-height: 1.6;
+}
+
+.emergency-path-panel dl {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+}
+
+.emergency-path-panel dt {
+  color: var(--muted);
+  font-size: var(--font-caption);
+}
+
+.emergency-path-panel dd {
+  margin: 2px 0 0;
+  color: var(--text);
+  font-size: var(--font-caption);
+  word-break: break-all;
+}
+
+.emergency-path-error {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--danger-border);
+  border-radius: 8px;
+  color: var(--danger-text);
+  background: var(--danger-soft);
+  font-size: var(--font-caption);
+}
+
+.emergency-path-dialog footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.emergency-path-dialog footer button {
+  min-height: 32px;
+  padding: 6px 15px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  font-size: var(--font-small);
+  cursor: pointer;
+}
+
+.emergency-path-dialog footer button.is-primary {
+  border-color: var(--accent);
+  color: var(--on-accent);
+  background: var(--accent);
+  font-weight: 650;
+}
+
+.emergency-path-dialog footer button.is-dangerous {
+  border-color: var(--danger);
+  color: var(--on-accent);
+  background: var(--danger);
+  font-weight: 650;
+}
+
+.emergency-path-dialog footer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}

@@ -1,0 +1,94 @@
+[workspace]
+members = [
+  "crates/lovelyhawk-core",
+  "crates/lovelyhawk-backend",
+  "crates/lovelyhawk-terminal",
+  "crates/lovelyhawk-desktop",
+  "crates/lovelyhawk-win-dvc",
+]
+# The desktop app embeds the built UI (ui/dist) at compile time, so it is
+# built on purpose with `--package lovelyhawk-desktop` after the UI build.
+default-members = [
+  "crates/lovelyhawk-core",
+  "crates/lovelyhawk-backend",
+  "crates/lovelyhawk-terminal",
+  "crates/lovelyhawk-win-dvc",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.0.1-dev"
+edition = "2024"
+rust-version = "1.93.1"
+license = "AGPL-3.0-only"
+authors = ["Tokeii"]
+repository = "https://github.com/Tokeii0/LovelyHawk"
+
+[workspace.dependencies]
+aes-gcm = "0.10"
+alacritty_terminal = "=0.25.1"
+async-channel = "2.5"
+async-trait = "0.1"
+base64 = "0.21"
+bytes = "1"
+chrono = { version = "0.4", features = ["serde"] }
+futures = "0.3"
+flate2 = "=1.1.9"
+native-tls = "0.2.18"
+parking_lot = "0.12"
+postgres-native-tls = { version = "0.5.3", default-features = false }
+regex = "1"
+rfd = { version = "0.16", default-features = false }
+reqwest = { version = "0.12", features = ["json", "stream", "socks"] }
+# `rsa`: RSA private keys, RSA certificates and RSA agent identities can sign.
+# RustCrypto `rsa` carries RUSTSEC-2023-0071; why that is accepted for an SSH
+# client is in docs/SSH_COMPATIBILITY.md.
+russh = { version = "0.62.5", default-features = false, features = ["ring", "flate2", "rsa"] }
+russh-sftp = "2.4.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tauri = { version = "=2.12.1", features = ["devtools"] }
+tauri-build = { version = "=2.7.1", features = [] }
+tauri-plugin-clipboard-manager = "=2.4.1"
+tauri-plugin-dialog = "=2.8.1"
+thiserror = "1.0"
+tokio = { version = "1", features = ["full"] }
+tokio-postgres = { version = "0.7.18", default-features = false }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+unicode-width = "0.2"
+url = "2.5"
+uuid = { version = "1", features = ["v4", "serde"] }
+windows = { version = "0.62.2", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Com",
+  "Win32_System_Console",
+  "Win32_System_IO",
+  "Win32_System_Pipes",
+  "Win32_System_Registry",
+  "Win32_System_RemoteDesktop",
+  "Win32_System_SystemInformation",
+  "Win32_System_Threading",
+  "Win32_UI_WindowsAndMessaging",
+] }
+windows-core = "0.62.2"
+zeroize = { version = "1", features = ["derive"] }
+
+[profile.dev]
+opt-level = 1
+
+# SSH crypto (russh/ring) and the alacritty terminal grid dominate debug-build
+# sidecar latency; keep dependencies optimized so development terminals stay
+# responsive under load.
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+panic = "unwind"
+lto = true
+opt-level = 3
+strip = true
+codegen-units = 1

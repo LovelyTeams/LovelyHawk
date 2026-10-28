@@ -1,0 +1,148 @@
+/* Asking an AI provider about something a page holds: log results, or the
+   output selected in a terminal window. */
+
+.ai-assist-panel {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--info-border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+/* The panel styles its own controls: it also sits in the terminal window,
+   which has none of the log page's. */
+.ai-assist-panel button,
+.ai-assist-panel select {
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  font-size: var(--font-small);
+}
+
+.ai-assist-panel button {
+  min-height: 32px;
+  padding: 5px 13px;
+  cursor: pointer;
+}
+
+.ai-assist-panel button:hover:not(:disabled) {
+  border-color: var(--accent-strong);
+  background: var(--info-soft);
+}
+
+.ai-assist-panel button:focus-visible,
+.ai-assist-panel select:focus-visible,
+.ai-assist-panel input:focus-visible {
+  outline: 3px solid var(--console-accent);
+  outline-offset: 2px;
+}
+
+.ai-assist-panel button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.ai-assist-panel > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ai-assist-panel h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-body);
+}
+
+.ai-assist-choose {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ai-assist-choose label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--muted);
+  font-size: var(--font-caption);
+}
+
+.ai-assist-choose select {
+  max-width: 520px;
+  min-height: 32px;
+  padding: 5px 8px;
+  font-size: var(--font-small);
+}
+
+.ai-assist-choose p,
+.ai-assist-note {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-small);
+  line-height: 1.6;
+}
+
+/* Text that may leave this computer: the tick is said in the warning colour. */
+.ai-assist-choose label.ai-assist-consent {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--warning-border);
+  border-radius: 8px;
+  color: var(--warning-text);
+  background: var(--warning-soft);
+  font-size: var(--font-small);
+  line-height: 1.6;
+}
+
+.ai-assist-send {
+  align-self: flex-start;
+}
+
+.ai-assist-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ai-assist-answer pre {
+  max-height: 360px;
+  margin: 0;
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface-inset);
+  font-family: inherit;
+  font-size: var(--font-small);
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ai-assist-answer > button {
+  align-self: flex-start;
+}
+
+.ai-assist-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+
+.ai-assist-error {
+  margin: 0;
+  color: var(--danger-text);
+  font-size: var(--font-small);
+}

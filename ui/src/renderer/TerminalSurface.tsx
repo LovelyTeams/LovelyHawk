@@ -1,0 +1,433 @@
+import { FitAddon } from "@xterm/addon-fit";
+import { SearchAddon } from "@xterm/addon-search";
+import { Terminal } from "@xterm/xterm";
+import "@xterm/xterm/css/xterm.css";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+
+import {
+  clampTerminalSize,
+  isTerminalSearchRequest,
+  TERMINAL_LIMITS,
+  type TerminalSessionApi,
+} from "../shared/terminal-contract";
+import { TerminalController } from "./terminal-controller";
+import { terminalXtermTheme } from "./terminal-theme";
+import "./terminal-surface.css";
+
+/** Opening, live, ended by the shell or the host, or never opened. */
+export type TerminalSessionState = "opening" | "connected" | "ended" | "failed";
+
+interface TerminalSurfaceProps {
+  api: TerminalSessionApi;
+  initialColumns?: number;
+  initialRows?: number;
+  writeClipboard?: (text: string) => Promise<void>;
+  /** Reports the live grid so the window can show it in its status bar. */
+  onViewport?: (columns: number, rows: number) => void;
+  /** Reports whether a session is live, so the window never shows 已连接 for one that is not. */
+  onSession?: (state: TerminalSessionState) => void;
+  /**
+   * A snippet to type into the terminal. It goes through the same bounded
+   * queue as typed input, and a new token replays it; the newline stays with
+   * the operator, so a half-formed command never runs on its own.
+   */
+  insert?: { token: number; text: string } | null;
+  /** The window's own "could not open" sentence, when it has a better one. */
+  openFailure?: string;
+  /**
+   * Whether this is the tab on screen. Only that one answers Ctrl+F, and it
+   * takes the keyboard when it comes to the front; the others keep their
+   * shells running behind it.
+   */
+  active?: boolean;
+  /** The shell process exited, so the window can close its tab. */
+  onExit?: () => void;
+  /**
+   * Whether text is selected, and a way to read it when the window needs it
+   * (to have it explained). Reading it on demand keeps a large selection out
+   * of every render.
+   */
+  onSelection?: (read: (() => string) | null) => void;
+}
+
+interface TerminalSelectionSource {
+  hasSelection(): boolean;
+  getSelection(): string;
+}
+
+export type TerminalSelectionCopyOutcome =
+  | "copied"
+  | "unavailable"
+  | "too-large"
+  | "failed";
+
+export async function copyBoundedTerminalSelection(
+  terminal: TerminalSelectionSource,
+  writeClipboard: ((text: string) => Promise<void>) | undefined,
+): Promise<TerminalSelectionCopyOutcome> {
+  if (writeClipboard === undefined || !terminal.hasSelection()) return "unavailable";
+  const selected = terminal.getSelection();
+  if (selected.length === 0) return "unavailable";
+  if (new TextEncoder().encode(selected).byteLength > TERMINAL_LIMITS.maximumSelectionCopyBytes) {
+    return "too-large";
+  }
+  try {
+    await writeClipboard(selected);
+    return "copied";
+  } catch {
+    return "failed";
+  }
+}
+
+export function interceptTerminalCopyEvent(
+  event: Pick<ClipboardEvent, "preventDefault" | "stopImmediatePropagation">,
+  terminal: Pick<TerminalSelectionSource, "hasSelection">,
+  copySelection: () => void,
+): boolean {
+  if (!terminal.hasSelection()) return false;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  copySelection();
+  return true;
+}
+
+const RESIZE_DEBOUNCE_MS = 80;
+
+export function disposeTerminalRuntime(
+  controller: Pick<TerminalController, "dispose">,
+  terminal: Pick<Terminal, "dispose">,
+): Promise<void> {
+  const closing = controller.dispose();
+  terminal.dispose();
+  return closing;
+}
+
+export function TerminalSurface({
+  api,
+  initialColumns = 80,
+  initialRows = 24,
+  writeClipboard,
+  onViewport,
+  onSession,
+  insert = null,
+  openFailure,
+  active = true,
+  onExit,
+  onSelection,
+}: TerminalSurfaceProps) {
+  const hostRef = useRef<HTMLDivElement>(null);
+  const mountRef = useRef<HTMLDivElement>(null);
+  // A window holds one of these per tab, so the heading id must be its own.
+  const titleId = useId();
+  // Held in refs so a changing callback never restarts the terminal.
+  const onViewportRef = useRef(onViewport);
+  onViewportRef.current = onViewport;
+  const onSessionRef = useRef(onSession);
+  onSessionRef.current = onSession;
+  const onExitRef = useRef(onExit);
+  onExitRef.current = onExit;
+  const onSelectionRef = useRef(onSelection);
+  onSelectionRef.current = onSelection;
+  const terminalRef = useRef<Terminal | null>(null);
+  const controllerRef = useRef<TerminalController | null>(null);
+  const searchAddonRef = useRef<SearchAddon | null>(null);
+  const searchGenerationRef = useRef(0);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [status, setStatus] = useState("正在打开终端…");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [title, setTitle] = useState("远程终端");
+  const [query, setQuery] = useState("");
+  const [caseSensitive, setCaseSensitive] = useState(false);
+  const [regex, setRegex] = useState(false);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    const mount = mountRef.current;
+    if (host === null || mount === null) return;
+    let active = true;
+    let resizeTimer: number | null = null;
+    let resizeFrame: number | null = null;
+    let inputDisposable: { dispose(): void } | null = null;
+
+    const terminal = new Terminal({
+      allowProposedApi: false,
+      allowTransparency: false,
+      convertEol: false,
+      cursorBlink: true,
+      cursorStyle: "block",
+      fontFamily: '"Cascadia Mono", monospace',
+      fontSize: 13,
+      letterSpacing: 0,
+      lineHeight: 1.15,
+      linkHandler: {
+        activate: () => undefined,
+        allowNonHttpProtocols: false,
+      },
+      logLevel: "off",
+      rightClickSelectsWord: true,
+      screenReaderMode: true,
+      scrollback: TERMINAL_LIMITS.maximumScrollbackLines,
+      theme: terminalXtermTheme((name) =>
+        window.getComputedStyle(document.documentElement).getPropertyValue(name)),
+    });
+    const fitAddon = new FitAddon();
+    const searchAddon = new SearchAddon({
+      highlightLimit: TERMINAL_LIMITS.maximumSearchResults,
+    });
+    terminal.loadAddon(fitAddon);
+    terminal.loadAddon(searchAddon);
+    // The fit addon sizes the grid from the element xterm opens in, and reads
+    // its whole width and height. Opened in the padded, bordered host it
+    // counted the padding as room for text and the last columns fell outside.
+    terminal.open(mount);
+    terminalRef.current = terminal;
+    searchAddonRef.current = searchAddon;
+
+    const copyListener = (event: ClipboardEvent) => {
+      interceptTerminalCopyEvent(event, terminal, () => {
+        void copySelectionFrom(terminal);
+      });
+    };
+    host.addEventListener("copy", copyListener, true);
+    // One reader for the terminal's life, so the window's state only changes
+    // when a selection appears or goes, not on every step of a drag.
+    const readSelection = () => terminal.getSelection();
+    const selectionDisposable = terminal.onSelectionChange(() => {
+      if (!active) return;
+      onSelectionRef.current?.(terminal.hasSelection() ? readSelection : null);
+    });
+    const controller = new TerminalController(api, {
+      write: (bytes) => new Promise<void>((resolve) => terminal.write(bytes, resolve)),
+      titleChanged: (nextTitle) => {
+        if (active) setTitle(nextTitle);
+      },
+      bell: () => {
+        if (active) setStatus("终端请求注意。");
+      },
+      exited: (exitCode) => {
+        if (!active) return;
+        setStatus(exitCode === null ? "终端进程已退出。" : `终端进程已退出（${exitCode}）。`);
+        onSessionRef.current?.("ended");
+        onExitRef.current?.();
+      },
+      closed: () => {
+        if (!active) return;
+        setStatus("终端会话已关闭。");
+        onSessionRef.current?.("ended");
+      },
+    }, {
+      isScopeCurrent: () => active,
+      // Read once, at open: the window's kind never changes.
+      ...(openFailure === undefined ? {} : { openFailure }),
+      onError: (message) => {
+        if (!active) return;
+        setError(message);
+        // An error that stopped a live session ends it; one before the open is a failed open.
+        if (controllerRef.current?.stopped === true) onSessionRef.current?.("ended");
+      },
+    });
+    controllerRef.current = controller;
+
+    function fitAndResize() {
+      if (!active) return;
+      const proposed = fitAddon.proposeDimensions();
+      const size = clampTerminalSize(
+        proposed?.cols ?? terminal.cols,
+        proposed?.rows ?? terminal.rows,
+      );
+      if (terminal.cols !== size.columns || terminal.rows !== size.rows) {
+        terminal.resize(size.columns, size.rows);
+      }
+      controller.resize(size.columns, size.rows);
+      onViewportRef.current?.(size.columns, size.rows);
+    }
+
+    function scheduleResize() {
+      if (resizeTimer !== null) window.clearTimeout(resizeTimer);
+      resizeTimer = window.setTimeout(() => {
+        resizeTimer = null;
+        fitAndResize();
+      }, RESIZE_DEBOUNCE_MS);
+    }
+
+    const resizeObserver = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(scheduleResize);
+    resizeObserver?.observe(mount);
+    if (resizeObserver === null) window.addEventListener("resize", scheduleResize);
+
+    const initialSize = clampTerminalSize(initialColumns, initialRows);
+    terminal.resize(initialSize.columns, initialSize.rows);
+    onViewportRef.current?.(initialSize.columns, initialSize.rows);
+    onSessionRef.current?.("opening");
+    void controller.open(initialSize.columns, initialSize.rows).then((opened) => {
+      if (!active) return;
+      if (!opened) {
+        onSessionRef.current?.("failed");
+        return;
+      }
+      setStatus("终端已连接。");
+      onSessionRef.current?.("connected");
+      inputDisposable = terminal.onData((data) => {
+        controller.enqueueText(data);
+      });
+      terminal.focus();
+      resizeFrame = window.requestAnimationFrame(scheduleResize);
+      // Also on a timer: a window behind another, or not yet shown, gets no
+      // animation frames, and the fit on mount may have run before xterm had
+      // measured its cells. Either way the first prompt was drawn on the
+      // 80-column grid the shell was opened with, past the box's right edge.
+      scheduleResize();
+    });
+
+    return () => {
+      active = false;
+      searchGenerationRef.current += 1;
+      if (resizeTimer !== null) window.clearTimeout(resizeTimer);
+      if (resizeFrame !== null) window.cancelAnimationFrame(resizeFrame);
+      resizeObserver?.disconnect();
+      if (resizeObserver === null) window.removeEventListener("resize", scheduleResize);
+      inputDisposable?.dispose();
+      selectionDisposable.dispose();
+      onSelectionRef.current?.(null);
+      host.removeEventListener("copy", copyListener, true);
+      controllerRef.current = null;
+      searchAddonRef.current = null;
+      void disposeTerminalRuntime(controller, terminal);
+      terminalRef.current = null;
+    };
+  }, [api, initialColumns, initialRows, writeClipboard]);
+
+  async function search(direction: "next" | "previous") {
+    const controller = controllerRef.current;
+    const searchAddon = searchAddonRef.current;
+    if (
+      controller === null ||
+      searchAddon === null ||
+      !isTerminalSearchRequest(query, TERMINAL_LIMITS.maximumSearchResults)
+    ) {
+      setStatus("请输入不含控制字符的搜索内容。");
+      return;
+    }
+    const generation = searchGenerationRef.current + 1;
+    searchGenerationRef.current = generation;
+    const options = { caseSensitive, regex };
+    if (direction === "next") searchAddon.findNext(query, options);
+    else searchAddon.findPrevious(query, options);
+    const result = await controller.search(
+      query,
+      caseSensitive,
+      regex,
+      TERMINAL_LIMITS.maximumSearchResults,
+    );
+    if (searchGenerationRef.current !== generation || result === null) return;
+    setStatus(`找到 ${result.matches.length} 个匹配。`);
+  }
+
+  function submitSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void search("next");
+  }
+
+  async function copySelectionFrom(terminal: TerminalSelectionSource) {
+    const outcome = await copyBoundedTerminalSelection(terminal, writeClipboard);
+    if (outcome === "copied") setStatus("已复制选中的纯文本。");
+    else if (outcome === "too-large") setStatus("选区超过纯文本复制上限。");
+    else if (outcome === "failed") setStatus("复制终端选区失败。");
+  }
+
+  const insertToken = insert?.token ?? 0;
+  const insertText = insert?.text ?? "";
+  useEffect(() => {
+    if (insertToken === 0 || insertText === "") return;
+    controllerRef.current?.enqueueText(insertText);
+  }, [insertToken, insertText]);
+
+  /**
+   * The search bar used to sit behind a floating button over the output. The
+   * keyboard is where a terminal search belongs anyway, so Ctrl+F opens it and
+   * Escape hands the keys back to the terminal.
+   */
+  useEffect(() => {
+    if (!active) return undefined;
+    function onKeyDown(event: KeyboardEvent): void {
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        setSearchOpen(true);
+        return;
+      }
+      if (event.key === "Escape" && searchOpen) {
+        event.preventDefault();
+        setSearchOpen(false);
+        terminalRef.current?.focus();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [active, searchOpen]);
+
+  // A tab brought to the front takes the keyboard, as its shell did when it opened.
+  useEffect(() => {
+    if (active) terminalRef.current?.focus();
+  }, [active]);
+
+  useEffect(() => {
+    if (searchOpen) searchInputRef.current?.focus();
+  }, [searchOpen]);
+
+  function closeSearch(): void {
+    setSearchOpen(false);
+    terminalRef.current?.focus();
+  }
+
+  return (
+    <section className="terminal-surface" aria-labelledby={titleId}>
+      <h2 id={titleId} className="terminal-sr-only">SSH 终端 · {title}</h2>
+      <p className="terminal-sr-only">支持输入法组合输入、键盘操作、文本选择与搜索。</p>
+
+      {searchOpen ? (
+        <div className="terminal-surface-tools">
+          <form className="terminal-search" role="search" onSubmit={submitSearch}>
+            <label>
+              <span className="terminal-sr-only">搜索终端输出</span>
+              <input
+                ref={searchInputRef}
+                type="search"
+                value={query}
+                maxLength={TERMINAL_LIMITS.maximumSearchQueryBytes}
+                placeholder="搜索输出（Ctrl+F）"
+                onChange={(event) => setQuery(event.target.value)}
+              />
+            </label>
+            <label title="区分大小写">
+              <input type="checkbox" checked={caseSensitive}
+                onChange={(event) => setCaseSensitive(event.target.checked)} />Aa
+            </label>
+            <label title="正则表达式">
+              <input type="checkbox" checked={regex}
+                onChange={(event) => setRegex(event.target.checked)} />.*
+            </label>
+            <button type="button" title="上一个" onClick={() => void search("previous")}>上一个</button>
+            <button type="submit" title="下一个">下一个</button>
+            <button type="button" title="关闭搜索" onClick={closeSearch}>关闭</button>
+          </form>
+        </div>
+      ) : null}
+
+      <div
+        ref={hostRef}
+        className="terminal-xterm-host"
+        role="region"
+        aria-label="SSH 终端输出与输入"
+        onMouseDown={() => terminalRef.current?.focus()}
+      >
+        <div ref={mountRef} className="terminal-xterm-mount" />
+      </div>
+      {error === null ? <p className="terminal-sr-only" role="status" aria-live="polite">{status}</p> : (
+        <p className="terminal-error" role="alert">{error}</p>
+      )}
+    </section>
+  );
+}
+

@@ -1,0 +1,129 @@
+.notification-overlay-layer {
+  position: fixed;
+  z-index: 1400;
+  inset: 0;
+  pointer-events: none;
+}
+
+.notification-overlay-layer.is-modal-blocked {
+  visibility: hidden;
+}
+
+.notification-stack {
+  position: absolute;
+  bottom: calc(var(--statusbar-height, 28px) + 12px);
+  left: 12px;
+  display: grid;
+  width: min(390px, calc(100vw - 32px));
+  max-height: calc(100vh - 96px);
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+  animation: notification-arrive 180ms ease-out;
+}
+
+.notification-card {
+  display: grid;
+  grid-template-columns: 4px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  color: var(--text);
+  pointer-events: auto;
+}
+
+.notification-marker {
+  align-self: stretch;
+  min-height: 34px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.notification-card.is-success .notification-marker {
+  background: var(--success-bright);
+}
+
+.notification-card.is-warning .notification-marker {
+  background: var(--warning);
+}
+
+.notification-card.is-error .notification-marker {
+  background: var(--danger);
+}
+
+.notification-card strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: var(--font-small);
+  letter-spacing: 0.08em;
+}
+
+.notification-card p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.notification-stack .notification-card p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.notification-count { margin-left: 5px; padding: 1px 5px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); }
+.notification-center-backdrop { position: fixed; inset: var(--titlebar-height, 36px) 0 0; z-index: 1450; background: color-mix(in srgb, var(--bg) 40%, transparent); }
+.notification-center { position: absolute; left: 10px; bottom: calc(var(--statusbar-height, 28px) + 8px); width: min(460px, calc(100vw - 20px)); height: min(640px, calc(100vh - 100px)); display: flex; flex-direction: column; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-sm); }
+.notification-center header { display: flex; justify-content: space-between; align-items: start; padding: 16px; border-bottom: 1px solid var(--border); }
+.notification-center h2 { margin: 0 0 6px; font-size: var(--font-body); }
+.notification-center header p, .notification-center time { margin: 0; color: var(--muted); font-size: var(--font-caption); }
+.notification-center-list { flex: 1; min-height: 0; overflow: auto; padding: 12px; }
+.notification-center-list ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }
+.notification-center .notification-card { box-shadow: none; }
+.notification-center time { display: block; margin-bottom: 6px; }
+.notification-center footer { padding: 12px 16px; border-top: 1px solid var(--border); display: flex; align-items: center; gap: 12px; font-size: var(--font-caption); color: var(--muted); }
+.notification-center footer span { flex: 1; }
+.notification-center footer button { flex-shrink: 0; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; }
+.notification-empty { color: var(--muted); line-height: 1.7; }
+@keyframes notification-arrive { from { opacity: 0; transform: translateX(-24px); } to { opacity: 1; transform: translateX(0); } }
+@media (prefers-reduced-motion: reduce) { .notification-stack { animation: none; } }
+html[data-motion="reduced"] .notification-stack { animation: none; }
+
+.notification-dismiss {
+  min-width: 32px;
+  min-height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.notification-dismiss:hover,
+.notification-dismiss:focus-visible {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+@media (max-width: 680px) {
+  .notification-stack {
+    top: auto;
+    right: 16px;
+    left: 16px;
+    width: auto;
+  }
+}
+
+/* The toast is a brief signpost. The notification center retains the full message. */
+.notification-stack .notification-card p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.notice-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; font-size: var(--font-caption); color: var(--warning-text); }
+.notice-summary.is-info { color: var(--muted); }
+.notice-summary.is-error { color: var(--danger); }
+.notice-summary-link { border: 0; padding: 2px 0; color: inherit; background: transparent; cursor: pointer; font: inherit; text-align: left; }
+.notice-summary-link:hover { text-decoration: underline; }
+.notice-summary-link:focus-visible, .notice-summary-disclosure summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.notice-summary-disclosure { min-width: 0; max-width: 100%; }
+.notice-summary-disclosure summary { cursor: pointer; padding: 2px 0; }
+.notice-summary-disclosure ul { margin: 6px 0; padding-left: 20px; max-height: 180px; overflow: auto; overflow-wrap: anywhere; white-space: pre-wrap; }

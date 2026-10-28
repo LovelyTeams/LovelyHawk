@@ -1,0 +1,60 @@
+name: Desktop CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: desktop-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Tauri desktop and Rust quality gates
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.93.1'
+          components: rustfmt, clippy
+
+      - name: Restore Cargo build cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.13.0'
+
+      - name: Activate pinned pnpm
+        shell: pwsh
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.28.2 --activate
+          pnpm --version
+
+      - name: Install locked UI dependencies
+        shell: pwsh
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify gate failure detection
+        shell: pwsh
+        run: |
+          ./scripts/desktop-quality-gates.ps1 -SelfTest
+          ./scripts/desktop-source-gate.ps1 -SelfTest
+          ./scripts/desktop-dependency-gate.ps1 -SelfTest
+          ./scripts/desktop-ui-ledger-gate.ps1 -SelfTest
+
+      - name: Run desktop and Rust quality gates
+        shell: pwsh
+        run: ./scripts/desktop-quality-gates.ps1

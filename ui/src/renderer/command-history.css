@@ -1,0 +1,73 @@
+.command-history-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--backdrop);
+}
+
+.command-history-panel {
+  position: relative;
+  width: min(1080px, calc(100% - 96px));
+  height: min(680px, calc(100vh - 140px));
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.command-history-shell { display: flex; height: 100%; min-height: 0; flex-direction: column; }
+.command-history-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 20px 24px; border-bottom: 1px solid var(--border); }
+.command-history-heading h1 { margin: 2px 0 4px; font-size: var(--page-title-size); }
+.command-history-heading p { margin: 0; color: var(--accent); font-size: var(--font-caption); letter-spacing: .12em; }
+.command-history-heading span { color: var(--muted); font-size: var(--font-small); }
+.command-history-header-actions, .command-history-detail header > div:last-child { display: flex; flex-wrap: wrap; gap: 8px; }
+.command-history-panel button { border: 1px solid var(--border); border-radius: 8px; padding: 7px 11px; color: var(--text); background: var(--surface-alt); cursor: pointer; }
+.command-history-panel button:disabled { cursor: not-allowed; opacity: .48; }
+.command-history-panel button.danger { border-color: color-mix(in srgb, var(--danger) 58%, var(--border)); color: var(--danger); }
+.command-history-panel button.primary { border-color: var(--accent); color: var(--on-accent); background: var(--accent); }
+.command-history-notice { margin: 12px 24px 0; padding: 9px 12px; border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border)); border-radius: 8px; background: color-mix(in srgb, var(--accent) 9%, transparent); font-size: var(--font-small); }
+.command-history-notice.error, .command-history-detail-state.error { color: var(--danger); }
+.command-history-disconnected, .command-history-detail-state { display: grid; flex: 1; place-items: center; padding: 26px; color: var(--muted); text-align: center; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
+.command-history-workbench { display: grid; grid-template-columns: minmax(290px, 36%) 1fr; flex: 1; min-height: 0; gap: 14px; padding: 14px; }
+.command-history-list-panel, .command-history-detail { min-height: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-alt); }
+.command-history-list-panel { display: flex; flex-direction: column; }
+.command-history-list-panel > label { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 10px; padding: 12px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: var(--font-small); }
+.command-history-list-panel input { min-width: 0; border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; color: var(--text); background: var(--surface); }
+.command-history-list { flex: 1; min-height: 0; overflow: auto; padding: 8px; }
+.command-history-list > p { padding: 30px 12px; text-align: center; color: var(--muted); }
+.command-history-row { display: block; width: 100%; margin-bottom: 7px; text-align: left; }
+.command-history-row.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, var(--surface)); }
+.command-history-row > span { display: flex; justify-content: space-between; gap: 12px; }
+.command-history-row time { color: var(--muted); font-size: var(--font-caption); }
+.command-history-row small { display: block; margin: 5px 0; color: var(--muted); }
+.command-history-row small.succeeded, .command-history-status.succeeded { color: var(--success); }
+.command-history-row small.failed, .command-history-status.failed { color: var(--danger); }
+.command-history-row code, .command-history-row p { display: block; margin: 4px 0 0; overflow: hidden; color: var(--text); font: var(--font-small)/1.4 ui-monospace, Consolas, monospace; white-space: nowrap; text-overflow: ellipsis; }
+.command-history-row p { color: var(--muted); }
+.command-history-list-panel > footer { display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; border-top: 1px solid var(--border); color: var(--muted); font-size: var(--font-small); }
+.command-history-list-panel > footer div { display: flex; gap: 7px; }
+.command-history-detail { overflow: auto; padding: 18px; background: var(--surface); }
+.command-history-detail > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.command-history-detail h2 { margin: 0 0 5px; }
+.command-history-detail header p { margin: 0; color: var(--muted); font-size: var(--font-small); }
+.command-history-status { margin: 14px 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; color: var(--warning); font-size: var(--font-small); }
+.command-history-detail article { margin-top: 14px; }
+.command-history-detail h3 { margin: 0 0 7px; font-size: var(--font-small); }
+.command-history-detail pre { max-height: 280px; overflow: auto; margin: 0; border: 1px solid var(--border); border-radius: 9px; padding: 12px; color: var(--text); background: var(--surface-alt); font: var(--font-small)/1.55 ui-monospace, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.command-history-confirm-backdrop { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; padding: 20px; background: var(--backdrop); }
+.command-history-confirm { width: min(460px, 100%); border: 1px solid color-mix(in srgb, var(--danger) 65%, var(--border)); border-radius: 14px; padding: 22px; background: var(--surface); box-shadow: var(--shadow-sm); }
+.command-history-confirm > p { color: var(--danger); font-size: var(--font-caption); letter-spacing: .14em; }
+.command-history-confirm h2 { margin: 8px 0 12px; }
+.command-history-confirm small { display: block; margin-top: 12px; color: var(--muted); }
+.command-history-confirm footer { display: flex; justify-content: flex-end; gap: 9px; margin-top: 20px; }
+
+@media (max-width: 800px) {
+  .command-history-backdrop { padding: 8px; }
+  .command-history-workbench { grid-template-columns: 1fr; overflow: auto; }
+  .command-history-list-panel { min-height: 330px; }
+  .command-history-heading, .command-history-detail > header { align-items: stretch; flex-direction: column; }
+}
