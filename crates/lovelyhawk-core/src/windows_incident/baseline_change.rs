@@ -1,7 +1,7 @@
 //! Bounded registry policy changes. Plans and original values never come from the page.
 use super::{
-    BASE64, DEFAULT_COLLECTION_TIMEOUT, WindowsIncidentService, encode_powershell_command,
-    strip_exit_prefix,
+    BASE64, DEFAULT_COLLECTION_TIMEOUT, WindowsIncidentService,
+    script_transport::compressed_command, strip_exit_prefix,
 };
 use crate::{
     CoreError, CoreResult,
@@ -236,6 +236,456 @@ const RULES: &[Rule] = &[
         1,
         "脚本内容可能包含秘密；需规划日志权限、容量及保留范围，新会话另行验证。"
     ),
+    rule!(
+        "lsass-ppl",
+        "启用 LSA 受保护进程 (RunAsPPL)",
+        "HKLM",
+        LSA,
+        "RunAsPPL",
+        1,
+        "重启后生效；老旧第三方安全驱动或认证插件可能不兼容。"
+    ),
+    rule!(
+        "guest",
+        "禁用内置 Guest 账户",
+        "HKLM",
+        r"@SAM\Guest",
+        "Enabled",
+        0,
+        "禁用本地访客账户，依赖匿名来宾共享的旧访问将受限。"
+    ),
+    rule!(
+        "auto-logon",
+        "关闭 Winlogon 自动登录",
+        "HKLM",
+        r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon",
+        "AutoAdminLogon",
+        0,
+        "重启后控制台不再自动登录，需人工输入凭据。"
+    ),
+    rule!(
+        "smb1",
+        "禁用 SMBv1 服务端协议",
+        "HKLM",
+        r"@SMB\Server",
+        "EnableSMB1Protocol",
+        0,
+        "停止接受旧版 SMBv1 连接；古旧打印机或旧系统共享需先核查。"
+    ),
+    rule!(
+        "defender-rt",
+        "开启 Defender 实时保护",
+        "HKLM",
+        r"@DEFENDER\Preference",
+        "DisableRealtimeMonitoring",
+        0,
+        "恢复实时监控；如安装了第三方主防病毒软件，请先确认兼容模式。"
+    ),
+    rule!(
+        "firewall",
+        "启用三种网络配置文件防火墙",
+        "HKLM",
+        r"@FIREWALL\Profiles",
+        "Enabled",
+        1,
+        "启用域、专用、公用配置文件防火墙；请确认远程管理端口已在允许规则中。"
+    ),
+    rule!(
+        "ps-module-logging",
+        "开启 PowerShell 模块日志",
+        "HKLM",
+        r"SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging",
+        "EnableModuleLogging",
+        1,
+        "启用模块执行日志记录，新 PowerShell 会话生效。"
+    ),
+    rule!(
+        "ps-transcription",
+        "开启 PowerShell 转录日志",
+        "HKLM",
+        r"SOFTWARE\Policies\Microsoft\Windows\PowerShell\Transcription",
+        "EnableTranscripting",
+        1,
+        "启用会话转录，需注意输出目录访问权限与磁盘容量。"
+    ),
+    rule!(
+        "smb-server-sign",
+        "启用 SMB 服务端强制签名",
+        "HKLM",
+        r"@SMB\Server",
+        "RequireSecuritySignature",
+        1,
+        "不支持 SMB 签名的旧客户端将无法连接共享。"
+    ),
+    rule!(
+        "smb-client-sign",
+        "启用 SMB 客户端强制签名",
+        "HKLM",
+        r"@SMB\Client",
+        "RequireSecuritySignature",
+        1,
+        "连接未开启签名的第三方旧 NAS 时可能被拒绝。"
+    ),
+    rule!(
+        "smb-insecure-guest",
+        "禁止 SMB 客户端不安全来宾登录",
+        "HKLM",
+        r"@SMB\Client",
+        "EnableInsecureGuestLogons",
+        0,
+        "阻止客户端回退到无认证的 SMB 来宾访问。"
+    ),
+    rule!(
+        "defender-tamper",
+        "启用 Defender 防篡改保护",
+        "HKLM",
+        r"SOFTWARE\Microsoft\Windows Defender\Features",
+        "TamperProtection",
+        5,
+        "受安全中心保护的系统可能拒绝非界面写入，回读未生效时需在安全中心开启。"
+    ),
+    rule!(
+        "remote-registry",
+        "禁用远程注册表服务 (RemoteRegistry)",
+        "HKLM",
+        r"@SERVICE\RemoteRegistry",
+        "Start",
+        4,
+        "停止并禁用 RemoteRegistry 服务；依赖远程注册表的管理软件将受影响。"
+    ),
+    rule!(
+        "password-length",
+        "设置本地账户最短口令长度为 14",
+        "HKLM",
+        r"@SAM\PasswordPolicy",
+        "MinimumLength",
+        14,
+        "仅约束后续修改口令的本地账户，不强制重置当前口令。"
+    ),
+    rule!(
+        "password-history",
+        "设置本地账户口令历史为 24 次",
+        "HKLM",
+        r"@SAM\PasswordPolicy",
+        "HistoryLength",
+        24,
+        "限制本地账户改密时重复使用旧口令。"
+    ),
+    rule!(
+        "password-min-age",
+        "设置本地账户最短口令使用期为 1 天",
+        "HKLM",
+        r"@SAM\PasswordPolicy",
+        "MinimumAge",
+        86400,
+        "防止用户在改密后立即改回旧口令。"
+    ),
+    rule!(
+        "lockout-threshold",
+        "设置本地账户失败锁定阈值为 5 次",
+        "HKLM",
+        r"@SAM\LockoutPolicy",
+        "Threshold",
+        5,
+        "连续 5 次认证失败后锁定账户；自动同步设置 15 分钟锁定与重置窗口。"
+    ),
+    rule!(
+        "lockout-duration",
+        "设置本地账户锁定持续时间为 15 分钟",
+        "HKLM",
+        r"@SAM\LockoutPolicy",
+        "Duration",
+        900,
+        "账户锁定后持续 900 秒（15 分钟）自动解锁。"
+    ),
+    rule!(
+        "lockout-reset",
+        "设置失败登录计数重置窗口为 15 分钟",
+        "HKLM",
+        r"@SAM\LockoutPolicy",
+        "ObservationWindow",
+        900,
+        "失败计数窗口设为 900 秒（15 分钟），不超过锁定持续时间。"
+    ),
+    rule!(
+        "audit-logon",
+        "启用登录成功与失败审计",
+        "HKLM",
+        r"@AUDIT\Subcategory",
+        "9215",
+        3,
+        "开启登录子类别成功与失败审计（4624/4625）。"
+    ),
+    rule!(
+        "audit-lockout",
+        "启用账户锁定失败审计",
+        "HKLM",
+        r"@AUDIT\Subcategory",
+        "9217",
+        2,
+        "开启账户锁定失败审计（4740）。"
+    ),
+    rule!(
+        "audit-special-logon",
+        "启用特殊权限登录审计",
+        "HKLM",
+        r"@AUDIT\Subcategory",
+        "921b",
+        1,
+        "开启特殊权限分配登录审计（4672）。"
+    ),
+    rule!(
+        "audit-process-creation",
+        "启用进程创建成功审计",
+        "HKLM",
+        r"@AUDIT\Subcategory",
+        "922b",
+        1,
+        "开启进程创建审计（4688），便于追踪命令执行。"
+    ),
+    rule!(
+        "audit-policy-change",
+        "启用审计策略变更审计",
+        "HKLM",
+        r"@AUDIT\Subcategory",
+        "922f",
+        1,
+        "开启审计策略变更记录（4719）。"
+    ),
+    rule!(
+        "audit-user-account",
+        "启用用户账户管理成功与失败审计",
+        "HKLM",
+        r"@AUDIT\Subcategory",
+        "9235",
+        3,
+        "开启账户创建、删除、启用与改密审计（4720-4726）。"
+    ),
+    rule!(
+        "audit-security-group",
+        "启用安全组管理成功审计",
+        "HKLM",
+        r"@AUDIT\Subcategory",
+        "9237",
+        1,
+        "开启安全组成员变更审计（4728/4732/4756）。"
+    ),
+    rule!(
+        "audit-credential-validation",
+        "启用凭据验证成功与失败审计",
+        "HKLM",
+        r"@AUDIT\Subcategory",
+        "923f",
+        3,
+        "开启本地凭据验证成功与失败审计（4776）。"
+    ),
+    rule!(
+        "security-log-enabled",
+        "启用 Security 事件日志通道",
+        "HKLM",
+        r"@EVENTLOG\Security",
+        "IsEnabled",
+        1,
+        "确保安全事件日志通道处于启用状态。"
+    ),
+    rule!(
+        "system-log-enabled",
+        "启用 System 事件日志通道",
+        "HKLM",
+        r"@EVENTLOG\System",
+        "IsEnabled",
+        1,
+        "确保系统事件日志通道处于启用状态。"
+    ),
+    rule!(
+        "application-log-enabled",
+        "启用 Application 事件日志通道",
+        "HKLM",
+        r"@EVENTLOG\Application",
+        "IsEnabled",
+        1,
+        "确保应用程序事件日志通道处于启用状态。"
+    ),
+    rule!(
+        "powershell-log-enabled",
+        "启用 PowerShell Operational 日志通道",
+        "HKLM",
+        r"@EVENTLOG\Microsoft-Windows-PowerShell/Operational",
+        "IsEnabled",
+        1,
+        "确保 PowerShell Operational 日志通道处于启用状态。"
+    ),
+    rule!(
+        "security-log-size",
+        "设置 Security 日志容量为 192 MiB",
+        "HKLM",
+        r"@EVENTLOG\Security",
+        "MaximumSizeInBytes",
+        201_326_592,
+        "扩大安全日志容量上限以减少关键事件被快速覆盖。"
+    ),
+    rule!(
+        "system-log-size",
+        "设置 System 日志容量为 32 MiB",
+        "HKLM",
+        r"@EVENTLOG\System",
+        "MaximumSizeInBytes",
+        33_554_432,
+        "扩大系统日志容量上限以保留更多服务与驱动事件。"
+    ),
+    rule!(
+        "process-command-line",
+        "在进程创建事件 (4688) 中包含完整命令行",
+        "HKLM",
+        r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Audit",
+        "ProcessCreationIncludeCmdLine_Enabled",
+        1,
+        "4688 事件将记录进程命令行参数；请注意日志访问权限控制。"
+    ),
+    rule!(
+        "firewall-inbound",
+        "设置三种网络配置文件默认入站阻止",
+        "HKLM",
+        r"@FIREWALL\Profiles",
+        "DefaultInboundAction",
+        1,
+        "未命中放行规则的入站连接将被默认阻止；已启用放行规则不受影响。"
+    ),
+    rule!(
+        "firewall-dropped-log",
+        "开启防火墙丢弃连接日志记录",
+        "HKLM",
+        r"@FIREWALL\Profiles",
+        "LogBlocked",
+        1,
+        "在三种防火墙配置文件中记录被丢弃的数据包。"
+    ),
+    rule!(
+        "firewall-log-size",
+        "设置防火墙日志容量为 16384 KiB",
+        "HKLM",
+        r"@FIREWALL\Profiles",
+        "LogMaxSizeKilobytes",
+        16384,
+        "将域、专用、公用防火墙日志上限设为 16 MiB。"
+    ),
+    rule!(
+        "defender-antivirus",
+        "启用 Defender 反恶意软件策略",
+        "HKLM",
+        r"@DEFENDER\Preference",
+        "DisableAntiSpyware",
+        0,
+        "移除禁用 Defender 的策略开关并确认防病毒启用。"
+    ),
+    rule!(
+        "defender-behavior",
+        "开启 Defender 行为监控",
+        "HKLM",
+        r"@DEFENDER\Preference",
+        "DisableBehaviorMonitoring",
+        0,
+        "启用 Windows Defender 行为监控保护。"
+    ),
+    rule!(
+        "defender-on-access",
+        "开启 Defender 文件访问保护",
+        "HKLM",
+        r"@DEFENDER\Preference",
+        "DisableIOAVProtection",
+        0,
+        "启用下载文件与附件访问保护。"
+    ),
+    rule!(
+        "defender-signature-age",
+        "触发 Defender 安全情报签名更新",
+        "HKLM",
+        r"@DEFENDER\Signature",
+        "SignatureAge",
+        0,
+        "请求更新病毒定义库；离线主机需配置内部更新源。"
+    ),
+    rule!(
+        "vbs-running",
+        "启用基于虚拟化的安全 (VBS) 配置",
+        "HKLM",
+        r"SYSTEM\CurrentControlSet\Control\DeviceGuard",
+        "EnableVirtualizationBasedSecurity",
+        1,
+        "写入 VBS 启用配置；实际运行状态需硬件虚拟化支持并在重启后核实。"
+    ),
+    rule!(
+        "credential-guard-running",
+        "启用 Credential Guard 配置",
+        "HKLM",
+        LSA,
+        "LsaCfgFlags",
+        1,
+        "配置 UEFI 锁定的 Credential Guard；需重启主机后核实运行状态。"
+    ),
+    rule!(
+        "memory-integrity-running",
+        "启用内存完整性 (HVCI) 配置",
+        "HKLM",
+        r"SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity",
+        "Enabled",
+        1,
+        "启用内核代码完整性保护；存在不兼容旧驱动时切勿盲目重启。"
+    ),
+    rule!(
+        "uac-standard-prompt",
+        "设置标准用户提权为安全桌面输入凭据",
+        "HKLM",
+        UAC,
+        "ConsentPromptBehaviorUser",
+        1,
+        "标准用户请求提升权限时在安全桌面上要求输入管理员凭据。"
+    ),
+    rule!(
+        "remote-token-filter",
+        "启用本地账户远程管理令牌过滤",
+        "HKLM",
+        UAC,
+        "LocalAccountTokenFilterPolicy",
+        0,
+        "过滤本地管理员通过网络登录时的远程高权限令牌（不走 RDP 控制台时受限）。"
+    ),
+    rule!(
+        "everyone-anonymous",
+        "禁止将 Everyone 权限扩展给匿名用户",
+        "HKLM",
+        LSA,
+        "EveryoneIncludesAnonymous",
+        0,
+        "匿名连接不再自动获得 Everyone 组访问权限。"
+    ),
+    rule!(
+        "winrm-client-basic",
+        "禁用 WinRM 客户端 Basic 认证策略",
+        "HKLM",
+        r"SOFTWARE\Policies\Microsoft\Windows\WinRM\Client",
+        "AllowBasic",
+        0,
+        "禁止 WinRM 客户端使用明文 Basic 身份验证。"
+    ),
+    rule!(
+        "winrm-client-cleartext",
+        "禁止 WinRM 客户端未加密流量策略",
+        "HKLM",
+        r"SOFTWARE\Policies\Microsoft\Windows\WinRM\Client",
+        "AllowUnencryptedTraffic",
+        0,
+        "要求 WinRM 客户端仅使用加密传输。"
+    ),
+    rule!(
+        "llmnr",
+        "关闭 LLMNR 多播名称解析策略",
+        "HKLM",
+        r"SOFTWARE\Policies\Microsoft\Windows NT\DNSClient",
+        "EnableMulticast",
+        0,
+        "禁用局域网 LLMNR 多播解析，降低内网名称欺骗风险。"
+    ),
 ];
 fn rule(id: &str) -> CoreResult<Rule> {
     RULES
@@ -397,7 +847,7 @@ impl DvcRemote<'_> {
             "__PAYLOAD__",
             &BASE64.encode(serde_json::to_vec(&payload).map_err(|_| invalid("配置参数编码失败"))?),
         );
-        let command = encode_powershell_command(&script);
+        let command = compressed_command(&script)?;
         if command.encode_utf16().count() > 30_000 {
             return Err(invalid("配置权限信息超出安全执行长度，拒绝写入"));
         }
@@ -481,7 +931,7 @@ fn make_plan(
         || ids.len() > RULES.len()
         || ids.iter().collect::<HashSet<_>>().len() != ids.len()
     {
-        return Err(invalid("请选择 1 至 19 个不同的支持项"));
+        return Err(invalid("请选择有效的支持配置项（不可为空或重复）"));
     }
     let rules = ids
         .iter()
@@ -991,10 +1441,11 @@ mod tests {
     #[test]
     fn encoded_fixed_queries_fit_windows_process_command_limits() {
         let encoded_len = |payload: serde_json::Value| {
-            encode_powershell_command(&SCRIPT.replace(
+            compressed_command(&SCRIPT.replace(
                 "__PAYLOAD__",
                 &BASE64.encode(serde_json::to_vec(&payload).unwrap()),
             ))
+            .unwrap()
             .encode_utf16()
             .count()
         };
@@ -1023,7 +1474,7 @@ mod tests {
             vec![],
             vec!["wdigest".into(), "wdigest".into()],
             vec!["wdigest'; Remove-Item C:\\".into()],
-            vec!["lsass-ppl".into()],
+            vec!["unknown-rule".into()],
         ] {
             assert!(make_plan(&remote, &values, "session", None).is_err());
         }

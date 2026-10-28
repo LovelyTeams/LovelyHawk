@@ -13,6 +13,7 @@ artifacts/
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
+.claude/
 .idea
 .DS_Store
 *.suo
@@ -43,6 +44,10 @@ secrets/
 .github/workflows/release.yml
 tmp/*
 
-rdp-dvc-demo/*
+rdp-dvc-demo/
 tools/lab.7z
 LovelyHawk_dev.exe
+myupx.exe
+docs/DVC_prompt.md
+docs/WECHAT_WINDOWS_DVC_ARTICLE.md
+docs/WECHAT_WINDOWS_DVC_ARTICLE.html

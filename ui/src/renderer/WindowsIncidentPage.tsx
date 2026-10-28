@@ -19,7 +19,7 @@ import { WinIrProcesses, WinIrNetwork } from "./WinIrActivity";
 import { WinIrAccounts, WinIrBaseline, WinIrStartup } from "./WinIrChecks";
 import { useWindowsChannel } from "./use-windows-channel";
 import type { WindowsChannelTab } from "../shared/windows-channel-contract";
-import { WinIrLogs, WinIrTimeline } from "./WinIrEvents";
+import { WinIrCommands, WinIrDefender, WinIrLogs, WinIrTimeline, WinIrWebshell } from "./WinIrEvents";
 import { WinIrBaselineChanges } from "./WinIrBaselineChanges";
 import { WinIrFileManager } from "./WinIrFileManager";
 import { WinIrIcon } from "./WinIrIcon";
@@ -182,12 +182,15 @@ export function WindowsIncidentPage({ ref, api, writeClipboard, onBackToWelcome,
     switch (tab) {
       case "baseline": return data.snapshots.baseline?.failedCount;
       case "processes": return data.snapshots.processes?.suspiciousCount;
+      case "commands": return data.snapshots.commands?.highRiskCount;
       case "network": return data.snapshots.network?.suspiciousCount;
       case "startup": return data.snapshots.startup?.suspiciousCount;
       case "services": case "drivers": case "tasks": return data.snapshots[tab]?.entries.filter((entry) => entry.riskLevel !== "normal").length;
       case "accounts": return data.snapshots.accounts?.suspiciousCount;
       case "logs": return data.snapshots.logs?.highRiskCount;
+      case "defender": return data.snapshots.defender?.highRiskCount;
       case "files": return data.snapshots.files?.entries.filter((entry) => entry.riskLevel === "high" || entry.riskLevel === "medium").length;
+      case "webshell": return data.snapshots.webshell ? data.snapshots.webshell.highRiskCount + data.snapshots.webshell.mediumRiskCount : undefined;
       default: return undefined;
     }
   }
@@ -219,6 +222,17 @@ export function WindowsIncidentPage({ ref, api, writeClipboard, onBackToWelcome,
       "确认禁用账户",
     )) {
       await data.dispose("accounts", { action: "disable-account", name: entry.name, sid: entry.sid }, capturedSession, `正在禁用账户「${entry.name}」并复核…`, `已禁用本地账户「${entry.name}」并刷新账户快照。`);
+    }
+  }
+  async function deleteAccount(entry: WindowsAccountEntry) {
+    const capturedSession = data.sessionKey;
+    if (!capturedSession || busy) return;
+    if (await confirm.ask(
+      "确认删除本地账户",
+      `目标主机：${targetHost}\n账户名称：${entry.name}\nSID：${entry.sid}（RID ${entry.rid}）\n权限组：${entry.isAdmin ? "管理员组" : "普通账户"}\n\n注意：将按 SID 与账户名核对身份并从本机 SAM 中永久删除该本地账户（自动拒绝删除内置系统账户和当前登录会话账户；磁盘上的用户配置目录将保留供取证核查），随后重新采集本地账户列表。`,
+      "确认删除账户",
+    )) {
+      await data.dispose("accounts", { action: "delete-account", name: entry.name, sid: entry.sid }, capturedSession, `正在删除账户「${entry.name}」并复核…`, `已删除本地账户「${entry.name}」并刷新账户快照。`);
     }
   }
   async function deleteFile(entry: WindowsFileEntry) {
@@ -328,15 +342,18 @@ export function WindowsIncidentPage({ ref, api, writeClipboard, onBackToWelcome,
             {key === "playbooks" ? <WinIrPlaybooks connected={connected} busy={busy} onAction={openPlaybookAction} onCopy={(text) => void copy(text)} /> : null}
             {key === "desktop" ? <WinIrDesktop api={api.windowsRdp} covered={covered || setupOpen} canCopyScript={Boolean(data.filelessScript && writeClipboard)} onCopyScript={() => void copy(data.filelessScript)} /> : null}
             {key === "overview" ? <WinIrOverview snapshots={data.snapshots} collectedAt={data.collectedAt} busy={busy || !connected} onNavigate={(tab) => navigate(tab, true)} onGo={goTo} onCollectAll={() => void data.collectAll()} /> : null}
-            {key === "baseline" ? <WinIrBaseline snapshot={data.snapshots.baseline ?? null} focus={focusFor(focus, "baseline")} busy={busy} connected={connected} onCopy={(text) => void copy(text)} onRemediate={(item) => configureBaseline([item.id])} onConfigure={() => configureBaseline((data.snapshots.baseline?.items ?? []).filter((item) => item.remediationAvailable && item.status === "fail").map((item) => item.id))} /> : null}
+            {key === "baseline" ? <WinIrBaseline snapshot={data.snapshots.baseline ?? null} focus={focusFor(focus, "baseline")} busy={busy} connected={connected} onCopy={(text) => void copy(text)} onRemediate={(item) => configureBaseline([item.id])} onConfigure={() => configureBaseline((data.snapshots.baseline?.items ?? []).filter((item) => item.remediationAvailable && (item.status === "fail" || item.status === "warn")).map((item) => item.id))} /> : null}
             {key === "processes" ? <WinIrProcesses busy={busy} connected={connected} onInspect={data.inspectProcess} onKill={(process) => killProcess(process)} onKillTree={(process) => killProcess(process, true)} snapshot={data.snapshots.processes ?? null} network={data.snapshots.network ?? null} focus={focusFor(focus, "processes")} related={related} onCopy={(text) => void copy(text)} onFile={locateFile} onNetwork={(pid) => goTo({ tab: "network", pid })} /> : null}
+            {key === "commands" ? <WinIrCommands snapshot={data.snapshots.commands ?? null} busy={busy} connected={connected} onCollect={() => void data.collect("commands")} onCopy={(text) => void copy(text)} onProcess={(pid) => goTo({ tab: "processes", pid })} onFile={locateFile} onEnableAudit={() => configureBaseline(["audit-process-creation", "process-command-line", "ps-scriptblock-logging"])} /> : null}
             {key === "network" ? <WinIrNetwork snapshot={data.snapshots.network ?? null} processes={data.snapshots.processes ?? null} busy={busy} connected={connected} focus={focusFor(focus, "network")} related={related} onCopy={(text) => void copy(text)} onProcess={(pid) => goTo({ tab: "processes", pid })} onFile={locateFile} onKillProcess={(process) => void killProcess(process)} /> : null}
             {key === "services" || key === "drivers" || key === "tasks" ? <WinIrInventory onInspect={entry=>setInventoryDetail({kind:key,entry,session:data.sessionKey,observedAt:data.snapshots[key]?.observedAt??"未取得"})} kind={key} snapshot={data.snapshots[key] ?? null} busy={busy} connected={connected} focus={inventoryFocus?.kind===key?inventoryFocus:null} onAction={(entry,operation)=>{if(data.sessionKey&&!busy&&entry.objectId)setControlSelection({kind:key,session:data.sessionKey,action:{objectId:entry.objectId,name:entry.name,operation}});}} onHistory={()=>{if(data.sessionKey&&!busy)setControlSelection({kind:key,session:data.sessionKey,action:null});}} onFile={locateFile} onCopy={(text) => void copy(text)} onRegistry={locateRegistry} onProcess={(pid) => goTo({tab:"processes",pid})} onCommand={(id) => { setCommandSuggestion({id,request:++requestId.current}); openDock("command"); }} /> : null}
             {key === "startup" ? <WinIrStartup snapshot={data.snapshots.startup ?? null} busy={busy} connected={connected} focus={focusFor(focus, "startup")} related={related} onCopy={(text) => void copy(text)} onFile={locateFile} onRegistry={locateRegistry} onRemove={(entry) => void removeStartup(entry)} onManage={(kind,entry)=>{setInventoryFocus({kind,name:entry.name,location:entry.location,request:++requestId.current});navigate(kind,true);}} /> : null}
-            {key === "accounts" ? <WinIrAccounts snapshot={data.snapshots.accounts ?? null} busy={busy} connected={connected} focus={focusFor(focus, "accounts")} related={related} onCopy={(text) => void copy(text)} onLogs={(query) => goTo({ tab: "logs", query })} onDisable={(entry) => void disableAccount(entry)} /> : null}
+            {key === "accounts" ? <WinIrAccounts snapshot={data.snapshots.accounts ?? null} busy={busy} connected={connected} focus={focusFor(focus, "accounts")} related={related} onCopy={(text) => void copy(text)} onLogs={(query) => goTo({ tab: "logs", query })} onDisable={(entry) => void disableAccount(entry)} onDelete={(entry) => void deleteAccount(entry)} /> : null}
             {key === "logs" ? <WinIrLogs onDirectory={(path) => { if (!busy && connected) { navigate("files", true); void data.collect("files", path); } }} snapshot={data.snapshots.logs ?? null} busy={busy || !connected} category={data.snapshots.logs?.categoryFilter ?? "all"} onCategory={(category) => void data.collect("logs", category)} focus={focusFor(focus, "logs")} onCopy={(text) => void copy(text)} /> : null}
+            {key === "defender" ? <WinIrDefender snapshot={data.snapshots.defender ?? null} busy={busy} connected={connected} onCopy={(text) => void copy(text)} onFile={locateFile} /> : null}
             {key === "timeline" ? <WinIrTimeline snapshots={data.snapshots} onCopy={(text) => void copy(text)} onGo={goTo} /> : null}
-            {key === "files" ? <WinIrFileManager snapshot={data.snapshots.files ?? null} busy={busy} connected={connected} revealPath={focus?.target.tab === "files" ? focus.target.path : null} related={related} onNavigate={(path) => void data.collect("files", path)} onPreview={data.previewFile} onInspectAccess={data.inspectFileAccess} onCommands={() => openDock("command")} onPull={(path) => void data.pullFile(path).then((received) => { if (received) openDock("files"); })} onDelete={(entry) => void deleteFile(entry)} onCopy={(text) => void copy(text)} /> : null}
+            {key === "files" ? <WinIrFileManager snapshot={data.snapshots.files ?? null} busy={busy} connected={connected} revealPath={focus?.target.tab === "files" ? focus.target.path : null} related={related} onNavigate={(path) => void data.collect("files", path)} onPreview={data.previewFile} onInspectAccess={data.inspectFileAccess} onCommands={() => openDock("command")} onPull={(path) => void data.pullFile(path).then((received) => { if (received) openDock("files"); })} onDelete={(entry) => void deleteFile(entry)} onScanWebshells={(path) => { navigate("webshell", true); void data.collect("webshell", path); }} onCopy={(text) => void copy(text)} /> : null}
+            {key === "webshell" ? <WinIrWebshell snapshot={data.snapshots.webshell ?? null} busy={busy} connected={connected} onScan={(path) => void data.collect("webshell", path)} onCopy={(text) => void copy(text)} onFile={locateFile} onPull={(path) => void data.pullFile(path).then((received) => { if (received) openDock("files"); })} /> : null}
             {key === "registry" ? <WinIrRegistry snapshot={data.snapshots.registry ?? null} busy={busy} connected={connected} focus={focusFor(focus, "registry")} related={related} onNavigate={(path) => void data.collect("registry", path)} onDeleteValue={(keyPath, value) => void deleteRegistryValue(keyPath, value)} onCopy={(text) => void copy(text)} /> : null}
 
           </Activity>)}

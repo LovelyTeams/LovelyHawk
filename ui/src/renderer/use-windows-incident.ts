@@ -33,12 +33,15 @@ function collectionRequest(tab: CollectionTab, argument: string): WindowsRemoteI
     case "overview": return { action: "collect-overview" };
     case "baseline": return { action: "collect-baseline" };
     case "processes": return { action: "collect-processes" };
+    case "commands": return { action: "collect-commands" };
     case "network": return { action: "collect-network" };
     case "services": case "drivers": case "tasks": return { action:"collect-inventory",kind:tab };
     case "startup": return { action: "collect-startup" };
     case "accounts": return { action: "collect-accounts" };
     case "logs": return { action: "collect-logs", category: argument };
+    case "defender": return { action: "collect-defender" };
     case "files": return { action: "collect-files", path: argument };
+    case "webshell": return { action: "scan-webshells", path: argument };
     case "registry": return { action: "collect-registry", keyPath: argument };
   }
 }
@@ -66,7 +69,7 @@ export function useWindowsIncident(api: WindowsIncidentApi) {
   const epochRef = useRef(0);
   const stopBatch = useRef(false);
   const statusSequence = useRef(0);
-  const paths = useRef({ files: DEFAULT_FILE_PATH, registry: DEFAULT_REGISTRY_PATH, logs: "all" });
+  const paths = useRef({ files: DEFAULT_FILE_PATH, registry: DEFAULT_REGISTRY_PATH, logs: "all", webshell: "auto" });
   const snapshotsRef = useRef<Partial<WinIrSnapshots>>({});
   snapshotsRef.current = snapshots;
   /** A new channel to a host collected before keeps its results only once the host is shown to be the same one. */
@@ -80,7 +83,7 @@ export function useWindowsIncident(api: WindowsIncidentApi) {
     setCollectionErrors({});
     setCommandOutput(null);
     setNotice(null);
-    paths.current = { files: DEFAULT_FILE_PATH, registry: DEFAULT_REGISTRY_PATH, logs: "all" };
+    paths.current = { files: DEFAULT_FILE_PATH, registry: DEFAULT_REGISTRY_PATH, logs: "all", webshell: "auto" };
   }, []);
 
   const observe = useCallback((next: DvcRuntimeStatus | null) => {
@@ -175,6 +178,7 @@ export function useWindowsIncident(api: WindowsIncidentApi) {
     if (response.kind === "files") paths.current.files = response.snapshot.currentPath;
     if (response.kind === "registry") paths.current.registry = response.snapshot.keyPath;
     if (response.kind === "logs") paths.current.logs = response.snapshot.categoryFilter;
+    if (response.kind === "webshell" && response.snapshot.scannedPaths[0]) paths.current.webshell = response.snapshot.scannedPaths[0];
   }, []);
 
   const collect = useCallback(async (tab: CollectionTab, argument?: string): Promise<boolean> => {
@@ -182,7 +186,7 @@ export function useWindowsIncident(api: WindowsIncidentApi) {
     if (!start(`正在采集${label}…`)) return false;
     const generation = epochRef.current;
     try {
-      const arg = argument ?? (tab === "files" || tab === "registry" || tab === "logs" ? paths.current[tab] : "");
+      const arg = argument ?? (tab === "files" || tab === "registry" || tab === "logs" || tab === "webshell" ? paths.current[tab] : "");
       const response = await remote(collectionRequest(tab, arg), generation);
       acceptCollection(tab, response);
       return true;

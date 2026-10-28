@@ -422,6 +422,140 @@ pub struct WindowsFileAccess {
     pub warnings: Vec<String>,
 }
 
+/// One Webshell or suspicious script hit from multi-threaded D-Shield style scan.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WindowsWebshellEntry {
+    pub full_path: String,
+    pub name: String,
+    pub extension: String,
+    pub size_bytes: u64,
+    pub last_write_time: String,
+    pub sha256: String,
+    pub risk_level: WindowsRiskLevel,
+    pub confidence_level: u32,
+    pub threat_type: String,
+    pub matched_rules: Vec<String>,
+    pub line_snippet: String,
+}
+
+/// Multi-threaded Webshell scan snapshot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WindowsWebshellSnapshot {
+    pub scanned_paths: Vec<String>,
+    pub observed_at: String,
+    pub scanned_files: u32,
+    pub scanned_dirs: u32,
+    pub elapsed_ms: u64,
+    pub worker_threads: u32,
+    pub truncated: bool,
+    pub high_risk_count: u32,
+    pub medium_risk_count: u32,
+    pub warnings: Vec<String>,
+    pub entries: Vec<WindowsWebshellEntry>,
+}
+
+/// One Windows Defender exclusion item.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WindowsDefenderExclusion {
+    pub kind: String,
+    pub value: String,
+    pub source: String,
+    pub risk_level: WindowsRiskLevel,
+    pub risk_reason: String,
+}
+
+/// One Windows Defender threat detection record (1116/1117/1118/1119).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WindowsDefenderDetection {
+    pub record_id: u64,
+    pub time_created: String,
+    pub event_id: u32,
+    pub threat_name: String,
+    pub severity: String,
+    pub category: String,
+    pub file_path: String,
+    pub process_name: String,
+    pub user: String,
+    pub action: String,
+    pub detail: String,
+    pub risk_level: WindowsRiskLevel,
+}
+
+/// One Windows Defender configuration or protection change event (5001/5007/5013).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WindowsDefenderConfigChange {
+    pub record_id: u64,
+    pub time_created: String,
+    pub event_id: u32,
+    pub change_type: String,
+    pub old_value: String,
+    pub new_value: String,
+    pub detail: String,
+    pub risk_level: WindowsRiskLevel,
+}
+
+/// Windows Defender forensic analysis snapshot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WindowsDefenderSnapshot {
+    pub observed_at: String,
+    pub running_mode: String,
+    pub antivirus_enabled: Option<bool>,
+    pub realtime_protection: Option<bool>,
+    pub behavior_monitor: Option<bool>,
+    pub ioav_protection: Option<bool>,
+    pub on_access_protection: Option<bool>,
+    pub tamper_protected: Option<bool>,
+    pub engine_version: String,
+    pub signature_version: String,
+    pub signature_last_updated: String,
+    pub signature_age_days: Option<u32>,
+    pub high_risk_count: u32,
+    pub exclusions: Vec<WindowsDefenderExclusion>,
+    pub detections: Vec<WindowsDefenderDetection>,
+    pub config_changes: Vec<WindowsDefenderConfigChange>,
+    pub warnings: Vec<String>,
+}
+
+/// One monitored command execution record (active process, 4688, Sysmon 1, 4104, PSReadLine).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WindowsCommandEntry {
+    pub id: String,
+    pub time_created: String,
+    pub source: String,
+    pub pid: u32,
+    pub ppid: u32,
+    pub process_name: String,
+    pub executable_path: String,
+    pub parent_name: String,
+    pub user: String,
+    pub command_line: String,
+    pub risk_level: WindowsRiskLevel,
+    pub risk_reasons: Vec<String>,
+}
+
+/// Command execution monitoring snapshot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WindowsCommandMonitorSnapshot {
+    pub observed_at: String,
+    pub total_count: u32,
+    pub high_risk_count: u32,
+    pub medium_risk_count: u32,
+    pub process_creation_events_enabled: bool,
+    pub command_line_audit_enabled: bool,
+    pub script_block_logging_enabled: bool,
+    pub sysmon_installed: bool,
+    pub warnings: Vec<String>,
+    pub entries: Vec<WindowsCommandEntry>,
+}
+
 /// High-level service owned by `BackendServices`.
 #[derive(Debug, Clone, Default)]
 pub struct WindowsIncidentService {
@@ -430,6 +564,7 @@ pub struct WindowsIncidentService {
     baseline_changes: std::sync::Arc<baseline_change::BaselineChanges>,
     process_changes: std::sync::Arc<process_change::ProcessChanges>,
     control_changes: std::sync::Arc<control::ControlChanges>,
+    ps_only_session: std::sync::Arc<parking_lot::Mutex<Option<String>>>,
 }
 
 impl WindowsIncidentService {
@@ -704,24 +839,26 @@ impl WindowsIncidentService {
         fallback_ps: &str,
         session_id: &str,
     ) -> CoreResult<String> {
-        let native_cmd = format!("__NATIVE_COLLECT__:{native_spec}");
-        let raw = self
-            .hub
-            .execute_command_for_session(&native_cmd, DEFAULT_COLLECTION_TIMEOUT, session_id)
-            .map_err(|e| CoreError::validation("windows_incident.collect", e))?;
-        if let Ok(cleaned) = strip_exit_prefix(&raw)
-            && cleaned.trim_start().starts_with(['{', '['])
-        {
-            return Ok(cleaned);
-        }
-        if raw.starts_with("[error]")
-            && !raw.contains("未知原生采集指令")
-            && !raw.contains("此采集端使用 PowerShell 查询")
-        {
-            return Err(CoreError::validation(
-                "windows_incident.collect",
-                "采集端查询未完成，请检查权限、输出上限或查询时限，缩小范围后重试",
-            ));
+        let is_ps_only = self.ps_only_session.lock().as_deref() == Some(session_id);
+        if !is_ps_only {
+            let native_cmd = format!("__NATIVE_COLLECT__:{native_spec}");
+            let raw = self
+                .hub
+                .execute_command_for_session(&native_cmd, DEFAULT_COLLECTION_TIMEOUT, session_id)
+                .map_err(|e| CoreError::validation("windows_incident.collect", e))?;
+            if let Ok(cleaned) = strip_exit_prefix(&raw)
+                && cleaned.trim_start().starts_with(['{', '['])
+            {
+                return Ok(cleaned);
+            }
+            if raw.contains("此采集端使用 PowerShell 查询") {
+                *self.ps_only_session.lock() = Some(session_id.to_owned());
+            } else if raw.starts_with("[error]") && !raw.contains("未知原生采集指令") {
+                return Err(CoreError::validation(
+                    "windows_incident.collect",
+                    "采集端查询未完成，请检查权限、输出上限或查询时限，缩小范围后重试",
+                ));
+            }
         }
         let cmd = encode_powershell_command(fallback_ps);
         let raw_ps = self
@@ -969,6 +1106,56 @@ impl WindowsIncidentService {
         })?;
         self.run_ps_mutation(&script, session_id)?;
         self.collect_accounts(session_id)
+    }
+
+    pub fn delete_account(
+        &self,
+        name: &str,
+        sid: &str,
+        session_id: &str,
+    ) -> CoreResult<WindowsAccountsSnapshot> {
+        let script = build_delete_account_ps_script(name, sid).ok_or_else(|| {
+            CoreError::validation(
+                "windows_incident.delete_account",
+                "账户名称或 SID 无效，或属于系统内置账户（RID < 1000）",
+            )
+        })?;
+        self.run_ps_mutation(&script, session_id)?;
+        self.collect_accounts(session_id)
+    }
+
+    pub fn scan_webshells(
+        &self,
+        path: &str,
+        session_id: &str,
+    ) -> CoreResult<WindowsWebshellSnapshot> {
+        let trimmed = path.trim();
+        let spec_path = if trimmed.is_empty() { "auto" } else { trimmed };
+        let script = lovelyhawk_win_dvc::windows_read_queries::webshell_scan(spec_path)
+            .ok_or_else(|| {
+                CoreError::validation("windows_incident.webshell", "扫描目录路径无效")
+            })?;
+        let json_str =
+            self.run_native_or_ps(&format!("webshell-scan:{spec_path}"), &script, session_id)?;
+        parse_webshell_json(&json_str)
+    }
+
+    pub fn collect_defender(&self, session_id: &str) -> CoreResult<WindowsDefenderSnapshot> {
+        let json_str = self.run_native_or_ps(
+            "defender-v1",
+            lovelyhawk_win_dvc::windows_read_queries::DEFENDER_ANALYSIS,
+            session_id,
+        )?;
+        parse_defender_json(&json_str)
+    }
+
+    pub fn collect_commands(&self, session_id: &str) -> CoreResult<WindowsCommandMonitorSnapshot> {
+        let json_str = self.run_native_or_ps(
+            "commands-v1",
+            lovelyhawk_win_dvc::windows_read_queries::COMMAND_MONITOR,
+            session_id,
+        )?;
+        parse_commands_json(&json_str)
     }
 
     pub fn delete_file(
@@ -1234,6 +1421,57 @@ if ($after.Enabled) {{
     ))
 }
 
+pub fn build_delete_account_ps_script(name: &str, sid: &str) -> Option<String> {
+    let name_trimmed = name.trim();
+    let sid_trimmed = sid.trim();
+    if name_trimmed.is_empty()
+        || name_trimmed.len() > 256
+        || sid_trimmed.len() < 6
+        || sid_trimmed.len() > 128
+        || name_trimmed.contains(['\0', '\r', '\n'])
+        || !sid_trimmed.starts_with("S-1-")
+        || !sid_trimmed[4..]
+            .bytes()
+            .all(|b| b.is_ascii_digit() || b == b'-')
+    {
+        return None;
+    }
+    let rid: u32 = sid_trimmed.rsplit('-').next()?.parse().ok()?;
+    if rid < 1000
+        || matches!(
+            name_trimmed.to_ascii_lowercase().as_str(),
+            "administrator" | "guest" | "defaultaccount" | "wdagutilityaccount" | "krbtgt"
+        )
+    {
+        return None;
+    }
+    let escaped_name = name_trimmed.replace('\'', "''");
+    let escaped_sid = sid_trimmed.replace('\'', "''");
+    Some(format!(
+        r#"
+$targetSid = '{escaped_sid}'
+$expectedName = '{escaped_name}'
+$currentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+if ($targetSid -eq $currentSid -or $expectedName -ieq $env:USERNAME) {{
+  throw '安全限制：拒绝删除当前正在执行应急响应的会话登录账户。'
+}}
+$rid = [uint32](($targetSid -split '-')[-1])
+if ($rid -lt 1000) {{
+  throw '安全限制：拒绝删除系统内置账户（RID < 1000），请使用禁用操作。'
+}}
+$u = Get-LocalUser -SID $targetSid -ErrorAction Stop
+if ($u.Name -ne $expectedName) {{
+  throw '目标账户名称与 SID 不匹配，请刷新账户列表后重试。'
+}}
+Remove-LocalUser -SID $targetSid -ErrorAction Stop
+$after = Get-LocalUser -SID $targetSid -ErrorAction SilentlyContinue
+if ($null -ne $after) {{
+  throw '删除本地账户未完成，目标账户仍然存在，请检查管理员权限。'
+}}
+"#
+    ))
+}
+
 pub fn build_delete_file_ps_script(file_path: &str, dir_path: &str) -> Option<String> {
     let f = file_path.trim();
     let d = dir_path.trim();
@@ -1328,7 +1566,7 @@ pub fn agent_executable_path() -> Option<std::path::PathBuf> {
 /// - the Python `demo_server.py`
 pub fn encode_powershell_command(ps_script: &str) -> String {
     let wrapped = format!(
-        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $ErrorActionPreference = 'SilentlyContinue'; {ps_script}"
+        "# LovelyHawk-IR-Query\n[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $ErrorActionPreference = 'SilentlyContinue'; {ps_script}"
     );
     let utf16: Vec<u8> = wrapped
         .encode_utf16()
@@ -2225,11 +2463,67 @@ pub fn parse_processes_json(json_str: &str) -> CoreResult<WindowsProcessesSnapsh
     })
 }
 
+/// Returns true when the command line is an unmodified LovelyHawk fileless DVC agent
+/// or internal read-only PowerShell collector invocation running from a system path.
+pub fn is_lovelyhawk_powershell_invocation(name: &str, exe_path: &str, cmd_line: &str) -> bool {
+    let name_l = name.trim().to_ascii_lowercase();
+    if !matches!(
+        name_l.as_str(),
+        "powershell.exe" | "pwsh.exe" | "powershell" | "pwsh"
+    ) {
+        return false;
+    }
+    let path_l = exe_path.trim().to_ascii_lowercase();
+    if !path_l.is_empty()
+        && !path_l.starts_with("c:\\windows\\system32\\windowspowershell\\")
+        && !path_l.starts_with("c:\\windows\\syswow64\\windowspowershell\\")
+        && !path_l.starts_with("c:\\program files\\powershell\\")
+    {
+        return false;
+    }
+    let cmd_l = cmd_line.to_ascii_lowercase();
+    if cmd_l.contains(" -w hidden") || cmd_l.contains("-windowstyle hidden") {
+        return false;
+    }
+    let tokens: Vec<&str> = cmd_line.split_whitespace().collect();
+    let Some(enc_idx) = tokens
+        .iter()
+        .position(|t| t.eq_ignore_ascii_case("-EncodedCommand") || t.eq_ignore_ascii_case("-enc"))
+    else {
+        return false;
+    };
+    if enc_idx + 2 != tokens.len() {
+        return false;
+    }
+    let b64_token = tokens[enc_idx + 1].trim_matches('"').trim_matches('\'');
+    let Ok(bytes) = BASE64.decode(b64_token) else {
+        return false;
+    };
+    if bytes.is_empty() || !bytes.len().is_multiple_of(2) {
+        return false;
+    }
+    let words: Vec<u16> = bytes
+        .chunks_exact(2)
+        .map(|b| u16::from_le_bytes([b[0], b[1]]))
+        .collect();
+    let Ok(decoded) = String::from_utf16(&words) else {
+        return false;
+    };
+    let trimmed = decoded.trim_start();
+    trimmed.starts_with("# LovelyHawk")
+        || (trimmed.contains("LovelyHawkDvcNative") && trimmed.contains("dvc::lovelyhawk::winir"))
+        || trimmed.contains("LovelyHawkBaselineV3")
+        || trimmed.contains("LovelyHawkProcessOwner")
+}
+
 pub fn evaluate_process_risk(
     name: &str,
     exe_path: &str,
     cmd_line: &str,
 ) -> (WindowsRiskLevel, Vec<String>) {
+    if is_lovelyhawk_powershell_invocation(name, exe_path, cmd_line) {
+        return (WindowsRiskLevel::Normal, Vec::new());
+    }
     let name_l = name.to_ascii_lowercase();
     let path_l = exe_path.to_ascii_lowercase();
     let cmd_l = cmd_line.to_ascii_lowercase();
@@ -2628,7 +2922,15 @@ pub fn parse_logs_json(json_str: &str, category_filter: &str) -> CoreResult<Wind
             ("security", 4720 | 4732) => ("账户与权限变更", WindowsRiskLevel::High),
             ("security", 4625) => ("登录失败", WindowsRiskLevel::Medium),
             ("microsoft-windows-powershell/operational", 4104) => {
-                ("PowerShell 脚本块", WindowsRiskLevel::Medium)
+                if e.detail.contains("LovelyHawkDvcNative")
+                    || e.detail.contains("LovelyHawkBaselineV3")
+                    || e.detail.contains("LovelyHawkProcessOwner")
+                    || e.detail.contains("# LovelyHawk")
+                {
+                    ("PowerShell 脚本块", WindowsRiskLevel::Normal)
+                } else {
+                    ("PowerShell 脚本块", WindowsRiskLevel::Medium)
+                }
             }
             ("security", 4688) => ("进程创建", WindowsRiskLevel::Low),
             ("security", 4624) => ("登录成功", WindowsRiskLevel::Normal),
@@ -2992,6 +3294,563 @@ pub fn parse_registry_json(json_str: &str) -> CoreResult<WindowsRegistrySnapshot
         subkeys: raw.subkeys,
         values,
         warnings: raw.warnings,
+    })
+}
+
+pub fn parse_webshell_json(json_str: &str) -> CoreResult<WindowsWebshellSnapshot> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct RawHit {
+        #[serde(default)]
+        full_path: String,
+        #[serde(default)]
+        name: String,
+        #[serde(default)]
+        extension: String,
+        #[serde(default)]
+        size_bytes: u64,
+        #[serde(default)]
+        last_write_time: String,
+        #[serde(default)]
+        sha256: String,
+        #[serde(default)]
+        risk_level: String,
+        #[serde(default)]
+        confidence_level: u32,
+        #[serde(default)]
+        threat_type: String,
+        #[serde(default)]
+        matched_rules: Vec<String>,
+        #[serde(default)]
+        line_snippet: String,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct RawScan {
+        #[serde(default)]
+        scanned_paths: Vec<String>,
+        #[serde(default)]
+        observed_at: String,
+        #[serde(default)]
+        scanned_files: u32,
+        #[serde(default)]
+        scanned_dirs: u32,
+        #[serde(default)]
+        elapsed_ms: u64,
+        #[serde(default)]
+        worker_threads: u32,
+        #[serde(default)]
+        truncated: bool,
+        #[serde(default)]
+        warnings: Vec<String>,
+        #[serde(default)]
+        entries: Vec<RawHit>,
+    }
+    let raw: RawScan = serde_json::from_str(extract_json_slice(json_str)).map_err(|e| {
+        CoreError::validation(
+            "windows_incident.webshell",
+            format!("解析 Webshell 扫描结果失败: {e}"),
+        )
+    })?;
+    if raw.entries.len() > 1000 || raw.scanned_paths.len() > 64 || raw.warnings.len() > 64 {
+        return Err(CoreError::validation(
+            "windows_incident.webshell",
+            "Webshell 扫描返回条目超过上限",
+        ));
+    }
+    let mut entries = Vec::with_capacity(raw.entries.len());
+    let mut high_risk_count = 0;
+    let mut medium_risk_count = 0;
+    for item in raw.entries {
+        let confidence = item.confidence_level.clamp(1, 5);
+        let risk_level = match item.risk_level.as_str() {
+            "high" => WindowsRiskLevel::High,
+            "medium" => WindowsRiskLevel::Medium,
+            "low" => WindowsRiskLevel::Low,
+            _ if confidence >= 5 => WindowsRiskLevel::High,
+            _ if confidence >= 3 => WindowsRiskLevel::Medium,
+            _ => WindowsRiskLevel::Low,
+        };
+        if risk_level == WindowsRiskLevel::High {
+            high_risk_count += 1;
+        } else if risk_level == WindowsRiskLevel::Medium {
+            medium_risk_count += 1;
+        }
+        entries.push(WindowsWebshellEntry {
+            full_path: item.full_path,
+            name: item.name,
+            extension: item.extension,
+            size_bytes: item.size_bytes,
+            last_write_time: item.last_write_time,
+            sha256: item.sha256,
+            risk_level,
+            confidence_level: confidence,
+            threat_type: if item.threat_type.is_empty() {
+                "可疑脚本后门".to_owned()
+            } else {
+                item.threat_type
+            },
+            matched_rules: item.matched_rules.into_iter().take(16).collect(),
+            line_snippet: item.line_snippet.chars().take(512).collect(),
+        });
+    }
+    entries.sort_by(|a, b| {
+        b.confidence_level
+            .cmp(&a.confidence_level)
+            .then_with(|| a.full_path.cmp(&b.full_path))
+    });
+    Ok(WindowsWebshellSnapshot {
+        scanned_paths: raw.scanned_paths,
+        observed_at: if raw.observed_at.is_empty() {
+            chrono::Utc::now().to_rfc3339()
+        } else {
+            raw.observed_at
+        },
+        scanned_files: raw.scanned_files,
+        scanned_dirs: raw.scanned_dirs,
+        elapsed_ms: raw.elapsed_ms,
+        worker_threads: raw.worker_threads.max(1),
+        truncated: raw.truncated,
+        high_risk_count,
+        medium_risk_count,
+        warnings: raw.warnings,
+        entries,
+    })
+}
+
+pub fn parse_defender_json(json_str: &str) -> CoreResult<WindowsDefenderSnapshot> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct RawExcl {
+        #[serde(default)]
+        kind: String,
+        #[serde(default)]
+        value: String,
+        #[serde(default)]
+        source: String,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct RawDet {
+        #[serde(default)]
+        record_id: u64,
+        #[serde(default)]
+        time_created: String,
+        #[serde(default)]
+        event_id: u32,
+        #[serde(default)]
+        threat_name: String,
+        #[serde(default)]
+        severity: String,
+        #[serde(default)]
+        category: String,
+        #[serde(default)]
+        file_path: String,
+        #[serde(default)]
+        process_name: String,
+        #[serde(default)]
+        user: String,
+        #[serde(default)]
+        action: String,
+        #[serde(default)]
+        detail: String,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct RawCfg {
+        #[serde(default)]
+        record_id: u64,
+        #[serde(default)]
+        time_created: String,
+        #[serde(default)]
+        event_id: u32,
+        #[serde(default)]
+        change_type: String,
+        #[serde(default)]
+        old_value: String,
+        #[serde(default)]
+        new_value: String,
+        #[serde(default)]
+        detail: String,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct RawDefender {
+        #[serde(default)]
+        observed_at: String,
+        #[serde(default)]
+        running_mode: String,
+        #[serde(default)]
+        antivirus_enabled: Option<bool>,
+        #[serde(default)]
+        realtime_protection: Option<bool>,
+        #[serde(default)]
+        behavior_monitor: Option<bool>,
+        #[serde(default)]
+        ioav_protection: Option<bool>,
+        #[serde(default)]
+        on_access_protection: Option<bool>,
+        #[serde(default)]
+        tamper_protected: Option<bool>,
+        #[serde(default)]
+        engine_version: String,
+        #[serde(default)]
+        signature_version: String,
+        #[serde(default)]
+        signature_last_updated: String,
+        #[serde(default)]
+        signature_age_days: Option<u32>,
+        #[serde(default)]
+        exclusions: Vec<RawExcl>,
+        #[serde(default)]
+        detections: Vec<RawDet>,
+        #[serde(default)]
+        config_changes: Vec<RawCfg>,
+        #[serde(default)]
+        warnings: Vec<String>,
+    }
+    let raw: RawDefender = serde_json::from_str(extract_json_slice(json_str)).map_err(|e| {
+        CoreError::validation(
+            "windows_incident.defender",
+            format!("解析 Defender 取证数据失败: {e}"),
+        )
+    })?;
+    if raw.exclusions.len() > 512
+        || raw.detections.len() > 512
+        || raw.config_changes.len() > 512
+        || raw.warnings.len() > 64
+    {
+        return Err(CoreError::validation(
+            "windows_incident.defender",
+            "Defender 解析条目超过上限",
+        ));
+    }
+    let mut high_risk_count = 0u32;
+    if raw.realtime_protection == Some(false) || raw.antivirus_enabled == Some(false) {
+        high_risk_count += 1;
+    }
+    let exclusions = raw
+        .exclusions
+        .into_iter()
+        .map(|ex| {
+            let v_low = ex.value.to_ascii_lowercase();
+            let (risk_level, risk_reason) = if v_low == "c:\\"
+                || v_low == "c:"
+                || v_low.contains("\\temp")
+                || v_low.contains("\\users\\public")
+                || v_low.contains("\\programdata")
+                || v_low.contains("inetpub")
+                || v_low.contains("wwwroot")
+                || matches!(
+                    v_low.as_str(),
+                    "powershell.exe"
+                        | "cmd.exe"
+                        | "mshta.exe"
+                        | "rundll32.exe"
+                        | ".exe"
+                        | ".dll"
+                        | ".ps1"
+                        | ".php"
+                        | ".aspx"
+                        | ".jsp"
+                )
+            {
+                high_risk_count += 1;
+                (
+                    WindowsRiskLevel::High,
+                    "排除项覆盖高危目录、系统解释器或可执行/网页脚本扩展名，极易被攻击者用于免杀驻留"
+                        .to_owned(),
+                )
+            } else {
+                (
+                    WindowsRiskLevel::Medium,
+                    "存在自定义防病毒排除项，请核实是否为管理员授权配置".to_owned(),
+                )
+            };
+            WindowsDefenderExclusion {
+                kind: ex.kind,
+                value: ex.value,
+                source: ex.source,
+                risk_level,
+                risk_reason,
+            }
+        })
+        .collect();
+
+    let detections = raw
+        .detections
+        .into_iter()
+        .map(|d| {
+            let act_l = d.action.to_ascii_lowercase();
+            let risk_level = if matches!(d.event_id, 1118 | 1119 | 1008)
+                || act_l.contains("失败")
+                || act_l.contains("fail")
+                || act_l.contains("allow")
+                || d.event_id == 1116
+            {
+                high_risk_count += 1;
+                WindowsRiskLevel::High
+            } else {
+                WindowsRiskLevel::Medium
+            };
+            WindowsDefenderDetection {
+                record_id: d.record_id,
+                time_created: d.time_created,
+                event_id: d.event_id,
+                threat_name: d.threat_name,
+                severity: d.severity,
+                category: d.category,
+                file_path: d.file_path,
+                process_name: d.process_name,
+                user: d.user,
+                action: d.action,
+                detail: d.detail,
+                risk_level,
+            }
+        })
+        .collect();
+
+    let config_changes = raw
+        .config_changes
+        .into_iter()
+        .map(|c| {
+            let new_l = c.new_value.to_ascii_lowercase();
+            let risk_level = if matches!(c.event_id, 5001 | 5010 | 5012 | 5013)
+                || new_l.contains("exclusions")
+                || new_l.contains("disablerealtimemonitoring = 0x1")
+                || new_l.contains("disableantispyware = 0x1")
+            {
+                high_risk_count += 1;
+                WindowsRiskLevel::High
+            } else {
+                WindowsRiskLevel::Medium
+            };
+            WindowsDefenderConfigChange {
+                record_id: c.record_id,
+                time_created: c.time_created,
+                event_id: c.event_id,
+                change_type: c.change_type,
+                old_value: c.old_value,
+                new_value: c.new_value,
+                detail: c.detail,
+                risk_level,
+            }
+        })
+        .collect();
+
+    Ok(WindowsDefenderSnapshot {
+        observed_at: if raw.observed_at.is_empty() {
+            chrono::Utc::now().to_rfc3339()
+        } else {
+            raw.observed_at
+        },
+        running_mode: raw.running_mode,
+        antivirus_enabled: raw.antivirus_enabled,
+        realtime_protection: raw.realtime_protection,
+        behavior_monitor: raw.behavior_monitor,
+        ioav_protection: raw.ioav_protection,
+        on_access_protection: raw.on_access_protection,
+        tamper_protected: raw.tamper_protected,
+        engine_version: raw.engine_version,
+        signature_version: raw.signature_version,
+        signature_last_updated: raw.signature_last_updated,
+        signature_age_days: raw.signature_age_days,
+        high_risk_count,
+        exclusions,
+        detections,
+        config_changes,
+        warnings: raw.warnings,
+    })
+}
+
+pub fn evaluate_command_risk(
+    process_name: &str,
+    exe_path: &str,
+    cmd_line: &str,
+) -> (WindowsRiskLevel, Vec<String>) {
+    if is_lovelyhawk_powershell_invocation(process_name, exe_path, cmd_line)
+        || cmd_line.contains("LovelyHawkDvcNative")
+        || cmd_line.contains("LovelyHawkBaselineV3")
+        || cmd_line.contains("LovelyHawkProcessOwner")
+        || cmd_line.contains("# LovelyHawk")
+    {
+        return (WindowsRiskLevel::Normal, Vec::new());
+    }
+    let (base_level, mut reasons) = evaluate_process_risk(process_name, exe_path, cmd_line);
+    let mut high = base_level == WindowsRiskLevel::High;
+    let cmd_l = cmd_line.to_ascii_lowercase();
+
+    if [
+        "mimikatz",
+        "sekurlsa",
+        "lsadump",
+        "comsvcs.dll",
+        "minidump",
+        "procdump",
+        "ntds.dit",
+    ]
+    .iter()
+    .any(|k| cmd_l.contains(k))
+    {
+        high = true;
+        reasons.push("命令行包含凭据转储 (LSASS/SAM/NTDS) 高危特征".to_owned());
+    }
+    if (cmd_l.contains("reg ") || cmd_l.contains("reg.exe"))
+        && (cmd_l.contains("save") || cmd_l.contains("export"))
+        && (cmd_l.contains("hklm\\sam")
+            || cmd_l.contains("hklm\\system")
+            || cmd_l.contains("hklm\\security"))
+    {
+        high = true;
+        reasons.push("尝试导出 SAM/SYSTEM/SECURITY 注册表凭据配置单元".to_owned());
+    }
+    if cmd_l.contains("vssadmin") && cmd_l.contains("delete") && cmd_l.contains("shadows")
+        || (cmd_l.contains("wbadmin") && cmd_l.contains("delete"))
+        || (cmd_l.contains("wmic") && cmd_l.contains("shadowcopy") && cmd_l.contains("delete"))
+    {
+        high = true;
+        reasons.push("删除卷影副本或系统备份，疑似勒索软件或反取证行为".to_owned());
+    }
+    if cmd_l.contains("wevtutil") && (cmd_l.contains(" cl ") || cmd_l.contains(" clear-log ")) {
+        high = true;
+        reasons.push("调用 wevtutil 清除 Windows 事件日志".to_owned());
+    }
+    if (cmd_l.contains("net ") || cmd_l.contains("net1 "))
+        && (cmd_l.contains("/add") || cmd_l.contains("localgroup administrators"))
+    {
+        high = true;
+        reasons.push("通过 net 命令创建账户或修改管理员组成员".to_owned());
+    }
+    if !high
+        && [
+            "whoami",
+            "nltest",
+            "netstat -ano",
+            "tasklist",
+            "quser",
+            "qwinsta",
+            "systeminfo",
+            "ipconfig /all",
+            "arp -a",
+        ]
+        .iter()
+        .any(|k| cmd_l.contains(k))
+    {
+        reasons.push("包含主机/内网信息收集命令，建议结合上下文核实执行主体".to_owned());
+    }
+
+    let level = if high {
+        WindowsRiskLevel::High
+    } else if !reasons.is_empty() || base_level == WindowsRiskLevel::Medium {
+        WindowsRiskLevel::Medium
+    } else {
+        WindowsRiskLevel::Normal
+    };
+    (level, reasons)
+}
+
+pub fn parse_commands_json(json_str: &str) -> CoreResult<WindowsCommandMonitorSnapshot> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct RawCmd {
+        #[serde(default)]
+        id: String,
+        #[serde(default)]
+        time_created: String,
+        #[serde(default)]
+        source: String,
+        #[serde(default)]
+        pid: u32,
+        #[serde(default)]
+        ppid: u32,
+        #[serde(default)]
+        process_name: String,
+        #[serde(default)]
+        executable_path: String,
+        #[serde(default)]
+        parent_name: String,
+        #[serde(default)]
+        user: String,
+        #[serde(default)]
+        command_line: String,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct RawPayload {
+        #[serde(default)]
+        observed_at: String,
+        #[serde(default)]
+        process_creation_events_enabled: bool,
+        #[serde(default)]
+        command_line_audit_enabled: bool,
+        #[serde(default)]
+        script_block_logging_enabled: bool,
+        #[serde(default)]
+        sysmon_installed: bool,
+        #[serde(default)]
+        warnings: Vec<String>,
+        #[serde(default)]
+        entries: Vec<RawCmd>,
+    }
+    let raw: RawPayload = serde_json::from_str(extract_json_slice(json_str)).map_err(|e| {
+        CoreError::validation(
+            "windows_incident.commands",
+            format!("解析命令监控数据失败: {e}"),
+        )
+    })?;
+    if raw.entries.len() > 2048 || raw.warnings.len() > 64 {
+        return Err(CoreError::validation(
+            "windows_incident.commands",
+            "命令监控条目超过上限",
+        ));
+    }
+    let mut entries = Vec::with_capacity(raw.entries.len());
+    let mut high_risk_count = 0u32;
+    let mut medium_risk_count = 0u32;
+
+    for c in raw.entries {
+        if is_lovelyhawk_powershell_invocation(&c.process_name, &c.executable_path, &c.command_line)
+        {
+            continue;
+        }
+        let (risk_level, risk_reasons) =
+            evaluate_command_risk(&c.process_name, &c.executable_path, &c.command_line);
+        if risk_level == WindowsRiskLevel::High {
+            high_risk_count += 1;
+        } else if risk_level == WindowsRiskLevel::Medium {
+            medium_risk_count += 1;
+        }
+        entries.push(WindowsCommandEntry {
+            id: c.id,
+            time_created: c.time_created,
+            source: c.source,
+            pid: c.pid,
+            ppid: c.ppid,
+            process_name: c.process_name,
+            executable_path: c.executable_path,
+            parent_name: c.parent_name,
+            user: c.user,
+            command_line: c.command_line,
+            risk_level,
+            risk_reasons,
+        });
+    }
+
+    Ok(WindowsCommandMonitorSnapshot {
+        observed_at: if raw.observed_at.is_empty() {
+            chrono::Utc::now().to_rfc3339()
+        } else {
+            raw.observed_at
+        },
+        total_count: entries.len() as u32,
+        high_risk_count,
+        medium_risk_count,
+        process_creation_events_enabled: raw.process_creation_events_enabled,
+        command_line_audit_enabled: raw.command_line_audit_enabled,
+        script_block_logging_enabled: raw.script_block_logging_enabled,
+        sysmon_installed: raw.sysmon_installed,
+        warnings: raw.warnings,
+        entries,
     })
 }
 
@@ -3386,8 +4245,30 @@ ConvertTo-Json -InputObject $script:frames.ToArray() -Depth 8 -Compress
     fn disposal_builders_enforce_identity_and_safety_boundaries() {
         assert!(baseline_change_supported("wdigest"));
         assert!(baseline_change_supported("rdp-nla"));
-        assert!(!baseline_change_supported("defender-tamper"));
+        assert!(baseline_change_supported("defender-tamper"));
+        assert!(baseline_change_supported("password-length"));
+        assert!(baseline_change_supported("audit-logon"));
+        assert!(baseline_change_supported("llmnr"));
         assert!(!baseline_change_supported("unknown-rule"));
+
+        // LovelyHawk's own fileless PowerShell agent & encoded collector must not be flagged as High Risk.
+        let fileless_cmd = fileless_powershell_script();
+        let (self_level, self_reasons) = evaluate_process_risk(
+            "powershell.exe",
+            "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+            &fileless_cmd,
+        );
+        assert_eq!(self_level, WindowsRiskLevel::Normal);
+        assert!(self_reasons.is_empty());
+
+        let collector_cmd = encode_powershell_command("Get-Process");
+        let (col_level, col_reasons) = evaluate_process_risk(
+            "powershell.exe",
+            "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+            &collector_cmd,
+        );
+        assert_eq!(col_level, WindowsRiskLevel::Normal);
+        assert!(col_reasons.is_empty());
 
         assert!(build_kill_process_ps_script(0, "2026-10-24T09:30:00Z").is_none());
         assert!(build_kill_process_ps_script(4, "2026-10-24T09:30:00Z").is_none());
@@ -3461,5 +4342,31 @@ ConvertTo-Json -InputObject $script:frames.ToArray() -Depth 8 -Compress
 
         assert!(build_disable_account_ps_script("support$", "invalid-sid").is_none());
         assert!(build_disable_account_ps_script("support$", "S-1-5-21-1001").is_some());
+
+        assert!(build_delete_account_ps_script("Administrator", "S-1-5-21-500").is_none());
+        assert!(build_delete_account_ps_script("Guest", "S-1-5-21-501").is_none());
+        assert!(build_delete_account_ps_script("support$", "S-1-5-21-1001").is_some());
+
+        let ws_hit = lovelyhawk_win_dvc::native_collect::inspect_webshell_bytes(
+            b"<?php @eval($_POST['cmd']); ?>",
+            ".php",
+        )
+        .unwrap();
+        assert_eq!(ws_hit.0, 5);
+        assert_eq!(ws_hit.1, "high");
+
+        let def_snap = parse_defender_json(
+            r#"{"observedAt":"2026-10-27T00:00:00Z","runningMode":"Normal","realtimeProtection":false,"exclusions":[{"kind":"path","value":"C:\\Users\\Public","source":"Get-MpPreference"}],"detections":[{"recordId":1,"timeCreated":"2026-10-27T00:00:00Z","eventId":1116,"threatName":"Backdoor:PHP/Chopper","action":"检出威胁"}],"configChanges":[]}"#,
+        )
+        .unwrap();
+        assert!(def_snap.high_risk_count >= 2);
+        assert_eq!(def_snap.exclusions[0].risk_level, WindowsRiskLevel::High);
+
+        let cmd_snap = parse_commands_json(
+            r#"{"observedAt":"2026-10-27T00:00:00Z","processCreationEventsEnabled":true,"commandLineAuditEnabled":true,"scriptBlockLoggingEnabled":true,"sysmonInstalled":false,"warnings":[],"entries":[{"id":"1","timeCreated":"2026-10-27T00:00:00Z","source":"security-4688","pid":1200,"ppid":800,"processName":"cmd.exe","executablePath":"C:\\Windows\\System32\\cmd.exe","commandLine":"vssadmin delete shadows /all /quiet"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(cmd_snap.high_risk_count, 1);
+        assert_eq!(cmd_snap.entries[0].risk_level, WindowsRiskLevel::High);
     }
 }

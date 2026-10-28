@@ -60,13 +60,35 @@ export function mount() {
     baseline: { totalChecks: 7, passedCount: 1, failedCount: 2, warningCount: 2, unknownCount: 1, notApplicableCount: 1, items: [
       { id: "wdigest", remediationAvailable: true, category: "凭据保护", title: "WDigest 凭据缓存", currentValue: "启用", expectedValue: "禁用", status: "fail", severity: "high", description: "可能增加凭据暴露风险。", recommendation: "核对业务依赖并制定修复计划。" },
       { id: "uac", remediationAvailable: false, category: "权限控制", title: "用户账户控制", currentValue: "启用", expectedValue: "启用", status: "pass", severity: "normal", description: "本次读取报告 UAC 已启用。", recommendation: "结合实际权限策略核实。" },
-      { id: "log", remediationAvailable: false, category: "日志审计", title: "PowerShell 脚本块日志", currentValue: "未取得", expectedValue: "启用", status: "warn", severity: "medium", description: "采集权限不足。", recommendation: "由有权限的操作员核实。" },
-      { id: "password-length", remediationAvailable: false, category: "口令与锁定", title: "本地账户最短口令长度", currentValue: "8 字符", expectedValue: "至少 14 字符", status: "fail", severity: "medium", description: "来源：NetUserModalsGet 的本地 SAM 策略；不代表域账户口令。", recommendation: "评估本地账户及业务依赖后制定计划。" },
+      { id: "ps-scriptblock-logging", remediationAvailable: true, category: "日志审计", title: "PowerShell 脚本块日志", currentValue: "未取得", expectedValue: "启用", status: "warn", severity: "medium", description: "采集权限不足。", recommendation: "由有权限的操作员核实。" },
+      { id: "password-length", remediationAvailable: true, category: "口令与锁定", title: "本地账户最短口令长度", currentValue: "8 字符", expectedValue: "至少 14 字符", status: "fail", severity: "medium", description: "来源：NetUserModalsGet 的本地 SAM 策略；不代表域账户口令。", recommendation: "评估本地账户及业务依赖后制定计划。" },
       { id: "audit-logon", remediationAvailable: false, category: "高级审计", title: "登录成功与失败审计", currentValue: "当前账户缺少读取权限；未自动提权", expectedValue: "成功和失败", status: "unknown", severity: "low", description: "来源：AuditQuerySystemPolicy 的固定子类别 GUID。", recommendation: "由有读取权限的操作员重新核查。" },
       { id: "lockout-duration", remediationAvailable: false, category: "口令与锁定", title: "本地账户锁定持续时间", currentValue: "锁定阈值为 0，本项尚不生效", expectedValue: "至少 15 分钟，或仅由管理员解锁", status: "not-applicable", severity: "normal", description: "仅在锁定阈值大于 0 时适用。", recommendation: "先复核锁定阈值。" },
-      { id: "security-log-size", remediationAvailable: false, category: "日志留存", title: "Security 日志容量", currentValue: "20971520 字节", expectedValue: "建议至少 192 MiB", status: "warn", severity: "medium", description: "来源：Get-WinEvent -ListLog Security 的 MaximumSizeInBytes。", recommendation: "容量不证明实际留存期；结合转发、覆盖速度核实。" },
+      { id: "security-log-size", remediationAvailable: true, category: "日志留存", title: "Security 日志容量", currentValue: "20971520 字节", expectedValue: "建议至少 192 MiB", status: "warn", severity: "medium", description: "来源：Get-WinEvent -ListLog Security 的 MaximumSizeInBytes。", recommendation: "容量不证明实际留存期；结合转发、覆盖速度核实。" },
     ] },
     processes: { totalCount: processes.length, suspiciousCount: 1, processes },
+    commands: {
+      observedAt: stamp, totalCount: 2, highRiskCount: 1, mediumRiskCount: 0,
+      processCreationEventsEnabled: true, commandLineAuditEnabled: true, scriptBlockLoggingEnabled: false, sysmonInstalled: true,
+      warnings: [],
+      entries: [
+        { id: "4688:1", timeCreated: stamp, source: "security-4688", pid: 900, ppid: 640, processName: "powershell.exe", executablePath: "C:\\Users\\Public\\dropper.exe", parentName: "C:\\Windows\\System32\\svchost.exe", user: "IR-LAB\\Analyst", commandLine: "powershell.exe -EncodedCommand VwByAGkAdABlAC0ASABvAHMAdAA=", riskLevel: "high", riskReasons: ["命令行包含编码载荷、隐蔽窗口或远程下载执行特征"] },
+        { id: "hist:Analyst:1", timeCreated: stamp, source: "psreadline-history", pid: 0, ppid: 0, processName: "powershell.exe (PSReadLine)", executablePath: "C:\\Users\\Analyst\\AppData\\Roaming\\Microsoft\\Windows\\PowerShell\\PSReadLine\\ConsoleHost_history.txt", parentName: "", user: "Analyst", commandLine: "Get-Service", riskLevel: "normal", riskReasons: [] },
+      ],
+    },
+    defender: {
+      observedAt: stamp, runningMode: "Normal", antivirusEnabled: true, realtimeProtection: true, behaviorMonitor: true,
+      ioavProtection: true, onAccessProtection: true, tamperProtected: true, engineVersion: "1.1.24000.1", signatureVersion: "1.419.100.0",
+      signatureLastUpdated: stamp, signatureAgeDays: 1, highRiskCount: 2, warnings: [],
+      exclusions: [{ kind: "path", value: "C:\\Users\\Public", source: "Get-MpPreference", riskLevel: "high", riskReason: "排除项覆盖高危公共可写目录" }],
+      detections: [{ recordId: 1001, timeCreated: stamp, eventId: 1116, threatName: "Backdoor:ASP/Webshell.A", severity: "严重", category: "后门", filePath: "C:\\Users\\Public\\dropper.exe", processName: "w3wp.exe", user: "NT AUTHORITY\\NETWORK SERVICE", action: "检出威胁", detail: "Windows Defender 检测到恶意软件。", riskLevel: "high" }],
+      configChanges: [{ recordId: 1002, timeCreated: stamp, eventId: 5007, changeType: "Defender 配置变更 (5007)", oldValue: "", newValue: "HKLM\\SOFTWARE\\Microsoft\\Windows Defender\\Exclusions\\Paths\\C:\\Users\\Public = 0x0", detail: "Windows Defender 配置已更改。", riskLevel: "high" }],
+    },
+    webshell: {
+      scannedPaths: ["C:\\inetpub\\wwwroot"], observedAt: stamp, scannedFiles: 128, scannedDirs: 14, elapsedMs: 16, workerThreads: 8,
+      truncated: false, highRiskCount: 1, mediumRiskCount: 0, warnings: [],
+      entries: [{ fullPath: "C:\\Users\\Public\\dropper.exe", name: "shell.aspx", extension: ".aspx", sizeBytes: 1024, lastWriteTime: stamp, sha256: digest, riskLevel: "high", confidenceLevel: 5, threatType: "ASP.NET 加密反射 Webshell", matchedRules: ["冰蝎/哥斯拉 ASP.NET 反射字节码内存加载后门特征"], lineSnippet: "L1: Assembly.Load( new RijndaelManaged().CreateDecryptor() )" }],
+    },
     network: { totalCount: 2, suspiciousCount: 1, connections: [
       { protocol: "TCP", localAddress: "10.10.0.5", localPort: 53432, remoteAddress: "1.1.1.1", remotePort: 443, state: "Established", pid: 900, processName: "powershell.exe", processPath: "C:\\Users\\Public\\dropper.exe", riskLevel: "high", riskReason: "需结合进程上下文核实外联。" },
       { protocol: "TCP", localAddress: "0.0.0.0", localPort: 3389, remoteAddress: "0.0.0.0", remotePort: 0, state: "Listen", pid: 640, processName: "svchost.exe", processPath: "C:\\Windows\\System32\\svchost.exe", riskLevel: "normal", riskReason: "" },
@@ -238,6 +260,20 @@ export function mount() {
             accounts: snapshots.accounts.accounts.map((a) => a.sid === request.sid ? { ...a, enabled: false } : a),
           };
           response = { kind: "accounts", snapshot: snapshots.accounts }; break;
+        case "delete-account": {
+          const remaining = snapshots.accounts.accounts.filter((a) => a.sid !== request.sid);
+          snapshots.accounts = {
+            ...snapshots.accounts,
+            totalCount: remaining.length,
+            adminCount: remaining.filter((a) => a.isAdmin).length,
+            suspiciousCount: remaining.filter((a) => a.riskLevel !== "normal").length,
+            accounts: remaining,
+          };
+          response = { kind: "accounts", snapshot: snapshots.accounts }; break;
+        }
+        case "collect-commands": response = { kind: "commands", snapshot: snapshots.commands }; break;
+        case "collect-defender": response = { kind: "defender", snapshot: snapshots.defender }; break;
+        case "scan-webshells": response = { kind: "webshell", snapshot: { ...snapshots.webshell, scannedPaths: [request.path || "auto"] } }; break;
         case "delete-file": {
           const listing = files(request.dirPath);
           const filtered = listing.entries.filter((e) => e.fullPath !== request.path);

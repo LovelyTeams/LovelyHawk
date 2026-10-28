@@ -53,11 +53,15 @@ try {
             --package lovelyhawk-backend `
             --package lovelyhawk-terminal `
             --package lovelyhawk-desktop `
+            --package lovelyhawk-win-dvc `
             -- `
             --check
     }
     Invoke-CheckedStep -Name 'lovelyhawk-core clippy' -Action {
         & cargo clippy --locked --package lovelyhawk-core --all-targets -- -D warnings
+    }
+    Invoke-CheckedStep -Name 'lovelyhawk-win-dvc clippy' -Action {
+        & cargo clippy --locked --package lovelyhawk-win-dvc --all-targets --no-deps -- -D warnings
     }
     Invoke-CheckedStep -Name 'Backend clippy' -Action {
         & cargo clippy --locked --package lovelyhawk-backend --all-targets --no-deps -- -D warnings
@@ -67,6 +71,9 @@ try {
     }
     Invoke-CheckedStep -Name 'lovelyhawk-core tests' -Action {
         & cargo test --locked --package lovelyhawk-core --all-targets
+    }
+    Invoke-CheckedStep -Name 'lovelyhawk-win-dvc tests' -Action {
+        & cargo test --locked --package lovelyhawk-win-dvc --all-targets
     }
     Invoke-CheckedStep -Name 'Backend tests' -Action {
         & cargo test --locked --package lovelyhawk-backend --all-targets

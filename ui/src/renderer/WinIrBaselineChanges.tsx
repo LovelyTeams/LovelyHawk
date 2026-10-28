@@ -20,7 +20,7 @@ export function WinIrBaselineChanges({ items, initialIds, session, currentSessio
   const workingRef = useRef(false);
   const planRegion = useRef<HTMLDivElement>(null);
   const available = session === currentSession;
-  const eligible = items.filter((item) => (WINDOWS_BASELINE_CHANGE_IDS as readonly string[]).includes(item.id) && item.status === "fail");
+  const eligible = items.filter((item) => (WINDOWS_BASELINE_CHANGE_IDS as readonly string[]).includes(item.id) && (item.status === "fail" || item.status === "warn"));
   useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
   useEffect(() => { if (plan) planRegion.current?.focus({ preventScroll: true }); }, [plan?.id]);
   useEffect(() => {
@@ -78,7 +78,7 @@ export function WinIrBaselineChanges({ items, initialIds, session, currentSessio
     </div> : null}
     {report ? <div className="wir-baseline-report"><p>{report.message}</p><p>目标：{report.target} · {new Date(report.createdAt * 1000).toLocaleString()}</p><ul>{report.items.map((item) => <li key={item.id}><strong>{item.title}</strong><span>{STATE[item.state]}</span></li>)}</ul></div> : null}
     {history ? <div className="wir-baseline-history"><p>本机最多保留 100 次配置记录；其他主机记录仅供查看，恢复时会重新核对主机、账户、配置及权限。</p>{history.length ? history.map((record) => <article key={record.id}><strong>{record.target} · {new Date(record.createdAt * 1000).toLocaleString()}</strong><p>{record.finished ? record.message : "上次执行未记录结束，结果尚未核实。请先读取当前配置。"}</p><p>{record.items.map((item) => `${item.title}：${STATE[item.state]}`).join("；")}</p>{record.recoveryAvailable && !record.restoring ? <button type="button" className="win-ir-btn" disabled={working || !available} onClick={() => void preview(record.id)}>预览恢复差异</button> : null}</article>) : <p>暂无本机配置记录。</p>}</div> : null}
-    {!plan && !report && !history ? <div className="wir-baseline-selection"><p>配置功能仍属实验性，请先在测试主机验证。当前支持 19 项注册表策略，列出本次检查中不通过的可配置项。其他检查仍需按建议处理。自动配置目前限非域成员的本机管理员会话，不会自动提权。</p>
+    {!plan && !report && !history ? <div className="wir-baseline-selection"><p>配置功能仍属实验性，请先在测试主机验证。当前已支持全部 69 项基线策略的一键修复与回读备份，下方列出本次检查中不通过或需复核的可修复项。自动配置目前限非域成员的本机管理员会话，不会自动提权。</p>
       <div className="wir-toolbar"><button type="button" className="win-ir-btn" disabled={working} onClick={() => setSelected(new Set(eligible.map((item) => item.id)))}>选择全部可配置项（{eligible.length}）</button><button type="button" className="win-ir-btn" disabled={working} onClick={() => setSelected(new Set())}>清空选择</button></div>
       {eligible.length ? eligible.map((item) => <label key={item.id}><input type="checkbox" disabled={working} checked={selected.has(item.id)} onChange={(event) => { const checked = event.currentTarget.checked; setSelected((before) => { const next = new Set(before); if (checked) next.add(item.id); else next.delete(item.id); return next; }); }} /><span><strong>{item.title}</strong><small>{item.currentValue} → {item.expectedValue}</small></span></label>) : <p>本次结果没有不通过的可配置项。可查看历史，或关闭后重新核查基线。</p>}
     </div> : null}

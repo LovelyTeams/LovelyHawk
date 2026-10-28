@@ -53,6 +53,12 @@ pub fn handle_native_collect(spec: &str) -> String {
         pull_file_json(file_path)
     } else if let Some(file_path) = spec.strip_prefix("preview-file:") {
         preview_file_json(file_path)
+    } else if spec == "defender" || spec == "defender-v1" {
+        collect_defender()
+    } else if spec == "commands" || spec == "commands-v1" {
+        collect_commands()
+    } else if let Some(scan_path) = spec.strip_prefix("webshell-scan:") {
+        scan_webshells(scan_path)
     } else {
         Err(format!("未知原生采集指令: {spec}"))
     };
@@ -227,14 +233,166 @@ fn collect_logs(category: &str) -> Result<Value, String> {
     query_powershell_json(&script)
 }
 
-fn query_powershell_json(script: &str) -> Result<Value, String> {
-    let script =
-        format!("[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false\n{script}");
-    let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
-    let executable = std::env::var_os("SystemRoot")
+fn collect_defender() -> Result<Value, String> {
+    query_powershell_json(crate::windows_read_queries::DEFENDER_ANALYSIS)
+}
+
+fn collect_commands() -> Result<Value, String> {
+    query_powershell_json(crate::windows_read_queries::COMMAND_MONITOR)
+}
+
+struct WarmPsWorker {
+    child: std::process::Child,
+    stdin: std::process::ChildStdin,
+    rx: std::sync::mpsc::Receiver<std::io::Result<String>>,
+}
+
+static WARM_PS: parking_lot::Mutex<Option<WarmPsWorker>> = parking_lot::Mutex::new(None);
+
+fn system_powershell_exe() -> Result<PathBuf, String> {
+    std::env::var_os("SystemRoot")
         .map(|root| Path::new(&root).join("System32\\WindowsPowerShell\\v1.0\\powershell.exe"))
         .filter(|path| path.is_absolute() && path.is_file())
-        .ok_or_else(|| "系统 PowerShell 不可用，无法完成只读查询".to_owned())?;
+        .ok_or_else(|| "系统 PowerShell 不可用，无法完成只读查询".to_owned())
+}
+
+impl WarmPsWorker {
+    fn spawn() -> Result<Self, String> {
+        use std::io::BufRead;
+        use std::process::Stdio;
+        let executable = system_powershell_exe()?;
+        let mut command = Command::new(executable);
+        command
+            .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "-"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x08000000);
+        }
+        let mut child = command
+            .spawn()
+            .map_err(|e| format!("无法启动常驻查询进程: {e}"))?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| "无法打开查询输入管道".to_owned())?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| "无法打开查询输出管道".to_owned())?;
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let reader = std::io::BufReader::new(stdout);
+            for line in reader.lines() {
+                if tx.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+        Ok(Self { child, stdin, rx })
+    }
+
+    fn execute(
+        &mut self,
+        script: &str,
+        limit: usize,
+        timeout: std::time::Duration,
+    ) -> Result<String, (bool, String)> {
+        use std::io::Write;
+        if let Ok(Some(_)) = self.child.try_wait() {
+            return Err((true, "常驻 PowerShell 已退出".to_owned()));
+        }
+        let marker = uuid::Uuid::new_v4().simple().to_string();
+        let b64 = BASE64.encode(script.as_bytes());
+        let line = format!(
+            "$__lh_id='{marker}'; try {{ [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false; $ErrorActionPreference = 'Stop'; $__lh_s = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('{b64}')); $__lh_r = & ([scriptblock]::Create($__lh_s)) | Out-String -Width 2147483647; [Console]::Out.WriteLine('__LH_OK_' + $__lh_id + '__'); [Console]::Out.WriteLine($__lh_r.TrimEnd()); }} catch {{ [Console]::Out.WriteLine('__LH_ERR_' + $__lh_id + '__:' + $_.Exception.Message) }} finally {{ [Console]::Out.WriteLine('__LH_END_' + $__lh_id + '__'); [Console]::Out.Flush() }}\n"
+        );
+        if self.stdin.write_all(line.as_bytes()).is_err() || self.stdin.flush().is_err() {
+            return Err((true, "写入常驻 PowerShell 失败".to_owned()));
+        }
+        let ok_tag = format!("__LH_OK_{marker}__");
+        let err_tag = format!("__LH_ERR_{marker}__:");
+        let end_tag = format!("__LH_END_{marker}__");
+        let deadline = std::time::Instant::now() + timeout;
+        let mut started = false;
+        let mut err_msg: Option<String> = None;
+        let mut out = String::new();
+        loop {
+            let now = std::time::Instant::now();
+            if now >= deadline {
+                return Err((true, "查询超时".to_owned()));
+            }
+            match self.rx.recv_timeout(deadline.duration_since(now)) {
+                Ok(Ok(line_str)) => {
+                    let trimmed = line_str.trim_end_matches('\r');
+                    if trimmed == end_tag {
+                        if let Some(err) = err_msg {
+                            return Err((false, err));
+                        }
+                        return Ok(out);
+                    }
+                    if trimmed == ok_tag {
+                        started = true;
+                        continue;
+                    }
+                    if let Some(rest) = trimmed.strip_prefix(&err_tag) {
+                        err_msg = Some(rest.trim().to_owned());
+                        continue;
+                    }
+                    if started && err_msg.is_none() {
+                        if !out.is_empty() {
+                            out.push('\n');
+                        }
+                        out.push_str(trimmed);
+                        if out.len() > limit {
+                            return Err((true, format!("查询输出超过 {limit} 字节上限")));
+                        }
+                    }
+                }
+                Ok(Err(e)) => return Err((true, format!("读取管道失败: {e}"))),
+                Err(_) => return Err((true, "查询超时".to_owned())),
+            }
+        }
+    }
+}
+
+impl Drop for WarmPsWorker {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// Execute a UTF-8 PowerShell script using the warm persistent worker, falling back to cold process if needed.
+pub fn run_powershell_utf8(
+    script: &str,
+    limit: usize,
+    timeout: std::time::Duration,
+) -> Result<String, String> {
+    {
+        let mut guard = WARM_PS.lock();
+        if guard.is_none() {
+            *guard = WarmPsWorker::spawn().ok();
+        }
+        if let Some(worker) = guard.as_mut() {
+            match worker.execute(script, limit, timeout) {
+                Ok(output) => return Ok(output),
+                Err((kill_worker, _err)) => {
+                    if kill_worker {
+                        *guard = None;
+                    }
+                }
+            }
+        }
+    }
+    let script = format!(
+        "# LovelyHawk-IR-Query\n[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false\n{script}"
+    );
+    let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    let executable = system_powershell_exe()?;
     let mut command = Command::new(executable);
     command.args([
         "-NoProfile",
@@ -247,18 +405,66 @@ fn query_powershell_json(script: &str) -> Result<Value, String> {
         use std::os::windows::process::CommandExt;
         command.creation_flags(0x08000000);
     }
-    let output = crate::agent_runtime::bounded_output(
-        &mut command,
-        2 * 1024 * 1024,
-        std::time::Duration::from_secs(35),
-    )?;
+    let output = crate::agent_runtime::bounded_output(&mut command, limit, timeout)?;
     if !output.status.success() {
         return Err("Windows 查询未完成，请检查当前账户的读取权限及 PowerShell 组件".to_owned());
     }
-    if output.stdout.len() > 2 * 1024 * 1024 {
-        return Err("Windows 查询结果超过 2 MB 上限".to_owned());
+    if output.stdout.len() > limit {
+        return Err(format!("Windows 查询结果超过 {limit} 字节上限"));
     }
-    serde_json::from_slice(&output.stdout).map_err(|_| "Windows 查询结果不是有效 JSON".to_owned())
+    String::from_utf8(output.stdout).map_err(|_| "Windows 查询结果编码无效".to_owned())
+}
+
+/// Execute an `-EncodedCommand <UTF-16LE Base64>` payload via the warm persistent worker when possible.
+pub fn run_encoded_powershell(
+    encoded_b64: &str,
+    limit: usize,
+    timeout: std::time::Duration,
+) -> Result<String, String> {
+    if let Ok(raw_bytes) = BASE64.decode(encoded_b64.trim())
+        && raw_bytes.len().is_multiple_of(2)
+    {
+        let words: Vec<u16> = raw_bytes
+            .chunks_exact(2)
+            .map(|b| u16::from_le_bytes([b[0], b[1]]))
+            .collect();
+        if let Ok(script) = String::from_utf16(&words) {
+            return run_powershell_utf8(&script, limit, timeout);
+        }
+    }
+    let executable = system_powershell_exe()?;
+    let mut command = Command::new(executable);
+    command.args([
+        "-NoProfile",
+        "-NonInteractive",
+        "-EncodedCommand",
+        encoded_b64.trim(),
+    ]);
+    let output = crate::agent_runtime::bounded_output(&mut command, limit, timeout)?;
+    let code = output.status.code().unwrap_or(-1);
+    let mut combined = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !stderr.trim().is_empty() {
+        if !combined.is_empty() && !combined.ends_with('\n') {
+            combined.push('\n');
+        }
+        combined.push_str(stderr.trim());
+    }
+    if code != 0 && combined.trim().is_empty() {
+        return Err(format!("PowerShell 退出码 {code}"));
+    }
+    Ok(combined)
+}
+
+fn query_powershell_json(script: &str) -> Result<Value, String> {
+    let stdout = run_powershell_utf8(script, 2 * 1024 * 1024, std::time::Duration::from_secs(35))?;
+    let trimmed = stdout.trim();
+    let slice = if let Some(idx) = trimmed.find(['{', '[']) {
+        &trimmed[idx..]
+    } else {
+        trimmed
+    };
+    serde_json::from_str(slice).map_err(|_| "Windows 查询结果不是有效 JSON".to_owned())
 }
 
 fn collect_files(dir_path: &str) -> Result<Value, String> {
@@ -278,8 +484,8 @@ fn collect_files(dir_path: &str) -> Result<Value, String> {
         let is_dir = item.file_type().map(|t| t.is_dir()).unwrap_or(false);
         (!is_dir, item.file_name().to_string_lossy().to_lowercase())
     });
-    let mut entries = Vec::new();
-    let mut hashes_remaining = 24usize;
+    let mut pending = Vec::with_capacity(items.len().min(MAX_LISTED_FILES));
+    let mut hash_jobs: Vec<(usize, PathBuf, u64)> = Vec::new();
     for item in items.into_iter().take(MAX_LISTED_FILES) {
         let path = item.path();
         let name = item.file_name().to_string_lossy().into_owned();
@@ -307,39 +513,89 @@ fn collect_files(dir_path: &str) -> Result<Value, String> {
             .extension()
             .map(|e| e.to_string_lossy().to_ascii_lowercase())
             .unwrap_or_default();
-        let sha256 = if !is_dir
-            && hashes_remaining > 0
+        if !is_dir
+            && hash_jobs.len() < 24
             && size_bytes > 0
             && size_bytes <= 5 * 1024 * 1024
             && matches!(
                 ext.as_str(),
                 "exe" | "dll" | "ps1" | "bat" | "cmd" | "vbs" | "hta" | "jsp" | "aspx" | "php"
-            ) {
-            use std::io::Read;
-            hashes_remaining -= 1;
-            let mut bytes = Vec::new();
-            let read = std::fs::File::open(&path)
-                .and_then(|file| file.take(5 * 1024 * 1024 + 1).read_to_end(&mut bytes));
-            if read.is_ok() && bytes.len() as u64 == size_bytes {
-                format!("{:x}", Sha256::digest(&bytes))
-            } else {
-                String::new()
-            }
-        } else {
-            String::new()
-        };
+            )
+        {
+            hash_jobs.push((pending.len(), path.clone(), size_bytes));
+        }
 
-        entries.push(json!({
-            "name": name,
-            "fullPath": path.to_string_lossy(),
-            "entryType": if is_dir { "dir" } else { "file" },
-            "sizeBytes": size_bytes,
-            "lastWriteTime": last_write,
-            "sha256": sha256,
-            "hidden": hidden,
-            "system": system,
-        }));
+        pending.push((
+            name,
+            path,
+            is_dir,
+            size_bytes,
+            last_write,
+            hidden,
+            system,
+            String::new(),
+        ));
     }
+
+    if !hash_jobs.is_empty() {
+        let workers = std::thread::available_parallelism()
+            .map(|n| n.get().clamp(2, 4))
+            .unwrap_or(2)
+            .min(hash_jobs.len());
+        let chunk_size = hash_jobs.len().div_ceil(workers);
+        let computed: Vec<(usize, String)> = std::thread::scope(|scope| {
+            let mut handles = Vec::new();
+            for chunk in hash_jobs.chunks(chunk_size) {
+                handles.push(scope.spawn(move || {
+                    use std::io::Read;
+                    let mut out = Vec::with_capacity(chunk.len());
+                    for (idx, path, expected_size) in chunk {
+                        let mut bytes = Vec::new();
+                        let read = std::fs::File::open(path).and_then(|file| {
+                            file.take(5 * 1024 * 1024 + 1).read_to_end(&mut bytes)
+                        });
+                        let digest = if read.is_ok() && bytes.len() as u64 == *expected_size {
+                            format!("{:x}", Sha256::digest(&bytes))
+                        } else {
+                            String::new()
+                        };
+                        out.push((*idx, digest));
+                    }
+                    out
+                }));
+            }
+            let mut results = Vec::new();
+            for h in handles {
+                if let Ok(part) = h.join() {
+                    results.extend(part);
+                }
+            }
+            results
+        });
+        for (idx, digest) in computed {
+            if let Some(slot) = pending.get_mut(idx) {
+                slot.7 = digest;
+            }
+        }
+    }
+
+    let entries: Vec<Value> = pending
+        .into_iter()
+        .map(
+            |(name, path, is_dir, size_bytes, last_write, hidden, system, sha256)| {
+                json!({
+                    "name": name,
+                    "fullPath": path.to_string_lossy(),
+                    "entryType": if is_dir { "dir" } else { "file" },
+                    "sizeBytes": size_bytes,
+                    "lastWriteTime": last_write,
+                    "sha256": sha256,
+                    "hidden": hidden,
+                    "system": system,
+                })
+            },
+        )
+        .collect();
 
     Ok(json!({
         "currentPath": target,
@@ -439,6 +695,474 @@ fn collect_registry(key_path: &str) -> Result<Value, String> {
         "注册表路径无效，请使用 HKLM:\\、HKCU:\\、HKU:\\、HKCR:\\ 或 HKCC:\\".to_owned()
     })?;
     query_powershell_json(&script)
+}
+
+const WEBSHELL_EXTENSIONS: &[&str] = &[
+    "php", "phtml", "inc", "php3", "php4", "php5", "php7", "phar", "asp", "asa", "cer", "cdx",
+    "aspx", "ashx", "asmx", "ascx", "cshtml", "config", "jsp", "jspx", "jspf", "py", "ps1", "vbs",
+    "hta", "cgi", "bat", "cmd", "js",
+];
+
+fn discover_webroots(target: &str) -> Result<Vec<PathBuf>, String> {
+    let trimmed = target.trim();
+    if !trimmed.is_empty() && !trimmed.eq_ignore_ascii_case("auto") {
+        let expanded = expand_env_vars(trimmed);
+        let p = PathBuf::from(&expanded);
+        let meta =
+            std::fs::metadata(&p).map_err(|e| format!("无法访问扫描目录 '{expanded}': {e}"))?;
+        if !meta.is_dir() {
+            return Err(format!("扫描路径不是文件夹: {expanded}"));
+        }
+        return Ok(vec![p]);
+    }
+    let mut roots = Vec::new();
+    for candidate in [
+        "C:\\inetpub\\wwwroot",
+        "C:\\wwwroot",
+        "D:\\wwwroot",
+        "E:\\wwwroot",
+        "C:\\phpstudy_pro\\WWW",
+        "D:\\phpstudy_pro\\WWW",
+        "C:\\phpStudy\\WWW",
+        "C:\\xampp\\htdocs",
+        "D:\\xampp\\htdocs",
+        "C:\\wamp64\\www",
+        "C:\\bt_panel\\wwwroot",
+        "D:\\bt_panel\\wwwroot",
+        "C:\\Users\\Public",
+    ] {
+        let path = PathBuf::from(candidate);
+        if path.is_dir() && !roots.contains(&path) {
+            roots.push(path);
+        }
+    }
+    if roots.is_empty() {
+        roots.push(PathBuf::from("C:\\Users\\Public"));
+    }
+    Ok(roots)
+}
+
+/// Multi-threaded D-Shield style Webshell & script backdoor scanner.
+pub fn scan_webshells(target_path: &str) -> Result<Value, String> {
+    use std::collections::VecDeque;
+    use std::io::Read;
+    let started = std::time::Instant::now();
+    let roots = discover_webroots(target_path)?;
+    let scanned_paths: Vec<String> = roots
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    let mut queue: VecDeque<(PathBuf, usize)> = roots.into_iter().map(|r| (r, 0)).collect();
+    let mut candidates: Vec<(PathBuf, String, String, u64, String)> = Vec::new();
+    let mut scanned_dirs = 0u32;
+    let mut truncated = false;
+    let warnings: Vec<String> = Vec::new();
+
+    while let Some((dir, depth)) = queue.pop_front() {
+        if scanned_dirs >= 2000 || candidates.len() >= 10_000 {
+            truncated = true;
+            break;
+        }
+        scanned_dirs += 1;
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in rd.flatten() {
+            let Ok(ft) = entry.file_type() else {
+                continue;
+            };
+            if ft.is_symlink() {
+                continue;
+            }
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if ft.is_dir() {
+                if depth < 12
+                    && !matches!(
+                        name.to_ascii_lowercase().as_str(),
+                        "node_modules" | ".git" | "winsxs" | "installer" | "$recycle.bin"
+                    )
+                {
+                    queue.push_back((path, depth + 1));
+                }
+                continue;
+            }
+            if !ft.is_file() {
+                continue;
+            }
+            let ext = path
+                .extension()
+                .map(|e| e.to_string_lossy().to_ascii_lowercase())
+                .unwrap_or_default();
+            if !WEBSHELL_EXTENSIONS.contains(&ext.as_str()) {
+                continue;
+            }
+            let Ok(meta) = entry.metadata() else {
+                continue;
+            };
+            let len = meta.len();
+            if len == 0 || len > 2 * 1024 * 1024 {
+                continue;
+            }
+            let mtime = meta
+                .modified()
+                .ok()
+                .map(|t| {
+                    let dt: DateTime<Local> = t.into();
+                    dt.format("%Y-%m-%d %H:%M:%S").to_string()
+                })
+                .unwrap_or_default();
+            candidates.push((path, name, format!(".{ext}"), len, mtime));
+            if candidates.len() >= 10_000 {
+                truncated = true;
+                break;
+            }
+        }
+    }
+
+    let scanned_files = candidates.len() as u32;
+    let worker_threads = std::thread::available_parallelism()
+        .map(|n| n.get().clamp(2, 8))
+        .unwrap_or(4);
+
+    let hits: Vec<(u32, Value)> = if candidates.is_empty() {
+        Vec::new()
+    } else {
+        let chunk_size = candidates.len().div_ceil(worker_threads);
+        std::thread::scope(|scope| {
+            let mut handles = Vec::new();
+            for chunk in candidates.chunks(chunk_size) {
+                handles.push(scope.spawn(move || {
+                    let mut local_hits = Vec::new();
+                    for (path, name, ext, size_bytes, last_write) in chunk {
+                        let mut bytes = Vec::new();
+                        if std::fs::File::open(path)
+                            .and_then(|f| f.take(2 * 1024 * 1024 + 1).read_to_end(&mut bytes))
+                            .is_err()
+                        {
+                            continue;
+                        }
+                        if let Some((confidence, risk, threat_type, rules, snippet)) =
+                            inspect_webshell_bytes(&bytes, ext)
+                        {
+                            let sha256 = format!("{:x}", Sha256::digest(&bytes));
+                            local_hits.push((
+                                confidence,
+                                json!({
+                                    "fullPath": path.to_string_lossy(),
+                                    "name": name,
+                                    "extension": ext,
+                                    "sizeBytes": *size_bytes,
+                                    "lastWriteTime": last_write,
+                                    "sha256": sha256,
+                                    "riskLevel": risk,
+                                    "confidenceLevel": confidence,
+                                    "threatType": threat_type,
+                                    "matchedRules": rules,
+                                    "lineSnippet": snippet,
+                                }),
+                            ));
+                        }
+                    }
+                    local_hits
+                }));
+            }
+            let mut merged = Vec::new();
+            for h in handles {
+                if let Ok(part) = h.join() {
+                    merged.extend(part);
+                }
+            }
+            merged
+        })
+    };
+
+    let mut sorted = hits;
+    sorted.sort_by(|a, b| b.0.cmp(&a.0));
+    if sorted.len() > 500 {
+        sorted.truncate(500);
+        truncated = true;
+    }
+    let entries: Vec<Value> = sorted.into_iter().map(|(_, v)| v).collect();
+
+    Ok(json!({
+        "scannedPaths": scanned_paths,
+        "observedAt": chrono::Utc::now().to_rfc3339(),
+        "scannedFiles": scanned_files,
+        "scannedDirs": scanned_dirs,
+        "elapsedMs": started.elapsed().as_millis() as u64,
+        "workerThreads": worker_threads as u32,
+        "truncated": truncated,
+        "warnings": warnings,
+        "entries": entries,
+    }))
+}
+
+pub fn inspect_webshell_bytes(
+    bytes: &[u8],
+    ext: &str,
+) -> Option<(u32, &'static str, String, Vec<String>, String)> {
+    let sample = &bytes[..bytes.len().min(512 * 1024)];
+    let text = String::from_utf8_lossy(sample);
+    let lower = text.to_ascii_lowercase();
+    let mut rules = Vec::new();
+    let mut confidence = 0u32;
+    let mut threat_type = String::new();
+
+    let has_input = [
+        "$_post",
+        "$_get",
+        "$_request",
+        "$_cookie",
+        "php://input",
+        "$_server",
+        "request[",
+        "request.form",
+        "request.querystring",
+        "request.getparameter",
+        "request.binaryread",
+        "page_load",
+    ]
+    .iter()
+    .any(|k| lower.contains(k));
+
+    // 1. Behinder / Godzilla / AntSword encrypted / memory shells
+    if (lower.contains("openssl_decrypt") || lower.contains("mcrypt_decrypt"))
+        && (lower.contains("session_start")
+            || lower.contains("php://input")
+            || lower.contains("base64_decode"))
+    {
+        rules.push("冰蝎 (Behinder) / 哥斯拉 PHP 加密通道后门特征".to_owned());
+        confidence = confidence.max(5);
+        threat_type = "冰蝎/哥斯拉加密 Webshell".to_owned();
+    }
+    if (lower.contains("rijndaelmanaged")
+        || lower.contains("aesmanaged")
+        || lower.contains("descryptoserviceprovider"))
+        && (lower.contains("createdecryptor") || lower.contains("frombase64string"))
+        && (lower.contains("assembly.load") || lower.contains("createinstance"))
+    {
+        rules.push("冰蝎/哥斯拉 ASP.NET 反射字节码内存加载后门特征".to_owned());
+        confidence = confidence.max(5);
+        threat_type = "ASP.NET 加密反射 Webshell".to_owned();
+    }
+    if lower.contains("defineclass")
+        && (lower.contains("cipher")
+            || lower.contains("classloader")
+            || lower.contains("getdeclaredmethod"))
+    {
+        rules.push("JSP 自定义 ClassLoader 字节码加载特征 (冰蝎/哥斯拉/内存马)".to_owned());
+        confidence = confidence.max(5);
+        threat_type = "JSP 字节码加载 Webshell".to_owned();
+    }
+    if lower.contains("@ini_set(\"display_errors\"")
+        && (lower.contains("@set_time_limit") || has_input)
+    {
+        rules.push("蚁剑 (AntSword) / 菜刀典型错误抑制与连接头特征".to_owned());
+        confidence = confidence.max(5);
+        if threat_type.is_empty() {
+            threat_type = "蚁剑/菜刀特征 Webshell".to_owned();
+        }
+    }
+
+    // 2. Classic PHP one-liner & dynamic code evaluation
+    if (lower.contains("eval(")
+        || lower.contains("eval (")
+        || lower.contains("assert(")
+        || lower.contains("assert (")
+        || lower.contains("create_function("))
+        && (has_input
+            || lower.contains("base64_decode")
+            || lower.contains("gzinflate")
+            || lower.contains("gzuncompress")
+            || lower.contains("str_rot13"))
+    {
+        rules.push("PHP 动态代码执行一句话后门 (eval/assert + 外部输入或编码解码)".to_owned());
+        confidence = confidence.max(5);
+        if threat_type.is_empty() {
+            threat_type = "PHP 一句话执行后门".to_owned();
+        }
+    }
+
+    // 3. PHP callback / variable function obfuscated backdoors
+    if has_input
+        && [
+            "call_user_func",
+            "call_user_func_array",
+            "array_map",
+            "array_filter",
+            "usort",
+            "uksort",
+            "register_shutdown_function",
+            "preg_replace",
+        ]
+        .iter()
+        .any(|f| lower.contains(f))
+    {
+        rules.push("PHP 回调函数构造的免杀动态执行后门 (Callback Webshell)".to_owned());
+        confidence = confidence.max(4);
+        if threat_type.is_empty() {
+            threat_type = "PHP 回调免杀后门".to_owned();
+        }
+    }
+    if lower.contains("${$_")
+        || lower.contains("$$_")
+        || (lower.contains("$_get[") && lower.contains("]($_post["))
+    {
+        rules.push("PHP 可变变量/动态函数直接调用特征 (${$_} / $$)".to_owned());
+        confidence = confidence.max(4);
+        if threat_type.is_empty() {
+            threat_type = "PHP 可变变量混淆后门".to_owned();
+        }
+    }
+
+    // 4. ASP / ASP.NET script & command execution
+    if matches!(
+        ext,
+        ".asp" | ".asa" | ".cer" | ".cdx" | ".aspx" | ".ashx" | ".asmx" | ".cshtml"
+    ) && (lower.contains("execute(request")
+        || lower.contains("executeglobal(request")
+        || lower.contains("eval(request")
+        || lower.contains("wscript.shell")
+        || lower.contains("shell.application")
+        || lower.contains("compileassemblyfromsource")
+        || (lower.contains("processstartinfo")
+            && (lower.contains("cmd.exe") || lower.contains("powershell"))))
+    {
+        rules.push("ASP/ASP.NET 命令执行组件或动态编译后门特征".to_owned());
+        confidence = confidence.max(5);
+        if threat_type.is_empty() {
+            threat_type = "ASP/ASP.NET 脚本木马".to_owned();
+        }
+    }
+
+    // 5. JSP / Java command execution & memory shells
+    if matches!(ext, ".jsp" | ".jspx" | ".jspf")
+        && (lower.contains("runtime.getruntime().exec")
+            || lower.contains("processbuilder")
+            || lower.contains("$$bcel$$")
+            || lower.contains("scriptenginemanager")
+            || (lower.contains("applicationfilterconfig") && lower.contains("addfilter")))
+    {
+        rules.push("JSP 系统命令执行、BCEL 或 Filter/Servlet 内存马注入特征".to_owned());
+        confidence = confidence.max(5);
+        if threat_type.is_empty() {
+            threat_type = "JSP 命令执行/内存马后门".to_owned();
+        }
+    }
+
+    // 6. Direct OS command execution in web scripts
+    if has_input
+        && [
+            "shell_exec(",
+            "passthru(",
+            "proc_open(",
+            "popen(",
+            "pcntl_exec(",
+            "system(",
+        ]
+        .iter()
+        .any(|f| lower.contains(f))
+    {
+        rules.push("Web 脚本直接将外部请求参数传入系统命令执行函数".to_owned());
+        confidence = confidence.max(5);
+        if threat_type.is_empty() {
+            threat_type = "Web 命令执行后门".to_owned();
+        }
+    }
+
+    // 7. PowerShell / VBS / HTA dropper scripts in web or public dirs
+    if matches!(ext, ".ps1" | ".vbs" | ".hta" | ".bat" | ".cmd")
+        && !text.contains("LovelyHawkDvcNative")
+        && !text.contains("# LovelyHawk")
+        && (lower.contains("downloadstring")
+            || lower.contains("invoke-expression")
+            || lower.contains("frombase64string")
+            || lower.contains("-enc ")
+            || lower.contains("-encodedcommand")
+            || lower.contains("net.webclient"))
+    {
+        rules.push("脚本包含远程下载执行、Base64 解码或无文件载荷特征".to_owned());
+        confidence = confidence.max(4);
+        if threat_type.is_empty() {
+            threat_type = "可疑下载器/执行脚本".to_owned();
+        }
+    }
+
+    // 8. Obfuscation / chr() chain heuristic in web scripts
+    if matches!(ext, ".php" | ".phtml" | ".asp" | ".aspx" | ".jsp") {
+        let chr_count = lower.matches("chr(").count();
+        if chr_count >= 12
+            && (has_input
+                || lower.contains("eval")
+                || lower.contains("assert")
+                || lower.contains("execute"))
+        {
+            rules.push(format!(
+                "检测到密集的字符拼接混淆 (chr 调用 {chr_count} 次)"
+            ));
+            confidence = confidence.max(3);
+            if threat_type.is_empty() {
+                threat_type = "疑似字符拼接混淆 Webshell".to_owned();
+            }
+        }
+    }
+
+    if rules.is_empty() {
+        return None;
+    }
+
+    let risk = if confidence >= 5 {
+        "high"
+    } else if confidence >= 3 {
+        "medium"
+    } else {
+        "low"
+    };
+
+    let mut snippet = String::new();
+    for (idx, line) in text.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let l = trimmed.to_ascii_lowercase();
+        if [
+            "eval",
+            "assert",
+            "openssl_decrypt",
+            "base64_decode",
+            "rijndael",
+            "defineclass",
+            "getruntime",
+            "processbuilder",
+            "wscript.shell",
+            "shell_exec",
+            "system(",
+            "passthru",
+            "call_user_func",
+            "downloadstring",
+            "invoke-expression",
+            "$_post",
+            "$_get",
+            "$_request",
+        ]
+        .iter()
+        .any(|k| l.contains(k))
+        {
+            let clipped: String = trimmed.chars().take(200).collect();
+            snippet = format!("L{}: {}", idx + 1, clipped);
+            break;
+        }
+    }
+    if snippet.is_empty()
+        && let Some(first) = text.lines().map(str::trim).find(|l| !l.is_empty())
+    {
+        let clipped: String = first.chars().take(200).collect();
+        snippet = format!("L1: {clipped}");
+    }
+
+    Some((confidence, risk, threat_type, rules, snippet))
 }
 
 #[derive(Clone, Copy)]

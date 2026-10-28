@@ -71,7 +71,7 @@ pub fn bounded_output(
                     "查询超时，已停止等待并请求终止查询进程；其派生进程需另行核实".to_owned(),
                 );
             }
-            std::thread::sleep(Duration::from_millis(20));
+            std::thread::sleep(Duration::from_millis(2));
         }
     })();
     if result.is_err() {
@@ -99,7 +99,7 @@ fn read_pipe(
 ) -> std::io::Result<Vec<u8>> {
     use windows::Win32::{Foundation::HANDLE, System::Pipes::PeekNamedPipe};
     let mut bytes = Vec::new();
-    let mut buffer = [0u8; 8192];
+    let mut buffer = [0u8; 65536];
     while !stop.load(Ordering::Acquire) && bytes.len() <= limit {
         let mut available = 0;
         // SAFETY: the pipe is owned throughout this call; no other reader can
@@ -120,7 +120,7 @@ fn read_pipe(
             return Err(std::io::Error::other(error));
         }
         if available == 0 {
-            std::thread::sleep(Duration::from_millis(10));
+            std::thread::sleep(Duration::from_millis(2));
             continue;
         }
         let size = (available as usize)

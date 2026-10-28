@@ -11,11 +11,12 @@ function Gap($c,$text){$coverage[$c].status='partial';$coverage[$c].message=$tex
 function In-Time($c){if($clock.Elapsed.TotalSeconds -gt 30){Gap $c '本次采集达到时间上限，部分位置尚未读取。';return $false};return $true}
 function Open-Key($path){$roots[$path.Substring(0,5)].OpenSubKey($path.Substring(6),$false)}
 function Clip($v,$n){$s=[string]$v;if($s.Length -gt $n){$collectionState.truncated=$true;return $s.Substring(0,$n)+'…[截断]'};return $s}
+function ClipMeta($v,$n){$s=[string]$v;if($s.Length -gt $n){return $s.Substring(0,$n)+'…'};return $s}
 function Row($c,$source,$name,$location,$command,$account,$state){
   $identity=@($c,$source,$location,$name)|ConvertTo-Json -Compress
   if($seenRows.ContainsKey($identity)){return}
   if($rows.Count -ge 20000 -or $coverage[$c].count -ge 5000){$collectionState.truncated=$true;Gap $c '达到本次条目上限（每类 5000 / 总共 20000），清单不完整。';return}
-  $row=@{category=$c;sourceType=$source;name=(Clip $name 500);location=(Clip $location 2000);command=(Clip $command 2000);runAs=(Clip $account 250);state=(Clip $state 60)}
+  $row=@{category=$c;sourceType=$source;name=(Clip $name 500);location=(Clip $location 2000);command=(Clip $command 4000);runAs=(ClipMeta $account 250);state=(ClipMeta $state 200)}
   $bytes=[Text.Encoding]::UTF8.GetByteCount(($row|ConvertTo-Json -Depth 8 -Compress))+1
   if($collectionState.bytes+$bytes -gt 4460000){$collectionState.truncated=$true;Gap $c '达到本次 4.5 MB 字节预算，清单不完整。';return}
   $collectionState.bytes+=$bytes

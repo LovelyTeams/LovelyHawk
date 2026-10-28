@@ -626,7 +626,7 @@ pub(super) fn append_checks(raw: &Map<String, Value>, items: &mut Vec<WindowsBas
             severity: match status { "pass" | "not-applicable" => WindowsRiskLevel::Normal, "unknown" => WindowsRiskLevel::Low, _ => WindowsRiskLevel::Medium },
             description: format!("{scope}{note}"),
             recommendation: if status == "unknown" { "补齐读取权限、组件及适用范围后重新检查；不要把未取得的数据当作通过。" } else if status == "not-applicable" { "本项不计为通过；请按当前主机角色与前置策略核查对应范围。" } else { "先评估组织要求、业务依赖与采集影响，再制定具体变更、备份和恢复计划；变更后独立读取并验证实际行为。" }.to_owned(),
-            remediation_available: false,
+            remediation_available: matches!(status, "fail" | "warn") && super::baseline_change_supported(id),
         });
     }
 }
@@ -915,10 +915,12 @@ mod tests {
         assert_eq!(item(json!({"llmnr":0}), "llmnr").status, "pass");
         assert_eq!(item(json!({"llmnr":1}), "llmnr").status, "fail");
         assert_eq!(item(json!({"llmnr":99}), "llmnr").status, "unknown");
-        assert!(!item(json!({"llmnr":1}), "llmnr").remediation_available);
+        assert!(item(json!({"llmnr":1}), "llmnr").remediation_available);
+        assert!(!item(json!({"llmnr":0}), "llmnr").remediation_available);
+        assert!(!item(json!({"llmnr":99}), "llmnr").remediation_available);
         assert!(item(json!({"wdigest":1}), "wdigest").remediation_available);
         assert!(!item(json!({}), "wdigest").remediation_available);
-        assert!(!item(json!({"defenderTamper":0}), "defender-tamper").remediation_available);
+        assert!(item(json!({"defenderTamper":0}), "defender-tamper").remediation_available);
     }
 
     #[cfg(windows)]

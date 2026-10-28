@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $procMap = @{}
-Get-CimInstance Win32_Process -ErrorAction Stop | ForEach-Object { $procMap[[uint32]$_.ProcessId] = @{ name = [string]$_.Name; path = [string]$_.ExecutablePath } }
+Get-CimInstance Win32_Process -Property ProcessId,Name,ExecutablePath -ErrorAction Stop | ForEach-Object { $procMap[[uint32]$_.ProcessId] = @{ name = [string]$_.Name; path = [string]$_.ExecutablePath } }
 $out = New-Object System.Collections.Generic.List[object]
 foreach ($kind in @('TCP','UDP')) {
   $rows = if ($kind -eq 'TCP') { @(Get-NetTCPConnection -ErrorAction Stop | Select-Object -First 8193) } else { @(Get-NetUDPEndpoint -ErrorAction Stop | Select-Object -First 8193) }

@@ -198,7 +198,7 @@ if ($lockText -match "(?m)^\s{2}'?(?:electron|@tauri-apps/plugin-[a-z-]+|node-pt
 }
 
 # Rust dependencies are declared once, in the workspace manifest.
-foreach ($crate in @('lovelyhawk-core', 'lovelyhawk-backend', 'lovelyhawk-terminal', 'lovelyhawk-desktop')) {
+foreach ($crate in @('lovelyhawk-core', 'lovelyhawk-backend', 'lovelyhawk-terminal', 'lovelyhawk-desktop', 'lovelyhawk-win-dvc')) {
     $manifest = Join-Path $root "crates/$crate/Cargo.toml"
     if (-not (Test-Path -LiteralPath $manifest)) { $violations.Add("missing crates/$crate/Cargo.toml"); continue }
     $inDependencies = $false

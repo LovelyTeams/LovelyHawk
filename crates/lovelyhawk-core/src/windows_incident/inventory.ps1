@@ -10,6 +10,11 @@ function Text($value, $limit) {
   if ($text.Length -gt $limit) { $capture.truncated=$true; return $text.Substring(0,$limit) + '…[截断]' }
   return $text
 }
+function ClipDesc($value, $limit) {
+  $text = [string]$value
+  if ($text.Length -gt $limit) { return $text.Substring(0,$limit) + '…' }
+  return $text
+}
 try {
   if ($kind -eq 'tasks') {
     $all = @(Get-ScheduledTask -ErrorAction Stop | Select-Object -First 2001)
@@ -18,26 +23,26 @@ try {
       $details = New-Object 'Collections.Generic.List[string]'
       $actions = @($t.Actions)
       foreach ($a in ($actions | Select-Object -First 10)) {
-        $details.Add((Text ("操作：" + $a.CimClass.CimClassName + ' · ' + $a.Execute + ' ' + $a.Arguments + ' · 工作目录：' + $a.WorkingDirectory + ' · 类标识：' + $a.ClassId) 900))
+        $details.Add((ClipDesc ("操作：" + $a.CimClass.CimClassName + ' · ' + $a.Execute + ' ' + $a.Arguments + ' · 工作目录：' + $a.WorkingDirectory + ' · 类标识：' + $a.ClassId) 900))
       }
       foreach ($trigger in ($t.Triggers | Select-Object -First 10)) {
-        $details.Add((Text ("触发器：" + $trigger.CimClass.CimClassName + ' · 开始：' + $trigger.StartBoundary + ' · 启用：' + $trigger.Enabled) 900))
+        $details.Add((ClipDesc ("触发器：" + $trigger.CimClass.CimClassName + ' · 开始：' + $trigger.StartBoundary + ' · 启用：' + $trigger.Enabled) 900))
       }
       if ($actions.Count -gt 10 -or @($t.Triggers).Count -gt 10) { $details.Add('操作或触发器仅展示前 10 项。'); $capture.truncated=$true }
-      $details.Add((Text ("权限：" + $t.Principal.RunLevel + ' · 登录类型：' + $t.Principal.LogonType) 900))
-      $items.Add(@{name=(Text $t.TaskName 250);displayName=(Text $t.Description 250);location=(Text $t.TaskPath 500);command=(Text (($actions | Select-Object -First 10 | ForEach-Object { ([string]$_.Execute + ' ' + $_.Arguments).Trim() }) -join ' ; ') 2000);account=(Text $t.Principal.UserId 250);state=[string]$t.State;startMode='';pid=0;details=$details.ToArray();riskLevel='normal';riskReason=''})
+      $details.Add((ClipDesc ("权限：" + $t.Principal.RunLevel + ' · 登录类型：' + $t.Principal.LogonType) 900))
+      $items.Add(@{name=(Text $t.TaskName 500);displayName=(ClipDesc $t.Description 300);location=(Text $t.TaskPath 1000);command=(Text (($actions | Select-Object -First 10 | ForEach-Object { ([string]$_.Execute + ' ' + $_.Arguments).Trim() }) -join ' ; ') 4000);account=(ClipDesc $t.Principal.UserId 250);state=[string]$t.State;startMode='';pid=0;details=$details.ToArray();riskLevel='normal';riskReason=''})
     }
   } else {
     $class = if ($kind -eq 'drivers') { 'Win32_SystemDriver' } else { 'Win32_Service' }
     $all = @(Get-CimInstance -ClassName $class -OperationTimeoutSec 15 -ErrorAction Stop | Select-Object -First 2001)
     $total = $all.Count
     foreach ($s in ($all | Select-Object -First 2000)) {
-      $details = @((Text ("说明：" + $s.Description) 900),(Text ("服务类型：" + $s.ServiceType + ' · 错误控制：' + $s.ErrorControl + ' · 接受停止：' + $s.AcceptStop) 900))
+      $details = @((ClipDesc ("说明：" + $s.Description) 900),(ClipDesc ("服务类型：" + $s.ServiceType + ' · 错误控制：' + $s.ErrorControl + ' · 接受停止：' + $s.AcceptStop) 900))
       $processId = if ($kind -eq 'services') { [uint32]$s.ProcessId } else { 0 }
       $command=[string]$s.PathName
       $key=$null
       try{$key=[Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SYSTEM\CurrentControlSet\Services\'+$s.Name);if($null -ne $key){$command=[string]$key.GetValue('ImagePath','',[Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)}}catch{$details+='未取得原始执行配置，处置前需要重新核对。'}finally{if($null -ne $key){$key.Dispose()}}
-      $items.Add(@{name=(Text $s.Name 250);displayName=(Text $s.DisplayName 250);location=(Text ('HKLM:\SYSTEM\CurrentControlSet\Services\' + $s.Name) 500);command=(Text $command 2000);account=(Text $s.StartName 250);state=[string]$s.State;startMode=[string]$s.StartMode;pid=$processId;details=$details;riskLevel='normal';riskReason=''})
+      $items.Add(@{name=(Text $s.Name 500);displayName=(ClipDesc $s.DisplayName 300);location=(Text ('HKLM:\SYSTEM\CurrentControlSet\Services\' + $s.Name) 1000);command=(Text $command 4000);account=(ClipDesc $s.StartName 250);state=[string]$s.State;startMode=[string]$s.StartMode;pid=$processId;details=$details;riskLevel='normal';riskReason=''})
     }
   }
 } catch {

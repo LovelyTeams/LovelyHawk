@@ -193,9 +193,9 @@ export function WinIrStartup({ snapshot, focus, related, busy = false, connected
   );
 }
 
-export function WinIrAccounts({ snapshot, focus, related, busy = false, connected = false, onCopy, onLogs, onDisable }: {
+export function WinIrAccounts({ snapshot, focus, related, busy = false, connected = false, onCopy, onLogs, onDisable, onDelete }: {
   snapshot: WindowsAccountsSnapshot | null; focus?: Target<"accounts">; related?: RelatedContext; busy?: boolean; connected?: boolean;
-  onCopy: (text: string) => void; onLogs: (account: string) => void; onDisable?: (entry: WindowsAccountEntry) => void;
+  onCopy: (text: string) => void; onLogs: (account: string) => void; onDisable?: (entry: WindowsAccountEntry) => void; onDelete?: (entry: WindowsAccountEntry) => void;
 }) {
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState("all");
@@ -256,6 +256,17 @@ export function WinIrAccounts({ snapshot, focus, related, busy = false, connecte
               onClick={() => onDisable(current)}
             >
               禁用账户
+            </button>
+          ) : null}
+          {onDelete ? (
+            <button
+              type="button"
+              className="win-ir-btn is-danger"
+              disabled={busy || !connected || !current.sid.startsWith("S-1-") || current.rid < 1000}
+              title={current.rid < 1000 ? "系统内置账户（RID < 1000）不可删除，请使用禁用账户" : undefined}
+              onClick={() => onDelete(current)}
+            >
+              删除账户
             </button>
           ) : null}
         </>}>

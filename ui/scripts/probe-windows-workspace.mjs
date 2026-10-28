@@ -170,7 +170,7 @@ try {
   }
   await module("基线配置");
   await chooseRow("本地账户最短口令长度");
-  check("new baseline findings show their source and do not offer unsupported quick repair", await evaluate(`${visibleDetail}?.textContent.includes('NetUserModalsGet') && ![...${visibleDetail}.querySelectorAll('button')].some(b => b.textContent.includes('快速修复')) && ${visibleDetail}.textContent.includes('尚未提供自动修复')`));
+  check("new baseline findings show their source and offer guarded preview remediation", await evaluate(`${visibleDetail}?.textContent.includes('NetUserModalsGet') && [...${visibleDetail}.querySelectorAll('button')].some(b => b.textContent.includes('预览配置差异'))`));
   await clickText("不适用", false);
   check("not applicable baseline results have a separate filter and neutral label", await evaluate(`(() => { const rows = ${scope}.querySelector('table[aria-label^="基线检查"] tbody'); return rows.rows.length === 1 && rows.textContent.includes('锁定持续时间') && rows.textContent.includes('不适用'); })()`));
   await chooseRow("锁定持续时间");
@@ -715,7 +715,7 @@ try {
   await screenshot("22a-process-narrow-inspector");
   await clickLabel("关闭详情");
   check("closing the narrow inspector restores the table and keyboard focus", await evaluate(`getComputedStyle(${scope}.querySelector('.wir-process-list')).display !== 'none' && document.activeElement?.getAttribute('role') === 'grid'`));
-  check("collapsed navigation retains all investigation names and the desktop entry", await evaluate(`${scope}.querySelectorAll('.win-ir-nav-item[aria-label]').length === 14 && Boolean(${scope}.querySelector('button[aria-label="远程桌面"]'))`));
+  check("collapsed navigation retains all investigation names and the desktop entry", await evaluate(`${scope}.querySelectorAll('.win-ir-nav-item[aria-label]').length === 17 && Boolean(${scope}.querySelector('button[aria-label="远程桌面"]'))`));
   await screenshot("23-navigation-rail");
   await module("响应方案");
   await setInput(playbookSearch, "");

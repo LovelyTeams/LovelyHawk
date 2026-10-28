@@ -15,7 +15,7 @@ pub(super) fn compressed_command(script: &str) -> CoreResult<String> {
     let data = BASE64.encode(gzip.finish().map_err(|_| invalid())?);
     // Fixed application source only; caller data is separately encoded JSON.
     let loader = format!(
-        "$m=[IO.MemoryStream]::new([Convert]::FromBase64String('{data}'));$z=[IO.Compression.GZipStream]::new($m,[IO.Compression.CompressionMode]::Decompress);$r=[IO.StreamReader]::new($z,[Text.Encoding]::UTF8);try{{& ([ScriptBlock]::Create($r.ReadToEnd()))}}finally{{$r.Dispose();$m.Dispose()}}"
+        "# LovelyHawk-IR-Query\n$m=[IO.MemoryStream]::new([Convert]::FromBase64String('{data}'));$z=[IO.Compression.GZipStream]::new($m,[IO.Compression.CompressionMode]::Decompress);$r=[IO.StreamReader]::new($z,[Text.Encoding]::UTF8);try{{& ([ScriptBlock]::Create($r.ReadToEnd()))}}finally{{$r.Dispose();$m.Dispose()}}"
     );
     let command = encode_powershell_command(&loader);
     if command.encode_utf16().count() > 30000 {

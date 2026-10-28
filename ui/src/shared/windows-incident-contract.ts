@@ -16,8 +16,11 @@ export type WindowsRemoteIntent =
         | "collect-processes"
         | "collect-network"
         | "collect-startup"
-        | "collect-accounts";
+        | "collect-accounts"
+        | "collect-defender"
+        | "collect-commands";
     }
+  | { action: "scan-webshells"; path: string }
   | { action: "collect-logs"; category: string }
   | { action: "inspect-process"; pid: number; startTime: string }
   | { action: "collect-files"; path: string }
@@ -39,6 +42,7 @@ export type WindowsRemoteIntent =
   | { action: "kill-process"; pid: number; startTime: string }
   | { action: "remove-startup"; sourceType: string; name: string; location: string }
   | { action: "disable-account"; name: string; sid: string }
+  | { action: "delete-account"; name: string; sid: string }
   | { action: "delete-file"; path: string; dirPath: string }
   | { action: "delete-registry-value"; keyPath: string; valueName: string };
 
@@ -300,7 +304,129 @@ export interface WindowsRegistrySnapshot {
   warnings: string[];
 }
 
-export const WINDOWS_BASELINE_CHANGE_IDS = ["rdp-nla", "rdp-encryption", "rdp-security-layer", "wdigest", "uac", "uac-prompt", "uac-secure-desktop", "uac-filter-admin", "blank-password", "anonymous", "anonymous-sam", "ntlm", "lm-hash", "winrm-basic", "winrm-cleartext", "installer-machine", "installer-user", "autorun", "ps-scriptblock-logging"] as const;
+export interface WindowsWebshellEntry {
+  fullPath: string;
+  name: string;
+  extension: string;
+  sizeBytes: number;
+  lastWriteTime: string;
+  sha256: string;
+  riskLevel: WindowsRiskLevel;
+  confidenceLevel: number;
+  threatType: string;
+  matchedRules: string[];
+  lineSnippet: string;
+}
+
+export interface WindowsWebshellSnapshot {
+  scannedPaths: string[];
+  observedAt: string;
+  scannedFiles: number;
+  scannedDirs: number;
+  elapsedMs: number;
+  workerThreads: number;
+  truncated: boolean;
+  highRiskCount: number;
+  mediumRiskCount: number;
+  warnings: string[];
+  entries: WindowsWebshellEntry[];
+}
+
+export interface WindowsDefenderExclusion {
+  kind: string;
+  value: string;
+  source: string;
+  riskLevel: WindowsRiskLevel;
+  riskReason: string;
+}
+
+export interface WindowsDefenderDetection {
+  recordId: number;
+  timeCreated: string;
+  eventId: number;
+  threatName: string;
+  severity: string;
+  category: string;
+  filePath: string;
+  processName: string;
+  user: string;
+  action: string;
+  detail: string;
+  riskLevel: WindowsRiskLevel;
+}
+
+export interface WindowsDefenderConfigChange {
+  recordId: number;
+  timeCreated: string;
+  eventId: number;
+  changeType: string;
+  oldValue: string;
+  newValue: string;
+  detail: string;
+  riskLevel: WindowsRiskLevel;
+}
+
+export interface WindowsDefenderSnapshot {
+  observedAt: string;
+  runningMode: string;
+  antivirusEnabled: boolean | null;
+  realtimeProtection: boolean | null;
+  behaviorMonitor: boolean | null;
+  ioavProtection: boolean | null;
+  onAccessProtection: boolean | null;
+  tamperProtected: boolean | null;
+  engineVersion: string;
+  signatureVersion: string;
+  signatureLastUpdated: string;
+  signatureAgeDays: number | null;
+  highRiskCount: number;
+  exclusions: WindowsDefenderExclusion[];
+  detections: WindowsDefenderDetection[];
+  configChanges: WindowsDefenderConfigChange[];
+  warnings: string[];
+}
+
+export interface WindowsCommandEntry {
+  id: string;
+  timeCreated: string;
+  source: string;
+  pid: number;
+  ppid: number;
+  processName: string;
+  executablePath: string;
+  parentName: string;
+  user: string;
+  commandLine: string;
+  riskLevel: WindowsRiskLevel;
+  riskReasons: string[];
+}
+
+export interface WindowsCommandMonitorSnapshot {
+  observedAt: string;
+  totalCount: number;
+  highRiskCount: number;
+  mediumRiskCount: number;
+  processCreationEventsEnabled: boolean;
+  commandLineAuditEnabled: boolean;
+  scriptBlockLoggingEnabled: boolean;
+  sysmonInstalled: boolean;
+  warnings: string[];
+  entries: WindowsCommandEntry[];
+}
+
+export const WINDOWS_BASELINE_CHANGE_IDS = [
+  "rdp-nla", "rdp-encryption", "rdp-security-layer", "wdigest", "uac", "uac-prompt", "uac-secure-desktop", "uac-filter-admin",
+  "blank-password", "anonymous", "anonymous-sam", "ntlm", "lm-hash", "winrm-basic", "winrm-cleartext", "installer-machine",
+  "installer-user", "autorun", "ps-scriptblock-logging", "lsass-ppl", "guest", "auto-logon", "smb1", "defender-rt", "firewall",
+  "ps-module-logging", "ps-transcription", "smb-server-sign", "smb-client-sign", "smb-insecure-guest", "defender-tamper",
+  "remote-registry", "password-length", "password-history", "password-min-age", "lockout-threshold", "lockout-duration",
+  "lockout-reset", "audit-logon", "audit-lockout", "audit-special-logon", "audit-process-creation", "audit-policy-change",
+  "audit-user-account", "audit-security-group", "audit-credential-validation", "security-log-enabled", "system-log-enabled",
+  "application-log-enabled", "powershell-log-enabled", "security-log-size", "system-log-size", "process-command-line",
+  "firewall-inbound", "firewall-dropped-log", "firewall-log-size", "defender-antivirus", "defender-behavior", "defender-on-access",
+  "defender-signature-age", "vbs-running", "credential-guard-running", "memory-integrity-running", "uac-standard-prompt",
+  "remote-token-filter", "everyone-anonymous", "winrm-client-basic", "winrm-client-cleartext", "llmnr",
+] as const;
 export interface WindowsBaselinePlanItem { id: string; title: string; location: string; currentValue: string; expectedValue: string; impact: string }
 export interface WindowsBaselineChangePlan { id: string; target: string; expiresAt: number; restoring: boolean; items: WindowsBaselinePlanItem[]; notes: string[] }
 export type WindowsBaselineChangeState = "pending" | "applying" | "verified" | "restored" | "refused" | "uncertain" | "skipped";
@@ -344,7 +470,10 @@ export type WindowsIncidentResponse =
   | { kind: "files"; snapshot: WindowsFilesSnapshot }
   | { kind: "file-preview"; preview: WindowsFilePreview }
   | { kind: "file-access"; inspection: WindowsFileAccess }
-  | { kind: "registry"; snapshot: WindowsRegistrySnapshot };
+  | { kind: "registry"; snapshot: WindowsRegistrySnapshot }
+  | { kind: "webshell"; snapshot: WindowsWebshellSnapshot }
+  | { kind: "defender"; snapshot: WindowsDefenderSnapshot }
+  | { kind: "commands"; snapshot: WindowsCommandMonitorSnapshot };
 
 export interface WindowsIncidentApi {
   windowsChannel?: import("./windows-channel-contract").WindowsChannelOwnerApi;
@@ -409,9 +538,18 @@ export function isWindowsIncidentRequest(value: unknown): value is WindowsIncide
     case "collect-network":
     case "collect-startup":
     case "collect-accounts":
+    case "collect-defender":
+    case "collect-commands":
       return keys();
+    case "scan-webshells":
+      return (
+        keys("path") &&
+        isBoundedText(value.path, 1024, true) &&
+        !value.path.includes("\n") &&
+        !value.path.includes("\r")
+      );
     case "plan-baseline":
-      return keys("ruleIds") && Array.isArray(value.ruleIds) && value.ruleIds.length>0 && value.ruleIds.length<=19 && new Set(value.ruleIds).size===value.ruleIds.length && value.ruleIds.every(isBaselineChangeId);
+      return keys("ruleIds") && Array.isArray(value.ruleIds) && value.ruleIds.length>0 && value.ruleIds.length<=WINDOWS_BASELINE_CHANGE_IDS.length && new Set(value.ruleIds).size===value.ruleIds.length && value.ruleIds.every(isBaselineChangeId);
     case "apply-baseline-plan": case "discard-baseline-plan": case "cancel-baseline-plan": case "baseline-plan-progress":
       return keys("planId") && isWindowsFileId(value.planId);
     case "plan-baseline-restore": return keys("recordId") && isWindowsFileId(value.recordId);
@@ -492,6 +630,20 @@ export function isWindowsIncidentRequest(value: unknown): value is WindowsIncide
         !value.name.includes("\r") &&
         /^S-1-[0-9-]+$/u.test(value.sid)
       );
+    case "delete-account": {
+      if (
+        !keys("name", "sid") ||
+        !isBoundedText(value.name, 256) ||
+        !isBoundedText(value.sid, 128) ||
+        value.name.includes("\n") ||
+        value.name.includes("\r") ||
+        !/^S-1-[0-9-]+$/u.test(value.sid)
+      ) {
+        return false;
+      }
+      const rid = Number(value.sid.split("-").at(-1));
+      return Number.isSafeInteger(rid) && rid >= 1000;
+    }
     case "delete-file":
       return (
         keys("path", "dirPath") &&
@@ -629,6 +781,103 @@ const checkRegistry = object({
   values: list(object({ name: shortText, kind: shortText, data: text, truncated: boolean, riskLevel: risk, riskReason: shortText }), 4096),
   warnings: reasonList,
 });
+const checkWebshell = object({
+  scannedPaths: list(shortText, 64),
+  observedAt: shortText,
+  scannedFiles: uint,
+  scannedDirs: uint,
+  elapsedMs: uint,
+  workerThreads: uint,
+  truncated: boolean,
+  highRiskCount: uint,
+  mediumRiskCount: uint,
+  warnings: reasonList,
+  entries: list(object({
+    fullPath: text,
+    name: shortText,
+    extension: shortText,
+    sizeBytes: uint,
+    lastWriteTime: shortText,
+    sha256: hash,
+    riskLevel: risk,
+    confidenceLevel: (v) => uint(v) && (v as number) >= 1 && (v as number) <= 5,
+    threatType: shortText,
+    matchedRules: list(shortText, 16),
+    lineSnippet: shortText,
+  }), 1000),
+});
+const checkDefender = object({
+  observedAt: shortText,
+  runningMode: shortText,
+  antivirusEnabled: nullable(boolean),
+  realtimeProtection: nullable(boolean),
+  behaviorMonitor: nullable(boolean),
+  ioavProtection: nullable(boolean),
+  onAccessProtection: nullable(boolean),
+  tamperProtected: nullable(boolean),
+  engineVersion: shortText,
+  signatureVersion: shortText,
+  signatureLastUpdated: shortText,
+  signatureAgeDays: nullable(uint),
+  highRiskCount: uint,
+  exclusions: list(object({
+    kind: shortText,
+    value: shortText,
+    source: shortText,
+    riskLevel: risk,
+    riskReason: shortText,
+  }), 512),
+  detections: list(object({
+    recordId: uint,
+    timeCreated: shortText,
+    eventId: uint,
+    threatName: shortText,
+    severity: shortText,
+    category: shortText,
+    filePath: shortText,
+    processName: shortText,
+    user: shortText,
+    action: shortText,
+    detail: text,
+    riskLevel: risk,
+  }), 512),
+  configChanges: list(object({
+    recordId: uint,
+    timeCreated: shortText,
+    eventId: uint,
+    changeType: shortText,
+    oldValue: shortText,
+    newValue: shortText,
+    detail: text,
+    riskLevel: risk,
+  }), 512),
+  warnings: reasonList,
+});
+const checkCommands = object({
+  observedAt: shortText,
+  totalCount: uint,
+  highRiskCount: uint,
+  mediumRiskCount: uint,
+  processCreationEventsEnabled: boolean,
+  commandLineAuditEnabled: boolean,
+  scriptBlockLoggingEnabled: boolean,
+  sysmonInstalled: boolean,
+  warnings: reasonList,
+  entries: list(object({
+    id: shortText,
+    timeCreated: shortText,
+    source: shortText,
+    pid: uint,
+    ppid: uint,
+    processName: shortText,
+    executablePath: shortText,
+    parentName: shortText,
+    user: shortText,
+    commandLine: text,
+    riskLevel: risk,
+    riskReasons: reasonList,
+  }), 2048),
+});
 const checkPreviewShape = object({
   fullPath: (value) => isBoundedText(value, 32 * 1024),
   sizeBytes: uint, lastWriteTime: shortText, previewB64: text, previewBytes: uint, truncated: boolean,
@@ -711,7 +960,14 @@ export function matchesWindowsIncidentResponse(
       return snapshotResponse(value, "startup", checkStartup);
     case "collect-accounts":
     case "disable-account":
+    case "delete-account":
       return snapshotResponse(value, "accounts", checkAccounts);
+    case "scan-webshells":
+      return snapshotResponse(value, "webshell", checkWebshell);
+    case "collect-defender":
+      return snapshotResponse(value, "defender", checkDefender);
+    case "collect-commands":
+      return snapshotResponse(value, "commands", checkCommands);
     case "collect-logs":
       return snapshotResponse(value, "logs", checkLogs);
     case "collect-files":
@@ -732,10 +988,10 @@ export function matchesWindowsIncidentResponse(
 function isBaselineChangeId(value: unknown): value is string { return typeof value === "string" && (WINDOWS_BASELINE_CHANGE_IDS as readonly string[]).includes(value); }
 function isEpoch(value: unknown): value is number { return typeof value === "number" && Number.isSafeInteger(value) && value>0; }
 function isBaselineChangePlan(value: unknown): value is WindowsBaselineChangePlan {
-  return isRecord(value) && exactKeys(value,["id","target","expiresAt","restoring","items","notes"]) && isWindowsFileId(value.id) && isBoundedText(value.target,255) && isEpoch(value.expiresAt) && typeof value.restoring === "boolean" && Array.isArray(value.notes) && value.notes.length<=10 && value.notes.every((v) => isBoundedText(v,2048)) && Array.isArray(value.items) && value.items.length<=19 && value.items.every((item) => isRecord(item) && exactKeys(item,["id","title","location","currentValue","expectedValue","impact"]) && isBaselineChangeId(item.id) && isBoundedText(item.title,256) && isBoundedText(item.location,1024) && isBoundedText(item.currentValue,256) && isBoundedText(item.expectedValue,256) && isBoundedText(item.impact,2048)) && new Set(value.items.map((v) => v.id)).size===value.items.length;
+  return isRecord(value) && exactKeys(value,["id","target","expiresAt","restoring","items","notes"]) && isWindowsFileId(value.id) && isBoundedText(value.target,255) && isEpoch(value.expiresAt) && typeof value.restoring === "boolean" && Array.isArray(value.notes) && value.notes.length<=10 && value.notes.every((v) => isBoundedText(v,2048)) && Array.isArray(value.items) && value.items.length<=WINDOWS_BASELINE_CHANGE_IDS.length && value.items.every((item) => isRecord(item) && exactKeys(item,["id","title","location","currentValue","expectedValue","impact"]) && isBaselineChangeId(item.id) && isBoundedText(item.title,256) && isBoundedText(item.location,1024) && isBoundedText(item.currentValue,256) && isBoundedText(item.expectedValue,256) && isBoundedText(item.impact,2048)) && new Set(value.items.map((v) => v.id)).size===value.items.length;
 }
 function isBaselineChangeReport(value: unknown): value is WindowsBaselineChangeReport {
-  if (!isRecord(value) || !exactKeys(value,["id","target","createdAt","restoring","finished","recoveryAvailable","items","message"]) || !isWindowsFileId(value.id) || !isBoundedText(value.target,255) || !isEpoch(value.createdAt) || typeof value.restoring!=="boolean" || typeof value.finished!=="boolean" || typeof value.recoveryAvailable!=="boolean" || !isBoundedText(value.message,2048) || !Array.isArray(value.items) || value.items.length<1 || value.items.length>19) return false;
+  if (!isRecord(value) || !exactKeys(value,["id","target","createdAt","restoring","finished","recoveryAvailable","items","message"]) || !isWindowsFileId(value.id) || !isBoundedText(value.target,255) || !isEpoch(value.createdAt) || typeof value.restoring!=="boolean" || typeof value.finished!=="boolean" || typeof value.recoveryAvailable!=="boolean" || !isBoundedText(value.message,2048) || !Array.isArray(value.items) || value.items.length<1 || value.items.length>WINDOWS_BASELINE_CHANGE_IDS.length) return false;
   return value.items.every((item) => isRecord(item) && exactKeys(item,["id","title","state"]) && isBaselineChangeId(item.id) && isBoundedText(item.title,256) && typeof item.state==="string" && ["pending","applying","verified","restored","refused","uncertain","skipped"].includes(item.state) && (!value.finished || !["pending","applying"].includes(item.state))) && new Set(value.items.map((v) => v.id)).size===value.items.length && value.recoveryAvailable===(!value.restoring && value.items.some((v) => v.state==="verified"));
 }
 

@@ -113,8 +113,7 @@ impl WindowsIncidentService {
         session: &str,
     ) -> CoreResult<WindowsInventorySnapshot> {
         let script = include_str!("inventory.ps1").replace("__KIND__", kind.key());
-        let raw =
-            self.run_native_or_ps(&format!("inventory-v2:{}", kind.key()), &script, session)?;
+        let raw = self.run_bounded_script(&script, session)?;
         let mut snapshot = parse_inventory_json(&raw, kind)?;
         self.bind_inventory(&mut snapshot, session);
         Ok(snapshot)

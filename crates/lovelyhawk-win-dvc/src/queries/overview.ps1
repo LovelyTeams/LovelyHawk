@@ -42,7 +42,7 @@ Read-Part '网络适配器' {
   }
 } | Out-Null
 Read-Part '系统更新' {
-  $patches = @(Get-CimInstance Win32_QuickFixEngineering -OperationTimeoutSec 8 | Sort-Object InstalledOn -Descending | Select-Object -First 51)
+  $patches = @(Get-CimInstance Win32_QuickFixEngineering -Property HotFixID,Description,InstalledOn -OperationTimeoutSec 4 | Sort-Object InstalledOn -Descending | Select-Object -First 51)
   if ($patches.Count -gt 50) { $warnings.Add('更新记录仅显示最近 50 项；此来源不包含全部更新类型。') }
   foreach ($p in ($patches | Select-Object -First 50)) { Fact '更新记录' $p.HotFixID "$($p.Description) · $($p.InstalledOn)" }
 } | Out-Null

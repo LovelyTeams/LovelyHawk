@@ -52,11 +52,14 @@ describe("WindowsIncidentPage", () => {
     expect(html).toContain("响应方案");
     expect(html).toContain("基线配置");
     expect(html).toContain("进程分析");
+    expect(html).toContain("命令监控");
     expect(html).toContain("网络连接");
     expect(html).toContain("启动项");
     expect(html).toContain("本地账户");
     expect(html).toContain("事件日志");
+    expect(html).toContain("Defender 解析");
     expect(html).toContain("文件排查");
+    expect(html).toContain("Webshell 查杀");
     expect(html).toContain("注册表");
   });
 });

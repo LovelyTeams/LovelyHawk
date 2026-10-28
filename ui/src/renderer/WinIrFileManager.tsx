@@ -56,6 +56,7 @@ export interface FileManagerProps {
   onPreview: (path: string) => Promise<WindowsFilePreview>;
   onPull: (path: string) => void;
   onDelete?: (entry: WindowsFileEntry) => void;
+  onScanWebshells?: (path: string) => void;
   onCopy: (text: string) => void;
 }
 
@@ -64,7 +65,7 @@ export interface FileManagerProps {
  * an address bar with history, a sortable listing and a properties / preview
  * pane. Preview reads the first 16 KB only; deleting a file requires confirmation.
  */
-export function WinIrFileManager({ snapshot, busy, connected, revealPath, related, onNavigate, onPreview, onInspectAccess, onCommands, onPull, onDelete, onCopy }: FileManagerProps) {
+export function WinIrFileManager({ snapshot, busy, connected, revealPath, related, onNavigate, onPreview, onInspectAccess, onCommands, onPull, onDelete, onScanWebshells, onCopy }: FileManagerProps) {
   const [trail, setTrail] = useState<{ items: string[]; index: number }>({ items: [], index: -1 });
   const travellingRef = useRef<number | null>(null);
   const history = trail.items;
@@ -255,6 +256,7 @@ export function WinIrFileManager({ snapshot, busy, connected, revealPath, relate
             <button type="button" className="win-ir-btn" disabled={!selectedEntry} onClick={() => selectedEntry && onCopy(selectedEntry.fullPath)}>复制完整路径</button>
             <button type="button" className="win-ir-btn" disabled={!selectedEntry || selectedEntry.entryType === "dir" || selectedEntry.sizeBytes > 8 * 1024 * 1024 || busy || !connected} onClick={() => selectedEntry && onPull(selectedEntry.fullPath)}>取证拉取</button>
             {onDelete ? <button type="button" className="win-ir-btn is-danger" disabled={!selectedEntry || selectedEntry.entryType === "dir" || busy || !connected} onClick={() => selectedEntry && onDelete(selectedEntry)}>删除文件</button> : null}
+            {onScanWebshells ? <button type="button" className="win-ir-btn" disabled={busy || !connected} onClick={() => onScanWebshells(selectedEntry?.entryType === "dir" ? selectedEntry.fullPath : (currentPath ?? address))}>在此目录查杀 Webshell ↗</button> : null}
             <button type="button" className="win-ir-btn" aria-pressed={showDetails} onClick={() => setShowDetails(!showDetails)}>详情窗格</button>
           </div>
           <FilterChips<KindFilter>

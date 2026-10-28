@@ -280,7 +280,11 @@ impl BackendServices {
         session_id: &str,
     ) -> CoreResult<BoundSshSession> {
         self.inner.target.validate(guard)?;
-        let bound = self.inner.ssh.bind_session(guard.clone(), session_id).await?;
+        let bound = self
+            .inner
+            .ssh
+            .bind_session(guard.clone(), session_id)
+            .await?;
         self.inner.target.validate(guard)?;
         Ok(bound)
     }

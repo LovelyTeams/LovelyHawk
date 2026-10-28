@@ -10,11 +10,12 @@ artifacts/
   LovelyHawk-<版本>-windows-x64.zip.sha256
 ```
 
-ZIP 只有一个顶层目录，里面恰好七个文件：
+ZIP 只有一个顶层目录，里面恰好八个文件：
 
 ```text
 LovelyHawk-<版本>-windows-x64/
   LovelyHawk.exe                  # Tauri 宿主 + 进程内后端；页面资源已嵌入
+  lovelyhawk-win-agent.exe        # Windows 远程桌面会话采集端（不随主程序自动运行）
   LICENSE
   THIRD_PARTY_NOTICES.md          # 来自 ui/THIRD_PARTY_NOTICES.md：界面依赖、Tauri/WebView2、字体
   THIRD_PARTY_LICENSES_RUST.txt   # 链接进可执行文件的每个 Rust crate 及其自带的许可证全文
@@ -47,8 +48,8 @@ pnpm release:package -Build
 打包脚本 `scripts/desktop-package-windows.ps1` 依次执行：
 
 1. 源码门禁的自检与正式检查（`desktop-source-gate.ps1`）；
-2. 使用 `-Build` 时由 `desktop-build-windows.ps1` 先构建 UI，再以 `-C target-feature=+crt-static` 构建 release 宿主；
-3. 用 `desktop-verify-windows-binary.ps1` 检查可执行文件：必须是 x86-64 PE，不得动态导入 `VCRUNTIME*`、`MSVCP*` 或 `MSVCR*`；
+2. 使用 `-Build` 时由 `desktop-build-windows.ps1` 先构建 UI，再以 `-C target-feature=+crt-static` 构建 release 宿主与 `lovelyhawk-win-agent.exe`；
+3. 用 `desktop-verify-windows-binary.ps1` 检查两个可执行文件：必须是 x86-64 PE，不得动态导入 `VCRUNTIME*`、`MSVCP*` 或 `MSVCR*`；
 4. 核对第三方声明中的必需条目，并核对版本号与 `tauri.conf.json` 一致；
 5. 在 `artifacts/` 下的临时目录组装、写清单、压缩并写校验和。已有同名产物时拒绝覆盖；
 6. 调用校验器检查刚生成的 ZIP。
@@ -64,10 +65,10 @@ pnpm release:validate -ArchivePath artifacts/LovelyHawk-1.0.0-windows-x64.zip
 `scripts/desktop-validate-package.ps1` 不运行程序，只检查：
 
 - 相邻 `.sha256` 与 ZIP 一致；
-- 只有一个 `LovelyHawk-<版本>-windows-x64` 目录，文件集合恰好是上面七个，没有 `data/` 或其他运行状态；
+- 只有一个 `LovelyHawk-<版本>-windows-x64` 目录，文件集合恰好是上面八个，没有 `data/` 或其他运行状态；
 - `SBOM.cdx.json` 是 CycloneDX 1.5，每个组件都有许可证、没有 GPUI，SBOM 中的每个 crate 都能在 `THIRD_PARTY_LICENSES_RUST.txt` 中找到对应条目；
 - 清单的 schema、版本与目录名一致，并逐个列出、逐个核对其余文件的大小与 SHA-256；
-- `LovelyHawk.exe` 是 PE 文件，且不包含仅调试构建才读取的变量名（`LOVELYHAWK_DEBUG_PORT`、`LOVELYHAWK_TEST_DIALOG_ANSWERS`、`LOVELYHAWK_TEST_CLIPBOARD_FILE`、`LOVELYHAWK_ARCHIVE_ROOT`）。
+- `LovelyHawk.exe` 是 PE 文件，且不包含仅调试构建才读取的变量名（`LOVELYHAWK_DEBUG_PORT`、`LOVELYHAWK_TEST_DIALOG_ANSWERS`、`LOVELYHAWK_TEST_CLIPBOARD_FILE`、`LOVELYHAWK_ARCHIVE_ROOT`、`LOVELYHAWK_DEV_SERVER`）。
 
 `-SelfTest` 用构造的合格包、带运行数据的包与被篡改的包验证校验器本身。
 

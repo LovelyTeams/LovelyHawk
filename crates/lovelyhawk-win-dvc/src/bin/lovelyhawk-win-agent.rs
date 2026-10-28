@@ -336,6 +336,44 @@ mod win_agent {
         if let Some(spec) = cmd.strip_prefix("__NATIVE_COLLECT__:") {
             return lovelyhawk_win_dvc::native_collect::handle_native_collect(spec.trim());
         }
+        if let Some((_, b64)) = cmd.split_once("-EncodedCommand ") {
+            return match lovelyhawk_win_dvc::native_collect::run_encoded_powershell(
+                b64.trim(),
+                MAX_CMD_OUTPUT_BYTES,
+                std::time::Duration::from_secs(35),
+            ) {
+                Ok(out) => {
+                    let trimmed = out.trim();
+                    if trimmed.len() > MAX_CMD_OUTPUT_BYTES {
+                        format!(
+                            "[error] 命令输出超过 {MAX_CMD_OUTPUT_BYTES} 字节上限，请缩小查询范围"
+                        )
+                    } else {
+                        format!("[exit=0]\n{trimmed}")
+                    }
+                }
+                Err(e) => format!("[error] {e}"),
+            };
+        }
+        if let Some(ps_script) = cmd.strip_prefix("__PS__:") {
+            return match lovelyhawk_win_dvc::native_collect::run_powershell_utf8(
+                ps_script,
+                MAX_CMD_OUTPUT_BYTES,
+                std::time::Duration::from_secs(35),
+            ) {
+                Ok(out) => {
+                    let trimmed = out.trim();
+                    if trimmed.len() > MAX_CMD_OUTPUT_BYTES {
+                        format!(
+                            "[error] 命令输出超过 {MAX_CMD_OUTPUT_BYTES} 字节上限，请缩小查询范围"
+                        )
+                    } else {
+                        format!("[exit=0]\n{trimmed}")
+                    }
+                }
+                Err(e) => format!("[error] {e}"),
+            };
+        }
         let run = |command: &mut Command| {
             lovelyhawk_win_dvc::agent_runtime::bounded_output(
                 command,
@@ -343,28 +381,7 @@ mod win_agent {
                 std::time::Duration::from_secs(35),
             )
         };
-        let output = if let Some((_, b64)) = cmd.split_once("-EncodedCommand ") {
-            run(Command::new("powershell.exe").args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-EncodedCommand",
-                b64.trim(),
-            ]))
-        } else if let Some(ps_script) = cmd.strip_prefix("__PS__:") {
-            let utf16: Vec<u8> = ps_script
-                .encode_utf16()
-                .flat_map(|w| w.to_le_bytes())
-                .collect();
-            let encoded = BASE64.encode(&utf16);
-            run(Command::new("powershell.exe").args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-EncodedCommand",
-                &encoded,
-            ]))
-        } else {
-            run(Command::new("cmd.exe").args(["/d", "/C", cmd]))
-        };
+        let output = run(Command::new("cmd.exe").args(["/d", "/C", cmd]));
 
         match output {
             Ok(out) => {

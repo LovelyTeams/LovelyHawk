@@ -2,6 +2,8 @@ import type {
   WindowsAccountsSnapshot,
   WindowsInventorySnapshot,
   WindowsBaselineSnapshot,
+  WindowsCommandMonitorSnapshot,
+  WindowsDefenderSnapshot,
   WindowsFilesSnapshot,
   WindowsLogsSnapshot,
   WindowsNetworkSnapshot,
@@ -10,12 +12,14 @@ import type {
   WindowsRegistrySnapshot,
   WindowsStartupSnapshot,
   WindowsStartupCategory,
+  WindowsWebshellSnapshot,
 } from "../shared/windows-incident-contract";
 
 export interface WinIrSnapshots {
   overview: WindowsOverviewSnapshot;
   baseline: WindowsBaselineSnapshot;
   processes: WindowsProcessesSnapshot;
+  commands: WindowsCommandMonitorSnapshot;
   network: WindowsNetworkSnapshot;
   startup: WindowsStartupSnapshot;
   services: WindowsInventorySnapshot;
@@ -23,7 +27,9 @@ export interface WinIrSnapshots {
   tasks: WindowsInventorySnapshot;
   accounts: WindowsAccountsSnapshot;
   logs: WindowsLogsSnapshot;
+  defender: WindowsDefenderSnapshot;
   files: WindowsFilesSnapshot;
+  webshell: WindowsWebshellSnapshot;
   registry: WindowsRegistrySnapshot;
 }
 
@@ -43,6 +49,7 @@ export const WIN_IR_MODULES: ReadonlyArray<{
   { key: "baseline", label: "基线配置", group: "配置", description: "对照当前值和建议值核查配置，查看每项检查的依据与建议。", action: "核查安全基线" },
   { key: "timeline", label: "调查时间线", group: "取证", description: "按时间对照已采集的事件、进程启动和文件修改记录。", action: "采集核心模块" },
   { key: "processes", label: "进程分析", group: "调查", description: "从父子关系、执行路径和命令行定位可疑活动。", action: "刷新进程" },
+  { key: "commands", label: "命令监控", group: "调查", description: "汇总并实时监控执行的命令行、PowerShell 脚本块（4688 / Sysmon 1 / 4104 / PSReadLine）与新进程。", action: "采集命令活动" },
   { key: "network", label: "网络连接", group: "调查", description: "区分监听、活动连接和公网地址，关联到所属进程。", action: "刷新连接" },
   { key: "startup", label: "启动项", group: "调查", description: "按持久化来源检查启动位置、执行命令与运行账户。", action: "采集启动项" },
   { key: "services", label: "服务", group: "调查", description: "查看全部可读取服务的运行状态、启动方式、账户与执行路径。", action: "刷新服务" },
@@ -50,7 +57,9 @@ export const WIN_IR_MODULES: ReadonlyArray<{
   { key: "tasks", label: "计划任务", group: "调查", description: "查看系统与用户计划任务，核对操作、触发器和运行权限。", action: "刷新计划任务" },
   { key: "accounts", label: "本地账户", group: "调查", description: "核对管理员、账户状态、口令属性与最近登录。", action: "采集账户" },
   { key: "logs", label: "事件日志", group: "取证", description: "围绕登录、账户变更、服务安装和脚本执行筛选事件。", action: "读取事件日志" },
+  { key: "defender", label: "Defender 解析", group: "取证", description: "通过日志与配置快速解析 Windows Defender 威胁检出、处置状态、排除项与防篡改变更。", action: "解析 Defender" },
   { key: "files", label: "文件排查", group: "取证", description: "像文件管理器一样浏览远程目录，查看属性、预览内容并拉取取证文件。", action: "刷新目录" },
+  { key: "webshell", label: "Webshell 查杀", group: "取证", description: "多线程扫描 Web 目录与脚本后门，检测一句话木马、冰蝎/哥斯拉特征与高熵混淆脚本。", action: "开始查杀" },
   { key: "registry", label: "注册表", group: "取证", description: "浏览常见持久化、凭据策略与用户活动位置，查看原始键值。", action: "刷新键值" },
   { key: "desktop", label: "远程桌面", group: "连接", description: "在软件内查看并操作远程 Windows 桌面。", action: "刷新客户端状态" },
   { key: "console", label: "通道与传输", group: "连接", description: "检查会话通信、已接收文件和命令执行记录。", action: "刷新通道状态" },

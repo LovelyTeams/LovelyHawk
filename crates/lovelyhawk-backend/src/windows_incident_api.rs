@@ -6,10 +6,11 @@ use lovelyhawk_core::{
     BackendServices,
     windows_incident::{
         BaselineChangePlan, BaselineChangeReport, DvcRuntimeStatus, WindowsAccountsSnapshot,
-        WindowsBaselineSnapshot, WindowsFileAccess, WindowsFilePreview, WindowsFilesSnapshot,
-        WindowsLogsSnapshot, WindowsNetworkSnapshot, WindowsOverviewSnapshot,
-        WindowsProcessInspection, WindowsProcessesSnapshot, WindowsRegistrySnapshot,
-        WindowsStartupSnapshot, fileless_powershell_script,
+        WindowsBaselineSnapshot, WindowsCommandMonitorSnapshot, WindowsDefenderSnapshot,
+        WindowsFileAccess, WindowsFilePreview, WindowsFilesSnapshot, WindowsLogsSnapshot,
+        WindowsNetworkSnapshot, WindowsOverviewSnapshot, WindowsProcessInspection,
+        WindowsProcessesSnapshot, WindowsRegistrySnapshot, WindowsStartupSnapshot,
+        WindowsWebshellSnapshot, fileless_powershell_script,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -175,6 +176,21 @@ pub(crate) enum WindowsIncidentRequest {
         sid: String,
         session_id: String,
     },
+    DeleteAccount {
+        name: String,
+        sid: String,
+        session_id: String,
+    },
+    ScanWebshells {
+        path: String,
+        session_id: String,
+    },
+    CollectDefender {
+        session_id: String,
+    },
+    CollectCommands {
+        session_id: String,
+    },
     DeleteFile {
         path: String,
         dir_path: String,
@@ -225,6 +241,10 @@ impl WindowsIncidentRequest {
             | Self::KillProcess { session_id, .. }
             | Self::RemoveStartup { session_id, .. }
             | Self::DisableAccount { session_id, .. }
+            | Self::DeleteAccount { session_id, .. }
+            | Self::ScanWebshells { session_id, .. }
+            | Self::CollectDefender { session_id }
+            | Self::CollectCommands { session_id }
             | Self::DeleteFile { session_id, .. }
             | Self::DeleteRegistryValue { session_id, .. } => Some(session_id),
             _ => None,
@@ -321,6 +341,15 @@ pub(crate) enum WindowsIncidentResponse {
     },
     Registry {
         snapshot: WindowsRegistrySnapshot,
+    },
+    Webshell {
+        snapshot: WindowsWebshellSnapshot,
+    },
+    Defender {
+        snapshot: WindowsDefenderSnapshot,
+    },
+    Commands {
+        snapshot: WindowsCommandMonitorSnapshot,
     },
 }
 
@@ -490,7 +519,7 @@ impl WindowsIncidentApi {
                 session_id,
             } => {
                 if rule_ids.is_empty()
-                    || rule_ids.len() > 19
+                    || rule_ids.len() > 69
                     || rule_ids
                         .iter()
                         .any(|id| !lovelyhawk_core::windows_incident::baseline_change_supported(id))
@@ -931,6 +960,51 @@ impl WindowsIncidentApi {
                 .map_err(|_| WindowsIncidentError::Failed)?
                 .map_err(|_| WindowsIncidentError::Failed)?;
                 Ok(WindowsIncidentResponse::Accounts { snapshot })
+            }
+            WindowsIncidentRequest::DeleteAccount {
+                name,
+                sid,
+                session_id,
+            } => {
+                if lovelyhawk_core::windows_incident::build_delete_account_ps_script(&name, &sid)
+                    .is_none()
+                {
+                    return Err(WindowsIncidentError::Invalid);
+                }
+                let snapshot = tokio::task::spawn_blocking(move || {
+                    svc.delete_account(&name, &sid, &session_id)
+                })
+                .await
+                .map_err(|_| WindowsIncidentError::Failed)?
+                .map_err(|_| WindowsIncidentError::Failed)?;
+                Ok(WindowsIncidentResponse::Accounts { snapshot })
+            }
+            WindowsIncidentRequest::ScanWebshells { path, session_id } => {
+                if path.len() > 1024 || path.contains(['\0', '\r', '\n']) {
+                    return Err(WindowsIncidentError::Invalid);
+                }
+                let snapshot =
+                    tokio::task::spawn_blocking(move || svc.scan_webshells(&path, &session_id))
+                        .await
+                        .map_err(|_| WindowsIncidentError::Failed)?
+                        .map_err(|_| WindowsIncidentError::Failed)?;
+                Ok(WindowsIncidentResponse::Webshell { snapshot })
+            }
+            WindowsIncidentRequest::CollectDefender { session_id } => {
+                let snapshot =
+                    tokio::task::spawn_blocking(move || svc.collect_defender(&session_id))
+                        .await
+                        .map_err(|_| WindowsIncidentError::Failed)?
+                        .map_err(|_| WindowsIncidentError::Failed)?;
+                Ok(WindowsIncidentResponse::Defender { snapshot })
+            }
+            WindowsIncidentRequest::CollectCommands { session_id } => {
+                let snapshot =
+                    tokio::task::spawn_blocking(move || svc.collect_commands(&session_id))
+                        .await
+                        .map_err(|_| WindowsIncidentError::Failed)?
+                        .map_err(|_| WindowsIncidentError::Failed)?;
+                Ok(WindowsIncidentResponse::Commands { snapshot })
             }
             WindowsIncidentRequest::DeleteFile {
                 path,
