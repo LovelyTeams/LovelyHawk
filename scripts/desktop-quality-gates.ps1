@@ -36,6 +36,7 @@ function Assert-SelfTest {
     if (-not $failed) {
         throw 'Desktop quality gate self-test did not propagate a failing child command.'
     }
+    $global:LASTEXITCODE = 0
     Write-Host 'Desktop quality gate failure-propagation self-test passed.'
 }
 
