@@ -628,45 +628,45 @@ impl SystemInfoDetailRequest {
             SystemInfoDetailKey::Process { pid } => {
                 let pid = shq(&pid.to_string());
                 format!(
-                    "p={pid}; printf 'Parent PID\\t'; ps -o ppid= -p \"$p\" 2>/dev/null | xargs; \
-printf 'Parent Process\\t'; pp=$(ps -o ppid= -p \"$p\" 2>/dev/null | xargs); [ -n \"$pp\" ] && ps -o comm= -p \"$pp\" 2>/dev/null; \
-printf 'PGID\\t'; ps -o pgid= -p \"$p\" 2>/dev/null | xargs; \
-printf 'SID\\t'; ps -o sid= -p \"$p\" 2>/dev/null | xargs; \
-printf 'Priority\\t'; ps -o pri= -p \"$p\" 2>/dev/null | xargs; \
-printf 'Threads\\t'; ls \"/proc/$p/task\" 2>/dev/null | wc -l; \
-printf 'Command Line\\t'; tr '\\0' ' ' < \"/proc/$p/cmdline\" 2>/dev/null | head -c 2048; printf '\\n'; \
-printf 'Working Directory\\t'; readlink \"/proc/$p/cwd\" 2>/dev/null; \
-printf 'Executable\\t'; readlink \"/proc/$p/exe\" 2>/dev/null; \
-printf 'UID / GID\\t'; awk '/^(Uid|Gid):/{{printf \"%s=%s/%s/%s/%s \",$1,$2,$3,$4,$5}} END{{print \"\"}}' \"/proc/$p/status\" 2>/dev/null; \
-printf 'Capabilities\\t'; awk '/^Cap(Inh|Prm|Eff|Bnd|Amb):/{{printf \"%s=%s \",$1,$2}} END{{print \"\"}}' \"/proc/$p/status\" 2>/dev/null; \
-printf 'Memory\\t'; awk '/^(VmPeak|VmSize|VmRSS|RssAnon|VmSwap):/{{printf \"%s=%s%s \",$1,$2,$3}} END{{print \"\"}}' \"/proc/$p/status\" 2>/dev/null; \
-printf 'I/O\\t'; awk '/^(read_bytes|write_bytes|syscr|syscw):/{{printf \"%s=%s \",$1,$2}} END{{print \"\"}}' \"/proc/$p/io\" 2>/dev/null; \
-printf 'Open File Descriptors\\t'; find \"/proc/$p/fd\" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l; \
-printf 'Cgroup\\t'; head -n 8 \"/proc/$p/cgroup\" 2>/dev/null | tr '\\n\\t' '  '; printf '\\n'; \
-printf 'Children\\t'; pgrep -P \"$p\" 2>/dev/null | paste -sd ',' -; \
-printf 'Deleted Executable\\t'; readlink \"/proc/$p/exe\" 2>/dev/null | grep -q ' (deleted)$' && printf 'yes\\n' || printf 'no\\n'; \
-printf 'Network Sockets\\t'; ss -H -tunap 2>/dev/null | grep -F \"pid=$p,\" | head -n 8 | tr '\\n\\t' '  '; printf '\\n'"
+                    "p={pid}; printf 'Parent PID\\t%s\\n' \"$(ps -o ppid= -p \"$p\" 2>/dev/null | xargs)\"; \
+printf 'Parent Process\\t%s\\n' \"$(pp=$(ps -o ppid= -p \"$p\" 2>/dev/null | xargs); [ -n \"$pp\" ] && ps -o comm= -p \"$pp\" 2>/dev/null)\"; \
+printf 'PGID\\t%s\\n' \"$(ps -o pgid= -p \"$p\" 2>/dev/null | xargs)\"; \
+printf 'SID\\t%s\\n' \"$(ps -o sid= -p \"$p\" 2>/dev/null | xargs)\"; \
+printf 'Priority\\t%s\\n' \"$(ps -o pri= -p \"$p\" 2>/dev/null | xargs)\"; \
+printf 'Threads\\t%s\\n' \"$(ls \"/proc/$p/task\" 2>/dev/null | wc -l)\"; \
+printf 'Command Line\\t%s\\n' \"$(tr '\\0' ' ' < \"/proc/$p/cmdline\" 2>/dev/null | head -c 2048; printf '\\n')\"; \
+printf 'Working Directory\\t%s\\n' \"$(readlink \"/proc/$p/cwd\" 2>/dev/null)\"; \
+printf 'Executable\\t%s\\n' \"$(readlink \"/proc/$p/exe\" 2>/dev/null)\"; \
+printf 'UID / GID\\t%s\\n' \"$(awk '/^(Uid|Gid):/{{printf \"%s=%s/%s/%s/%s \",$1,$2,$3,$4,$5}} END{{print \"\"}}' \"/proc/$p/status\" 2>/dev/null)\"; \
+printf 'Capabilities\\t%s\\n' \"$(awk '/^Cap(Inh|Prm|Eff|Bnd|Amb):/{{printf \"%s=%s \",$1,$2}} END{{print \"\"}}' \"/proc/$p/status\" 2>/dev/null)\"; \
+printf 'Memory\\t%s\\n' \"$(awk '/^(VmPeak|VmSize|VmRSS|RssAnon|VmSwap):/{{printf \"%s=%s%s \",$1,$2,$3}} END{{print \"\"}}' \"/proc/$p/status\" 2>/dev/null)\"; \
+printf 'I/O\\t%s\\n' \"$(awk '/^(read_bytes|write_bytes|syscr|syscw):/{{printf \"%s=%s \",$1,$2}} END{{print \"\"}}' \"/proc/$p/io\" 2>/dev/null)\"; \
+printf 'Open File Descriptors\\t%s\\n' \"$(find \"/proc/$p/fd\" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)\"; \
+printf 'Cgroup\\t%s\\n' \"$(head -n 8 \"/proc/$p/cgroup\" 2>/dev/null | tr '\\n\\t' '  '; printf '\\n')\"; \
+printf 'Children\\t%s\\n' \"$(pgrep -P \"$p\" 2>/dev/null | paste -sd ',' -)\"; \
+printf 'Deleted Executable\\t%s\\n' \"$(readlink \"/proc/$p/exe\" 2>/dev/null | grep -q ' (deleted)$' && printf 'yes\\n' || printf 'no\\n')\"; \
+printf 'Network Sockets\\t%s\\n' \"$(ss -H -tunap 2>/dev/null | grep -F \"pid=$p,\" | head -n 8 | tr '\\n\\t' '  '; printf '\\n')\" "
                 )
             }
             SystemInfoDetailKey::Service { name } => {
                 let name = shq(name);
                 format!(
                     "n={name}; systemctl show \"$n\" --no-pager -p Description -p ActiveState -p SubState -p UnitFileState -p MainPID -p User -p Group -p MemoryCurrent -p CPUUsageNSec -p FragmentPath -p ExecStart -p WorkingDirectory -p EnvironmentFiles -p Requires -p Wants -p After -p TriggeredBy 2>/dev/null | awk -F= '{{v=substr($0,index($0,\"=\")+1); gsub(/\\t/,\" \",v); print $1\"\\t\"v}}'; \
-printf 'Recent Warnings\\t'; journalctl -u \"$n\" -p warning -n 5 --no-pager 2>/dev/null | tr '\\n\\t' '  '; printf '\\n'"
+printf 'Recent Warnings\\t%s\\n' \"$(journalctl -u \"$n\" -p warning -n 5 --no-pager 2>/dev/null | tr '\\n\\t' '  '; printf '\\n')\" "
                 )
             }
             SystemInfoDetailKey::User { username } => {
                 let username = shq(username);
                 format!(
-                    "u={username}; printf 'Account\\t'; getent passwd \"$u\" 2>/dev/null | awk -F: '{{print \"UID=\" $3 \" GID=\" $4 \" Home=\" $6 \" Shell=\" $7}}'; \
-printf 'Groups\\t'; id -nG \"$u\" 2>/dev/null; \
-printf 'Password Status\\t'; passwd -S \"$u\" 2>/dev/null; \
-printf 'Sudo Rules\\t'; sudo -nl -U \"$u\" 2>/dev/null | tail -n +2 | tr '\\n\\t' '  '; printf '\\n'; \
-printf 'Last Login\\t'; lastlog -u \"$u\" 2>/dev/null | tail -n 1; \
-printf 'Active Sessions\\t'; who 2>/dev/null | awk -v u=\"$u\" '$1==u{{n++}} END{{print n+0}}'; \
-printf 'Process Count\\t'; pgrep -u \"$u\" 2>/dev/null | wc -l; \
-printf 'Cron Entries\\t'; crontab -u \"$u\" -l 2>/dev/null | awk 'NF && $1 !~ /^#/ {{n++}} END{{print n+0}}'; \
-printf 'Authorized Keys\\t'; h=$(getent passwd \"$u\" 2>/dev/null | cut -d: -f6); [ -n \"$h\" ] && awk 'NF>=2 && $1 !~ /^#/ {{n++}} END{{print n+0}}' \"$h/.ssh/authorized_keys\" 2>/dev/null"
+                    "u={username}; printf 'Account\\t%s\\n' \"$(getent passwd \"$u\" 2>/dev/null | awk -F: '{{print \"UID=\" $3 \" GID=\" $4 \" Home=\" $6 \" Shell=\" $7}}')\"; \
+printf 'Groups\\t%s\\n' \"$(id -nG \"$u\" 2>/dev/null)\"; \
+printf 'Password Status\\t%s\\n' \"$(passwd -S \"$u\" 2>/dev/null)\"; \
+printf 'Sudo Rules\\t%s\\n' \"$(sudo -nl -U \"$u\" 2>/dev/null | tail -n +2 | tr '\\n\\t' '  '; printf '\\n')\"; \
+printf 'Last Login\\t%s\\n' \"$(lastlog -u \"$u\" 2>/dev/null | tail -n 1)\"; \
+printf 'Active Sessions\\t%s\\n' \"$(who 2>/dev/null | awk -v u=\"$u\" '$1==u{{n++}} END{{print n+0}}')\"; \
+printf 'Process Count\\t%s\\n' \"$(pgrep -u \"$u\" 2>/dev/null | wc -l)\"; \
+printf 'Cron Entries\\t%s\\n' \"$(crontab -u \"$u\" -l 2>/dev/null | awk 'NF && $1 !~ /^#/ {{n++}} END{{print n+0}}')\"; \
+printf 'Authorized Keys\\t%s\\n' \"$(h=$(getent passwd \"$u\" 2>/dev/null | cut -d: -f6); [ -n \"$h\" ] && awk 'NF>=2 && $1 !~ /^#/ {{n++}} END{{print n+0}}' \"$h/.ssh/authorized_keys\" 2>/dev/null)\" "
                 )
             }
             SystemInfoDetailKey::SshKey { key_line } => {
@@ -682,23 +682,23 @@ printf 'Authorized Keys\\t'; h=$(getent passwd \"$u\" 2>/dev/null | cut -d: -f6)
                 let name = shq(name);
                 format!(
                     "p={name}; if command -v dpkg >/dev/null 2>&1; then \
-printf 'Status\\t'; dpkg-query -W -f='${{db:Status-Abbrev}}\\n' \"$p\" 2>/dev/null; \
-printf 'Architecture\\t'; dpkg-query -W -f='${{Architecture}}\\n' \"$p\" 2>/dev/null; \
-printf 'Installed Size KiB\\t'; dpkg-query -W -f='${{Installed-Size}}\\n' \"$p\" 2>/dev/null; \
-printf 'Dependencies\\t'; dpkg-query -W -f='${{Depends}}\\n' \"$p\" 2>/dev/null; \
-printf 'Installed Files\\t'; dpkg -L \"$p\" 2>/dev/null | wc -l; \
-else printf 'Status\\t'; rpm -q \"$p\" 2>/dev/null; \
-printf 'Dependencies\\t'; rpm -qR \"$p\" 2>/dev/null | head -n 32 | tr '\\n\\t' '  '; printf '\\n'; \
-printf 'Installed Files\\t'; rpm -ql \"$p\" 2>/dev/null | wc -l; fi"
+printf 'Status\\t%s\\n' \"$(dpkg-query -W -f='${{db:Status-Abbrev}}\\n' \"$p\" 2>/dev/null)\"; \
+printf 'Architecture\\t%s\\n' \"$(dpkg-query -W -f='${{Architecture}}\\n' \"$p\" 2>/dev/null)\"; \
+printf 'Installed Size KiB\\t%s\\n' \"$(dpkg-query -W -f='${{Installed-Size}}\\n' \"$p\" 2>/dev/null)\"; \
+printf 'Dependencies\\t%s\\n' \"$(dpkg-query -W -f='${{Depends}}\\n' \"$p\" 2>/dev/null)\"; \
+printf 'Installed Files\\t%s\\n' \"$(dpkg -L \"$p\" 2>/dev/null | wc -l)\"; \
+else printf 'Status\\t%s\\n' \"$(rpm -q \"$p\" 2>/dev/null)\"; \
+printf 'Dependencies\\t%s\\n' \"$(rpm -qR \"$p\" 2>/dev/null | head -n 32 | tr '\\n\\t' '  '; printf '\\n')\"; \
+printf 'Installed Files\\t%s\\n' \"$(rpm -ql \"$p\" 2>/dev/null | wc -l)\"; fi"
                 )
             }
             SystemInfoDetailKey::KernelModule { name } => {
                 let name = shq(name);
                 format!(
-                    "m={name}; printf 'Description\\t'; modinfo -F description \"$m\" 2>/dev/null; \
-printf 'File\\t'; modinfo -F filename \"$m\" 2>/dev/null; \
-printf 'Signer\\t'; modinfo -F signer \"$m\" 2>/dev/null; \
-printf 'Dependencies\\t'; modinfo -F depends \"$m\" 2>/dev/null"
+                    "m={name}; printf 'Description\\t%s\\n' \"$(modinfo -F description \"$m\" 2>/dev/null)\"; \
+printf 'File\\t%s\\n' \"$(modinfo -F filename \"$m\" 2>/dev/null)\"; \
+printf 'Signer\\t%s\\n' \"$(modinfo -F signer \"$m\" 2>/dev/null)\"; \
+printf 'Dependencies\\t%s\\n' \"$(modinfo -F depends \"$m\" 2>/dev/null)\" "
                 )
             }
         }
@@ -6408,7 +6408,7 @@ fn user_investigation_command(username: &str, action: UserInvestigationAction) -
             "printf 'Groups\\n'; id -nG \"$u\" 2>/dev/null; printf '\\nDetailed identity\\n'; id \"$u\" 2>/dev/null".to_owned()
         }
         UserInvestigationAction::HomeDirectory => format!(
-            "{home} printf 'Home\\t%s\\n' \"$h\"; stat -c 'Mode\\t%A (%a)%nOwner\\t%U (%u)%nGroup\\t%G (%g)%nModified\\t%y' -- \"$h\" 2>/dev/null || true; printf 'Disk usage\\t'; du -sh -- \"$h\" 2>/dev/null | cut -f1 || printf 'unavailable\\n'"
+            "{home} printf 'Home\\t%s\\n' \"$h\"; stat -c 'Mode\\t%A (%a)%nOwner\\t%U (%u)%nGroup\\t%G (%g)%nModified\\t%y' -- \"$h\" 2>/dev/null || true; printf 'Disk usage\\t%s\\n' \"$(du -sh -- \"$h\" 2>/dev/null | cut -f1 || printf 'unavailable\\n')\" "
         ),
         UserInvestigationAction::PasswordExpiry => {
             "chage -l \"$u\" 2>/dev/null || printf 'Password expiry information is unavailable\\n'".to_owned()
@@ -6426,7 +6426,7 @@ fn user_investigation_command(username: &str, action: UserInvestigationAction) -
             "last -Faiw \"$u\" -n 20 2>/dev/null || printf 'No login history\\n'".to_owned()
         }
         UserInvestigationAction::CurrentSessions => {
-            "who 2>/dev/null | awk -v u=\"$u\" '$1==u' | head -n 100; printf '\\nSession count\\t'; who 2>/dev/null | awk -v u=\"$u\" '$1==u {n++} END {print n+0}'".to_owned()
+            "who 2>/dev/null | awk -v u=\"$u\" '$1==u' | head -n 100; printf '\\nSession count\\t%s\\n' \"$(who 2>/dev/null | awk -v u=\"$u\" '$1==u {n++} END {print n+0}')\"".to_owned()
         }
         UserInvestigationAction::FailedLogins => {
             "if command -v lastb >/dev/null 2>&1; then lastb \"$u\" -n 20 2>/dev/null || true; fi; for f in /var/log/auth.log /var/log/secure; do [ -r \"$f\" ] || continue; grep -F -- \"$u\" \"$f\" 2>/dev/null | grep -i 'fail' | tail -n 20; done".to_owned()
@@ -6450,7 +6450,7 @@ fn user_investigation_command(username: &str, action: UserInvestigationAction) -
             "printf 'User crontab\\n'; crontab -u \"$u\" -l 2>/dev/null || printf 'none or unreadable\\n'; printf '\\nSystem cron references\\n'; for f in /etc/crontab /etc/cron.d/*; do [ -f \"$f\" ] || continue; grep -Fn -- \"$u\" \"$f\" 2>/dev/null | sed \"s#^#$f:#\"; done | head -n 100".to_owned()
         }
         UserInvestigationAction::SshConfig => format!(
-            "{home} printf 'SSH client config\\n'; sed -n '1,300p' -- \"$h/.ssh/config\" 2>/dev/null || printf 'none or unreadable\\n'; printf '\\nKnown-host entry count\\t'; awk 'NF && $1 !~ /^#/ {{n++}} END {{print n+0}}' \"$h/.ssh/known_hosts\" 2>/dev/null"
+            "{home} printf 'SSH client config\\n'; sed -n '1,300p' -- \"$h/.ssh/config\" 2>/dev/null || printf 'none or unreadable\\n'; printf '\\nKnown-host entry count\\t%s\\n' \"$(awk 'NF && $1 !~ /^#/ {{n++}} END {{print n+0}}' \"$h/.ssh/known_hosts\" 2>/dev/null)\" "
         ),
         UserInvestigationAction::SuspiciousFiles => format!(
             "{home} printf 'Hidden files (depth <= 4)\\n'; find \"$h\" -xdev -maxdepth 4 -type f -name '.*' -print 2>/dev/null | head -n 50; printf '\\nFiles modified in the last 7 days\\n'; find \"$h\" -xdev -maxdepth 5 -type f -mtime -7 -exec stat -c '%y|%n' {{}} + 2>/dev/null | awk -F'|' '{{w=substr($1,1,19); sub(\" \",\"T\",w); p=$2; for(i=3;i<=NF;i++) p=p \"|\" $i; printf \"%s\\t%s\\n\", w, p}}' | head -n 100"
@@ -6485,10 +6485,10 @@ fn login_investigation_command(
             "id \"$u\" 2>/dev/null; printf '\\nAccount\\n'; getent passwd \"$u\" 2>/dev/null; printf '\\nPassword policy\\n'; chage -l \"$u\" 2>/dev/null || true".to_owned()
         }
         LoginInvestigationAction::UserLoginCount => {
-            "last -Faiw \"$u\" -n 50 2>/dev/null || true; printf '\\nTotal retained records\\t'; last -Faiw \"$u\" 2>/dev/null | awk -v u=\"$u\" '$1==u {n++} END {print n+0}'".to_owned()
+            "last -Faiw \"$u\" -n 50 2>/dev/null || true; printf '\\nTotal retained records\\t%s\\n' \"$(last -Faiw \"$u\" 2>/dev/null | awk -v u=\"$u\" '$1==u {n++} END {print n+0}')\"".to_owned()
         }
         LoginInvestigationAction::UserFailedCount => {
-            "if command -v lastb >/dev/null 2>&1; then lastb \"$u\" -n 50 2>/dev/null || true; printf '\\nTotal retained failures\\t'; lastb \"$u\" 2>/dev/null | awk -v u=\"$u\" '$1==u {n++} END {print n+0}'; else printf 'lastb is unavailable\\n'; fi".to_owned()
+            "if command -v lastb >/dev/null 2>&1; then lastb \"$u\" -n 50 2>/dev/null || true; printf '\\nTotal retained failures\\t%s\\n' \"$(lastb \"$u\" 2>/dev/null | awk -v u=\"$u\" '$1==u {n++} END {print n+0}')\"; else printf 'lastb is unavailable\\n'; fi".to_owned()
         }
         LoginInvestigationAction::UserSudoHistory => {
             "for f in /var/log/auth.log /var/log/secure; do [ -r \"$f\" ] || continue; grep -F -- \"$u\" \"$f\" 2>/dev/null | grep -F 'sudo' | tail -n 50; done; journalctl _COMM=sudo -n 500 --no-pager 2>/dev/null | grep -F -- \"$u\" | tail -n 50 || true".to_owned()
@@ -6651,10 +6651,14 @@ fn kernel_module_investigation_command(
             "path=$(modinfo -n \"$m\" 2>/dev/null); case \"$path\" in /*) printf 'Path\\t%s\\n' \"$path\"; stat -c 'Mode\\t%A (%a)%nOwner\\t%U (%u)%nSize\\t%s%nModified\\t%y' -- \"$path\" 2>/dev/null;; *) printf 'Module path is unavailable\\n';; esac"
         }
         KernelModuleInvestigationAction::Signing => {
-            "printf 'Signature ID\\t'; modinfo -F sig_id \"$m\" 2>/dev/null; printf 'Signer\\t'; modinfo -F signer \"$m\" 2>/dev/null; printf 'Key ID\\t'; modinfo -F sig_key \"$m\" 2>/dev/null; printf 'Hash algorithm\\t'; modinfo -F sig_hashalgo \"$m\" 2>/dev/null"
+            "printf 'Signature ID\\t%s\\n' \"$(modinfo -F sig_id \"$m\" 2>/dev/null)\"; \
+            printf 'Signer\\t%s\\n' \"$(modinfo -F signer \"$m\" 2>/dev/null)\"; \
+            printf 'Key ID\\t%s\\n' \"$(modinfo -F sig_key \"$m\" 2>/dev/null)\"; \
+            printf 'Hash algorithm\\t%s\\n' \"$(modinfo -F sig_hashalgo \"$m\" 2>/dev/null)\" "
         }
         KernelModuleInvestigationAction::Taint => {
-            "printf 'Kernel taint value\\t'; cat /proc/sys/kernel/tainted 2>/dev/null || printf 'unavailable\\n'; printf 'Module taint\\t'; cat /sys/module/\"$m\"/taint 2>/dev/null || printf 'none or unavailable\\n'; printf 'Interpretation\\t0 means the kernel reports no taint bits\\n'"
+            "printf 'Kernel taint value\\t%s\\n' \"$(cat /proc/sys/kernel/tainted 2>/dev/null || printf 'unavailable\\n')\"; \
+            printf 'Module taint\\t%s\\n' \"$(cat /sys/module/\"$m\"/taint 2>/dev/null || printf 'none or unavailable\\n'; printf 'Interpretation\\t0 means the kernel reports no taint bits\\n')\" "
         }
         KernelModuleInvestigationAction::Hash => {
             "path=$(modinfo -n \"$m\" 2>/dev/null); case \"$path\" in /*) printf 'Path\\t%s\\n' \"$path\"; md5sum -- \"$path\" 2>/dev/null | sed 's/^/MD5\\t/'; sha256sum -- \"$path\" 2>/dev/null | sed 's/^/SHA256\\t/';; *) printf 'Module path is unavailable\\n';; esac"
@@ -6714,7 +6718,11 @@ fn startup_investigation_command(
             "systemctl cat \"$u\" --no-pager 2>/dev/null || printf 'Unit configuration is unavailable\\n'"
         }
         StartupInvestigationAction::StartupType => {
-            "printf 'Enabled state\\t'; systemctl is-enabled \"$u\" 2>/dev/null || true; printf 'Preset\\t'; systemctl show \"$u\" -p Preset --value 2>/dev/null; printf 'WantedBy\\t'; systemctl show \"$u\" -p WantedBy --value 2>/dev/null; printf 'RequiredBy\\t'; systemctl show \"$u\" -p RequiredBy --value 2>/dev/null; printf 'Default target\\t'; systemctl get-default 2>/dev/null || true"
+            "printf 'Enabled state\\t%s\\n' \"$(systemctl is-enabled \"$u\" 2>/dev/null || true)\"; \
+            printf 'Preset\\t%s\\n' \"$(systemctl show \"$u\" -p Preset --value 2>/dev/null)\"; \
+            printf 'WantedBy\\t%s\\n' \"$(systemctl show \"$u\" -p WantedBy --value 2>/dev/null)\"; \
+            printf 'RequiredBy\\t%s\\n' \"$(systemctl show \"$u\" -p RequiredBy --value 2>/dev/null)\"; \
+            printf 'Default target\\t%s\\n' \"$(systemctl get-default 2>/dev/null || true)\" "
         }
         StartupInvestigationAction::ConfigLocation => {
             "systemctl show \"$u\" --no-pager -p FragmentPath -p SourcePath -p DropInPaths 2>/dev/null"
@@ -7133,7 +7141,9 @@ fn suid_file_investigation_command(
             "if command -v getcap >/dev/null 2>&1; then getcap -n -- \"$p\" 2>/dev/null || true; else printf 'getcap is unavailable\\n'; fi; printf 'Mode and owner\\n'; stat -c '%A (%a)\\t%U:%G\\t%n' -- \"$p\" 2>/dev/null"
         }
         SuidFileInvestigationAction::Links => {
-            "printf 'Canonical path\\t'; readlink -f -- \"$p\" 2>/dev/null; printf 'Link count\\t'; stat -c '%h' -- \"$p\" 2>/dev/null; printf '\\nLinks in executable inventories\\n'; find /bin /sbin /usr/bin /usr/sbin /usr/local/bin -xdev -samefile \"$p\" -print 2>/dev/null | head -n 300"
+            "printf 'Canonical path\\t%s\\n' \"$(readlink -f -- \"$p\" 2>/dev/null)\"; \
+            printf 'Link count\\t%s\\n' \"$(stat -c '%h' -- \"$p\" 2>/dev/null)\"; \
+            printf 'Links in executable inventories\\n'; find /bin /sbin /usr/bin /usr/sbin /usr/local/bin -xdev -samefile \"$p\" -print 2>/dev/null | head -n 300"
         }
     };
     Ok(format!("p={}; {probe}; :", shq(&path)))
@@ -7836,7 +7846,7 @@ fn network_investigation_command(
             )
         }
         NetworkInvestigationAction::ConnectionFrequency => format!(
-            "ip={}; printf 'Current TCP connections\\t'; ss -H -tn 2>/dev/null | grep -F -- \"$ip\" | wc -l; printf '\\nMatching connections\\n'; ss -H -tnp 2>/dev/null | grep -F -- \"$ip\" | head -n 100 || true",
+            "ip={}; printf 'Current TCP connections\\t%s\\n' \"$(ss -H -tn 2>/dev/null | grep -F -- \"$ip\" | wc -l)\"; printf '\\nMatching connections\\n'; ss -H -tnp 2>/dev/null | grep -F -- \"$ip\" | head -n 100 || true",
             ip_value.expect("validated remote IP")
         ),
         NetworkInvestigationAction::FirewallRules => format!(
@@ -8034,7 +8044,7 @@ fn process_investigation_command(pid: u32, action: ProcessInvestigationAction) -
             "pp=$(ps -o ppid= -p \"$p\" 2>/dev/null | xargs); [ -n \"$pp\" ] && ps -o pid=,ppid=,user=,stat=,args= -p \"$pp\" 2>/dev/null"
         }
         ProcessInvestigationAction::Threads => {
-            "printf 'Thread count: '; find \"/proc/$p/task\" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l; ps -T -p \"$p\" -o pid=,spid=,stat=,comm= 2>/dev/null | head -n 100"
+            "printf 'Thread count: %s\\n' \"$(find \"/proc/$p/task\" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)\"; ps -T -p \"$p\" -o pid=,spid=,stat=,comm= 2>/dev/null | head -n 100"
         }
         ProcessInvestigationAction::CpuUsage => {
             "ps -p \"$p\" -o pid=,ppid=,pcpu=,pmem=,vsz=,rss=,stat=,lstart=,time=,args= 2>/dev/null; i=0; while [ \"$i\" -lt 5 ]; do ps -p \"$p\" -o pcpu= 2>/dev/null || exit 0; i=$((i+1)); [ \"$i\" -lt 5 ] && sleep 1; done"
@@ -8044,7 +8054,8 @@ fn process_investigation_command(pid: u32, action: ProcessInvestigationAction) -
             "awk '/^(voluntary_ctxt_switches|nonvoluntary_ctxt_switches):/' \"/proc/$p/status\" 2>/dev/null"
         }
         ProcessInvestigationAction::OomScore => {
-            "printf 'oom_score\\t'; cat \"/proc/$p/oom_score\" 2>/dev/null; printf 'oom_score_adj\\t'; cat \"/proc/$p/oom_score_adj\" 2>/dev/null"
+            "printf 'oom_score\\t%s\\n' \"$(cat \"/proc/$p/oom_score\" 2>/dev/null)\"; \
+            printf 'oom_score_adj\\t%s\\n' \"$(cat \"/proc/$p/oom_score_adj\" 2>/dev/null)\" "
         }
         ProcessInvestigationAction::Scheduler => {
             "ps -p \"$p\" -o pid=,pri=,ni=,rtprio=,sched=,stat=,wchan:32=,args= 2>/dev/null"
@@ -8054,7 +8065,7 @@ fn process_investigation_command(pid: u32, action: ProcessInvestigationAction) -
         }
         ProcessInvestigationAction::KernelStack => "head -n 100 \"/proc/$p/stack\" 2>/dev/null",
         ProcessInvestigationAction::FileDescriptorStats => {
-            "printf 'Open file descriptors: '; find \"/proc/$p/fd\" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l; awk '/Max open files/{print}' \"/proc/$p/limits\" 2>/dev/null"
+            "printf 'Open file descriptors: %s\\n' \"$(find \"/proc/$p/fd\" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)\"; awk '/Max open files/{print}' \"/proc/$p/limits\" 2>/dev/null"
         }
         ProcessInvestigationAction::Signals => {
             "awk '/^(Sig|Shd)/{print}' \"/proc/$p/status\" 2>/dev/null"
@@ -8616,15 +8627,15 @@ fn validated_authorized_keys_path(value: &str) -> CoreResult<String> {
 fn file_detail_command(path: &str) -> String {
     let path = shq(path);
     format!(
-        "p={path}; printf 'Canonical Path\\t'; readlink -f -- \"$p\" 2>/dev/null; \
-printf 'File Type\\t'; file -b -- \"$p\" 2>/dev/null; \
-printf 'Owner\\t'; stat -c '%U (%u)' -- \"$p\" 2>/dev/null; \
-printf 'Group\\t'; stat -c '%G (%g)' -- \"$p\" 2>/dev/null; \
-printf 'Mode\\t'; stat -c '%A (%a)' -- \"$p\" 2>/dev/null; \
-printf 'Size Bytes\\t'; stat -c '%s' -- \"$p\" 2>/dev/null; \
-printf 'Modified\\t'; stat -c '%y' -- \"$p\" 2>/dev/null; \
-printf 'SHA256\\t'; sha256sum -- \"$p\" 2>/dev/null | awk '{{print $1}}'; \
-printf 'Capabilities\\t'; getcap -n -- \"$p\" 2>/dev/null | cut -d' ' -f2-"
+        "p={path}; printf 'Canonical Path\\t%s\\n' \"$(readlink -f -- \"$p\" 2>/dev/null)\"; \
+printf 'File Type\\t%s\\n' \"$(file -b -- \"$p\" 2>/dev/null)\"; \
+printf 'Owner\\t%s\\n' \"$(stat -c '%U (%u)' -- \"$p\" 2>/dev/null)\"; \
+printf 'Group\\t%s\\n' \"$(stat -c '%G (%g)' -- \"$p\" 2>/dev/null)\"; \
+printf 'Mode\\t%s\\n' \"$(stat -c '%A (%a)' -- \"$p\" 2>/dev/null)\"; \
+printf 'Size Bytes\\t%s\\n' \"$(stat -c '%s' -- \"$p\" 2>/dev/null)\"; \
+printf 'Modified\\t%s\\n' \"$(stat -c '%y' -- \"$p\" 2>/dev/null)\"; \
+printf 'SHA256\\t%s\\n' \"$(sha256sum -- \"$p\" 2>/dev/null | awk '{{print $1}}')\"; \
+printf 'Capabilities\\t%s\\n' \"$(getcap -n -- \"$p\" 2>/dev/null | cut -d' ' -f2-)\" "
     )
 }
 
@@ -8814,30 +8825,30 @@ const fn tab_id(tab: SystemInfoTab) -> &'static str {
     }
 }
 
-const SUMMARY_COMMAND: &str = r#"printf 'hostname\t'; hostname 2>/dev/null | head -n 1
-printf 'os\t'; sed -n 's/^PRETTY_NAME=//p' /etc/os-release 2>/dev/null | head -n 1 | tr -d '"'
-printf 'kernel\t'; uname -srmo 2>/dev/null | head -n 1
-printf 'architecture\t'; uname -m 2>/dev/null | head -n 1
-printf 'virtualization\t'; v=$(systemd-detect-virt 2>/dev/null || true); printf '%s\n' "${v:-physical-or-unknown}"
-printf 'boot_time\t'; (uptime -s 2>/dev/null || who -b 2>/dev/null | awk '{$1="";$2="";sub(/^  */,"");print}') | head -n 1
-printf 'timezone\t'; z=$(timedatectl show -p Timezone --value 2>/dev/null || true); [ -n "$z" ] || z=$(date +%Z 2>/dev/null); printf '%s\n' "$z"
-printf 'locale\t'; printf '%s\n' "${LANG:-unknown}"
-printf 'init_system\t'; readlink -f /proc/1/exe 2>/dev/null | awk -F/ '{print $NF}'
-printf 'package_manager\t'; for p in apt-get dnf yum zypper pacman apk rpm dpkg; do command -v "$p" >/dev/null 2>&1 && { printf '%s\n' "$p"; break; }; done
-printf 'selinux\t'; if command -v getenforce >/dev/null 2>&1; then getenforce 2>/dev/null; else printf 'unavailable\n'; fi
-printf 'apparmor\t'; if command -v aa-status >/dev/null 2>&1; then aa-status --enabled >/dev/null 2>&1 && printf 'enabled\n' || printf 'disabled\n'; elif [ -d /sys/module/apparmor ]; then printf 'present\n'; else printf 'unavailable\n'; fi
-printf 'uptime\t'; awk '{print int($1)}' /proc/uptime 2>/dev/null
-printf 'load\t'; awk '{print $1" "$2" "$3}' /proc/loadavg 2>/dev/null
-printf 'cpu_model\t'; sed -n 's/^model name[[:space:]]*:[[:space:]]*//p' /proc/cpuinfo 2>/dev/null | head -n 1
-printf 'cpu_cores\t'; (command -v nproc >/dev/null 2>&1 && nproc) || grep -c '^processor' /proc/cpuinfo 2>/dev/null
+const SUMMARY_COMMAND: &str = r#"printf 'hostname\t%s\n' "$(hostname 2>/dev/null | head -n 1)"
+printf 'os\t%s\n' "$(sed -n 's/^PRETTY_NAME=//p' /etc/os-release 2>/dev/null | head -n 1 | tr -d '"')"
+printf 'kernel\t%s\n' "$(uname -srmo 2>/dev/null | head -n 1)"
+printf 'architecture\t%s\n' "$(uname -m 2>/dev/null | head -n 1)"
+printf 'virtualization\t%s\n' "$(v=$(systemd-detect-virt 2>/dev/null || true); printf '%s' "${v:-physical-or-unknown}")"
+printf 'boot_time\t%s\n' "$( (uptime -s 2>/dev/null || who -b 2>/dev/null | awk '{$1="";$2="";sub(/^  */,"");print}') | head -n 1)"
+printf 'timezone\t%s\n' "$(z=$(timedatectl show -p Timezone --value 2>/dev/null || true); [ -n "$z" ] || z=$(date +%Z 2>/dev/null); printf '%s' "$z")"
+printf 'locale\t%s\n' "${LANG:-unknown}"
+printf 'init_system\t%s\n' "$(readlink -f /proc/1/exe 2>/dev/null | awk -F/ '{print $NF}')"
+printf 'package_manager\t%s\n' "$(for p in apt-get dnf yum zypper pacman apk rpm dpkg; do command -v "$p" >/dev/null 2>&1 && { printf '%s' "$p"; break; }; done)"
+printf 'selinux\t%s\n' "$(if command -v getenforce >/dev/null 2>&1; then getenforce 2>/dev/null; else printf 'unavailable'; fi)"
+printf 'apparmor\t%s\n' "$(if command -v aa-status >/dev/null 2>&1; then aa-status --enabled >/dev/null 2>&1 && printf 'enabled' || printf 'disabled'; elif [ -d /sys/module/apparmor ]; then printf 'present'; else printf 'unavailable'; fi)"
+printf 'uptime\t%s\n' "$(awk '{print int($1)}' /proc/uptime 2>/dev/null)"
+printf 'load\t%s\n' "$(awk '{print $1" "$2" "$3}' /proc/loadavg 2>/dev/null)"
+printf 'cpu_model\t%s\n' "$(sed -n 's/^model name[[:space:]]*:[[:space:]]*//p' /proc/cpuinfo 2>/dev/null | head -n 1)"
+printf 'cpu_cores\t%s\n' "$( (command -v nproc >/dev/null 2>&1 && nproc) || grep -c '^processor' /proc/cpuinfo 2>/dev/null)"
 awk '/^MemTotal:/{t=$2*1024}/^MemAvailable:/{a=$2*1024}/^SwapTotal:/{st=$2*1024}/^SwapFree:/{sf=$2*1024} END{printf "mem_total\t%.0f\nmem_available\t%.0f\nswap_total\t%.0f\nswap_free\t%.0f\n",t,a,st,sf}' /proc/meminfo 2>/dev/null
 df -B1 -PT / 2>/dev/null | awk 'NR==2{print "root_device\t"$1"\nroot_filesystem\t"$2"\nroot_total\t"$3"\nroot_available\t"$5}'
-printf 'primary_ip\t'; hostname -I 2>/dev/null | awk '{print $1}'
-printf 'default_gateway\t'; ip route show default 2>/dev/null | awk 'NR==1{print $3}'
-printf 'dns_servers\t'; awk '/^nameserver[[:space:]]+/{print $2}' /etc/resolv.conf 2>/dev/null | paste -sd ',' -
-printf 'processes\t'; ps -e --no-headers 2>/dev/null | wc -l
-printf 'users\t'; who 2>/dev/null | wc -l
-printf 'connections\t'; (ss -H -tun 2>/dev/null || netstat -tun 2>/dev/null | tail -n +3) | wc -l
+printf 'primary_ip\t%s\n' "$(hostname -I 2>/dev/null | awk '{print $1}')"
+printf 'default_gateway\t%s\n' "$(ip route show default 2>/dev/null | awk 'NR==1{print $3}')"
+printf 'dns_servers\t%s\n' "$(awk '/^nameserver[[:space:]]+/{print $2}' /etc/resolv.conf 2>/dev/null | paste -sd ',' -)"
+printf 'processes\t%s\n' "$(ps -e --no-headers 2>/dev/null | wc -l)"
+printf 'users\t%s\n' "$(who 2>/dev/null | wc -l)"
+printf 'connections\t%s\n' "$( (ss -H -tun 2>/dev/null || netstat -tun 2>/dev/null | tail -n +3) | wc -l)"
 awk -F'[: ]+' 'NR>2 && $1!="lo"{rx+=$3;tx+=$11} END{printf "rx\t%.0f\ntx\t%.0f\n",rx,tx}' /proc/net/dev 2>/dev/null"#;
 
 /// Processes that run come before the ones that exited and were never reaped
