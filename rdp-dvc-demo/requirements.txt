@@ -1,7 +1,0 @@
-# Simple RDP DVC Plugin - Python
-
-# Required for client-side COM LocalServer plugin
-win32more>=0.6.9
-
-# Optional: for building standalone executables
-# pyinstaller>=5.13.0
