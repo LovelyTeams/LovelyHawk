@@ -6658,7 +6658,8 @@ fn kernel_module_investigation_command(
         }
         KernelModuleInvestigationAction::Taint => {
             "printf 'Kernel taint value\\t%s\\n' \"$(cat /proc/sys/kernel/tainted 2>/dev/null || printf 'unavailable\\n')\"; \
-            printf 'Module taint\\t%s\\n' \"$(cat /sys/module/\"$m\"/taint 2>/dev/null || printf 'none or unavailable\\n'; printf 'Interpretation\\t0 means the kernel reports no taint bits\\n')\" "
+            printf 'Module taint\\t%s\\n' \"$(cat /sys/module/\"$m\"/taint 2>/dev/null || printf 'none or unavailable\\n')\"; \
+            printf 'Interpretation\\t0 means the kernel reports no taint bits\\n' "
         }
         KernelModuleInvestigationAction::Hash => {
             "path=$(modinfo -n \"$m\" 2>/dev/null); case \"$path\" in /*) printf 'Path\\t%s\\n' \"$path\"; md5sum -- \"$path\" 2>/dev/null | sed 's/^/MD5\\t/'; sha256sum -- \"$path\" 2>/dev/null | sed 's/^/SHA256\\t/';; *) printf 'Module path is unavailable\\n';; esac"
