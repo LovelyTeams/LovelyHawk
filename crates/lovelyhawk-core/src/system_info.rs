@@ -8989,10 +8989,17 @@ const SSH_KEYS_COMMAND: &str = r#"for f in /root/.ssh/authorized_keys /home/*/.s
 /// `last -Faiw` is the GNU spelling and busybox rejects the whole flag group,
 /// which left this exiting 1 with nothing on stdout — and the tab, whose tool
 /// check only asks whether `last` exists, then showed an empty login history
-/// on a machine that has one. Falling back to bare `last` costs nothing and
-/// the columns line up; busybox prints a header row, so `USER` joins the words
-/// that are never a username.
-const LOGIN_HISTORY_COMMAND: &str = r#"{ last -Faiw 2>/dev/null || last 2>/dev/null; } | head -n 500 | awk 'NF>=3 && $1 !~ /^(wtmp|btmp|reboot|shutdown|USER)$/ {time=""; for(i=4;i<=NF;i++) time=time (i==4?"":" ") $i; gsub(/\t/," ",time); print $1"\t"$2"\t"$3"\t"time"\tlogin"}'"#;
+/// on a machine that has one. Falling back to bare `last` costs nothing;
+/// busybox prints a header row, so `USER` joins the words that are never a
+/// username.
+///
+/// Columns are user, terminal, source address, login time and status. `-F`
+/// adds the year and `-a` moves the host to the end, while bare `last` has
+/// neither, so the address is matched by shape wherever it sits and the date
+/// runs through the year when there is one, otherwise through the clock. A
+/// login with no source prints `-`, which the row actions read as "this row
+/// carries no address to investigate".
+const LOGIN_HISTORY_COMMAND: &str = r#"{ last -Faiw 2>/dev/null || last 2>/dev/null; } | head -n 500 | awk 'NF>=3 && $1 !~ /^(wtmp|btmp|reboot|shutdown|USER)$/ {ip="-"; ipat=0; for(k=3;k<=NF;k++) if($k ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {ip=$k; ipat=k} n=0; for(k=1;k<=NF;k++) {if(k==ipat) continue; a[++n]=$k} if(n<6) next; t=a[3]" "a[4]" "a[5]" "a[6]; if(a[7] ~ /^[0-9][0-9][0-9][0-9]$/) {t=t" "a[7]; s=8} else s=7; st=""; for(i=s;i<=n;i++) st=st (i==s?"":" ") a[i]; gsub(/\t/," ",t); gsub(/\t/," ",st); print a[1]"\t"a[2]"\t"ip"\t"t"\t"st}'"#;
 const SUID_COMMAND: &str = concat!(
     r#"find /bin /sbin /usr/bin /usr/sbin /usr/local/bin -xdev -type f \( -perm -4000 -o -perm -2000 \)"#,
     file_facts_awk!(),
