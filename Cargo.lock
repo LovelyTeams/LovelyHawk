@@ -2710,7 +2710,7 @@ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
 name = "lovelyhawk-backend"
-version = "0.0.1-dev"
+version = "0.0.1"
 dependencies = [
  "base64 0.21.7",
  "chrono",
@@ -2729,7 +2729,7 @@ dependencies = [
 
 [[package]]
 name = "lovelyhawk-core"
-version = "0.0.1-dev"
+version = "0.0.1"
 dependencies = [
  "aes-gcm 0.10.3",
  "async-channel",
@@ -2761,7 +2761,7 @@ dependencies = [
 
 [[package]]
 name = "lovelyhawk-desktop"
-version = "0.0.1-dev"
+version = "0.0.1"
 dependencies = [
  "lovelyhawk-backend",
  "lovelyhawk-win-dvc",
@@ -2782,7 +2782,7 @@ dependencies = [
 
 [[package]]
 name = "lovelyhawk-terminal"
-version = "0.0.1-dev"
+version = "0.0.1"
 dependencies = [
  "alacritty_terminal",
  "async-channel",
@@ -2799,7 +2799,7 @@ dependencies = [
 
 [[package]]
 name = "lovelyhawk-win-dvc"
-version = "0.0.1-dev"
+version = "0.0.1"
 dependencies = [
  "base64 0.21.7",
  "chrono",

@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = '0.0.1-dev',
+    [string]$Version = '0.0.1',
     [string]$OutputDirectory = (Join-Path (Split-Path -Parent $PSScriptRoot) 'artifacts'),
     [string]$ExecutablePath = (Join-Path (Split-Path -Parent $PSScriptRoot) 'target\x86_64-pc-windows-msvc\release\lovelyhawk.exe'),
     [string]$AgentPath,
