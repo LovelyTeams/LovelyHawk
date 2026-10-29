@@ -2,7 +2,11 @@
   "name": "lovelyhawk-workspace",
   "private": true,
   "packageManager": "pnpm@10.28.2",
+  "engines": {
+    "node": ">=26.13.0 <27"
+  },
   "scripts": {
+    "dev": "pnpm desktop:hot",
     "ui:build": "pnpm --filter @lovelyhawk/ui build",
     "ui:check": "pnpm --filter @lovelyhawk/ui check",
     "ui:test": "pnpm --filter @lovelyhawk/ui test",

@@ -279,7 +279,7 @@ describe("visual configuration editor", () => {
     expect(html).toContain("块 · server · 2 个子项");
     expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
     expect(html).not.toContain("<script>");
-    expect(html).toContain("nginx -t");
+    expect(html).not.toContain("nginx -t");
     const hidden = renderToStaticMarkup(<ConfigVisualEditor api={api} initialView={{
       ...view, containsSensitive: true, text: null, copyAllowed: false,
       rows: [{ ...rows[0]!, sensitive: true, editable: false, preview: "[敏感内容已隐藏]" }], totalRows: 1,
@@ -328,7 +328,7 @@ describe("visual configuration editor", () => {
     const html = renderToStaticMarkup(<ConfigVisualEditor api={api} initialView={view} />);
     expect(html).toContain("Apache httpd");
     expect(html).toContain("区段 · VirtualHost · 1 个子项");
-    expect(html).toContain("apachectl -t");
+    expect(html).not.toContain("apachectl -t");
     expect(html).toContain("&lt;Perl&gt; 段");
     expect(html).not.toContain("nginx -t");
     expect(visibleConfigVisualRows(view.rows, "区段", "apache").map((r) => r.id)).toEqual(["1"]);
@@ -346,7 +346,7 @@ describe("visual configuration editor", () => {
     const html = renderToStaticMarkup(<ConfigVisualEditor api={api} initialView={view} />);
     expect(html).toContain("区段 · frontend · 1 个子项");
     expect(html).toContain("对外入口");
-    expect(html).toContain("haproxy -c -f");
+    expect(html).not.toContain("haproxy -c -f");
     expect(html).not.toContain("nginx -t");
     // Nothing selected: a setting has no section to go into yet.
     expect(html).toContain("HAProxy 的设置必须写在区段里");
@@ -368,16 +368,16 @@ describe("visual configuration editor", () => {
     expect(html).toContain("选项 · bind-address");
     expect(html).toContain("只允许本机连接");
     expect(html).toContain("不对客户端地址做反向域名解析");
-    expect(html).toContain("--validate-config");
+    expect(html).not.toContain("--validate-config");
     expect(html).not.toContain("nginx -t");
     // Nothing selected: an option has no group to go into yet; only include lines may stand outside one.
     expect(html).toContain("选项必须写在选项组里");
     const submit = html.match(/<button type="submit"[^>]*>添加选项<\/button>/u)?.[0] ?? "";
     expect(submit).toContain("disabled=\"\"");
     expect(html).toContain("<span>值</span>");
-    // MariaDB is told how to see what would take effect, since it cannot check a file alone.
+    // Product advice is shown after saving, rather than as a permanent banner.
     const mariadb = renderToStaticMarkup(<ConfigVisualEditor api={api} initialView={{ ...view, product: "mariadb" }} />);
-    expect(mariadb).toContain("my_print_defaults");
+    expect(mariadb).not.toContain("my_print_defaults");
     expect(mariadb).not.toContain("--validate-config");
   });
 
@@ -393,7 +393,7 @@ describe("visual configuration editor", () => {
     const html = renderToStaticMarkup(<ConfigVisualEditor api={api} initialView={view} />);
     expect(html).toContain("配置项 · bind");
     expect(html).toContain("监听哪些网卡地址");
-    expect(html).toContain("redis-server");
+    expect(html).not.toContain("redis-server");
     expect(html).not.toContain("nginx -t");
     expect(html).toContain("Redis 配置没有块");
     expect(html).not.toContain("加在文件最外层");

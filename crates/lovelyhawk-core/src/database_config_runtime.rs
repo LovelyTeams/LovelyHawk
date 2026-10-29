@@ -972,7 +972,7 @@ fn decode_runtime_identity_cell(
         return Err(DatabaseConfigRuntimeIdentityParseError::InvalidHex { column });
     }
     let mut bytes = Zeroizing::new(Vec::with_capacity(cell.len() / 2));
-    for pair in cell.chunks_exact(2) {
+    for pair in cell.as_chunks::<2>().0 {
         let high = hex_nibble(pair[0])
             .ok_or(DatabaseConfigRuntimeIdentityParseError::InvalidHex { column })?;
         let low = hex_nibble(pair[1])
@@ -1720,7 +1720,7 @@ fn optional_bytes_cell(
         return Err(DatabaseConfigRuntimeParseError::InvalidHex { row, column });
     }
     let mut decoded = Vec::with_capacity(cell.len() / 2);
-    for pair in cell.chunks_exact(2) {
+    for pair in cell.as_chunks::<2>().0 {
         let high = hex_nibble(pair[0])
             .ok_or(DatabaseConfigRuntimeParseError::InvalidHex { row, column })?;
         let low = hex_nibble(pair[1])
@@ -1746,7 +1746,7 @@ fn optional_zeroizing_bytes_cell(
         return Err(DatabaseConfigRuntimeParseError::InvalidHex { row, column });
     }
     let mut decoded = Zeroizing::new(Vec::with_capacity(cell.len() / 2));
-    for pair in cell.chunks_exact(2) {
+    for pair in cell.as_chunks::<2>().0 {
         let high = hex_nibble(pair[0])
             .ok_or(DatabaseConfigRuntimeParseError::InvalidHex { row, column })?;
         let low = hex_nibble(pair[1])

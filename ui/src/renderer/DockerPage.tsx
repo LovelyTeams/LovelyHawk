@@ -1047,7 +1047,7 @@ export function DockerSecurityView({ status, audit, onRefresh }: {
               <article><strong>{audit.summary.high}</strong><span>高风险</span></article>
               <article><strong>{audit.summary.total}</strong><span>全部发现</span></article>
             </div>
-            {audit.findings.length === 0 ? <EmptyPanel title="没有返回安全发现" detail="这不代表未执行的检查已通过。" /> : (
+            {audit.findings.length === 0 ? <EmptyPanel title="没有返回安全发现" /> : (
               <div className="docker-findings">
                 {audit.findings.map((finding, index) => (
                   <article className={`docker-finding severity-${finding.severity}`} key={`${finding.containerName}\0${finding.category}\0${index}`}>
@@ -1531,8 +1531,8 @@ function DockerMeter({ percent }: { percent: string | undefined }) {
   );
 }
 
-function EmptyPanel({ title, detail }: { title: string; detail: string }) {
-  return <div className="docker-empty"><strong>{title}</strong><p>{detail}</p></div>;
+function EmptyPanel({ title, detail }: { title: string; detail?: string }) {
+  return <div className="docker-empty"><strong>{title}</strong>{detail ? <p>{detail}</p> : null}</div>;
 }
 
 function TruncatedNotice({ value }: { value: boolean }) {

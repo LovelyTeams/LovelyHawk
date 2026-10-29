@@ -27,7 +27,7 @@ jobs:
       - name: Install pinned Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: '1.93.1'
+          toolchain: '1.99.1'
           components: rustfmt, clippy, llvm-tools-preview
 
       - name: Restore Cargo build cache
@@ -38,13 +38,13 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24.13.0'
+          node-version-file: '.node-version'
 
-      - name: Activate pinned pnpm
+      - name: Install pinned pnpm
         shell: pwsh
         run: |
-          corepack enable
-          corepack prepare pnpm@10.28.2 --activate
+          npm install --global pnpm@10.28.2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           pnpm --version
 
       - name: Install locked UI dependencies

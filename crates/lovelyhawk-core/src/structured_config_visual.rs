@@ -1521,7 +1521,7 @@ fn bounded_preview(source: &[u8]) -> (String, bool) {
 
 fn next_document_revision() -> CoreResult<u64> {
     NEXT_STRUCTURED_CONFIG_REVISION
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |revision| {
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |revision| {
             revision.checked_add(1)
         })
         .map_err(|_| {

@@ -50,18 +50,15 @@ describe("AppTitleBar", () => {
     expect(appSource.match(/<AppTitleBar\b/gu)).toHaveLength(3);
   });
 
-  it("exposes exactly the five named app actions as icon buttons", () => {
+  it("exposes the four app actions without a duplicate theme control", () => {
     const markup = renderToStaticMarkup(
       <AppTitleBar
         section="主机全景"
         actions={{
-          themeLabel: "浅色",
-          themeKind: "light",
           sshTerminalDisabled: true,
           onOpenConnections: () => undefined,
           onOpenSshTerminal: () => undefined,
           onOpenCommandHistory: () => undefined,
-          onCycleTheme: () => undefined,
           onOpenSettings: () => undefined,
         }}
       />,
@@ -73,15 +70,15 @@ describe("AppTitleBar", () => {
         "open-connections",
         "open-ssh-terminal",
         "open-command-history",
-        "cycle-theme",
         "open-settings",
       ]);
     // Window buttons need the desktop host, so a static render has none.
     expect(markup).not.toMatch(/最小化|最大化|关闭窗口|<input|<select|<textarea|<a /u);
-    expect(markup.match(/<button/gu)).toHaveLength(5);
-    expect(markup.match(/<svg/gu)).toHaveLength(5);
+    expect(markup.match(/<button/gu)).toHaveLength(4);
+    expect(markup.match(/<svg/gu)).toHaveLength(4);
     // Every action carries a text label for screen readers even though it is an icon.
-    expect(markup.match(/aria-label="/gu)).toHaveLength(6);
+    expect(markup.match(/aria-label="/gu)).toHaveLength(5);
+    expect(markup).not.toContain("cycle-theme");
     expect(markup).toContain('disabled=""');
     expect(cssSource).toContain(".window-titlebar-actions");
   });
@@ -96,25 +93,4 @@ describe("AppTitleBar", () => {
     }
   });
 
-  it("shows a moon for dark themes and a sun for light ones", () => {
-    const render = (themeKind: "light" | "dark") => renderToStaticMarkup(
-      <AppTitleBar
-        section="主机全景"
-        actions={{
-          themeLabel: themeKind === "dark" ? "深色" : "浅色",
-          themeKind,
-          sshTerminalDisabled: false,
-          onOpenConnections: () => undefined,
-          onOpenSshTerminal: () => undefined,
-          onOpenCommandHistory: () => undefined,
-          onCycleTheme: () => undefined,
-          onOpenSettings: () => undefined,
-        }}
-      />,
-    );
-
-    expect(render("light")).toContain('cx="8" cy="8" r="3"');
-    expect(render("dark")).toContain("M13.2 9.7A5.5 5.5 0 0 1 6.3 2.8");
-    expect(render("dark")).not.toContain('cx="8" cy="8" r="3"');
-  });
 });

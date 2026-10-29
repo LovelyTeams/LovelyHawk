@@ -1,5 +1,6 @@
 import type { WindowsIncidentPageHandle } from "./WindowsIncidentPage";
 import { NotificationCenter, NotificationContext, NotificationOpenContext } from "./NotificationCenter";
+import { useAppUpdate } from "./AppUpdate";
 import {
   lazy,
   Suspense,
@@ -84,7 +85,6 @@ import {
 import {
   DEFAULT_THEME_ID,
   applyTheme,
-  nextThemeId,
   themeDefinition,
 } from "./theme/theme";
 import type { SettingsTheme } from "../shared/settings-contract";
@@ -156,6 +156,7 @@ export function App() {
     initialNotificationState,
   );
   const [error, setError] = useState<string | null>(null);
+  const appUpdate = useAppUpdate();
   const [themeId, setThemeId] = useState<SettingsTheme>(DEFAULT_THEME_ID);
   const [uiPreferences, setUiPreferences] = useState<UiPreferences>(DEFAULT_UI_PREFERENCES);
   const [navigationBusy, setNavigationBusy] = useState(false);
@@ -549,6 +550,7 @@ export function App() {
 
   const sidebarActions = <div className="sidebar-footer">
     {notificationButton}
+    {appUpdate.button}
     <button type="button" data-testid="sidebar-open-application-log" onClick={(event) => openApplicationLog(event.currentTarget)}>应用日志</button>
     <button type="button" data-testid="sidebar-open-disposal-report" onClick={(event) => openDisposalReport(event.currentTarget)}>处置报告</button>
   </div>;
@@ -558,14 +560,11 @@ export function App() {
         section={activePage === null ? "欢迎" : activePage.title}
         backgroundHidden={overlayOpen}
         actions={{
-          themeLabel: themeDefinition(themeId).label,
           onOpenConnections: (returnFocus) =>
             openConnectionManager({ connectionId: null, startCreating: false }, returnFocus),
-          themeKind: themeDefinition(themeId).kind,
           sshTerminalDisabled: activeTarget === null,
           onOpenSshTerminal: () => void openSshTerminal(),
           onOpenCommandHistory: openCommandHistory,
-          onCycleTheme: () => void chooseTheme(nextThemeId(themeId)),
           onOpenSettings: openSettings,
         }}
       />
@@ -689,6 +688,7 @@ export function App() {
               connection={activeTarget}
               api={window.lovelyhawk}
               writeClipboard={window.lovelyhawk.writeClipboard}
+              openFile={window.lovelyhawk.openSystemInfoFile}
             />
           ) : activePage.id === "ai-history" ? (
             <AiHistoryPage
@@ -850,9 +850,11 @@ export function App() {
         </div>
         <div className="statusbar-group statusbar-end">
           <ThemePicker themeId={themeId} onSelect={(next) => void chooseTheme(next)} />
+          {appUpdate.button}
         </div>
       </footer>
       ) : null}
+      {appUpdate.dialog}
     </div></NotificationOpenContext.Provider></NotificationContext.Provider>
   );
 }

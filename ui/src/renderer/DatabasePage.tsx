@@ -48,7 +48,6 @@ export function PostgresqlObservationPanel({ session, expert }: { session: Postg
       {!session.settingsReadable ? <p>当前账号没有完整参数来源读取权限，部分路径、来源或行号可能不可见。</p> : null}
       <div className="database-table" tabIndex={0} role="region" aria-label="重点参数来源，可横向滚动"><table><thead><tr><th>参数</th><th>来源</th><th>来源文件 / 行号</th><th>等待重启</th></tr></thead>
         <tbody>{session.origins.map(item => <tr key={item.name}><th scope="row">{item.name}</th><td>{item.source ?? "未取得"}</td><td>{item.sourceFile ?? "未提供文件来源"}{item.sourceLine !== null ? ` · 第 ${item.sourceLine} 行` : ""}</td><td>{item.pendingRestart === null ? "未取得" : item.pendingRestart ? "是" : "否"}</td></tr>)}</tbody></table></div>
-      <p>文件来源为空可能因为权限不足或该值来自会话、默认值等其他来源。这里只记录十项重点参数的来源，未读取配置内容、完整 include 关系或访问规则。查询前后会核对会话与配置加载信息；这不构成磁盘原子快照。路径和已结束会话的 PID 不能直接用于修补、重启或结束进程。</p>
     </details> : null}
   </section>;
 }

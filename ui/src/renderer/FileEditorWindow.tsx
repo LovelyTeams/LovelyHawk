@@ -207,7 +207,7 @@ export function FileEditorWindow() {
             <button
               type="button"
               className="file-editor-save"
-              disabled={busy || !dirty}
+              disabled={busy || plan !== null || !dirty}
               onClick={() => void planSave()}
             >
               保存
@@ -241,7 +241,7 @@ export function FileEditorWindow() {
         className="file-editor-text"
         aria-label={target?.name ?? "文件内容"}
         spellCheck={false}
-        readOnly={!editable}
+        readOnly={!editable || busy || plan !== null}
         value={text}
         onChange={(event) => setText(event.currentTarget.value)}
       />

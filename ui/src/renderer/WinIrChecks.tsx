@@ -99,7 +99,6 @@ export function WinIrBaseline({ snapshot, focus, busy = false, connected = false
           {!current.remediationAvailable && current.status !== "pass" ? <p className="wir-footnote">{current.status === "unknown" ? "先补齐采集与适用条件，再制定变更计划。" : current.status === "not-applicable" ? "当前条件下不执行此项修复。" : "此项提供检查与建议，尚未提供自动修复；请按适用范围人工复核。"}</p> : null}
         </DetailPane> : null}
       </div>
-      <p className="wir-footnote">结果仅对应已列出的检查项；“通过”不代表主机无入侵，也不代表完整符合某项合规标准。配置变更应另行确认影响并复核。</p>
     </div>
   );
 }
@@ -188,7 +187,6 @@ export function WinIrStartup({ snapshot, focus, related, busy = false, connected
         </DetailPane> : null}
       </div>
       </div></div>
-      <p className="wir-footnote">列表是本次采集到的启动记录，权限和采集端支持的来源会影响覆盖范围。正常名称与签名也不能单独证明可信。</p>
     </div>
   );
 }
@@ -273,7 +271,6 @@ export function WinIrAccounts({ snapshot, focus, related, busy = false, connecte
           {related ? <WinIrRelated key={key(current)} context={related} query={{ accounts: [current.name], exclude: RELATED_ID.account(current) }} /> : null}
         </DetailPane> : null}
       </div>
-      <p className="wir-footnote">账户属性不是完整登录历史；相关事件只在已采集日志中检索，需结合审计开启情况与日志保留范围判断。</p>
     </div>
   );
 }

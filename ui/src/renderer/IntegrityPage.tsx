@@ -449,11 +449,6 @@ export function IntegrityPage({ bindingHandle, api, initialState }: IntegrityPag
           </div>
         </header>
 
-        <p className="integrity-boundary-note">
-          比较只读取文件，不改动它们。对比较中新增或改动的文件，可以查看属性、下载留证、去掉执行权限或隔离：
-          每一步都先给出计划，确认后才执行，完成后可以撤销。
-        </p>
-
         {visibleState.error !== null && (
           <TransientNotice source="文件完整性" message={visibleState.error ?? ""} severity="error"><p className="integrity-notice error" role="alert">{visibleState.error}</p></TransientNotice>
         )}

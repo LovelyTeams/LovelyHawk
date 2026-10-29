@@ -202,9 +202,11 @@ describe("welcome view", () => {
 describe("host overview", () => {
   it("points a truncated table at something that exists", () => {
     const page = readFileSync(new URL("./SystemInfoPage.tsx", import.meta.url), "utf8");
-    // The page has no filter; telling the operator to use one sent them looking for nothing.
+    // Filtering only covers the current snapshot. More rows need a new collect.
     expect(page).not.toContain("用上面的筛选");
-    expect(page.match(/需要完整列表时请在终端中查看/gu)).toHaveLength(2);
+    expect(page).toContain("重新采集前");
+    expect(page).toContain("changeRowLimit(nextLimit)");
+    expect(page).toContain("已达采集行数或大小上限");
   });
 });
 

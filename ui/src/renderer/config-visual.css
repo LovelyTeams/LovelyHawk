@@ -11,7 +11,7 @@
   font-size: var(--font-small);
 }
 
-.config-visual button {
+:where(.config-visual) button {
   padding: 7px 12px;
   color: var(--text);
   background: var(--surface);
@@ -20,7 +20,7 @@
   font: inherit;
   cursor: pointer;
 }
-.config-visual button:hover:enabled { background: var(--surface-hover); }
+:where(.config-visual) button:where(:hover:enabled) { background: var(--surface-hover); }
 .config-visual button:disabled { cursor: default; opacity: .55; }
 .config-visual button:focus-visible,
 .config-visual input:focus-visible,

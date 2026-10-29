@@ -27,7 +27,8 @@
   box-sizing: border-box;
 }
 
-.emergency-commands-page button,
+/* Page defaults must not override nested menus or dialog button variants. */
+:where(.emergency-commands-page) button,
 .emergency-commands-page input {
   border: 1px solid var(--border-strong);
   border-radius: 8px;
@@ -36,13 +37,13 @@
   font: inherit;
 }
 
-.emergency-commands-page button {
+:where(.emergency-commands-page) button {
   min-height: 36px;
   padding: 8px 13px;
   cursor: pointer;
 }
 
-.emergency-commands-page button:hover:not(:disabled) {
+:where(.emergency-commands-page) button:where(:hover:not(:disabled)) {
   border-color: var(--accent-strong);
   background: var(--info-soft);
 }

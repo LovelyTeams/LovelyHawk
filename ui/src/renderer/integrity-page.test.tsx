@@ -121,7 +121,7 @@ describe("standalone Integrity page", () => {
     const html = renderToStaticMarkup(
       <IntegrityPage bindingHandle={bindingHandle} api={api} initialState={readyState("idle")} />,
     );
-    expect(html).toContain("比较只读取文件，不改动它们");
+    expect(html).not.toContain("integrity-boundary-note");
     expect(html).toContain("开始比较");
     expect(html).toContain("新建基线");
     // Checkboxes choose among the presets.

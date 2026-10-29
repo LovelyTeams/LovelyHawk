@@ -425,7 +425,9 @@ pub fn run_encoded_powershell(
         && raw_bytes.len().is_multiple_of(2)
     {
         let words: Vec<u16> = raw_bytes
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|b| u16::from_le_bytes([b[0], b[1]]))
             .collect();
         if let Ok(script) = String::from_utf16(&words) {
@@ -878,7 +880,7 @@ pub fn scan_webshells(target_path: &str) -> Result<Value, String> {
     };
 
     let mut sorted = hits;
-    sorted.sort_by(|a, b| b.0.cmp(&a.0));
+    sorted.sort_by_key(|a| std::cmp::Reverse(a.0));
     if sorted.len() > 500 {
         sorted.truncate(500);
         truncated = true;

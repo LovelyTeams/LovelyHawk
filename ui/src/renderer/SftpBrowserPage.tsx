@@ -303,7 +303,6 @@ export function SftpBrowserPage({
     return (
       <main className="sftp-browser-page sftp-browser-disconnected">
         <h1>文件管理已暂停</h1>
-        <p>离开这里时会清空目录和预览；回来后重新读取，不会显示之前目标的旧结果。</p>
       </main>
     );
   }

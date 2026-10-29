@@ -1781,7 +1781,7 @@ impl MiddlewareService {
         for record in &records {
             validate_change_record(record)?;
         }
-        records.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+        records.sort_by_key(|left| std::cmp::Reverse(left.updated_at));
         Ok(records)
     }
 }
@@ -2043,7 +2043,7 @@ impl MiddlewareChangePlan {
             if stored.records.len() > MAX_HISTORY_RECORDS {
                 stored
                     .records
-                    .sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+                    .sort_by_key(|left| std::cmp::Reverse(left.updated_at));
                 stored.records.truncate(MAX_HISTORY_RECORDS);
             }
             self.store.write(StoreFile::Middleware, &stored)

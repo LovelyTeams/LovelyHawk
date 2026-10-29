@@ -964,6 +964,42 @@ impl BackendState {
                     Err(failure) => Err(failure),
                 }
             }
+            RpcMethod::SystemInfoFileEditorOpen => {
+                match parse_params::<SystemInfoDetailParams>(request.params) {
+                    Ok(params) => {
+                        async {
+                            let (_, table) = self
+                                .system_info
+                                .snapshot_for(
+                                    &params.binding_handle,
+                                    &params.snapshot_handle,
+                                    &params.row_id,
+                                )
+                                .map_err(system_info_failure)?;
+                            let path = table
+                                .shell_config_file(&params.row_id)
+                                .map_err(|_| system_info_failure(SystemInfoApiError::InvalidRow))?;
+                            let result = self
+                                .sftp_browser
+                                .open_editor_file(&params.binding_handle, path)
+                                .await
+                                .map_err(sftp_browser_failure)?;
+                            // A refresh or target switch while SFTP was opening revokes
+                            // the inventory row's authority to launch a new window.
+                            self.system_info
+                                .snapshot_for(
+                                    &params.binding_handle,
+                                    &params.snapshot_handle,
+                                    &params.row_id,
+                                )
+                                .map_err(system_info_failure)?;
+                            Ok(to_value(result))
+                        }
+                        .await
+                    }
+                    Err(failure) => Err(failure),
+                }
+            }
             RpcMethod::SystemInfoDetailGet => {
                 match parse_params::<SystemInfoDetailParams>(request.params) {
                     Ok(params) => self
@@ -2816,6 +2852,8 @@ enum RpcMethod {
     SystemInfoTableCollect,
     #[serde(rename = "system-info.detail.get")]
     SystemInfoDetailGet,
+    #[serde(rename = "system-info.file-editor.open")]
+    SystemInfoFileEditorOpen,
     #[serde(rename = "system-info.row.actions.list")]
     SystemInfoRowActionsList,
     #[serde(rename = "system-info.row.inspect")]

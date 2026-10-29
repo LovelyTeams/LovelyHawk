@@ -17,7 +17,7 @@ usage='usage: desktop-package-linux.sh <executable> <output-directory> <inventor
 executable=${1:?$usage}
 output=${2:?$usage}
 inventory=${3:?$usage}
-version=${4:-0.0.1}
+version=${4:-0.0.2}
 for file in SBOM.cdx.json THIRD_PARTY_LICENSES_RUST.txt; do
   [[ -f $inventory/$file ]] || { echo "missing $inventory/$file" >&2; exit 1; }
 done
@@ -33,7 +33,7 @@ for marker in LOVELYHAWK_DEBUG_PORT LOVELYHAWK_TEST_DIALOG_ANSWERS LOVELYHAWK_TE
   if grep -aq "$marker" "$executable"; then echo "release executable still reads the debug-only variable '$marker'" >&2; exit 1; fi
 done
 notices="$root/ui/THIRD_PARTY_NOTICES.md"
-for required in 'React 19.2.8' 'Tauri 2.12.1' '@tauri-apps/api 2.12.1' 'xterm.js 6.0.0' 'Inter 4.1' 'Cascadia Mono 2407.24'; do
+for required in 'React 19.3.1' 'Tauri 2.12.5' '@tauri-apps/api 2.12.4' 'xterm.js 6.0.0' 'Inter 4.1' 'Cascadia Mono 2407.24'; do
   grep -qF "$required" "$notices" || { echo "third-party notices are missing '$required'" >&2; exit 1; }
 done
 
@@ -65,7 +65,7 @@ libwebkit2gtk-4.1-0 与 libgtk-3-0）。同一个 data 文件夹同时只允许�
 README
 
 {
-  printf '{\n  "schema": "lovelyhawk-portable-package/v1",\n  "product": "LovelyHawk",\n  "version": "%s",\n  "platform": "linux",\n  "arch": "x64",\n  "shell": "tauri-2.12.1",\n  "webview": "system WebKitGTK 4.1",\n  "files": [\n' "$version"
+  printf '{\n  "schema": "lovelyhawk-portable-package/v1",\n  "product": "LovelyHawk",\n  "version": "%s",\n  "platform": "linux",\n  "arch": "x64",\n  "shell": "tauri-2.12.5",\n  "webview": "system WebKitGTK 4.1",\n  "files": [\n' "$version"
   first=1
   for file in LICENSE README.txt SBOM.cdx.json THIRD_PARTY_LICENSES_RUST.txt THIRD_PARTY_NOTICES.md lovelyhawk; do
     [[ $first == 1 ]] || printf ',\n'

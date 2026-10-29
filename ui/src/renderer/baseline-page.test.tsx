@@ -107,7 +107,7 @@ describe("central Baseline page", () => {
   it("renders an honest disconnected phase-one state without invented scan or history evidence", () => {
     const html = renderToStaticMarkup(<BaselinePage bindingHandle={null} api={api} />);
     expect(html).toContain("尚未连接 SSH 目标");
-    expect(html).toContain("只读取固定目录");
+    expect(html).toContain("只读模式");
     expect(html).toContain("正在读取随包分发的基线目录");
     expect(html).not.toContain("scan-a");
     expect(html).not.toContain("record-a");

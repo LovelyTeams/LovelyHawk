@@ -21,7 +21,7 @@ export function PostgresqlRolePanel({ summary, source, page, busy, onRead }: {
   const load = (mode: RoleAccessMode, query: string, offset: number): void => { if (source) void onRead?.(source.oid,mode,query,offset); };
   return <section aria-label="角色权限来源"><h5 ref={heading} tabIndex={-1}>角色权限来源{source ? ` · ${source.name}` : ""}</h5>
     {summary.state === "unavailable" ? <p>本次无法分析：{gaps[summary.reason]}。请先复核对应读取状态；这不表示没有权限关联。</p> : <>
-      <p>已分析成员关系：{summary.additionalManagementLogins} 个可登录角色可经角色切换获得额外管理属性。请逐个核对用途；数量为零也不代表完整权限已安全。</p>
+      <p>可经角色切换获得额外管理属性的登录角色：{summary.additionalManagementLogins} 个。</p>
       <p>当前数据库：{summary.database.name}（OID：{summary.database.oid}），所有者 OID：{summary.database.ownerOid}。数据库所有者隐式属于 pg_database_owner，此关系随数据库变化。</p>
       {source ? <><p>以此角色作为会话身份分析。{source.canLogin ? "该角色设置了 LOGIN，实际登录仍取决于认证、网络和其他限制。" : "该角色未设置 LOGIN，不能据此认定可直接登录。"}自身管理属性：{roleManagement(source)}。</p>
         <form className="database-toolbar" onSubmit={e => { e.preventDefault(); load(mode,query,0); }}>

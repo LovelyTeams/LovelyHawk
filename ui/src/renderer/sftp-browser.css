@@ -53,7 +53,7 @@
   letter-spacing: 0.08em;
 }
 
-.sftp-browser-page button,
+:where(.sftp-browser-page) button,
 .sftp-browser-page input,
 .sftp-browser-page select {
   border: 1px solid var(--border-strong);
@@ -63,13 +63,13 @@
   font: inherit;
 }
 
-.sftp-browser-page button {
+:where(.sftp-browser-page) button {
   min-height: 36px;
   padding: 7px 13px;
   cursor: pointer;
 }
 
-.sftp-browser-page button:hover:not(:disabled) {
+:where(.sftp-browser-page) button:where(:hover:not(:disabled)) {
   border-color: var(--accent);
   background: var(--surface-inset);
 }

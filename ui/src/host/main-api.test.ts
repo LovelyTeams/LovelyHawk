@@ -42,7 +42,27 @@ describe("main window API", () => {
   it("is frozen and keeps the method count the renderer was built against", () => {
     const api = createMainApi();
     expect(Object.isFrozen(api)).toBe(true);
-    expect(Object.keys(api)).toHaveLength(170);
+    expect(Object.keys(api)).toHaveLength(172);
+  });
+
+  it("keeps release checks and downloads on a validated main-window command", async () => {
+    const calls = recordingHost(() => ({ kind: "info", version: "0.0.1" }));
+    const api = createMainApi();
+    expect(await api.appUpdate({ action: "info" })).toEqual({ kind: "info", version: "0.0.1" });
+    expect(calls).toEqual([{ command: "app_update", args: { request: { action: "info" } } }]);
+    await expect(api.appUpdate({ action: "download", handle: "../package" })).rejects.toThrow();
+    await expect((api.appUpdate as (...args: unknown[]) => Promise<unknown>)({ action: "check", url: "https://evil.invalid" })).rejects.toThrow();
+    await expect((api.appUpdate as (...args: unknown[]) => Promise<unknown>)({ action: "info" }, 1)).rejects.toThrow();
+    expect(calls).toHaveLength(1);
+    recordingHost(() => ({ kind: "download", filename: "C:\\secret.zip" }));
+    await expect(api.appUpdate({ action: "download", handle: BINDING })).rejects.toThrow();
+    recordingHost(() => ({ kind: "progress", received: 11, total: 10 }));
+    await expect(api.appUpdate({ action: "progress", handle: BINDING })).rejects.toThrow();
+    recordingHost(() => ({ kind: "check", version: "0.0.2", available: false, handle: BINDING, notes: "" }));
+    await expect(api.appUpdate({ action: "check" })).rejects.toThrow();
+    expect(capability("main-window").permissions).toContain("allow-app-update");
+    expect(capability("child-windows").permissions).not.toContain("allow-app-update");
+    expect(capability("windows-channel").permissions).not.toContain("allow-app-update");
   });
 
   it("keeps RDP on the dedicated main-window command and validates its response", async () => {
@@ -68,6 +88,22 @@ describe("main window API", () => {
     expect(allowedMethods).not.toContain("windows.evidence.part");
   });
 
+  it("opens only an inventory-bound file through the native editor command", async () => {
+    const calls = recordingHost(() => ({ opened: true, reused: false }));
+    const api = createMainApi();
+    expect(await api.openSystemInfoFile(BINDING, "snapshot-1", "shell-row-1"))
+      .toEqual({ opened: true, reused: false });
+    expect(calls).toEqual([{ command: "system_info_file_open", args: {
+      bindingHandle: BINDING, snapshotHandle: "snapshot-1", rowId: "shell-row-1",
+    } }]);
+    await expect(api.openSystemInfoFile(BINDING, "/etc/profile", "row")).rejects.toThrow();
+    expect(calls).toHaveLength(1);
+    expect(allowedMethods).not.toContain("system-info.file-editor.open");
+    expect(capability("main-window").permissions).toContain("allow-system-info-file-open");
+    expect(capability("child-windows").permissions).not.toContain("allow-system-info-file-open");
+    expect(capability("windows-channel").permissions).not.toContain("allow-system-info-file-open");
+  });
+
   it("refuses bad arity and bad shapes before anything reaches the host", async () => {
     const calls = recordingHost();
     const api = createMainApi() as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
@@ -77,6 +113,7 @@ describe("main window API", () => {
       startSshConnect: ["", "extra"],
       getSshAttempt: [42],
       collectSystemInfo: ["b", "not-a-tab", 50],
+      openSystemInfoFile: ["b", "snapshot", "row", "/etc/shadow"],
       readBaselineFile: ["b"],
       planDockerContainerAction: ["b", "s", "c", "name", "delete-everything"],
       runEmergencyCommand: ["b", "s"],

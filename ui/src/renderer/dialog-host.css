@@ -11,7 +11,7 @@
 
 .dialog-host {
   width: min(450px, 100%);
-  padding: 25px;
+  padding: 16px 20px 20px;
   border: 1px solid var(--border);
   border-radius: 16px;
   outline: none;
@@ -48,7 +48,7 @@
 }
 
 .dialog-host-eyebrow {
-  margin: 0 0 7px;
+  margin: 0 0 3px;
   color: var(--accent-text);
   font-size: var(--font-small);
   font-weight: 700;

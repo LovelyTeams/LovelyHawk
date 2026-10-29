@@ -1242,7 +1242,7 @@ pub fn analyze_threats(entries: &[LogEntry]) -> ThreatSummary {
             action_type,
         })
         .collect();
-    top_source_ips.sort_by(|left, right| right.count.cmp(&left.count));
+    top_source_ips.sort_by_key(|left| std::cmp::Reverse(left.count));
     top_source_ips.truncate(20);
     let mut top_target_users: Vec<_> = users
         .into_iter()
@@ -1253,7 +1253,7 @@ pub fn analyze_threats(entries: &[LogEntry]) -> ThreatSummary {
             fail_count,
         })
         .collect();
-    top_target_users.sort_by(|left, right| right.count.cmp(&left.count));
+    top_target_users.sort_by_key(|left| std::cmp::Reverse(left.count));
     top_target_users.truncate(20);
 
     let threat_level = if brute_force > 100 || suspicious_activity > 10 {
@@ -1410,11 +1410,9 @@ pub fn generate_journalctl_command(
     date_filter: Option<LogCalendarDay>,
 ) -> CoreResult<String> {
     let mut command = "journalctl --no-pager".to_owned();
-    for (flag, value, maximum) in [("-u", unit, 256)] {
-        if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
-            bounded_text("journal filter", value, maximum)?;
-            command.push_str(&format!(" {flag} {}", shq(value)));
-        }
+    if let Some(value) = unit.map(str::trim).filter(|value| !value.is_empty()) {
+        bounded_text("journal filter", value, 256)?;
+        command.push_str(&format!(" -u {}", shq(value)));
     }
     if let Some(date) = date_filter {
         command.push_str(&format!(

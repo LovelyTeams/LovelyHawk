@@ -4954,7 +4954,7 @@ fn parse_volumes(
             labels: json_text(&row, "Labels", MAX_CELL_CHARS),
         });
     }
-    items.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+    items.sort_by_key(|left| left.name.to_lowercase());
     Ok(DockerCollection { items, truncated })
 }
 

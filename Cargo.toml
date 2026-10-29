@@ -17,9 +17,9 @@ default-members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
-rust-version = "1.93.1"
+rust-version = "1.99.1"
 license = "AGPL-3.0-only"
 authors = ["Tokeii"]
 repository = "https://github.com/LovelyTeams/LovelyHawk"
@@ -33,12 +33,12 @@ base64 = "0.21"
 bytes = "1"
 chrono = { version = "0.4", features = ["serde"] }
 futures = "0.3"
-flate2 = "=1.1.9"
+flate2 = "=1.1.10"
 native-tls = "0.2.18"
 parking_lot = "0.12"
 postgres-native-tls = { version = "0.5.3", default-features = false }
 regex = "1"
-rfd = { version = "0.16", default-features = false }
+rfd = { version = "0.17.2", default-features = false }
 reqwest = { version = "0.12", features = ["json", "stream", "socks"] }
 # `rsa`: RSA private keys, RSA certificates and RSA agent identities can sign.
 # RustCrypto `rsa` carries RUSTSEC-2023-0071; why that is accepted for an SSH
@@ -48,10 +48,12 @@ russh-sftp = "2.4.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
-tauri = { version = "=2.12.1", features = ["devtools"] }
-tauri-build = { version = "=2.7.1", features = [] }
-tauri-plugin-clipboard-manager = "=2.4.1"
-tauri-plugin-dialog = "=2.8.1"
+semver = "1"
+tauri = { version = "=2.12.5", features = ["devtools"] }
+tauri-build = { version = "=2.7.4", features = [] }
+tauri-plugin-clipboard-manager = "=2.5.0"
+tauri-plugin-dialog = "=2.8.4"
+tempfile = "3.27"
 thiserror = "1.0"
 tokio = { version = "1", features = ["full"] }
 tokio-postgres = { version = "0.7.18", default-features = false }
@@ -78,12 +80,19 @@ windows-core = "0.62.2"
 zeroize = { version = "1", features = ["derive"] }
 
 [profile.dev]
-opt-level = 1
+opt-level = 0
+debug = "line-tables-only"
 
 # SSH crypto (russh/ring) and the alacritty terminal grid dominate debug-build
 # sidecar latency; keep dependencies optimized so development terminals stay
 # responsive under load.
-[profile.dev.package."*"]
+[profile.dev.package.russh]
+opt-level = 3
+
+[profile.dev.package.ring]
+opt-level = 3
+
+[profile.dev.package.alacritty_terminal]
 opt-level = 3
 
 [profile.release]

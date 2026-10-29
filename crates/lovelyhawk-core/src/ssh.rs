@@ -2404,7 +2404,7 @@ async fn router_loop(
                         .values()
                         .map(|session| session.status.clone())
                         .collect::<Vec<_>>();
-                    listed.sort_by(|left, right| left.connected_at.cmp(&right.connected_at));
+                    listed.sort_by_key(|left| left.connected_at);
                     let _ = reply.send(listed);
                 }
                 WorkerCommand::Execute {

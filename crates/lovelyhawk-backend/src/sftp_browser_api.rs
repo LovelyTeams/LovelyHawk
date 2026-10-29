@@ -36,6 +36,7 @@ const MAX_DISPLAYED_ENTRIES: usize = 128;
 const MAX_ENTRY_NAME_BYTES: usize = 256;
 const MAX_NAVIGATION_DEPTH: usize = 64;
 const MAX_BROWSERS: usize = 4;
+const MAX_EDITOR_BROWSERS: usize = 16;
 const MAX_BROWSER_BYTES: usize = 1024 * 1024;
 const MAX_REGISTRY_BYTES: usize = 4 * 1024 * 1024;
 const MAX_ACTIVE_OPENS: usize = 2;
@@ -193,6 +194,89 @@ impl SftpBrowserApi {
             revision,
         )?;
         Ok(dto)
+    }
+
+    /// Used only after a domain snapshot authorizes this exact file. It creates
+    /// a separate capability so opening/browsing the terminal cannot invalidate
+    /// an editor's draft, and does not give the page a path-based browser API.
+    pub(crate) async fn open_editor_file(
+        &self,
+        binding_handle: &str,
+        path: RemotePath,
+    ) -> Result<SftpEditorFileDto, SftpBrowserApiError> {
+        let (_, scope) = self.capture_binding(binding_handle)?;
+        let _permit = self.begin_open(&scope)?;
+        {
+            let now = Instant::now();
+            let mut registry = self.lock_registry()?;
+            registry.prune(now);
+            if let Some(browser) = registry.browsers.values_mut().find(|browser| {
+                browser.editor_only
+                    && browser.scope == scope
+                    && browser
+                        .nodes
+                        .values()
+                        .any(|node| node.action == EntryAction::Preview && node.path == path)
+            }) {
+                browser.expires_at = now + BROWSER_TTL;
+                browser.last_used_at = now;
+                let node = browser
+                    .nodes
+                    .values()
+                    .find(|node| node.action == EntryAction::Preview && node.path == path)
+                    .ok_or(SftpBrowserApiError::EntryUnavailable)?;
+                return Ok(SftpEditorFileDto {
+                    browser_handle: browser.browser_handle.clone(),
+                    entry_handle: node.handle.clone(),
+                    name: node.display_name.clone(),
+                });
+            }
+        }
+        let session = self.bind_sftp(&scope).await?;
+        self.validate_binding(&scope)?;
+        let metadata = timeout(
+            READ_DEADLINE,
+            self.services.sftp().metadata(&session, &path, false),
+        )
+        .await
+        .map_err(|_| SftpBrowserApiError::Deadline)??;
+        if metadata.kind != SftpFileKind::File {
+            return Err(SftpBrowserApiError::EntryUnavailable);
+        }
+        let (parent, name) = path
+            .as_str()
+            .rsplit_once('/')
+            .ok_or(SftpBrowserApiError::EntryUnavailable)?;
+        let parent = RemotePath::new(if parent.is_empty() { "/" } else { parent })
+            .map_err(|_| SftpBrowserApiError::EntryUnavailable)?;
+        let name = name.to_owned();
+        let now = Instant::now();
+        let (mut browser, dto) = BrowserSnapshot::from_directory(
+            scope.clone(),
+            parent,
+            vec![SftpEntry {
+                name,
+                path,
+                metadata,
+            }],
+            now,
+        )?;
+        browser.editor_only = true;
+        let entry = dto
+            .entries
+            .first()
+            .filter(|entry| !entry.name_truncated)
+            .ok_or(SftpBrowserApiError::EntryUnavailable)?;
+        let result = SftpEditorFileDto {
+            browser_handle: dto.browser_handle,
+            entry_handle: entry.entry_handle.clone(),
+            name: entry.name.clone(),
+        };
+        self.validate_binding(&scope)?;
+        validate_sftp_session(&scope, &session)?;
+        self.lock_registry()?.replace(browser)?;
+        self.validate_binding(&scope)?;
+        Ok(result)
     }
 
     pub(crate) async fn list_sftp_directory(
@@ -714,6 +798,14 @@ impl StoredNode {
     }
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SftpEditorFileDto {
+    browser_handle: String,
+    entry_handle: String,
+    name: String,
+}
+
 #[derive(Clone)]
 struct BrowserSnapshot {
     browser_handle: String,
@@ -725,6 +817,7 @@ struct BrowserSnapshot {
     expires_at: Instant,
     last_used_at: Instant,
     stored_bytes: usize,
+    editor_only: bool,
 }
 
 impl BrowserSnapshot {
@@ -733,11 +826,25 @@ impl BrowserSnapshot {
         entries: Vec<SftpEntry>,
         now: Instant,
     ) -> Result<(Self, SftpDirectoryDto), SftpBrowserApiError> {
+        Self::from_directory(
+            scope,
+            RemotePath::new("/").map_err(|_| SftpBrowserApiError::InvalidListing)?,
+            entries,
+            now,
+        )
+    }
+
+    fn from_directory(
+        scope: BindingScope,
+        root_path: RemotePath,
+        entries: Vec<SftpEntry>,
+        now: Instant,
+    ) -> Result<(Self, SftpDirectoryDto), SftpBrowserApiError> {
         let browser_handle = Uuid::new_v4().to_string();
         let root_handle = Uuid::new_v4().to_string();
         let root = StoredNode {
             handle: root_handle.clone(),
-            path: RemotePath::new("/").map_err(|_| SftpBrowserApiError::InvalidListing)?,
+            path: root_path,
             kind: SftpBrowserEntryKind::Directory,
             action: EntryAction::Browse,
             parent_handle: None,
@@ -762,6 +869,7 @@ impl BrowserSnapshot {
             expires_at: now + BROWSER_TTL,
             last_used_at: now,
             stored_bytes: 0,
+            editor_only: false,
         };
         let dto = browser.refresh_directory(&root_handle, entries, now)?;
         Ok((browser, dto))
@@ -1149,15 +1257,36 @@ impl SftpBrowserRegistry {
             return Err(SftpBrowserApiError::Capacity);
         }
         let binding_handle = browser.scope.binding_handle.clone();
-        self.browsers
-            .retain(|_, stored| stored.scope.binding_handle != binding_handle);
-        while self.browsers.len() >= MAX_BROWSERS
+        if browser.editor_only {
+            if self
+                .browsers
+                .values()
+                .filter(|stored| stored.editor_only)
+                .count()
+                >= MAX_EDITOR_BROWSERS
+                || self.total_bytes().saturating_add(browser.registry_bytes()) > MAX_REGISTRY_BYTES
+            {
+                return Err(SftpBrowserApiError::Capacity);
+            }
+            self.browsers
+                .insert(browser.browser_handle.clone(), browser);
+            return Ok(());
+        }
+        self.browsers.retain(|_, stored| {
+            stored.editor_only || stored.scope.binding_handle != binding_handle
+        });
+        while self
+            .browsers
+            .values()
+            .filter(|stored| !stored.editor_only)
+            .count()
+            >= MAX_BROWSERS
             || self.total_bytes().saturating_add(browser.registry_bytes()) > MAX_REGISTRY_BYTES
         {
             let Some(handle) = self
                 .browsers
                 .iter()
-                .filter(|(handle, _)| !self.browser_is_active(handle))
+                .filter(|(handle, stored)| !stored.editor_only && !self.browser_is_active(handle))
                 .min_by_key(|(_, stored)| stored.last_used_at)
                 .map(|(handle, _)| handle.clone())
             else {
@@ -2569,6 +2698,64 @@ mod tests {
     }
 
     #[test]
+    fn opening_a_terminal_browser_preserves_inventory_editors_and_bounds_them() {
+        let now = Instant::now();
+        let private_scope = scope("binding", "target", 0);
+        let mut registry = SftpBrowserRegistry::default();
+        let mut first = None;
+        for index in 0..=MAX_EDITOR_BROWSERS {
+            let (mut browser, dto) = BrowserSnapshot::from_directory(
+                private_scope.clone(),
+                RemotePath::new("/root").unwrap(),
+                vec![entry("/root", &format!("file-{index}"), SftpFileKind::File)],
+                now,
+            )
+            .unwrap();
+            browser.editor_only = true;
+            if index == MAX_EDITOR_BROWSERS {
+                assert!(matches!(
+                    registry.replace(browser),
+                    Err(SftpBrowserApiError::Capacity)
+                ));
+            } else {
+                registry.replace(browser).unwrap();
+                if first.is_none() {
+                    first = Some(dto);
+                }
+            }
+        }
+        for _ in 0..2 {
+            let (browser, _) =
+                BrowserSnapshot::from_root(private_scope.clone(), Vec::new(), now).unwrap();
+            registry.replace(browser).unwrap();
+        }
+        assert_eq!(registry.browsers.len(), MAX_EDITOR_BROWSERS + 1);
+        let first = first.unwrap();
+        let access = registry
+            .begin_operation(
+                &private_scope,
+                &first.browser_handle,
+                &first.entries[0].entry_handle,
+                EntryAction::Preview,
+                now,
+            )
+            .unwrap();
+        assert_eq!(access.node.path.as_str(), "/root/file-0");
+        registry.finish_operation(access.operation_token);
+        assert!(
+            registry
+                .begin_operation(
+                    &scope("other", "target", 0),
+                    &first.browser_handle,
+                    &first.entries[0].entry_handle,
+                    EntryAction::Preview,
+                    now
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
     fn hostile_names_are_plain_bounded_and_credential_like_names_are_redacted() {
         let long_name = format!("{}{}", "界".repeat(100), "tail");
         let (_, dto) = BrowserSnapshot::from_root(
@@ -2884,9 +3071,14 @@ mod tests {
     fn production_source_uses_only_the_closed_core_sftp_surface() {
         let source = include_str!("sftp_browser_api.rs");
         let whole = source.split("#[cfg(test)]").next().unwrap();
-        // Sizing the local file an operator picked is a local read, not a
-        // remote one, so it is the single exemption from the ban below.
-        let production = whole.replace("std::fs::metadata(local_path)", "");
+        // Local upload sizing and the inventory-authorized, non-following core
+        // lstat are the only metadata calls. There is no page-supplied path API.
+        let editor_stat = "self.services.sftp().metadata(&session, &path, false)";
+        assert!(whole.contains(editor_stat));
+        assert!(whole.contains("metadata.kind != SftpFileKind::File"));
+        let production = whole
+            .replace("std::fs::metadata(local_path)", "")
+            .replace(editor_stat, "");
         assert!(production.contains(".sftp()\n                .bind_session("));
         assert!(production.contains("self.services.sftp().list("));
         assert!(production.contains("self.services.sftp().read_text("));

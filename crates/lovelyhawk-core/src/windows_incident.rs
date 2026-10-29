@@ -2503,7 +2503,9 @@ pub fn is_lovelyhawk_powershell_invocation(name: &str, exe_path: &str, cmd_line:
         return false;
     }
     let words: Vec<u16> = bytes
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|b| u16::from_le_bytes([b[0], b[1]]))
         .collect();
     let Ok(decoded) = String::from_utf16(&words) else {
@@ -3933,7 +3935,9 @@ mod tests {
         let encoded = command.split_whitespace().last().unwrap();
         let bytes = BASE64.decode(encoded).unwrap();
         let words: Vec<_> = bytes
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|b| u16::from_le_bytes([b[0], b[1]]))
             .collect();
         let script = String::from_utf16(&words).unwrap();

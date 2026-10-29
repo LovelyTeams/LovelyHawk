@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactElement } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactElement } from "react";
 
 import { menuMaxHeight, placeMenu } from "./menu-placement";
 
@@ -20,29 +20,25 @@ export interface EmergencyPathMenuProps {
 interface MenuItem {
   action: EmergencyPathMenuAction;
   label: string;
-  hint: string;
   icon: ReactElement;
   dangerous?: boolean;
 }
 
 const ITEMS: MenuItem[] = [
-  { action: "evidence", label: "下载留证", hint: "保存原始文件、来源和完整性摘要", icon: <InfoIcon /> },
+  { action: "evidence", label: "下载留证", icon: <InfoIcon /> },
   {
     action: "properties",
     label: "查看属性",
-    hint: "只读取，不改动",
     icon: <InfoIcon />,
   },
   {
     action: "disarm",
     label: "去掉执行权限",
-    hint: "移除直接执行权限，保留文件用于取证",
     icon: <PermissionIcon />,
   },
   {
     action: "quarantine",
     label: "隔离",
-    hint: "移到备份区，之后还能取回",
     icon: <TrashIcon />,
     dangerous: true,
   },
@@ -109,17 +105,19 @@ export function EmergencyPathMenu({
     >
       <p className="emergency-path-menu-title" title={offer.path}>{offer.path}</p>
       {ITEMS.map((item) => (
-        <button
-          type="button"
-          role="menuitem"
-          key={item.action}
-          className={item.dangerous === true ? "is-dangerous" : ""}
-          disabled={busy}
-          onClick={() => onAction(item.action)}
-        >
-          {item.icon}
-          <span>{item.label}<em>{item.hint}</em></span>
-        </button>
+        <Fragment key={item.action}>
+          {item.action === "disarm" ? <div className="emergency-path-menu-separator" role="separator" /> : null}
+          <button
+            type="button"
+            role="menuitem"
+            className={item.dangerous === true ? "is-dangerous" : ""}
+            disabled={busy}
+            onClick={() => onAction(item.action)}
+          >
+            {item.icon}
+            <span>{item.label}</span>
+          </button>
+        </Fragment>
       ))}
     </div>
   );

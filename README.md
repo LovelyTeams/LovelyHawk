@@ -8,9 +8,9 @@
   基于 Rust 与 Tauri 2 构建的离线便携桌面工具（原名 LovelyRes / LovelyERes）。<br/>
   通过原生 **SSH / SFTP** 与 **Windows RDP 动态虚拟通道（DVC，仅需 TCP 3389）**，提供从环境识别、证据采集、关联排查、受控遏制到独立复核与恢复的完整工作流。
 
-  [![Rust](https://img.shields.io/badge/Rust-1.93.1-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org)
-  [![Tauri](https://img.shields.io/badge/Tauri-2.12.1-24C8DB?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
-  [![React](https://img.shields.io/badge/React-19.2.8-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev/)
+  [![Rust](https://img.shields.io/badge/Rust-1.99.1-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org)
+  [![Tauri](https://img.shields.io/badge/Tauri-2.12.5-24C8DB?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
+  [![React](https://img.shields.io/badge/React-19.3.1-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev/)
   [![TypeScript](https://img.shields.io/badge/TypeScript-7.0.2-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
   [![License](https://img.shields.io/badge/License-AGPLv3-yellow.svg?style=flat-square)](LICENSE)
 </div>
@@ -125,15 +125,15 @@ LovelyHawk/
 ### 环境要求
 
 - **操作系统**：Windows 10 / 11 x64（自带 Microsoft Edge WebView2 Runtime）
-- **Rust 工具链**：`1.93.1`（含 `rustfmt`、`clippy`）与 MSVC 构建工具（Visual Studio C++ Build Tools）
-- **Node.js 与包管理**：Node.js `24.x` 与 `pnpm@10.28.2`（可通过 `corepack enable` 启用）
+- **Rust 工具链**：`1.99.1`（含 `rustfmt`、`clippy`）与 MSVC 构建工具（Visual Studio C++ Build Tools）
+- **Node.js 与包管理**：Node.js `26.13.0` LTS 与 `pnpm@10.28.2`；pnpm 会按 `pnpm-workspace.yaml` 自动准备脚本所用的 Node，不替换系统安装
 - **PowerShell**：PowerShell `7.2+`（`pwsh`，用于执行仓库质量门禁与便携打包脚本）
 
 ### 安装依赖与启动
 
 ```powershell
-# 启用固定版本的 pnpm 并安装锁定依赖
-corepack enable
+# 安装固定版本的 pnpm（Node 26 不内置 Corepack），再安装锁定依赖
+npm install --global pnpm@10.28.2
 pnpm install --frozen-lockfile
 
 # 构建前端与调试版宿主并启动桌面端
@@ -145,10 +145,14 @@ pnpm desktop:dev
 修改 `ui/src/` 下的前端代码时，可使用热更新模式以获得即时反馈：
 
 ```powershell
-pnpm desktop:hot
+pnpm dev
 ```
 
 > **说明**：`desktop:hot` 仅在调试构建（`debug_assertions`）中生效，宿主只接受本机回环地址 `http://127.0.0.1:<端口>/`。调试构建默认将数据写入仓库根目录的 `data/`（可通过 `LOVELYHAWK_ARCHIVE_ROOT` 指定隔离目录），支持按 `F12` 或 `Ctrl+Shift+I` 打开 DevTools。
+
+`pnpm dev` 是 `desktop:hot` 的快捷入口：启动时增量构建宿主，后续页面修改直接热更新；Rust 修改后重新启动此命令。开发构建不优化工作区代码，只优化 SSH 和终端的关键依赖，并仅保留行号调试信息。首次升级 Rust 或依赖仍会重新编译，不能与缓存命中的构建耗时比较；release 优化设置保持原有打包要求。
+
+右下角版本号可检查 GitHub Release 并下载通过 SHA-256 校验的 Windows x64 便携更新包；隐藏状态栏时入口位于侧栏。下载完成后，先结束任务、保存编辑并关闭程序，再解压替换程序文件，保留 `data/`，建议先备份旧版目录。检查与下载不会自动替换正在运行的程序，也不会自动重启远端任务。
 
 ---
 
@@ -196,7 +200,7 @@ node ui/scripts/probe-windows-workspace.mjs
 pnpm release:package -Build
 
 # 在含空格与中文的隔离目录中执行便携包启动、渲染、数据目录隔离与退出冒烟测试
-pnpm release:smoke -ArchivePath artifacts/LovelyHawk-0.0.1-windows-x64.zip
+pnpm release:smoke -ArchivePath artifacts/LovelyHawk-0.0.2-windows-x64.zip
 ```
 
 生成的 `LovelyHawk-<版本>-windows-x64.zip` 解压后为单一目录，包含以下 8 个文件（详见 [`docs/DESKTOP_PORTABLE_RELEASE.md`](docs/DESKTOP_PORTABLE_RELEASE.md)）：

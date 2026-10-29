@@ -37,32 +37,36 @@
      be squeezed to make room. */
   flex: none;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
   padding: 6px 9px;
+  min-height: 30px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 4px;
   color: var(--text);
   background: transparent;
   font: inherit;
-  font-size: var(--font-caption);
+  font-size: var(--font-small);
   text-align: left;
   cursor: pointer;
 }
 
 .emergency-path-menu button span {
-  display: grid;
-  gap: 1px;
+  min-width: 0;
+  white-space: nowrap;
 }
 
-.emergency-path-menu button em {
-  color: var(--muted);
-  font-size: var(--font-caption);
-  font-style: normal;
-}
+.emergency-path-menu button svg { flex: none; width: 16px; height: 16px; }
+.emergency-path-menu-separator { flex: none; margin: 4px 6px; border-top: 1px solid var(--border); }
 
-.emergency-path-menu button:hover:not(:disabled) {
+.emergency-path-menu button:is(:hover, :focus-visible):not(:disabled) {
+  color: var(--text);
   background: var(--surface-hover);
+}
+.emergency-path-menu button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.emergency-path-menu button.is-dangerous:is(:hover, :focus-visible):not(:disabled) {
+  color: var(--danger-text);
+  background: var(--danger-soft);
 }
 
 .emergency-path-menu button.is-dangerous {

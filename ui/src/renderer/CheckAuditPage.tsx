@@ -249,11 +249,7 @@ export function CheckAuditPage({ bindingHandle, api, writeClipboard }: CheckAudi
           </button>
         </div>
       </header>
-      <p className="check-audit-readonly-banner">
-        {writeApi === null
-          ? "本页只读：查看命令状态和已有的命令记录，不会运行这些命令，也不会改动目标。"
-          : "查看命令状态和已有的命令记录不会运行这些命令，也不会改动目标；加采集、移除采集和清空日志会改动目标，每次都先列出计划，确认后才执行并读回核对。"}
-      </p>
+      {writeApi === null ? <p className="check-audit-readonly-banner">只读模式</p> : null}
       {catalogExpired && state.catalog !== null ? (
         <p className="check-audit-expired-notice" role="status">
           命令列表读取已超过 {Math.max(1, Math.round(state.catalog.expiresInSeconds / 60))} 分钟，已经过期，现在读取状态或日志会被拒绝。
@@ -373,7 +369,6 @@ export function CommandsView({ catalog, statusKind, status, error, search, selec
     <>
       <ViewHeader title="命令状态" detail={`${catalog.commands.length} 个命令 · ${status?.isRoot ? "root 会话" : "普通会话或尚未确认"}`}
         loading={statusKind === "loading"} onRefresh={onRefresh} />
-      <p className="check-audit-note">按当前登录环境的 PATH 找到每个命令实际执行的文件。“未加采集”只说明它是程序文件、没有本工具的采集包装，不代表它没被篡改；核对文件来源请用文件完整性或软件包校验。</p>
       {scripts.length === 0 ? null : (
         <p className="check-audit-warning" role="status" data-testid="check-audit-scripts">
           {scripts.length} 个命令执行的是脚本而不是程序文件：{scripts.map((command) => command.name).join("、")}。
@@ -526,7 +521,7 @@ export function AnalysisView({ status, result, error, onRefresh }: {
       status === "error" ? <ErrorPanel message={error ?? "周期分析不可用。"} compact /> :
         result !== null && result.logState !== "read" ? <LogStatePanel state={result.logState} /> :
         result === null || result.cycles.length === 0 ? <EmptyPanel title="没有识别到周期行为"
-          detail="至少需要同一命令与参数的多次记录；空结果不代表没有未采集行为。" compact /> :
+          detail="至少需要同一命令与参数的多次记录。" compact /> :
           <div className="check-audit-cycle-list">{result.cycles.map((cycle, index) => <article key={`${cycle.command}\0${cycle.args}\0${index}`}>
             <header><strong>{cycle.command || "—"}</strong><span>{checkAuditCategoryLabel(cycle.category)}</span><span>{cycle.count} 次</span></header>
             <pre>{cycle.args}</pre>

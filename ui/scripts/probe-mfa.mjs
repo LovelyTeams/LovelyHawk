@@ -86,7 +86,7 @@ try {
   /** Starts a connection, trusts the first-contact key, and returns the MFA panel. */
   async function reachPrompt() {
     await selectRow();
-    await waitFor(() => main.evaluate(clickText(".connection-details-view header button", "连接目标")), { label: "连接目标" });
+    await waitFor(() => main.evaluate(clickText(".connection-connect-actions button", "连接目标")), { label: "连接目标" });
     return waitFor(async () => {
       if (await main.evaluate("document.querySelector('[data-testid=\"ssh-host-key-trust\"]') !== null")) {
         await main.evaluate("document.querySelector('[data-testid=\"ssh-host-key-trust\"]').click(), true");

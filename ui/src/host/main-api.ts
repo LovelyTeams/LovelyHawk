@@ -1,4 +1,5 @@
 import { isWindowsRdpRequest, isWindowsRdpStatus } from "../shared/windows-rdp-contract.js";
+import { isAppUpdateRequest, matchesAppUpdateResponse } from "../shared/update-contract.js";
 import { createWindowsChannelOwnerApi } from "./windows-channel-api";
 import { listen } from "@tauri-apps/api/event";
 
@@ -184,6 +185,14 @@ export function createMainApi(transport: BackendTransport = hostBackendTransport
     invokeHost(command, args, timeoutMs);
 
   const api: LovelyHawkApi = {
+    appUpdate: async (...values: unknown[]) => {
+      requireArity(values, 1, "更新请求无效。");
+      const request = values[0];
+      if (!isAppUpdateRequest(request)) refuse("更新请求无效。");
+      const result = await host("app_update", { request }, request.action === "download" ? DIALOG_TIMEOUT_MS : 35_000);
+      if (!matchesAppUpdateResponse(request, result)) refuse("更新结果未通过校验，请重新检查。");
+      return result;
+    },
     caseLibrary: async (...values: unknown[]) => {
       requireArity(values, 1, "案件库请求无效。");
       const request = values[0];
@@ -379,6 +388,14 @@ export function createMainApi(transport: BackendTransport = hostBackendTransport
     openSshTerminal: async (...values: unknown[]) => {
       requireArity(values, 0, "Invalid terminal window launch request.");
       return verified(host("terminal_window_open"), isTerminalWindowLaunchResult, "The terminal window launch result is invalid.");
+    },
+    openSystemInfoFile: async (...values: unknown[]) => {
+      requireArity(values, 3, "Invalid system-information file request.");
+      const [bindingHandle, snapshotHandle, rowId] = values;
+      if (!isSshOpaqueHandle(bindingHandle) || !isSystemInfoOpaqueHandle(snapshotHandle) ||
+        !isSystemInfoRowId(rowId)) refuse("Invalid system-information file request.");
+      return verified(host("system_info_file_open", { bindingHandle, snapshotHandle, rowId }),
+        isTerminalWindowLaunchResult, "The file editor launch result is invalid.");
     },
     getSystemInfoCatalog: async (...values: unknown[]) => {
       requireArity(values, 0, "Invalid system-information catalog request.");

@@ -115,7 +115,6 @@
   font-weight: 600;
 }
 
-.integrity-boundary-note,
 .integrity-truncated {
   color: var(--console-muted);
   font-size: var(--font-small);

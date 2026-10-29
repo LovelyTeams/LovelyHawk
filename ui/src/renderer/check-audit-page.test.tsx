@@ -155,7 +155,7 @@ describe("CheckAuditPage", () => {
     // A program without the collection wrapper is not claimed to be genuine.
     expect(html).toContain("未加采集");
     expect(html).not.toContain("原始二进制");
-    expect(html).toContain("不代表它没被篡改");
+    expect(html).not.toContain("不代表它没被篡改");
     expect(html).not.toContain("check-audit-scripts");
   });
 
@@ -334,5 +334,4 @@ describe("CheckAuditPage", () => {
     expect(css).toMatch(/\.check-audit-log-list pre,[\s\S]*?color:\s*var\(--console-text\);[\s\S]*?background:\s*var\(--console-bg\);/u);
   });
 });
-
 

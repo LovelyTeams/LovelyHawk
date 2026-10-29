@@ -32,7 +32,7 @@ describe("command output lines", () => {
     // The page rule it overrides sets a 36px floor and 8px padding.
     expect(body).toMatch(/min-height:\s*0/u);
     expect(body).toMatch(/padding:\s*0 /u);
-    expect(rule(rendererFile("emergency-commands.css"), ".emergency-commands-page button")).toMatch(/min-height:\s*36px/u);
+    expect(rule(rendererFile("emergency-commands.css"), ":where(.emergency-commands-page) button")).toMatch(/min-height:\s*36px/u);
   });
 });
 

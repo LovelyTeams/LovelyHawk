@@ -8,22 +8,22 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $approvedRuntimeDependencies = [ordered]@{
-    '@tauri-apps/api' = '2.12.1'
+    '@tauri-apps/api' = '2.12.4'
     '@xterm/addon-fit' = '0.11.0'
     '@xterm/addon-search' = '0.16.0'
     '@xterm/xterm' = '6.0.0'
-    'react' = '19.2.8'
-    'react-dom' = '19.2.8'
+    'react' = '19.3.1'
+    'react-dom' = '19.3.1'
 }
 $approvedDevelopmentDependencies = [ordered]@{
-    '@tauri-apps/cli' = '2.12.1'
-    '@types/node' = '24.13.3'
-    '@types/react' = '19.2.18'
-    '@types/react-dom' = '19.2.5'
-    '@vitejs/plugin-react' = '6.1.0'
+    '@tauri-apps/cli' = '2.12.4'
+    '@types/node' = '26.6.6'
+    '@types/react' = '19.3.0'
+    '@types/react-dom' = '19.3.0'
+    '@vitejs/plugin-react' = '6.1.2'
     'typescript' = '7.0.2'
-    'vite' = '8.2.2'
-    'vitest' = '4.1.11'
+    'vite' = '8.3.5'
+    'vitest' = '5.0.5'
 }
 # A plugin's JavaScript package would hand pages a capability the host keeps.
 $forbiddenUiPackagePattern = '^(?:electron|@electron/.+|electron-.+|node-pty|nw|wailsjs|@tauri-apps/plugin-.+)$'
@@ -236,7 +236,7 @@ try {
         foreach ($violation in @(Get-CargoTreeViolations -Tree $hostTree -Forbidden $forbiddenHostCrates -Label 'lovelyhawk-desktop')) {
             $violations.Add($violation)
         }
-        if ($hostTree -notmatch '(?m)^tauri v2\.12\.1\b') { $violations.Add('lovelyhawk-desktop must resolve tauri v2.12.1') }
+        if ($hostTree -notmatch '(?m)^tauri v2\.12\.5\b') { $violations.Add('lovelyhawk-desktop must resolve tauri v2.12.5') }
         foreach ($plugin in @([regex]::Matches($hostTree, '(?m)^(?<name>tauri-plugin-[a-z-]+) v') | ForEach-Object { $_.Groups['name'].Value } | Sort-Object -Unique)) {
             # The dialog plugin depends on the fs plugin's types; it is never registered.
             if ($approvedHostPlugins -notcontains $plugin -and $plugin -ne 'tauri-plugin-fs') {

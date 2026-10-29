@@ -6,6 +6,7 @@ import {
   isSystemInfoDetail,
   isSystemInfoSummary,
   isSystemInfoTable,
+  MAX_SYSTEM_INFO_ROWS,
   type SystemInfoApi,
   type SystemInfoRow,
   type SystemInfoTable,
@@ -46,11 +47,13 @@ interface SystemInfoPageProps {
   connection: SystemInfoConnection | null;
   api: SystemInfoApi;
   writeClipboard?: (text: string) => Promise<void>;
+  openFile?: (bindingHandle: string, snapshotHandle: string, rowId: string) => Promise<unknown>;
 }
 
-const MAXIMUM_ROWS = 500;
+const ROW_LIMITS = [500, 1_000, 2_000, 5_000, MAX_SYSTEM_INFO_ROWS] as const;
+const PAGE_SIZE = 100;
 
-export function SystemInfoPage({ connection, api, writeClipboard }: SystemInfoPageProps) {
+export function SystemInfoPage({ connection, api, writeClipboard, openFile }: SystemInfoPageProps) {
   const [state, dispatch] = useReducer(systemInfoReducer, undefined, createSystemInfoState);
   const [summaryVersion, setSummaryVersion] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
@@ -65,6 +68,18 @@ export function SystemInfoPage({ connection, api, writeClipboard }: SystemInfoPa
   const catalog = stateIsCurrent ? state.catalog : [];
   const selectedTab = stateIsCurrent ? state.selectedTab : null;
   const table = stateIsCurrent ? state.table : null;
+  const [limits, setLimits] = useState<{ scope: string | null; byTab: Partial<Record<SystemInfoTabKey, number>> }>({ scope: null, byTab: {} });
+  const rowLimit = (limits.scope === scope && selectedTab !== null ? limits.byTab[selectedTab] : undefined) ?? ROW_LIMITS[0];
+  const nextLimit = ROW_LIMITS.find((limit) => limit > rowLimit);
+  const [pageState, setPageState] = useState<{ snapshot: string | null; filter: SystemInfoRowFilter; index: number }>({
+    snapshot: null, filter: EMPTY_SYSTEM_INFO_FILTER, index: 0,
+  });
+  const [openingFile, setOpeningFile] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const fileOpenRef = useRef(false);
+  const currentFileScope = useRef({ scope, snapshot: table?.snapshotHandle });
+  currentFileScope.current = { scope, snapshot: table?.snapshotHandle };
+  useEffect(() => setFileError(null), [scope, table?.snapshotHandle]);
   const detailState = stateIsCurrent ? state.detail : null;
   // The right-click menu and the dialog it opens. Every request they make
   // names a row of the table currently showing and nothing else.
@@ -93,11 +108,43 @@ export function SystemInfoPage({ connection, api, writeClipboard }: SystemInfoPa
     [table, filter],
   );
   const riskCounts = useMemo(() => systemInfoRiskCounts(table?.rows ?? []), [table]);
+  const pageCount = Math.max(1, Math.ceil(visibleRows.length / PAGE_SIZE));
+  const page = pageState.snapshot === table?.snapshotHandle && pageState.filter === filter
+    ? Math.min(pageState.index, pageCount - 1) : 0;
+  const pageRows = useMemo(() => visibleRows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [visibleRows, page]);
   const visibleTable = useMemo(
     () => table === null ? null : { ...table, rows: visibleRows },
     [table, visibleRows],
   );
   const searchRef = useRef<HTMLInputElement>(null);
+
+  function changePage(index: number) {
+    setPageState({ snapshot: table?.snapshotHandle ?? null, filter, index });
+  }
+
+  function changeRowLimit(limit: number) {
+    if (selectedTab === null || !ROW_LIMITS.some((allowed) => allowed === limit)) return;
+    setLimits((current) => ({ scope, byTab: { ...(current.scope === scope ? current.byTab : {}), [selectedTab]: limit } }));
+    refreshTable();
+  }
+
+  async function editShellFile(rowId: string) {
+    if (!openFile || bindingHandle === null || table === null || fileOpenRef.current) return;
+    const requestScope = currentFileScope.current;
+    fileOpenRef.current = true;
+    setOpeningFile(true);
+    setFileError(null);
+    try {
+      await openFile(bindingHandle, table.snapshotHandle, rowId);
+    } catch {
+      if (currentFileScope.current.scope === requestScope.scope && currentFileScope.current.snapshot === requestScope.snapshot) {
+        setFileError("无法打开所选文件。请刷新列表，并检查文件类型、读取权限和连接状态。");
+      }
+    } finally {
+      fileOpenRef.current = false;
+      setOpeningFile(false);
+    }
+  }
 
   function updateFilter(patch: Partial<SystemInfoRowFilter>) {
     if (selectedTab === null) return;
@@ -176,7 +223,7 @@ export function SystemInfoPage({ connection, api, writeClipboard }: SystemInfoPa
     tableRequestRef.current += 1;
     const request = tableRequestRef.current;
     dispatch({ type: "table-started", scope: requestScope, tab: requestTab, request });
-    void api.collectSystemInfo(requestBinding, requestTab, MAXIMUM_ROWS).then((result) => {
+    void api.collectSystemInfo(requestBinding, requestTab, rowLimit).then((result) => {
       if (!isSystemInfoTable(result) || result.tab !== requestTab) {
         dispatch({
           type: "table-failed",
@@ -199,7 +246,7 @@ export function SystemInfoPage({ connection, api, writeClipboard }: SystemInfoPa
     });
   }, [
     api, bindingHandle, scope, state.scope, state.selectedTab, state.status, state.tableStatus,
-    summaryTabActive,
+    summaryTabActive, rowLimit,
   ]);
 
   useEffect(() => {
@@ -387,6 +434,8 @@ export function SystemInfoPage({ connection, api, writeClipboard }: SystemInfoPa
       >
 
         {notice !== null ? <TransientNotice source="系统信息" message={notice ?? ""} severity="info"><div className="system-info-notice" role="status">{notice}</div></TransientNotice> : null}
+        {fileError !== null ? <TransientNotice source="文件编辑" message={fileError} severity="error"><div className="system-info-notice error" role="alert">{fileError}</div></TransientNotice> : null}
+        {openingFile ? <p role="status">正在打开文件编辑器…</p> : null}
         {visibleStatus === "error" ? <TransientNotice source="系统信息" message={state.error ?? ""} severity="error"><div className="system-info-notice error" role="alert">{state.error}</div></TransientNotice> : null}
 
         {visibleStatus === "loading" || visibleStatus === "idle" ? (
@@ -433,13 +482,15 @@ export function SystemInfoPage({ connection, api, writeClipboard }: SystemInfoPa
                         ? "系统信息"
                         : catalog.find((entry) => entry.key === selectedTab)?.label ?? "系统信息"}
                     </h2>
-                    <p>
-                      {summaryTabActive
-                        ? "这次连接时读取到的主机概况。"
-                        : "最多 500 行；刷新会重新读取主机上的最新数据。"}
-                    </p>
                   </div>
                   <div className="system-info-panel-actions">
+                    {!summaryTabActive ? <label className="system-info-row-limit">
+                      采集上限
+                      <select aria-label="采集行数上限" value={rowLimit} disabled={state.tableStatus === "loading"}
+                        onChange={(event) => changeRowLimit(Number(event.currentTarget.value))}>
+                        {ROW_LIMITS.map((limit) => <option key={limit} value={limit}>{limit.toLocaleString()} 行</option>)}
+                      </select>
+                    </label> : null}
                     {summaryTabActive ? (
                       <button type="button" disabled={state.summary === null} onClick={() => void copySummary()}>复制摘要</button>
                     ) : (
@@ -470,7 +521,6 @@ export function SystemInfoPage({ connection, api, writeClipboard }: SystemInfoPa
                           <small>{gauge.detail}</small>
                         </article>
                       ))}
-                      <p>颜色只是经验阈值的提示（八成、九成满；每核负载 0.7、1.0），不等于出了问题。</p>
                     </section>
                   )}
                   <section className="system-info-summary" aria-label="系统摘要">
@@ -498,23 +548,22 @@ export function SystemInfoPage({ connection, api, writeClipboard }: SystemInfoPa
                 {state.tableStatus === "ready" && table?.rows.length === 0 ? (
                   <div className="system-info-table-state">
                     {table.missingTool !== null
-                      ? `这台机器上没有 ${table.missingTool}，所以这项查不了——空白不代表没有。`
+                      ? `${table.missingTool} 未安装，无法采集。`
                       : table.failedTool !== null
-                        ? `${table.failedTool} 装着，但这次没答上来（服务可能没起）。空白不代表没有，`
-                          + `先把它弄通再看这一页。`
-                        : "这台机器上没有这类条目。"}
+                        ? `${table.failedTool} 执行失败，请检查工具或服务状态。`
+                        : "本次采集没有返回条目。"}
                   </div>
                 ) : null}
                 {state.tableStatus === "ready" && table !== null && table.rows.length > 0 ? (
-                  <div className="system-info-filter" role="search" aria-label="搜索和筛选这一页">
+                  <div className="system-info-filter" role="search" aria-label="搜索和筛选已采集结果">
                     <label className="system-info-filter-search">
                       <SearchIcon />
                       <input
                         ref={searchRef}
                         type="search"
                         value={filter.query}
-                        placeholder="搜索这一页，空格分隔多个词"
-                        aria-label="搜索这一页"
+                        placeholder="搜索已采集结果"
+                        aria-label="搜索已采集结果"
                         maxLength={200}
                         onChange={(event) => updateFilter({ query: event.target.value })}
                         onKeyDown={(event) => {
@@ -575,9 +624,11 @@ export function SystemInfoPage({ connection, api, writeClipboard }: SystemInfoPa
                 {state.tableStatus === "ready" && visibleTable !== null && visibleRows.length > 0
                   && visibleTable.tab === "shell-configs" ? (
                   <ShellConfigText
-                    table={visibleTable}
+                    table={{ ...visibleTable, rows: pageRows }}
                     selectedRowId={rowActions.menu?.row.id ?? null}
                     onRowContextMenu={rowActions.openMenu}
+                    onEdit={openFile ? (rowId) => void editShellFile(rowId) : undefined}
+                    openingFile={openingFile}
                   />
                 ) : null}
                 {state.tableStatus === "ready" && table !== null && visibleRows.length > 0
@@ -586,7 +637,7 @@ export function SystemInfoPage({ connection, api, writeClipboard }: SystemInfoPa
                     <table>
                       <thead><tr>{table.columns.map((column, index) => shownColumn(table.columns, index) ? <th key={column}>{column}</th> : null)}<th>级别</th>{anyDetail ? <th>详情</th> : null}</tr></thead>
                       <tbody>
-                        {visibleRows.map((row) => (
+                        {pageRows.map((row) => (
                           <tr
                             key={row.id}
                             className={rowActions.menu?.row.id === row.id ? "is-selected" : undefined}
@@ -612,9 +663,20 @@ export function SystemInfoPage({ connection, api, writeClipboard }: SystemInfoPa
                         ))}
                       </tbody>
                     </table>
-                    {table.truncated ? <p className="system-info-truncated">这台机器上不止这些，只显示了前 {MAXIMUM_ROWS} 行；需要完整列表时请在终端中查看。</p> : null}
                   </div>
                 ) : null}
+                {state.tableStatus === "ready" && table !== null ? <nav className="system-info-pagination" aria-label="表格分页">
+                  <span>{visibleRows.length ? `${page * PAGE_SIZE + 1}–${Math.min((page + 1) * PAGE_SIZE, visibleRows.length)} / ${visibleRows.length} 行` : "0 行"}</span>
+                  <button type="button" disabled={page === 0} onClick={() => changePage(page - 1)}>上一页</button>
+                  <span role="status" aria-live="polite">第 {page + 1} / {pageCount} 页</span>
+                  <button type="button" disabled={page + 1 >= pageCount} onClick={() => changePage(page + 1)}>下一页</button>
+                </nav> : null}
+                {state.tableStatus === "ready" && table?.truncated ? <div className="system-info-truncated" role="status">
+                  已采集 {table.rows.length} 行，结果仍有截断。
+                  {nextLimit !== undefined
+                    ? <button type="button" onClick={() => changeRowLimit(nextLimit)}>重新采集前 {nextLimit.toLocaleString()} 行</button>
+                    : <span>已达采集行数或大小上限；更多内容可在终端中查看。</span>}
+                </div> : null}
                   </>
                 )}
               </section>
@@ -686,9 +748,13 @@ function ShellConfigText({
   table,
   selectedRowId,
   onRowContextMenu,
+  onEdit,
+  openingFile,
 }: {
   table: SystemInfoTable;
   selectedRowId: string | null;
+  onEdit: ((rowId: string) => void) | undefined;
+  openingFile: boolean;
   onRowContextMenu: (
     event: { clientX: number; clientY: number; preventDefault: () => void },
     row: SystemInfoRow,
@@ -705,7 +771,11 @@ function ShellConfigText({
             <strong>{file.path}</strong>
             <span>{file.owner}</span>
             <span>{file.modified}</span>
-            <span>{file.lines.length} 行</span>
+            <span>本页 {file.lines.length} 行</span>
+            {onEdit && file.lines[0] ? <button type="button" disabled={openingFile}
+              aria-label={`编辑 ${file.path}`} onClick={() => onEdit(file.lines[0]!.rowId)}>
+              编辑文件
+            </button> : null}
           </header>
           <pre>
             {file.lines.map((line) => (
@@ -724,7 +794,6 @@ function ShellConfigText({
           </pre>
         </article>
       ))}
-      {table.truncated ? <p className="system-info-truncated">这台机器上不止这些，只显示了前 {MAXIMUM_ROWS} 行；需要完整列表时请在终端中查看。</p> : null}
     </div>
   );
 }

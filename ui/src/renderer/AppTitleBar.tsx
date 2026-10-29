@@ -1,4 +1,3 @@
-import type { ThemeKind } from "./theme/theme";
 import { WindowControls } from "./WindowControls";
 
 /**
@@ -7,13 +6,10 @@ import { WindowControls } from "./WindowControls";
  * minimize/maximize/close buttons sit after them, in their own group.
  */
 export interface AppTitleBarActions {
-  themeLabel: string;
   onOpenConnections: (returnFocus: HTMLElement) => void;
-  themeKind: ThemeKind;
   sshTerminalDisabled: boolean;
   onOpenSshTerminal: () => void;
   onOpenCommandHistory: (returnFocus: HTMLElement) => void;
-  onCycleTheme: () => void;
   onOpenSettings: (returnFocus: HTMLElement) => void;
 }
 
@@ -62,23 +58,6 @@ function HistoryIcon() {
       <path d="M8 4.8v3.4l2.2 1.3" />
       <path d="M2.6 8a5.4 5.4 0 1 0 1.7-3.9" />
       <path d="M2.3 2.9v2.5h2.5" />
-    </svg>
-  );
-}
-
-function SunIcon() {
-  return (
-    <svg {...ICON_PROPS}>
-      <circle cx="8" cy="8" r="3" />
-      <path d="M8 1.4v1.5M8 13.1v1.5M1.4 8h1.5M13.1 8h1.5M3.3 3.3l1.1 1.1M11.6 11.6l1.1 1.1M12.7 3.3l-1.1 1.1M4.4 11.6l-1.1 1.1" />
-    </svg>
-  );
-}
-
-function MoonIcon() {
-  return (
-    <svg {...ICON_PROPS}>
-      <path d="M13.2 9.7A5.5 5.5 0 0 1 6.3 2.8a5.7 5.7 0 1 0 6.9 6.9Z" />
     </svg>
   );
 }
@@ -137,15 +116,6 @@ export function AppTitleBar({ section, backgroundHidden = false, actions }: AppT
             onClick={(event) => actions.onOpenCommandHistory(event.currentTarget)}
           >
             <HistoryIcon />
-          </button>
-          <button
-            type="button"
-            data-testid="cycle-theme"
-            aria-label={`切换主题配色（当前：${actions.themeLabel}）`}
-            title={`主题：${actions.themeLabel}`}
-            onClick={() => actions.onCycleTheme()}
-          >
-            {actions.themeKind === "dark" ? <MoonIcon /> : <SunIcon />}
           </button>
           <button
             type="button"

@@ -467,7 +467,7 @@ impl DiagnosticLogCapture {
     fn record(&self, metadata: &Metadata<'_>, visitor: EventVisitor) {
         let Ok(sequence) =
             self.next_sequence
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
                     (current <= MAX_SAFE_JSON_INTEGER).then(|| current.saturating_add(1))
                 })
         else {

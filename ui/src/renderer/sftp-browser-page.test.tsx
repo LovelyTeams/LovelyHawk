@@ -68,7 +68,7 @@ describe("SftpBrowserPage", () => {
     const deactivated = renderToStaticMarkup(<SftpBrowserPage connection={{ scopeKey: "binding-one" }}
       api={api} active={false} />);
     expect(deactivated).toContain("文件管理已暂停");
-    expect(deactivated).toContain("不会显示之前目标的旧结果");
+    expect(deactivated).not.toContain("不会显示之前目标的旧结果");
   });
 
   it("renders hostile entry names only as escaped text and exposes only capability-derived actions", () => {
@@ -198,5 +198,4 @@ describe("SftpBrowserPage", () => {
     expect(css).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/iu);
   });
 });
-
 

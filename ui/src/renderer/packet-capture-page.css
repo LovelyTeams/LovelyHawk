@@ -25,7 +25,7 @@
   color: var(--console-accent) !important;
 }
 
-.packet-capture-page button {
+:where(.packet-capture-page) button {
   background: var(--console-surface);
   border: 1px solid var(--console-border);
   border-radius: 8px;
@@ -34,7 +34,7 @@
   padding: 8px 12px;
 }
 
-.packet-capture-page button:hover:not(:disabled),
+:where(.packet-capture-page) button:where(:hover:not(:disabled)),
 .packet-capture-page button.active {
   background: var(--console-accent-surface);
   border-color: var(--console-accent);
@@ -397,12 +397,6 @@
 .packet-capture-detail-content > span {
   color: var(--console-warning-text);
   font-size: var(--font-small);
-}
-
-.packet-capture-boundary-note {
-  color: var(--console-muted);
-  font-size: var(--font-small);
-  margin-top: 12px;
 }
 
 @media (max-width: 1120px) {

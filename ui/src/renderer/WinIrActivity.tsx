@@ -356,7 +356,7 @@ export function WinIrNetwork({ snapshot, processes, focus, related, busy = false
         { label: "网络记录", value: snapshot?.totalCount ?? "—" },
         { label: "监听端点", value: snapshot ? entries.filter(listening).length : "—", onClick: () => setScope("listen") },
         { label: "已建立连接", value: snapshot ? entries.filter(established).length : "—", tone: "normal", onClick: () => setScope("established") },
-        { label: "公网远端", value: snapshot ? entries.filter(external).length : "—", hint: "公网通信不等于恶意", tone: "low", onClick: () => setScope("public") },
+        { label: "公网远端", value: snapshot ? entries.filter(external).length : "—", tone: "low", onClick: () => setScope("public") },
       ]} />
       <div className="wir-toolbar">
         <SearchBox value={query} onChange={setQuery} placeholder="搜索地址、端口、进程名称或 PID" />

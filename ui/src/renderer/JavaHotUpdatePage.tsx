@@ -301,8 +301,7 @@ export function JavaHotUpdatePage({ bindingHandle, api }: JavaHotUpdatePageProps
         <div>
           <p className="eyebrow">运维</p>
           <h1>Java 热更新</h1>
-          <p>替换某个 Java 进程所用 JAR 里的单个类文件：先备份原 JAR，替换后核对哈希，每次替换都留下记录，可以恢复原 JAR。
-            这里只改磁盘上的 JAR，不会重启进程；正在运行的 JVM 一般已经加载了旧的类，重启后才会用新的类。</p>
+          <p>替换磁盘 JAR 中的类文件；运行中的 JVM 需重启后生效。</p>
         </div>
         <button type="button" data-testid="java-scan" disabled={busy !== null} onClick={scanJvms}>
           {busy === "scan" ? "扫描中…" : scan === null ? "扫描 Java 进程" : "重新扫描"}
@@ -334,7 +333,7 @@ export function JavaHotUpdatePage({ bindingHandle, api }: JavaHotUpdatePageProps
 
           <section className="java-section" aria-label="运行中的 Java 进程">
             <h2>运行中的 Java 进程 · {scan.processes.length} 个</h2>
-            {scan.processes.length === 0 ? <p className="java-empty">没有找到正在运行的 Java 进程。这不代表主机上没有 Java 应用，只是此刻没有在运行的。</p> : (
+            {scan.processes.length === 0 ? <p className="java-empty">没有找到正在运行的 Java 进程。</p> : (
               <div className="java-table-wrap">
                 <table className="java-processes">
                   <thead><tr><th>PID</th><th>用户</th><th>CPU / 内存</th><th>已运行</th><th>命令行</th><th>JAR</th></tr></thead>

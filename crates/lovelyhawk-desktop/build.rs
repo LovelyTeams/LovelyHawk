@@ -4,6 +4,7 @@
 const COMMANDS: &[&str] = &[
     // Main window.
     "backend_call",
+    "app_update",
     "connections_import",
     "connections_export",
     "connection_credential_file",
@@ -31,6 +32,7 @@ const COMMANDS: &[&str] = &[
     "clipboard_write",
     "window_theme",
     "terminal_window_open",
+    "system_info_file_open",
     "container_terminal_open",
     "pod_terminal_open",
     "close_decision",

@@ -35,6 +35,5 @@ export function PostgresqlHostProcessPanel({ inspection, expert }: { inspection:
         <dt>PID / 网络 / 挂载命名空间</dt><dd>{process.pidNamespace} / {process.networkNamespace} / {process.mountNamespace}</dd>
       </dl></details> : null}
     </> : <p role="status">{reasons[inspection.reason]} 参数仍可独立查看；本次未取得主机实例对应依据。</p>}
-    <p>这些信息反映采集时状态。后续修补仍须重新核对目标、配置与影响范围；目录一致不能代替完整配置来源或业务健康检查。</p>
   </section>;
 }

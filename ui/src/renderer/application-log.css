@@ -22,9 +22,9 @@
   box-shadow: var(--shadow-sm);
 }
 
-.application-log-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 22px; padding: 20px 24px; border-bottom: 1px solid var(--border); }
+.application-log-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: var(--dialog-header-padding); border-bottom: 1px solid var(--border); }
 .application-log-heading p { margin: 0; color: var(--accent); font-size: var(--font-caption); letter-spacing: .13em; }
-.application-log-heading h1 { margin: 3px 0 4px; font-size: var(--page-title-size); }
+.application-log-heading h1 { margin: 2px 0; font-size: var(--font-title); }
 .application-log-heading span { color: var(--muted); font-size: var(--font-small); }
 .application-log-heading small { display: block; max-width: 720px; margin-top: 5px; color: var(--warning); font-size: var(--font-caption); line-height: 1.45; }
 .application-log-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }

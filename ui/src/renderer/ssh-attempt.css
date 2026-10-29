@@ -1,8 +1,8 @@
 .ssh-attempt-backdrop { position: fixed; z-index: 42; inset: 0; display: grid; place-items: center; padding: 24px; background: var(--backdrop); backdrop-filter: blur(5px); }
 .ssh-attempt-dialog { width: min(540px, 100%); max-height: calc(100vh - 140px); overflow: auto; color: var(--text-secondary); background: var(--surface); border: 1px solid var(--border-subtle); border-radius: 17px; box-shadow: var(--shadow-sm); }
-.ssh-attempt-dialog > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 22px 24px 18px; border-bottom: 1px solid var(--border); }
+.ssh-attempt-dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: var(--dialog-header-padding); border-bottom: 1px solid var(--border); }
 .ssh-attempt-dialog h2, .ssh-attempt-dialog h3, .ssh-attempt-dialog p { margin: 0; }
-.ssh-attempt-dialog h2 { margin-top: 4px; font-size: var(--page-title-size); }
+.ssh-attempt-dialog h2 { margin-top: 2px; font-size: var(--font-title); }
 .ssh-stage { padding: 6px 9px; color: var(--accent-text); background: var(--accent-soft); border-radius: 999px; font-size: var(--font-small); }
 .ssh-stage.connected, .ssh-stage.probe-succeeded { color: var(--success-text); background: var(--success-soft); }
 .ssh-stage.failed { color: var(--danger-text); background: var(--danger-soft); }

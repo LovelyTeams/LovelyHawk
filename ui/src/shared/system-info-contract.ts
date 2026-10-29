@@ -266,7 +266,8 @@ export const SYSTEM_INFO_CATALOG: readonly CatalogDefinition[] = [
 
 type JsonRecord = Record<string, unknown>;
 const encoder = new TextEncoder();
-const MAX_TABLE_BYTES = 512 * 1_024;
+export const MAX_SYSTEM_INFO_ROWS = 10_000;
+const MAX_TABLE_BYTES = 4 * 1_024 * 1_024;
 const MAX_DETAIL_BYTES = 256 * 1_024;
 
 const summaryStringKeys = [
@@ -315,7 +316,7 @@ export function isSystemInfoTabKey(value: unknown): value is SystemInfoTabKey {
 }
 
 export function isSystemInfoMaximumRows(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1 && value <= 500;
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1 && value <= MAX_SYSTEM_INFO_ROWS;
 }
 
 export function isSystemInfoOpaqueHandle(value: unknown): value is string {
@@ -377,7 +378,7 @@ export function isSystemInfoTable(value: unknown): value is SystemInfoTable {
     // A tool cannot be absent and present-but-broken at the same time.
     (value.missingTool !== null && value.failedTool !== null) ||
     !Array.isArray(value.rows) ||
-    value.rows.length > 500
+    value.rows.length > MAX_SYSTEM_INFO_ROWS
   ) return false;
   const definition = SYSTEM_INFO_CATALOG.find((entry) => entry.key === value.tab);
   if (definition === undefined || !sameStrings(value.columns, definition.columns)) return false;

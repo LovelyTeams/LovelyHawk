@@ -418,7 +418,7 @@ pub(crate) fn decode<T: DeserializeOwned>(
         return Err(AccessUnavailable::InvalidOutput);
     }
     let mut bytes = Zeroizing::new(Vec::with_capacity(encoded.len() / 2));
-    for pair in encoded.chunks_exact(2) {
+    for pair in encoded.as_chunks::<2>().0 {
         bytes.push(
             std::str::from_utf8(pair)
                 .ok()

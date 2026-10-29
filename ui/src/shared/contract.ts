@@ -486,6 +486,7 @@ export interface LovelyHawkApi {
   windowsIncident(request: WindowsIncidentRequest): Promise<WindowsIncidentResponse>;
   saveWindowsFile(fileId: string): Promise<WindowsFileSaveResult>;
   bootstrap(): Promise<BootstrapResult>;
+  appUpdate(request: import("./update-contract").AppUpdateRequest): Promise<import("./update-contract").AppUpdateResponse>;
   listConnections(): Promise<ConnectionSummary[]>;
   getConnection(id: string): Promise<ConnectionEditView>;
   createConnection(input: ConnectionWriteInput): Promise<ConnectionEditView>;
@@ -511,6 +512,7 @@ export interface LovelyHawkApi {
   cancelSshAttempt(attemptHandle: string): Promise<SshAttemptCancellation>;
   disconnectSshBinding(bindingHandle: string): Promise<SshBindingDisconnection>;
   openSshTerminal(): Promise<TerminalWindowLaunchResult>;
+  openSystemInfoFile(bindingHandle: string, snapshotHandle: string, rowId: string): Promise<TerminalWindowLaunchResult>;
   getSystemInfoCatalog(): Promise<SystemInfoTabCatalogEntry[]>;
   getSystemInfoSummary(bindingHandle: string): Promise<SystemInfoSummary>;
   collectSystemInfo(

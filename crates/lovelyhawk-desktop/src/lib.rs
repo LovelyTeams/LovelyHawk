@@ -21,6 +21,7 @@ mod main_commands;
 mod smoke;
 mod test_hooks;
 mod theme;
+mod updates;
 mod windows_channel;
 mod windows_rdp;
 
@@ -173,6 +174,7 @@ pub fn run() -> ExitCode {
             if let Some(origin) = &dev_server {
                 dev_server::grant(app.handle(), origin)?;
             }
+            app.manage(updates::Updates::default());
             app.manage(Host {
                 bridge: BackendBridge::new(Arc::new(state)),
                 rdp: Mutex::new(windows_rdp::RdpState::default()),
@@ -234,6 +236,7 @@ pub fn run() -> ExitCode {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            updates::app_update,
             windows_channel::windows_channel_owner,
             windows_channel::windows_channel_child,
             main_commands::backend_call,
@@ -290,6 +293,7 @@ pub fn run() -> ExitCode {
             child_commands::local_open,
             child_commands::local_list,
             child_commands::file_editor_open,
+            child_commands::system_info_file_open,
             child_commands::directory_terminal_open,
             child_commands::file_editor_target,
             child_commands::file_editor_unsaved,

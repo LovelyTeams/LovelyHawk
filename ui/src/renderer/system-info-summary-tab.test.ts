@@ -47,7 +47,7 @@ describe("system info tab collection", () => {
     );
     expect(effect).toContain('state.tableStatus !== "idle"');
     expect(pageSource).toMatch(
-      /\}, \[\s*api, bindingHandle, scope, state\.scope, state\.selectedTab, state\.status, state\.tableStatus,\s*summaryTabActive,\s*\]\);/u,
+      /\}, \[\s*api, bindingHandle, scope, state\.scope, state\.selectedTab, state\.status, state\.tableStatus,\s*summaryTabActive, rowLimit,\s*\]\);/u,
     );
   });
 
@@ -184,7 +184,7 @@ describe("resource gauges", () => {
     expect(unknown.find((gauge) => gauge.id === "memory")?.detail).toBe("没有读到内存总量");
     expect(unknown.find((gauge) => gauge.id === "load")?.tone).toBe("none");
     expect(pageSource).toContain('<section className="system-info-gauges" aria-label="资源占用">');
-    expect(pageSource).toContain("不等于出了问题");
+    expect(pageSource).not.toContain("不等于出了问题");
   });
 });
 

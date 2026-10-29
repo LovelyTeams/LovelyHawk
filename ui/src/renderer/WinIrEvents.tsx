@@ -108,7 +108,6 @@ export function WinIrLogs({ snapshot, busy, category, onCategory, focus, onCopy,
             { label: current.detailTruncated ? "事件详情（仅前 2048 字符）" : "返回的事件详情", value: current.detail, mono: true },
           ]} /> : null}
         </div>
-        <p className="wir-footnote">事件数量受采集端上限、权限和日志保留影响。没有返回某类事件不能证明其没有发生；需要完整日志时应另行保全原始 EVTX。</p>
       </div>
     </div>
   );
@@ -292,7 +291,6 @@ export function WinIrWebshell({ snapshot, busy, connected, onScan, onCopy, onFil
           <button type="button" className="win-ir-btn" disabled={busy || !connected} onClick={() => onPull(current.fullPath)}>取证拉取样本</button>
         </>} /> : null}
       </div>
-      <p className="wir-footnote">采用 D 盾风格多维度静态特征与混淆启发式在 Agent 端开启多线程并行扫描；静态未命中不代表不存在未知内存马或新型免杀木马，请结合进程与网络连接交叉核实。</p>
     </div>
   );
 }

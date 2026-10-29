@@ -5,10 +5,10 @@ fonts and data, and the Tauri application framework. The Rust crates the
 executable links are listed by `Cargo.lock`; a complete crate-level SBOM is
 still an open release item.
 
-## Tauri 2.12.1 and @tauri-apps/api 2.12.1
+## Tauri 2.12.5 and @tauri-apps/api 2.12.4
 
-- Packages: `tauri` (Rust crate) with `tauri-plugin-dialog` 2.8.1 and
-  `tauri-plugin-clipboard-manager` 2.4.1; `@tauri-apps/api` (npm, bundled into the UI)
+- Packages: `tauri` (Rust crate) with `tauri-plugin-dialog` 2.8.4 and
+  `tauri-plugin-clipboard-manager` 2.5.0; `@tauri-apps/api` (npm, bundled into the UI)
 - Project: https://github.com/tauri-apps/tauri
 - Copyright (c) 2017 - Present Tauri Apps Contributors
 - Locked by: `Cargo.lock` and `pnpm-lock.yaml`
@@ -22,7 +22,7 @@ recipient's option; LovelyHawk uses it under the MIT License.
 The page engine is the WebView2 Runtime already installed with Windows. It is
 a system component and is not redistributed in the LovelyHawk package.
 
-## React 19.2.8, React DOM 19.2.8, and Scheduler 0.27.0
+## React 19.3.1, React DOM 19.3.1, and Scheduler 0.28.0
 
 - Copyright Meta Platforms, Inc. and affiliates.
 - Embedded packages: `react`, `react-dom`, `scheduler`

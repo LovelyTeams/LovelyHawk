@@ -34,6 +34,7 @@
   --font-hero: 38px;      /* the welcome title and the large state icons */
   --page-lead-size: var(--font-small);
   --statusbar-height: 28px;
+  --dialog-header-padding: 10px 18px;
   color: var(--text);
   background: var(--bg);
   --font-ui: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei", Inter, sans-serif;
@@ -409,9 +410,9 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .connection-manager-backdrop { position: fixed; z-index: 24; inset: 0; display: grid; place-items: center; padding: 20px; background: var(--backdrop); backdrop-filter: blur(4px); }
 .connection-manager { display: flex; flex-direction: column; width: min(1060px, calc(100% - 96px)); height: min(700px, calc(100vh - 140px)); overflow: hidden; color: var(--text); background: var(--surface-alt); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow-lg); animation: welcome-rise .18s ease; }
 .connection-manager.is-hidden { display: none; }
-.connection-manager-header { display: flex; flex: none; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 15px 20px 13px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.connection-manager-header { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 16px; padding: var(--dialog-header-padding); background: var(--surface); border-bottom: 1px solid var(--border); }
 /* An overlay's title, the same size as every other overlay's and page's. */
-.connection-manager-header h1 { margin: 0 0 3px; font-size: var(--page-title-size); font-weight: 600; letter-spacing: -.02em; }
+.connection-manager-header h1 { margin: 0 0 2px; font-size: var(--font-title); font-weight: 600; letter-spacing: -.02em; }
 .connection-manager-header > div:first-child > p:last-child { margin: 0; color: var(--muted); font-size: var(--font-small); }
 .connection-manager-header > div:last-child { display: flex; align-items: center; gap: 7px; }
 .connection-manager-header button { padding: 7px 10px; color: var(--text-secondary); background: var(--surface-inset); border: 1px solid var(--border); border-radius: 7px; font-size: var(--font-small); }
@@ -436,30 +437,68 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .connection-list-row small { color: var(--faint); font-family: "Cascadia Mono", monospace; font-size: var(--font-caption); }
 .connection-list-row i { color: var(--success-bright); font-size: var(--font-caption); font-style: normal; }
 .connection-list-empty { padding: 45px 8px; color: var(--faint); text-align: center; font-size: var(--font-small); }
-.connection-detail { min-width: 0; min-height: 0; overflow: auto; background: var(--surface); scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
+.connection-detail { min-width: 0; min-height: 0; overflow: auto; background: var(--surface); scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; container: connection-detail / inline-size; }
 .connection-detail-empty { display: flex; min-height: 100%; flex-direction: column; align-items: center; justify-content: center; color: var(--muted); text-align: center; }
 .connection-detail-empty > span { display: grid; place-items: center; width: 58px; height: 58px; color: var(--accent-text); background: var(--accent-soft); border-radius: 17px; font-size: var(--page-title-size); }
 .connection-detail-empty h2 { margin: 16px 0 6px; color: var(--text); font-size: var(--font-subtitle); }
 .connection-detail-empty p { max-width: 430px; margin: 0; font-size: var(--font-small); line-height: 1.7; }
-.connection-details-view { padding: 25px 25px 0; }
-.connection-details-view > header { display: grid; grid-template-columns: 55px minmax(0, 1fr) auto; align-items: center; gap: 14px; padding-bottom: 22px; border-bottom: 1px solid var(--border-subtle); }
-.connection-hero-avatar { display: grid; place-items: center; width: 55px; height: 55px; color: var(--on-accent); background: linear-gradient(135deg, var(--accent-strong), var(--accent)); border-radius: 16px; box-shadow: var(--shadow-md); font-size: var(--font-title); font-weight: 700; }
+.connection-details-view { display: flex; min-height: 100%; flex-direction: column; padding: 18px 20px 0; }
+.connection-details-view > * { flex-shrink: 0; }
+.connection-details-view > header { display: grid; grid-template-columns: 44px minmax(0, 1fr); align-items: center; gap: 12px; padding-bottom: 14px; border-bottom: 1px solid var(--border-subtle); }
+.connection-hero-avatar { display: grid; place-items: center; width: 44px; height: 44px; color: var(--on-accent); background: linear-gradient(135deg, var(--accent-strong), var(--accent)); border-radius: 12px; box-shadow: var(--shadow-sm); font-size: var(--font-title); font-weight: 700; }
 .connection-details-view > header h2 { margin: 3px 0 4px; font-size: var(--font-title); }
 .connection-details-view > header span { color: var(--faint); font-family: "Cascadia Mono", monospace; font-size: var(--font-small); }
-.connection-details-view > header > div:last-child { display: flex; gap: 6px; }
+.connection-details-view > header h2, .connection-details-view > header span { overflow-wrap: anywhere; }
 .connection-details-view button { padding: 7px 10px; color: var(--text-secondary); background: var(--surface-inset); border: 1px solid var(--border); border-radius: 7px; font-size: var(--font-caption); }
-.connection-fact-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; margin-top: 20px; }
-.connection-fact-grid > div { display: flex; min-width: 0; flex-direction: column; gap: 4px; padding: 11px; background: var(--surface-alt); border: 1px solid var(--border-subtle); border-radius: 9px; }
+.connection-fact-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; margin: 8px 0 4px; }
+.connection-fact-grid > div { display: grid; min-width: 0; grid-template-columns: 76px minmax(0, 1fr); align-items: baseline; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border-subtle); }
 .connection-fact-grid span { color: var(--faint); font-size: var(--font-caption); }
-.connection-fact-grid strong { overflow: hidden; font-size: var(--font-small); text-overflow: ellipsis; white-space: nowrap; }
+.connection-fact-grid strong { min-width: 0; font-size: var(--font-small); font-weight: 500; overflow-wrap: anywhere; }
 .connection-detail-section { margin-top: 14px; padding: 14px; background: var(--surface-alt); border: 1px solid var(--border-subtle); border-radius: 10px; }
 .connection-detail-section h3 { margin: 0 0 8px; font-size: var(--font-small); }
 .connection-detail-section p { margin: 0 0 7px; color: var(--muted); font-size: var(--font-small); line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
 .connection-detail-section code { display: block; overflow: auto; padding: 8px; color: var(--text-secondary); background: var(--surface-inset); border-radius: 6px; font-family: "Cascadia Mono", monospace; font-size: var(--font-caption); }
 .connection-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
 .connection-tags span { padding: 4px 7px; color: var(--accent-text); background: var(--accent-soft); border-radius: 999px; font-size: var(--font-caption); }
-.connection-details-view > footer { position: sticky; bottom: 0; z-index: 1; display: flex; justify-content: flex-end; gap: 7px; margin: 17px -25px 0; padding: 12px 25px; background: var(--surface); border-top: 1px solid var(--border); }
+.connection-details-view > footer { position: sticky; bottom: 0; z-index: 1; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; margin: auto -20px 0; padding: 10px 20px; background: var(--surface); border-top: 1px solid var(--border); }
+.connection-details-view > section:last-of-type { margin-bottom: 18px; }
+.connection-manage-actions, .connection-connect-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.connection-connect-actions { margin-left: auto; }
+@media (max-width: 1100px) {
+  .connection-manager-body { grid-template-columns: 230px minmax(0, 1fr); }
+}
+@container connection-detail (max-width: 480px) {
+  .connection-fact-grid { grid-template-columns: minmax(0, 1fr); }
+}
 .connection-details-view .danger-button { color: var(--danger-text); background: var(--danger-soft); border-color: var(--danger-border); }
+/* Keep foreground/background pairs together; page hover defaults previously
+   left light text on a pale background in nested confirmation dialogs. */
+:is(.emergency-path-dialog, .docker-action-dialog, .kubernetes-action-dialog, .java-dialog, .sftp-operation-dialog, .system-info-action-body) footer button.is-primary:is(:hover, :focus-visible):not(:disabled),
+.log-analysis-page .log-analysis-run:is(:hover, :focus-visible):not(:disabled),
+.check-audit-page .check-audit-primary:is(:hover, :focus-visible):not(:disabled),
+.packet-capture-page .primary:is(:hover, :focus-visible):not(:disabled),
+:is(.connection-manager-header, .connection-editor, .connection-details-view) .primary-button:is(:hover, :focus-visible):not(:disabled) {
+  color: var(--on-accent);
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+:is(.emergency-path-dialog, .docker-action-dialog, .kubernetes-action-dialog, .java-dialog, .sftp-operation-dialog) footer button.is-dangerous:is(:hover, :focus-visible):not(:disabled) {
+  color: var(--on-accent);
+  background: var(--danger);
+  border-color: var(--danger-text);
+  box-shadow: 0 0 0 2px var(--danger-border);
+}
+:is(.connection-manager-header, .connection-editor, .connection-details-view) button:where(:hover:not(:disabled)),
+.emergency-path-dialog footer button:where(:hover:not(:disabled)) {
+  color: var(--text);
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+.connection-details-view .danger-button:is(:hover, :focus-visible):not(:disabled) {
+  color: var(--danger-text);
+  background: var(--danger-soft);
+  border-color: var(--danger-text);
+}
 .connection-editor { padding: 21px 23px 0; }
 .connection-editor > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 15px; padding-bottom: 17px; }
 .connection-editor > header h2 { margin: 3px 0 0; font-size: var(--font-title); }
@@ -659,6 +698,27 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0s !important; animation-iteration-count: 1 !important; transition-duration: 0s !important; scroll-behavior: auto !important; }
+}
+
+/* Activity is task feedback, not a decorative transition. Windows reduced
+   motion uses slower discrete steps; the app's animation switch uses opacity. */
+:root :is(.ssh-spinner, .loader, .win-ir-spinner, .docker-status-panel span,
+  .log-analysis-status span, .check-audit-status-panel span, .emergency-command-status > span) {
+  display: inline-block;
+  flex-shrink: 0;
+  animation: activity-spin .8s linear infinite !important;
+}
+@keyframes activity-spin { to { transform: rotate(360deg); } }
+@keyframes activity-pulse { 50% { opacity: .35; } }
+:root[data-motion="reduced"] :is(.ssh-spinner, .loader, .win-ir-spinner, .docker-status-panel span,
+  .log-analysis-status span, .check-audit-status-panel span, .emergency-command-status > span) {
+  animation: activity-pulse 2s ease-in-out infinite !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root :is(.ssh-spinner, .loader, .win-ir-spinner, .docker-status-panel span,
+    .log-analysis-status span, .check-audit-status-panel span, .emergency-command-status > span) {
+    animation: activity-spin 1.8s steps(12, end) infinite !important;
+  }
 }
 
 .welcome-platform-banner { display: flex; flex-direction: column; gap: 14px; }

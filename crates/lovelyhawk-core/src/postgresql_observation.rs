@@ -232,7 +232,7 @@ impl PostgresqlObservation {
             return Err(invalid());
         }
         let mut bytes = Zeroizing::new(Vec::with_capacity(encoded.len() / 2));
-        for pair in encoded.chunks_exact(2) {
+        for pair in encoded.as_chunks::<2>().0 {
             let cell = std::str::from_utf8(pair).map_err(|_| invalid())?;
             bytes.push(u8::from_str_radix(cell, 16).map_err(|_| invalid())?);
         }
@@ -371,7 +371,7 @@ impl PendingPostgresqlObservation {
                 return Err(invalid());
             }
             let mut digits = String::new();
-            for pair in hex.chunks_exact(2) {
+            for pair in hex.as_chunks::<2>().0 {
                 let byte =
                     u8::from_str_radix(std::str::from_utf8(pair).map_err(|_| invalid())?, 16)
                         .map_err(|_| invalid())?;

@@ -32,9 +32,9 @@
   background: var(--surface);
 }
 
-.settings-header { border-bottom: 1px solid var(--border); }
+.settings-header { padding: var(--dialog-header-padding); border-bottom: 1px solid var(--border); }
 .settings-footer { border-top: 1px solid var(--border); }
-.settings-header h2 { margin: 1px 0 2px; font-size: var(--page-title-size); }
+.settings-header h2 { margin: 0 0 2px; font-size: var(--font-title); }
 .settings-header p,
 .settings-page header p,
 .settings-footer p { margin: 0; color: var(--faint); font-size: var(--font-small); }

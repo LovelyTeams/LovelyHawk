@@ -39,7 +39,6 @@ function Analysis({ detail }: { detail: PostgresqlObjectDetail }): React.JSX.Ele
     <p>切换角色后可能新增的普通权限：{rights(analysis.additionalAfterSet)}。</p><p>切换后可能新增的转授权能力：{rights(analysis.additionalGrantOptionsAfterSet)}。这些来自不同可能身份，切换也可能失去当前权限，不能视为可同时使用。</p>
     <p>所有者权限来源：{viaNames[analysis.ownerVia]}。{detail.object.namespaceOid === null ? "" : `当前角色对所属模式的 USAGE：${analysis.schemaUsage === null ? "未能核实" : analysis.schemaUsage ? "已找到授权来源" : "未找到授权来源"}。`}</p>
     {analysis.implicit.length ? <ul>{analysis.implicit.map(g => <li key={`${g.sourceOid}:${g.via}`}>{identity(g.sourceName,g.sourceOid)} · {viaNames[g.via]} · {rights(g.privileges)}</li>)}</ul> : null}
-    <p>这里分析普通对象权限的来源。登录条件、模式查找、行级策略、视图和函数内部行为仍影响实际访问；预定义数据角色不会自动绕过行级安全。</p>
   </section>;
 }
 export function PostgresqlObjectPanel({ summary, source, page, detail, busy, onRead, onDetail }: {

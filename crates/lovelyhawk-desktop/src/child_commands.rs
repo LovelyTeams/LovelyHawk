@@ -810,6 +810,67 @@ pub fn local_list<R: Runtime>(
     serde_json::to_value(snapshot).map_err(|_| "本机目录读取失败。".to_owned())
 }
 
+/// The main window names an inventory row, never a remote path. Backend checks
+/// the snapshot and creates an isolated SFTP capability for the existing editor.
+#[tauri::command]
+pub async fn system_info_file_open<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    host: State<'_, Host>,
+    binding_handle: String,
+    snapshot_handle: String,
+    row_id: String,
+) -> CommandResult<WindowLaunch> {
+    if window.label() != "main"
+        || !opaque(&binding_handle)
+        || !opaque(&snapshot_handle)
+        || row_id.is_empty()
+        || row_id.len() > 256
+        || host.current_binding().as_deref() != Some(binding_handle.as_str())
+    {
+        return Err(REFUSED_METHOD.to_owned());
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct FileEntry {
+        browser_handle: String,
+        entry_handle: String,
+        name: String,
+    }
+    let value = host
+        .bridge
+        .call(
+            "system-info.file-editor.open",
+            json!({
+                "bindingHandle": binding_handle,
+                "snapshotHandle": snapshot_handle,
+                "rowId": row_id,
+            }),
+        )
+        .await?;
+    let file: FileEntry =
+        serde_json::from_value(value).map_err(|_| "文件编辑器响应无效。".to_owned())?;
+    if host.current_binding().as_deref() != Some(binding_handle.as_str())
+        || app.get_webview_window("main").is_none()
+        || !opaque(&file.browser_handle)
+        || !opaque(&file.entry_handle)
+        || file.name.is_empty()
+        || file.name.len() > 255
+    {
+        return Err(UNAVAILABLE.to_owned());
+    }
+    host.open_child(
+        &app,
+        &binding_handle,
+        ChildKind::Editor(EditorScope {
+            browser_handle: file.browser_handle,
+            entry_handle: file.entry_handle,
+            name: file.name,
+            editable: true,
+        }),
+    )
+}
+
 /// Asked by the browser pane, which already holds both handles. The window it
 /// opens gets them from the host, not from its own page. Async because it
 /// creates a window (see `terminal_window_open`).

@@ -3031,7 +3031,7 @@ impl BaselineService {
             .into_iter()
             .filter(|record| record.target == target.identity)
             .collect::<Vec<_>>();
-        records.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+        records.sort_by_key(|left| std::cmp::Reverse(left.created_at));
         Ok(records)
     }
 

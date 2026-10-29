@@ -142,7 +142,7 @@ impl IntegrityRepository {
             .into_iter()
             .filter(|baseline| &baseline.target == target)
             .collect::<Vec<_>>();
-        baselines.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+        baselines.sort_by_key(|left| std::cmp::Reverse(left.created_at));
         Ok(baselines)
     }
 

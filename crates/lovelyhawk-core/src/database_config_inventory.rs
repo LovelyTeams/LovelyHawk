@@ -1258,7 +1258,7 @@ fn optional_bytes_cell(
         return Err(DatabaseConfigInventoryParseError::InvalidHex { row, column });
     }
     let mut decoded = Zeroizing::new(Vec::with_capacity(cell.len() / 2));
-    for pair in cell.chunks_exact(2) {
+    for pair in cell.as_chunks::<2>().0 {
         let high = hex_nibble(pair[0])
             .ok_or(DatabaseConfigInventoryParseError::InvalidHex { row, column })?;
         let low = hex_nibble(pair[1])

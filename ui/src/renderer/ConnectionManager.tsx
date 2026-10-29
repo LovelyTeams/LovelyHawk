@@ -573,7 +573,7 @@ export function ConnectionManager({
     }
   }
 
-  function handleSshTerminal(status: SshAttemptStatus) {
+  async function handleSshTerminal(status: SshAttemptStatus) {
     if (status.stage === "connected") {
       onTargetConnected(status.bindingHandle, status.target);
       setNotice(`已连接 ${status.target.username}@${status.target.host}:${status.target.port}。`);
@@ -588,8 +588,31 @@ export function ConnectionManager({
     }
     setChromeHidden(false);
     if (status.stage === "probe-succeeded") {
-      setNotice(`SSH 配置验证通过：${status.target.username}@${status.target.host}:${status.target.port}。`);
+      // The backend commits the tested snapshot before reporting success.
+      // A subsequent save must update it, even if reading it back fails.
+      setCreating(false);
+      markEditorDirty(false);
+      setNotice(`SSH 配置验证通过并已保存：${status.target.username}@${status.target.host}:${status.target.port}。`);
       setError(null);
+      setBusy(true);
+      const probedForm = formRef.current;
+      try {
+        await refreshConnections(status.target.connectionId);
+        const saved = await window.lovelyhawk.getConnection(status.target.connectionId);
+        if (!mountedRef.current) return;
+        setSelected(saved);
+        setSelectedId(saved.id);
+        // Closing the attempt can expose the form before readback finishes.
+        // Do not replace edits or secrets typed in that interval.
+        if (formRef.current === probedForm && !editorDirtyRef.current) {
+          if (formRef.current?.id === saved.id) replaceForm(formFromView(saved));
+          resetSecrets();
+        }
+      } catch (reason: unknown) {
+        if (mountedRef.current) setError(messageFrom(reason, "配置已保存，但未能重新读取。请关闭编辑后重新打开。"));
+      } finally {
+        if (mountedRef.current) setBusy(false);
+      }
     } else if (status.stage === "failed") {
       setError(status.error.message);
       setNotice(null);
@@ -871,7 +894,6 @@ function ConnectionDetails({
       <header>
         <div className="connection-hero-avatar">{connection.name.slice(0, 1).toLocaleUpperCase()}</div>
         <div><p className="eyebrow">已保存的目标</p><h2>{connection.name}</h2><span>{connection.username}@{connection.host}:{connection.port}</span></div>
-        <div><button type="button" disabled={busy} onClick={onProbe}>测试连接</button><button type="button" className="primary-button" disabled={busy} onClick={onConnect}>连接目标</button></div>
       </header>
       <div className="connection-fact-grid">
         <Fact label="认证方式" value={authLabel(connection.authMethod)} />
@@ -888,7 +910,10 @@ function ConnectionDetails({
       </section> : null}
       {connection.jumpHost !== null ? <section className="connection-detail-section"><h3>堡垒机 / ProxyJump</h3><p>{connection.jumpHost.username}@{connection.jumpHost.host}:{connection.jumpHost.port} · {authLabel(connection.jumpHost.authMethod)}</p><code>{connection.jumpHost.hostKeyFingerprint ?? "首次连接时需要独立核验指纹"}</code></section> : null}
       <section className="connection-detail-section"><h3>分类与备注</h3><div className="connection-tags">{connection.tags.map((tag) => <span key={tag}>#{tag}</span>)}</div><p className="connection-notes-text">{connection.notes ?? "无备注"}</p></section>
-      <footer><button type="button" disabled={busy} onClick={onEdit}>编辑配置</button><button type="button" className="danger-button" disabled={busy} onClick={onDelete}>永久删除</button></footer>
+      <footer>
+        <div className="connection-manage-actions"><button type="button" disabled={busy} onClick={onEdit}>编辑配置</button><button type="button" className="danger-button" disabled={busy} onClick={onDelete}>永久删除</button></div>
+        <div className="connection-connect-actions"><button type="button" disabled={busy} onClick={onProbe}>测试连接</button><button type="button" className="primary-button" disabled={busy} onClick={onConnect}>连接目标</button></div>
+      </footer>
     </section>
   );
 }

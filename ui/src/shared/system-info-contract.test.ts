@@ -98,7 +98,9 @@ describe("system-info process-boundary validators", () => {
     expect(isSystemInfoMaximumRows(1)).toBe(true);
     expect(isSystemInfoMaximumRows(500)).toBe(true);
     expect(isSystemInfoMaximumRows(0)).toBe(false);
-    expect(isSystemInfoMaximumRows(501)).toBe(false);
+    expect(isSystemInfoMaximumRows(10_000)).toBe(true);
+    expect(isSystemInfoMaximumRows(10_001)).toBe(false);
+    expect(isSystemInfoMaximumRows(500.5)).toBe(false);
 
     expect(isSystemInfoTable({ ...table, snapshotHandle: "/tmp/snapshot" })).toBe(false);
     expect(isSystemInfoTable({ ...table, sessionId: "ssh-session" })).toBe(false);
@@ -134,7 +136,7 @@ describe("system-info process-boundary validators", () => {
     })).toBe(false);
     expect(isSystemInfoTable({
       ...table,
-      rows: Array.from({ length: 501 }, (_, index) => ({
+      rows: Array.from({ length: 10_001 }, (_, index) => ({
         id: `row-${index}`,
         cells: ["user", "1", "1", "/home/user", "/bin/sh"],
         risk: "normal",

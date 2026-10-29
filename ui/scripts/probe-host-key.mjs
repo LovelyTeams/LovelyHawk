@@ -131,7 +131,7 @@ try {
 
   // 1. A pinned fingerprint that is not the host's: refused, nothing replaced.
   check("the stale pin really is not one of the host's keys", !hostFingerprints("lab-ubuntu").includes(stalePin));
-  await waitFor(() => main.evaluate(clickText(".connection-details-view header button", "连接目标")), { label: "连接目标" });
+  await waitFor(() => main.evaluate(clickText(".connection-connect-actions button", "连接目标")), { label: "连接目标" });
   const refused = await waitFor(() => main.evaluate("document.querySelector('.ssh-failure-panel h3')?.textContent ?? null"), { timeoutMs: 60_000, label: "the refusal" }).catch(() => null);
   const refusedText = await main.evaluate("document.querySelector('.ssh-attempt-dialog')?.textContent ?? ''");
   check("a changed host key is refused and says it will not be accepted automatically",
@@ -147,7 +147,7 @@ try {
   const real = hostFingerprints(fresh.container);
   after = await select(fresh.name);
   check("the new connection has no pin yet", pinOf(after) === null && after.sections.join(" ").includes("首次连接时需要独立核验指纹"), after.sections[0]?.slice(0, 120));
-  await waitFor(() => main.evaluate(clickText(".connection-details-view header button", "连接目标")), { label: "连接目标 (first)" });
+  await waitFor(() => main.evaluate(clickText(".connection-connect-actions button", "连接目标")), { label: "连接目标 (first)" });
   const shown = await waitFor(() => main.evaluate("document.querySelector('.ssh-host-key-panel code')?.textContent ?? null"), { timeoutMs: 60_000, label: "the host-key prompt" });
   check("the prompt shows a fingerprint the host really has", real.includes(shown), { shown, real });
   const focused = await waitFor(() => main.evaluate("document.activeElement?.dataset?.testid ?? null"), { timeoutMs: 5_000, label: "initial focus" }).catch(() => null);
@@ -166,7 +166,7 @@ try {
   check("declining pins nothing and leaves no session", pinOf(after) === null && !after.connected, { pin: pinOf(after), connected: after.connected });
 
   // 3. Trusting it: connected, and exactly that key is pinned.
-  await waitFor(() => main.evaluate(clickText(".connection-details-view header button", "连接目标")), { label: "连接目标 (again)" });
+  await waitFor(() => main.evaluate(clickText(".connection-connect-actions button", "连接目标")), { label: "连接目标 (again)" });
   const again = await waitFor(() => main.evaluate("document.querySelector('.ssh-host-key-panel code')?.textContent ?? null"), { timeoutMs: 60_000, label: "the prompt again" });
   await main.evaluate("document.querySelector('[data-testid=\"ssh-host-key-trust\"]').click(), true");
   const connected = await waitFor(() => main.evaluate("document.querySelector('[data-testid=\"sidebar-disconnect-target\"]') !== null && document.querySelector('.connection-manager-backdrop') === null"), { timeoutMs: 90_000, label: "the login" }).catch(() => false);
@@ -182,7 +182,7 @@ try {
   // 4. Failures say which kind they are, in plain words, with no host text.
   for (const failure of failures) {
     await select(failure.name);
-    await waitFor(() => main.evaluate(clickText(".connection-details-view header button", "连接目标")), { label: `连接目标 (${failure.name})` });
+    await waitFor(() => main.evaluate(clickText(".connection-connect-actions button", "连接目标")), { label: `连接目标 (${failure.name})` });
     // A wrong password on a host this run has not pinned still asks for the key first.
     const outcome = await waitFor(async () => {
       if (await main.evaluate("document.querySelector('[data-testid=\"ssh-host-key-trust\"]') !== null")) {

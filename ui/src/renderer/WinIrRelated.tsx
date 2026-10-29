@@ -46,7 +46,6 @@ export function WinIrRelated({ query, context: { snapshots, collectedAt, onGo } 
       {hits.length === 0 ? <p className="wir-footnote">已采集的模块中没有相同路径、账户或地址的记录。</p> : null}
       {serviceAccounts.length ? <p className="wir-footnote">{serviceAccounts.join("、")} 是系统内置服务账户，不参与账户匹配。</p> : null}
       {missing.length ? <p className="wir-footnote">尚未采集：{missing.join("、")}，关联结果可能不完整。</p> : null}
-      <p className="wir-footnote">按已采集快照匹配，各模块不是同一时刻采集；名称相同不代表同一文件或同一进程，文本提及也不代表直接关联。</p>
     </section>
   );
 }

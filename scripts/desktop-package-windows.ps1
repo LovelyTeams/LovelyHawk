@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = '0.0.1',
+    [string]$Version = '0.0.2',
     [string]$OutputDirectory = (Join-Path (Split-Path -Parent $PSScriptRoot) 'artifacts'),
     [string]$ExecutablePath = (Join-Path (Split-Path -Parent $PSScriptRoot) 'target\x86_64-pc-windows-msvc\release\lovelyhawk.exe'),
     [string]$AgentPath,
@@ -38,7 +38,7 @@ $notices = (Resolve-Path -LiteralPath $NoticesPath).Path
 & (Join-Path $PSScriptRoot 'desktop-verify-windows-binary.ps1') -BinaryPath $agent -Target 'x86_64-pc-windows-msvc' -AllowSystemUcrt
 
 $noticesText = Get-Content -LiteralPath $notices -Raw
-foreach ($requiredNotice in @('React 19.2.8', 'React DOM 19.2.8', 'Scheduler 0.27.0', 'MIT License', 'Inter 4.1', 'Cascadia Mono 2407.24', 'Tauri 2.12.1', '@tauri-apps/api 2.12.1', 'xterm.js 6.0.0')) {
+foreach ($requiredNotice in @('React 19.3.1', 'React DOM 19.3.1', 'Scheduler 0.28.0', 'MIT License', 'Inter 4.1', 'Cascadia Mono 2407.24', 'Tauri 2.12.5', '@tauri-apps/api 2.12.4', 'xterm.js 6.0.0')) {
     if (-not $noticesText.Contains($requiredNotice, [System.StringComparison]::Ordinal)) {
         throw "Third-party notices are missing '$requiredNotice'."
     }
@@ -116,7 +116,7 @@ try {
         version = $Version
         platform = 'windows'
         arch = 'x64'
-        shell = 'tauri-2.12.1'
+        shell = 'tauri-2.12.5'
         webview = 'system WebView2 Runtime'
         files = $files
     }

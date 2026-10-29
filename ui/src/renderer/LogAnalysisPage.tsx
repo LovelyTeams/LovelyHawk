@@ -770,7 +770,7 @@ function CorrelationView({ selected, status, error, result, onRun, hits, copy }:
               <LogRuleSummary hits={hits} />
               <LogEntriesView entries={result.entries} hits={hits} empty="没有可展示的关联日志。" />
               {result.truncated && <p className="log-analysis-warning" role="status">
-                关联结果不代表未读取范围。
+                关联结果已截断。
               </p>}
             </>
           )}
@@ -934,7 +934,7 @@ export function LogEntriesView({ entries, empty, hits = null }: {
   hits?: LogRuleHits | null;
 }) {
   if (entries.length === 0) {
-    return <EmptyPanel title={empty} detail="空结果不代表未调查范围没有事件。" compact />;
+    return <EmptyPanel title={empty} compact />;
   }
   const lineClass = (entry: PublicLogEntry, index: number): string | undefined => {
     const names = [entry.highlighted ? "is-abnormal" : "", hits?.hits[index] ? "has-rule" : ""].filter(Boolean);
@@ -1091,10 +1091,10 @@ export function ErrorPanel({ message, compact = false }: { message: string; comp
 
 export function EmptyPanel({ title, detail, compact = false }: {
   title: string;
-  detail: string;
+  detail?: string;
   compact?: boolean;
 }) {
   return <div className={compact ? "log-analysis-empty is-compact" : "log-analysis-empty"}>
-    <strong>{title}</strong><p>{detail}</p>
+    <strong>{title}</strong>{detail ? <p>{detail}</p> : null}
   </div>;
 }

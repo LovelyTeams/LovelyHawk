@@ -232,11 +232,7 @@ export function BaselinePage({
             </button>
           </header>
 
-          <p className="baseline-readonly-banner">
-            {writeApi === null
-              ? "本页只读取固定目录、当前合规状态与当前目标的安全历史摘要；不提供计划、确认、执行、恢复或重载入口。"
-              : "扫描和查看文件不会改动目标。修改某一项或放回历史改动会改动目标：每次都先列出计划（改哪些完整文件、怎么生效、失败怎么放回），确认后才执行，并由独立读回核对。"}
-          </p>
+          {writeApi === null ? <p className="baseline-readonly-banner">只读模式</p> : null}
         </>
       )}
 
@@ -549,7 +545,7 @@ export function BaselineHistoryView({ status, history, error, connected, onRefre
         <BaselineErrorPanel message={error ?? "基线历史不可用。"} compact />
       ) : history === null || history.entries.length === 0 ? (
         <BaselineEmptyPanel title="没有基线变更历史"
-          detail="这里只记录通过本工具做的修改；没有记录不代表这台机器的配置从未被改过。" compact />
+          detail="暂无本工具的修改记录。" compact />
       ) : (
         <div className="baseline-history-list">
           {history.entries.map((entry) => (

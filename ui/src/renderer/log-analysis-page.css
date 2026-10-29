@@ -15,7 +15,7 @@
   box-sizing: border-box;
 }
 
-.log-analysis-page button,
+:where(.log-analysis-page) button,
 .log-analysis-page input,
 .log-analysis-page textarea {
   border: 1px solid var(--border-strong);
@@ -25,13 +25,13 @@
   font: inherit;
 }
 
-.log-analysis-page button {
+:where(.log-analysis-page) button {
   min-height: 36px;
   padding: 8px 13px;
   cursor: pointer;
 }
 
-.log-analysis-page button:hover:not(:disabled) {
+:where(.log-analysis-page) button:where(:hover:not(:disabled)) {
   border-color: var(--accent-strong);
   background: var(--info-soft);
 }

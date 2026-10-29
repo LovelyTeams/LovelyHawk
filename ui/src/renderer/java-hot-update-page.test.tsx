@@ -34,8 +34,8 @@ describe("Java hot update page", () => {
     const html = renderToStaticMarkup(<JavaHotUpdatePage bindingHandle="binding-1" api={api} />);
     expect(html).toContain("扫描 Java 进程");
     expect(html).toContain("扫描只读取进程列表和 Java 版本，不改动任何东西");
-    expect(html).toContain("不会重启进程");
-    expect(html).toContain("重启后才会用新的类");
+    expect(html).toContain("替换磁盘 JAR 中的类文件；运行中的 JVM 需重启后生效");
+    expect(html).toContain("JVM 需重启后生效");
     expect(html).toContain("替换记录");
   });
 

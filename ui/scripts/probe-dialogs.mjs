@@ -8,6 +8,9 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { build } from "vite";
+import react from "@vitejs/plugin-react";
+import { contrastRatio, parseThemeTokenTable } from "../src/renderer/theme/theme-test-utils.ts";
 
 import { attach, delay, launchDesktop, waitFor } from "./cdp.mjs";
 
@@ -52,14 +55,117 @@ async function openDiscard(session) {
   return waitFor(() => session.evaluate(dialog), { timeoutMs: 8_000, label: "the discard question" }).catch(() => null);
 }
 
+// Actual components and CSS inside the native WebView. The file/plan is a
+// labelled visual fixture: every action callback is local and no target exists.
+async function verifyButtonStates(session) {
+  const ui = path.join(repositoryRoot, "ui");
+  const outDir = path.join(runRoot, "button-fixture");
+  const source = (name) => JSON.stringify(path.join(ui, "src/renderer", name).replaceAll("\\", "/"));
+  const entry = `
+    import React from "react";
+    import {createRoot} from "react-dom/client";
+    import {EmergencyPathMenu} from ${source("EmergencyPathMenu.tsx")};
+    import {EmergencyPathDialog, EmergencyPathProperties} from ${source("EmergencyPathDialog.tsx")};
+    import ${source("emergency-commands.css")};
+    import ${source("log-analysis-page.css")};
+    export function mount() {
+      const app=document.getElementById("root"), previousTheme=document.documentElement.dataset.theme;
+      app.hidden=true;
+      const element=document.createElement("div"); element.id="button-states-preview"; document.body.append(element);
+      const root=createRoot(element), path="/tmp/lovelyhawk-style-sample";
+      const detail={pathHandle:"visual-only",path,kind:"file",size:"512",mode:"0755",ownerId:0,groupId:0,modifiedAt:"2026-10-29T00:00:00Z",executable:true};
+      const plan={planHandle:"visual-only",pathHandle:"visual-only",path,action:"disarm",summary:"本地样式样例，不会修改任何文件。",dangerous:true,restoreDescription:"样例不执行，无需恢复。",state:"planned",expiresInSeconds:300};
+      const noop=()=>{};
+      return {
+        show(page,kind,theme) {
+          document.documentElement.dataset.theme=theme;
+          const component=kind==="menu"
+            ? React.createElement(EmergencyPathMenu,{position:{x:140,y:150},offer:{pathHandle:"visual-only",path},busy:false,onAction:noop,onDismiss:noop})
+            : kind==="primary"
+            ? React.createElement(EmergencyPathProperties,{path,detail,error:null,onClose:noop})
+            : React.createElement(EmergencyPathDialog,{path,action:"disarm",detail,plan,receipt:null,busy:false,error:null,onConfirm:noop,onClose:noop});
+          root.render(React.createElement("section",{className:page,key:page+kind+theme},
+            React.createElement("h2",null,"按钮样式验证（本地样例，不连接目标）"),component));
+        },
+        unmount() {root.unmount();element.remove();app.hidden=false;document.documentElement.dataset.theme=previousTheme;}
+      };
+    }`;
+  await build({
+    root: ui, configFile: false, logLevel: "warn",
+    plugins: [{ name: "button-state-fixture", resolveId: id => id.endsWith("virtual:button-states") ? "\0button-states-fixture" : null,
+      load: id => id === "\0button-states-fixture" ? entry : null }, react()],
+    define: { "process.env.NODE_ENV": JSON.stringify("production") },
+    build: { outDir, emptyOutDir: false,
+      lib: { entry: "virtual:button-states", name: "ButtonStatesFixture", formats: ["iife"], fileName: () => "fixture.js" } },
+  });
+  await session.send("DOM.enable"); await session.send("CSS.enable");
+  const { frameTree } = await session.send("Page.getFrameTree");
+  const { styleSheetId } = await session.send("CSS.createStyleSheet", { frameId: frameTree.frame.id });
+  await session.send("CSS.setStyleSheetText", { styleSheetId,
+    text: fs.readdirSync(outDir).filter(name => name.endsWith(".css")).map(name => fs.readFileSync(path.join(outDir, name), "utf8")).join("\n") });
+  await session.evaluate(fs.readFileSync(path.join(outDir, "fixture.js"), "utf8"));
+  await session.evaluate("window.__buttonStates = ButtonStatesFixture.mount(); true");
+  await session.send("Emulation.setDeviceMetricsOverride", { width: 1100, height: 760, deviceScaleFactor: 1, mobile: false });
+  const themes = [...parseThemeTokenTable(fs.readFileSync(path.join(ui, "src/renderer/theme/themes.css"), "utf8")).keys()];
+  try {
+    for (const theme of themes) {
+      const ratios = [];
+      for (const page of ["emergency-commands-page", "log-analysis-page"]) {
+        for (const kind of ["menu", "primary", "danger"]) {
+          await session.evaluate(`window.__buttonStates.show(${JSON.stringify(page)},${JSON.stringify(kind)},${JSON.stringify(theme)}); true`);
+          const selector = kind === "menu" ? "#button-states-preview [role=menuitem]" :
+            `#button-states-preview footer button.is-${kind === "primary" ? "primary" : "dangerous"}`;
+          await waitFor(() => session.evaluate(`document.querySelector(${JSON.stringify(selector)}) !== null`), { label: `${theme} ${kind}` });
+          // Rendering replaces nodes; wait for the committed theme/page/scene.
+          await session.evaluate("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))");
+          const { root } = await session.send("DOM.getDocument");
+          const { nodeIds } = await session.send("DOM.querySelectorAll", { nodeId: root.nodeId, selector });
+          for (const [index, nodeId] of nodeIds.entries()) {
+            for (const state of [[], ["hover"], ["focus-visible"]]) {
+              await session.send("CSS.forcePseudoState", { nodeId, forcedPseudoClasses: state });
+              const colors = await session.evaluate(`(() => {
+                const b=document.querySelectorAll(${JSON.stringify(selector)})[${index}], c=getComputedStyle(b);
+                const canvas=document.createElement('canvas');canvas.width=canvas.height=1;const ctx=canvas.getContext('2d');
+                const rgba=value=>{ctx.clearRect(0,0,1,1);ctx.fillStyle=value;ctx.fillRect(0,0,1,1);return [...ctx.getImageData(0,0,1,1).data]};
+                let parent=b, bg=rgba(c.backgroundColor);
+                while(bg[3]===0 && parent.parentElement){parent=parent.parentElement;bg=rgba(getComputedStyle(parent).backgroundColor)}
+                const hex=channels=>'#'+channels.slice(0,3).map(v=>v.toString(16).padStart(2,'0')).join('');
+                return {foreground:hex(rgba(c.color)),background:hex(bg),alpha:bg[3],
+                  border:c.borderTopWidth,height:b.getBoundingClientRect().height,notes:b.querySelectorAll('em').length};
+              })()`);
+              const ratio = contrastRatio(colors.foreground, colors.background);
+              ratios.push(ratio);
+              if (ratio < 4.5 || colors.alpha !== 255 || (kind === "menu" && (colors.border !== "0px" || colors.height > 34 || colors.notes))) {
+                throw new Error(`${theme}/${page}/${kind}/${index}/${state}: contrast ${ratio.toFixed(2)} ${JSON.stringify(colors)}`);
+              }
+            }
+            await session.send("CSS.forcePseudoState", { nodeId, forcedPseudoClasses: [] });
+          }
+          if (page === "emergency-commands-page" && ["light", "dark"].includes(theme)) {
+            await session.send("CSS.forcePseudoState", { nodeId: nodeIds.at(-1), forcedPseudoClasses: ["hover"] });
+            await session.screenshot(path.join(evidence, `${kind}-hover-${theme}.png`));
+          }
+        }
+      }
+      check(`${theme}: menu rows and normal/hover/focus button contrast`, true, { minimumContrast: Math.min(...ratios), samples: ratios.length });
+    }
+  } finally {
+    await session.evaluate("window.__buttonStates.unmount(); delete window.__buttonStates; true");
+  }
+}
+
 try {
-  const { session } = await attach(port, (url) => /^https?:\/\/tauri\.localhost\/(index\.html)?$/u.test(url));
+  const origin = process.env.LOVELYHAWK_DEV_SERVER ?? "https://tauri.localhost";
+  const { session } = await attach(port, url => new URL(url).origin === origin && ["/", "/index.html"].includes(new URL(url).pathname));
   session.onEvent((method, params) => {
-    if (method === "Runtime.exceptionThrown" || (method === "Runtime.consoleAPICalled" && params?.type === "error")) {
+    if (method === "Runtime.exceptionThrown" || (method === "Runtime.consoleAPICalled" && params?.type === "error") ||
+      (method === "Log.entryAdded" && params?.entry?.level === "error")) {
       errors.push(JSON.stringify(params).slice(0, 1_500));
     }
   });
   await session.send("Runtime.enable");
+  await session.send("Log.enable");
+  await session.send("Page.bringToFront");
   await waitFor(() => session.evaluate("document.querySelector('[data-testid=\"open-settings\"]') !== null"), { label: "the title bar" });
   await session.evaluate("document.querySelector('[data-testid=\"open-settings\"]').click(), true");
   const toggled = await waitFor(() => session.evaluate(`(() => {
@@ -103,6 +209,11 @@ try {
   const closed = await waitFor(() => session.evaluate("document.querySelector('.settings-panel') === null && document.querySelector('.dialog-host') === null"), { timeoutMs: 8_000, label: "settings to close" }).catch(() => false);
   check("only the explicit 放弃更改 button discards and closes settings", closed);
 
+  if (process.argv.includes("--buttons")) {
+    check("titlebar has four actions and the statusbar theme picker remains", await session.evaluate(
+      "document.querySelectorAll('.window-titlebar-actions button').length === 4 && !document.querySelector('[data-testid=\"cycle-theme\"]') && !!document.querySelector('[data-testid=\"open-theme-picker\"]')"));
+    await verifyButtonStates(session);
+  }
   check("no console errors", errors.length === 0, errors.slice(0, 3));
   await session.evaluate("document.querySelector('[data-testid=\"window-close\"]').click(), true");
   await waitFor(() => exitCode !== null, { timeoutMs: 15_000, label: "exit" }).catch(() => undefined);

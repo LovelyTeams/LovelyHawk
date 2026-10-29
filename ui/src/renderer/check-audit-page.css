@@ -68,7 +68,7 @@
   font-size: var(--font-small);
 }
 
-.check-audit-page button {
+:where(.check-audit-page) button {
   border: 1px solid var(--border-strong);
   border-radius: 9px;
   padding: 8px 12px;
@@ -77,7 +77,7 @@
   cursor: pointer;
 }
 
-.check-audit-page button:hover:not(:disabled) {
+:where(.check-audit-page) button:where(:hover:not(:disabled)) {
   border-color: var(--accent);
   background: var(--surface-inset);
 }

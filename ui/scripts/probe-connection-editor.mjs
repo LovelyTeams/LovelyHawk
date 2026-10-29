@@ -149,7 +149,7 @@ try {
   await until((value) => !value.editor, "the editor to close");
 
   // The real login with that key.
-  await waitFor(() => main.evaluate(clickText(".connection-details-view header button", "连接目标")), { label: "连接目标" });
+  await waitFor(() => main.evaluate(clickText(".connection-connect-actions button", "连接目标")), { label: "连接目标" });
   const hostKey = await waitFor(() => main.evaluate("document.querySelector('.ssh-host-key-panel') ? document.querySelector('.ssh-host-key-panel').textContent : null"), { timeoutMs: 60_000, label: "the host-key prompt" });
   check("the first connection asks to verify the host key and says it will be remembered", hostKey.includes("SHA256:") && hostKey.includes("记在该连接里"), hostKey.slice(0, 160));
   await main.screenshot(path.join(evidence, "host-key.png"));

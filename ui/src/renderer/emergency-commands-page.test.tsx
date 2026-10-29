@@ -246,6 +246,8 @@ describe("EmergencyCommandsPage", () => {
     expect(html).toContain("去掉执行权限");
     expect(html).toContain("隔离");
     expect(html).toContain('role="menu"');
+    expect(html).not.toContain("<em>");
+    expect(html).toContain('role="separator"');
     // Every item leads to a plan the operator still has to read.
     expect(html).not.toContain("立即");
     expect(html).not.toContain("彻底删除");

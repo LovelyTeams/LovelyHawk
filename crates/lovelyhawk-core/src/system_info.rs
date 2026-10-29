@@ -31,7 +31,8 @@ use crate::{
     target::TargetContext,
 };
 
-const MAX_ROWS: usize = 1_000;
+pub const MAX_SYSTEM_INFO_ROWS: usize = 10_000;
+const MAX_ROWS: usize = MAX_SYSTEM_INFO_ROWS;
 /// How every table command spells its own row cap, so the cap can be moved.
 ///
 /// The number here is the one written into the command strings; nothing reads
@@ -3183,6 +3184,21 @@ impl SystemInfoTable {
             ));
         }
         Ok(LoginInvestigationRequest { identity, action })
+    }
+
+    /// Only a collected Shell configuration row can authorize opening an editor.
+    /// A line number is unnecessary: empty files also have an editable file.
+    pub fn shell_config_file(&self, row_id: &str) -> CoreResult<RemotePath> {
+        if self.tab != SystemInfoTab::ShellConfigs {
+            return Err(invalid_detail_key("shell configuration inventory"));
+        }
+        let path = self
+            .rows
+            .iter()
+            .find(|row| row.id == row_id)
+            .and_then(|row| row.cells.first())
+            .ok_or_else(|| invalid_detail_key("shell configuration row"))?;
+        RemotePath::new(validated_shell_config_path(path)?)
     }
 
     pub fn artifact_investigation_request(
@@ -9015,7 +9031,7 @@ const SUID_COMMAND: &str = concat!(
 const AUTORUNS_COMMAND: &str = r#"{ if command -v systemctl >/dev/null 2>&1; then systemctl list-unit-files --type=service --state=enabled --no-pager --no-legend 2>/dev/null | head -n 200 | awk '{print "systemd\t"$1"\t"$2"\t"$1"\troot"}'; fi; for l in /etc/rc[2345].d/S* /etc/runlevels/*/*; do [ -e "$l" ] || continue; n=${l##*/}; case "$n" in S[0-9][0-9]*) n=${n#S??};; esac; t=$(readlink -f "$l" 2>/dev/null); [ -n "$t" ] || t="$l"; printf 'init.d\t%s\t开机启动\t%s\troot\n' "$n" "$t"; done | sort -u; seen=""; for f in /etc/rc.local /etc/rc.d/rc.local; do [ -f "$f" ] || continue; rp=$(readlink -f "$f" 2>/dev/null); [ -n "$rp" ] || rp="$f"; case " $seen " in *" $rp "*) continue;; esac; seen="$seen $rp"; o=$(stat -c %U "$f" 2>/dev/null); s=未设置执行位; [ -x "$f" ] && s=开机执行; grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' -e '^[[:space:]]*exit' "$f" 2>/dev/null | tr '\t' ' ' | head -n 20 | while IFS= read -r line; do printf 'rc.local\t%s\t%s\t%s\t%s\n' "${f##*/}" "$s" "$line" "$o"; done; done; for f in /etc/profile.d/*.sh; do [ -f "$f" ] || continue; o=$(stat -c %U "$f" 2>/dev/null); c=$(grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' "$f" 2>/dev/null | head -n 2 | tr '\n\t' '  '); [ -n "$c" ] || c="$f"; printf 'profile.d\t%s\t登录执行\t%s\t%s\n' "${f##*/}" "$c" "$o"; done; if [ -f /etc/ld.so.preload ]; then o=$(stat -c %U /etc/ld.so.preload 2>/dev/null); tr '\t' ' ' < /etc/ld.so.preload 2>/dev/null | head -n 20 | while IFS= read -r line; do [ -n "$line" ] || continue; printf 'ld.so.preload\t%s\t强制预加载\t%s\t%s\n' ld.so.preload "$line" "$o"; done; fi; for f in /var/spool/cron/crontabs/* /var/spool/cron/* /etc/cron.d/*; do [ -f "$f" ] || continue; u=${f##*/}; grep '@reboot' "$f" 2>/dev/null | tr '\t' ' ' | head -n 10 | while IFS= read -r line; do printf 'cron @reboot\t%s\t开机执行\t%s\t%s\n' "$u" "$line" "$u"; done; done; } 2>/dev/null | head -n 500"#;
 const FIREWALL_COMMAND: &str = r#"iptables-save 2>/dev/null | grep '^-A ' | head -n 500 | awk '{rule=$0; gsub(/\t/," ",rule); print $2"\t\t\t\t\t"rule}'"#;
 const ENV_COMMAND: &str = r#"env 2>/dev/null | sort | head -n 500 | awk -F= '{name=$1; value=substr($0,length(name)+2); risk=(name=="LD_PRELOAD" || name=="LD_LIBRARY_PATH" ? "warning" : "normal"); gsub(/\t/," ",value); print name"\t"value"\t"risk}'"#;
-const SHELL_CONFIG_COMMAND: &str = r#"for f in /etc/profile /etc/bash.bashrc /root/.bashrc /home/*/.bashrc; do [ -f "$f" ] || continue; owner=$(stat -c %U "$f" 2>/dev/null); mtime=$(stat -c %Y "$f" 2>/dev/null); awk -v f="$f" -v o="$owner" -v m="$mtime" '{line=$0; gsub(/\t/," ",line); risk=(line ~ /(curl|wget|nc |ncat|LD_PRELOAD|\/dev\/tcp)/ ? "warning" : "normal"); print f"\t"o"\t"m"\t"NR"\t"line"\t"risk}' "$f"; done | head -n 1000"#;
+const SHELL_CONFIG_COMMAND: &str = r#"for f in /etc/profile /etc/bash.bashrc /root/.bashrc /home/*/.bashrc; do [ -f "$f" ] || continue; owner=$(stat -c %U "$f" 2>/dev/null); mtime=$(stat -c %Y "$f" 2>/dev/null); if [ ! -s "$f" ]; then printf '%s\t%s\t%s\t1\t\tnormal\n' "$f" "$owner" "$mtime"; else awk -v f="$f" -v o="$owner" -v m="$mtime" '{line=$0; gsub(/\t/," ",line); risk=(line ~ /(curl|wget|nc |ncat|LD_PRELOAD|\/dev\/tcp)/ ? "warning" : "normal"); print f"\t"o"\t"m"\t"NR"\t"line"\t"risk}' "$f"; fi; done | head -n 500"#;
 /// What is installed, whichever package manager put it there.
 ///
 /// It knew `dpkg` and `rpm` only, so on Alpine every branch fell through, the
@@ -9296,23 +9312,14 @@ mod tests {
             // A smaller request is rewritten the same way; the cap is not a
             // number baked into the string any more.
             assert!(tab.command(10).contains("head -n 11"), "{tab:?}");
+            assert!(tab.command(2_000).contains("head -n 2001"), "{tab:?}");
         }
-        // The rule is not "every command must carry the marker" — it is that no
-        // command may cap at or below what the caller asked for. Shell configs
-        // stop at a thousand lines, which is above anything a caller can
-        // request, so the parser meets the limit first and sees the spare row
-        // without any rewriting. Any other tab arriving here is a tab whose cap
-        // nobody has checked against the request, which is how this whole class
-        // of silence started.
-        assert_eq!(
-            unmarked,
-            vec![SystemInfoTab::ShellConfigs, SystemInfoTab::Rootcheck],
-            "{unmarked:?}"
-        );
+        // Only the fixed set of rootcheck facts has no row cap to rewrite.
+        assert_eq!(unmarked, vec![SystemInfoTab::Rootcheck], "{unmarked:?}");
         assert!(
             SystemInfoTab::ShellConfigs
-                .command_template()
-                .contains("head -n 1000")
+                .command(2_000)
+                .contains("head -n 2001")
         );
         // Rootcheck puts no ceiling on the target at all, so everything it
         // finds reaches the parser and the parser decides. That is the other
@@ -9330,6 +9337,62 @@ mod tests {
         let more = parse_table(&request, &format!("{row}\n{row}\n{row}"));
         assert_eq!(more.rows.len(), 2, "the spare row is never shown");
         assert!(more.truncated, "a machine with more rows must say so");
+    }
+
+    #[test]
+    fn larger_collections_keep_rows_after_500_and_report_a_real_cutoff() {
+        let output = (0..1_101)
+            .map(|i| format!("user{i}\t{i}\t{i}\t/home/user{i}\t/bin/sh"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let complete = parse_table(
+            &SystemInfoRequest::new(SystemInfoTab::Users, 2_000).unwrap(),
+            &output,
+        );
+        assert_eq!(complete.rows.len(), 1_101);
+        assert_eq!(complete.rows[1_100].cells[0], "user1100");
+        assert!(!complete.truncated);
+        let limited = parse_table(
+            &SystemInfoRequest::new(SystemInfoTab::Users, 1_000).unwrap(),
+            &output,
+        );
+        assert_eq!(limited.rows.len(), 1_000);
+        assert!(limited.truncated);
+    }
+
+    #[test]
+    fn editor_file_requires_a_shell_row_and_an_allowed_path() {
+        let request = SystemInfoRequest::new(SystemInfoTab::ShellConfigs, 10).unwrap();
+        for path in [
+            "/etc/profile",
+            "/etc/bash.bashrc",
+            "/root/.bashrc",
+            "/home/alice/.bashrc",
+        ] {
+            let table = parse_table(&request, &format!("{path}\troot\t0\t1\t\tnormal"));
+            assert_eq!(
+                table.shell_config_file(&table.rows[0].id).unwrap().as_str(),
+                path
+            );
+            assert!(table.shell_config_file("missing-row").is_err());
+            let mut other_tab = table.clone();
+            other_tab.tab = SystemInfoTab::Users;
+            assert!(other_tab.shell_config_file(&table.rows[0].id).is_err());
+        }
+        for path in [
+            "/etc/shadow",
+            "/tmp/.bashrc",
+            "/home/../.bashrc",
+            "/home/a/b/.bashrc",
+            "/etc/profile\n/tmp/x",
+        ] {
+            let mut table = parse_table(&request, "/etc/profile\troot\t0\t1\t\tnormal");
+            table.rows[0].cells[0] = path.to_owned();
+            assert!(
+                table.shell_config_file(&table.rows[0].id).is_err(),
+                "{path:?}"
+            );
+        }
     }
 
     #[test]

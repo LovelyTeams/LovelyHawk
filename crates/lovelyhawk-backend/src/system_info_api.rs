@@ -21,12 +21,12 @@ use uuid::Uuid;
 
 use crate::{ssh_api::SshApi, system_info_action_api::RowPlanRegistry};
 
-const MAX_REQUEST_ROWS: usize = 500;
+const MAX_REQUEST_ROWS: usize = lovelyhawk_core::system_info::MAX_SYSTEM_INFO_ROWS;
 const MAX_SNAPSHOTS: usize = 16;
-const MAX_SNAPSHOT_ROWS: usize = 500;
-const MAX_TOTAL_SNAPSHOT_ROWS: usize = 4_000;
-const MAX_SNAPSHOT_BYTES: usize = 512 * 1024;
-const MAX_TOTAL_SNAPSHOT_BYTES: usize = 4 * 1024 * 1024;
+const MAX_SNAPSHOT_ROWS: usize = MAX_REQUEST_ROWS;
+const MAX_TOTAL_SNAPSHOT_ROWS: usize = 20_000;
+const MAX_SNAPSHOT_BYTES: usize = 4 * 1024 * 1024;
+const MAX_TOTAL_SNAPSHOT_BYTES: usize = 8 * 1024 * 1024;
 const MAX_HANDLE_BYTES: usize = 128;
 const MAX_ROW_ID_BYTES: usize = 256;
 const SNAPSHOT_TTL: Duration = Duration::from_secs(5 * 60);

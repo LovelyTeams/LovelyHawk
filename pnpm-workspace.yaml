@@ -1,2 +1,5 @@
 packages:
   - ui
+
+# pnpm downloads the pinned LTS for scripts without replacing a system install.
+useNodeVersion: 26.13.0

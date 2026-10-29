@@ -482,9 +482,6 @@ function ConfigVisualEditor({ api, initialView = null, modeSwitch, initialDirty 
       {view === null && product === "database" ? (
         <div className="config-visual-empty" data-testid="config-visual-empty">
           <h2>按内置目录查看和修改数据库配置文件</h2>
-          <p>先在上面选数据库和配置文件。能起草的文件可以从经过审查的起始内容开始，也可以导入本机已有的副本；服务器或厂商工具生成的文件只能查看和另存副本，不能修改。</p>
-          <p>打开后可以选一个“对照的版本”：目录描述过的项会标出“目录说明”，右边列出这个版本的参数，以及每个参数的取值、作用范围、生效方式和风险；能写入的参数可以直接填值，值先按目录检查，写入后再读回核对。这些说明来自内置目录，没有核对过任何服务器。</p>
-          <p>口令、密钥这类内容会被隐藏，不能在这里填写，整份文件也不能复制和预览。改好后另存为新文件，不会覆盖已有文件，也不会改动任何服务器。</p>
           <div className="config-visual-empty-actions">
             <button type="button" className="primary" disabled={working || databaseFile === null} onClick={() => void openDatabase()}>
               {databaseFile?.draftable === false ? "打开（只读）" : "打开起始内容"}
@@ -512,13 +509,12 @@ function ConfigVisualEditor({ api, initialView = null, modeSwitch, initialDirty 
             <span>{formatConfigVisualBytes(view.totalBytes)}</span>
             {dirty ? <span className="config-visual-dirty" data-testid="config-visual-dirty">有未另存的修改</span> : <span>没有未另存的修改</span>}
           </div>
-          <div className="config-visual-banners">
+          {!view.structured || view.partlyOpaque || view.containsSensitive || view.rowsTruncated ? <div className="config-visual-banners">
             {!view.structured ? <p className="warning">这个文件没能按 {configVisualProductLabel(view.product)} 语法完整解析（或者不是 UTF-8 文本），只能原样保留，不能逐项编辑。另存的内容与原文件逐字节相同。</p> : null}
             {view.structured && view.partlyOpaque ? <p className="warning">{configVisualPartlyOpaqueNotice(view.product)}</p> : null}
             {view.containsSensitive ? <p className="warning">文件里有疑似口令、令牌或带账号的地址。相关的行已隐藏，不能在这里修改、删除或移动，整份文件也不能复制和预览；另存时这些内容原样保留。</p> : null}
             {view.rowsTruncated ? <p className="warning">文件很大，这里只列出前 {view.rows.length} 项（共 {view.totalRows} 项）。</p> : null}
-            <p>这是本机草稿，没有在目标服务器上校验过，不能直接部署。{configVisualCheckAdvice(view.product)}中文说明是内置的通用解释，不代表目标上的版本一定支持某一项。</p>
-          </div>
+          </div> : null}
 
           <div className="config-visual-body">
             <section className="config-visual-tree" aria-label="配置结构">

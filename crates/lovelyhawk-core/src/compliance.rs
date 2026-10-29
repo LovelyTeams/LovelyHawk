@@ -528,9 +528,9 @@ pub fn generate_compliance_summary(
             ComplianceRuleStatus::Error => summary.errors += 1,
         }
     }
-    if summary.total > 0 {
-        summary.percent = (summary.passed * 100 + summary.total / 2) / summary.total;
-    }
+    summary.percent = (summary.passed * 100 + summary.total / 2)
+        .checked_div(summary.total)
+        .unwrap_or(0);
     summary
 }
 

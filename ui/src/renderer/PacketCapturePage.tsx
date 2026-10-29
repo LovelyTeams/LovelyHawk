@@ -646,11 +646,6 @@ export function PacketCapturePage({
         </aside>
       </div>
 
-      <footer className="packet-capture-boundary-note">
-        {evidence !== null
-          ? "实时抓包只在本页显示，不写文件；“抓包并保存”会在目标的 /tmp 写一个临时文件，读回核对后删除。本页不提供终端或任意命令入口。"
-          : "本页不创建或读取 PCAP 文件，也不提供下载、导出或终端入口。"}
-      </footer>
     </section>
   );
 }

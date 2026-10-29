@@ -22,9 +22,9 @@
   box-shadow: var(--shadow-sm);
 }
 
-.disposal-report-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 20px 24px; border-bottom: 1px solid var(--border); }
+.disposal-report-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: var(--dialog-header-padding); border-bottom: 1px solid var(--border); }
 .disposal-report-heading p { margin: 0; color: var(--accent); font-size: var(--font-caption); letter-spacing: .13em; }
-.disposal-report-heading h1 { margin: 3px 0 4px; font-size: var(--page-title-size); }
+.disposal-report-heading h1 { margin: 2px 0; font-size: var(--font-title); }
 .disposal-report-heading span { color: var(--muted); font-size: var(--font-small); }
 .disposal-report-heading small { display: block; margin-top: 4px; color: var(--warning); font-size: var(--font-caption); }
 .disposal-report-heading > div:last-child { display: flex; flex-wrap: wrap; gap: 8px; }
