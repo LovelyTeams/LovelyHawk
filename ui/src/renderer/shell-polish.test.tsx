@@ -56,7 +56,7 @@ describe("interface settings", () => {
 
 describe("navigation", () => {
   it("draws an icon for every page the backend registers", () => {
-    expect(pageIds).toHaveLength(14);
+    expect(pageIds).toHaveLength(15);
     for (const id of pageIds) expect(hasNavIcon(id), id).toBe(true);
     expect(renderToStaticMarkup(<NavIcon pageId="docker" glyph="▣" />)).toContain("<svg");
     // An unknown page still shows its registry glyph, as plain text.

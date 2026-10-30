@@ -35,6 +35,7 @@ mod notes_api;
 mod packet_capture_evidence_api;
 mod packet_capture_live_api;
 mod postgresql_runtime_api;
+mod response_engine_api;
 mod settings_api;
 mod sftp_browser_api;
 mod ssh_api;
@@ -112,6 +113,7 @@ use crate::{
         PacketCaptureLiveApi, PacketCaptureLiveApiError, PacketCaptureStartInput,
     },
     postgresql_runtime_api::{PostgresqlRuntimeApi, PostgresqlRuntimeRequest},
+    response_engine_api::{ResponseEngineApi, ResponseEngineError, ResponseEngineRequest},
     settings_api::{
         SettingsAiApiKeyReplacementInput, SettingsApi, SettingsApiError, SettingsSaveInput,
     },
@@ -226,6 +228,7 @@ pub struct BackendState {
     log_analysis_read: LogAnalysisReadApi,
     notes: NotesApi,
     nginx_repair: NginxRepairApi,
+    response_engine: ResponseEngineApi,
     java_hot_update: JavaHotUpdateApi,
     note_replays: parking_lot::Mutex<HashMap<String, NoteReplayEntry>>,
     packet_capture_evidence: PacketCaptureEvidenceApi,
@@ -342,6 +345,7 @@ impl BackendState {
         let system_info = SystemInfoApi::new(services.clone(), Arc::clone(&ssh));
         let terminal = TerminalApi::new(services.clone(), Arc::clone(&ssh));
         let nginx_repair = NginxRepairApi::new(services.clone(), Arc::clone(&ssh));
+        let response_engine = ResponseEngineApi::new(services.clone(), Arc::clone(&ssh));
         let java_hot_update = JavaHotUpdateApi::new(services.clone(), Arc::clone(&ssh));
         let windows_incident = WindowsIncidentApi::new(services.clone());
         Ok(Self {
@@ -375,6 +379,7 @@ impl BackendState {
             log_analysis_read,
             notes: NotesApi::default(),
             nginx_repair,
+            response_engine,
             java_hot_update,
             note_replays: parking_lot::Mutex::new(HashMap::new()),
             packet_capture_evidence,
@@ -823,6 +828,7 @@ impl BackendState {
                             self.baseline_read.close_binding(&params.binding_handle);
                             self.baseline_write.close_binding(&params.binding_handle);
                             self.nginx_repair.close_binding(&params.binding_handle);
+                            self.response_engine.close_binding(&params.binding_handle);
                             self.java_hot_update.close_binding(&params.binding_handle);
                             self.postgresql_runtime
                                 .close_binding(&params.binding_handle);
@@ -1202,6 +1208,17 @@ impl BackendState {
                     .map_err(nginx_repair_failure),
                 Err(failure) => Err(failure),
             },
+            RpcMethod::ResponseEngine => {
+                match parse_params::<ResponseEngineRequest>(request.params) {
+                    Ok(params) => self
+                        .response_engine
+                        .dispatch(params)
+                        .await
+                        .map(to_value)
+                        .map_err(response_engine_failure),
+                    Err(failure) => Err(failure),
+                }
+            }
             RpcMethod::BaselineScan => {
                 match parse_params::<BaselineBindingParams>(request.params) {
                     Ok(params) => self
@@ -2876,6 +2893,8 @@ enum RpcMethod {
     LogRules,
     #[serde(rename = "nginx.repair")]
     NginxRepair,
+    #[serde(rename = "response.engine")]
+    ResponseEngine,
     #[serde(rename = "java.hot-update")]
     JavaHotUpdate,
     #[serde(rename = "windows.incident")]
@@ -5612,6 +5631,40 @@ fn log_rules_failure(error: LogRulesApiError) -> RpcFailure {
     }
 }
 
+fn response_engine_failure(error: ResponseEngineError) -> RpcFailure {
+    let (code, public_message) = match error {
+        ResponseEngineError::Invalid => {
+            ("invalid-params", "请求无效，或该问题项不支持此修复方式。")
+        }
+        ResponseEngineError::Stale => (
+            "response-engine-stale",
+            "扫描结果、计划或操作已过期，或目标连接已变化；请重新扫描后再修复。",
+        ),
+        ResponseEngineError::Busy => (
+            "response-engine-busy",
+            "此目标还有修复操作进行中，请等待当前修复与复验完成。",
+        ),
+        ResponseEngineError::Capacity => (
+            "response-engine-capacity",
+            "待处理的扫描、计划或操作过多，请先完成或取消已有的修复。",
+        ),
+        ResponseEngineError::NotConfirmed => (
+            "response-engine-not-confirmed",
+            "该修复计划尚未确认，请先在页面上确认后再执行。",
+        ),
+        ResponseEngineError::Core => (
+            "response-engine-failed",
+            "未能完成此步骤；目标状态或权限可能已变化，请重新扫描确认后再操作。",
+        ),
+    };
+    RpcFailure {
+        operation: "incident response fix",
+        code,
+        public_message,
+        source: None,
+    }
+}
+
 fn nginx_repair_failure(error: NginxRepairError) -> RpcFailure {
     let (code, public_message) = match error {
         NginxRepairError::Invalid => ("invalid-params", "请求无效或尚未确认此计划。"),
@@ -6397,6 +6450,17 @@ fn page_descriptors() -> Vec<PageDescriptor> {
             summary: "离线安全速查与命令参考。",
             primary_action: "搜索速查",
             sections: &["收藏", "Linux", "网络"],
+            migration_state: Ready,
+        },
+        PageDescriptor {
+            id: "response-engine",
+            group: Triage,
+            title: "应急处置",
+            icon: "✚",
+            capability: ConnectedTarget,
+            summary: "一键扫描入侵痕迹（伪命令、影子账户、空口令、恶意 sudoers、cron 持久化、后门进程），逐项确认后归档证据、修复并自动复验。",
+            primary_action: "开始扫描",
+            sections: &["扫描结果", "逐项修复与确认", "复验结论"],
             migration_state: Ready,
         },
         PageDescriptor {
@@ -7310,6 +7374,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn response_engine_rpc_rejects_injected_and_unbound_intents_without_echoing_input() {
+        let root = TestRoot::new();
+        let state = BackendState::open(root.0.clone()).unwrap();
+        for (params, code) in [
+            (
+                serde_json::json!({"action":"scan","bindingHandle":"never-connected"}),
+                "response-engine-stale",
+            ),
+            (
+                serde_json::json!({"action":"plan-fix","bindingHandle":"never-connected","issueHandle":"i"}),
+                "response-engine-stale",
+            ),
+            (
+                serde_json::json!({"action":"execute-fix","bindingHandle":"never-connected","planHandle":"p"}),
+                "response-engine-stale",
+            ),
+            (
+                serde_json::json!({"action":"poll-fix","bindingHandle":"never-connected","operationHandle":"o"}),
+                "response-engine-stale",
+            ),
+            (
+                serde_json::json!({"action":"scan","bindingHandle":""}),
+                "invalid-params",
+            ),
+            (
+                serde_json::json!({"action":"plan-fix","bindingHandle":"b","issueHandle":"i","path":"private-marker"}),
+                "invalid-params",
+            ),
+            (
+                serde_json::json!({"action":"plan-fix","bindingHandle":"b","issueHandle":"i","password":"private-marker"}),
+                "invalid-params",
+            ),
+            (
+                serde_json::json!({"action":"execute-fix","bindingHandle":"b","planHandle":"p","confirmed":true}),
+                "invalid-params",
+            ),
+            (
+                serde_json::json!({"action":"fix","bindingHandle":"b","command":"private-marker"}),
+                "invalid-params",
+            ),
+        ] {
+            let response =
+                handle_frame(&state, &request("response.engine", &params.to_string())).await;
+            assert!(!response.ok);
+            assert_eq!(response.error.as_ref().unwrap().code, code);
+            let encoded = serde_json::to_string(&response).unwrap();
+            assert!(!encoded.contains("private-marker"));
+            assert!(!encoded.contains("never-connected"));
+        }
+    }
+
+    #[tokio::test]
     async fn nginx_repair_rpc_rejects_injected_and_unbound_intents_without_echoing_input() {
         let root = TestRoot::new();
         let state = BackendState::open(root.0.clone()).unwrap();
@@ -7671,7 +7787,16 @@ mod tests {
         assert!(response.ok);
         let result = response.result.unwrap();
         assert_eq!(result["protocolVersion"], PROTOCOL_VERSION);
-        assert_eq!(result["pages"].as_array().unwrap().len(), 14);
+        assert_eq!(result["pages"].as_array().unwrap().len(), 15);
+        let response_engine = result["pages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|page| page["id"] == "response-engine")
+            .expect("应急处置页已注册");
+        assert_eq!(response_engine["group"], "triage");
+        assert_eq!(response_engine["primaryAction"], "开始扫描");
+        assert_eq!(response_engine["migrationState"], "ready");
         assert!(result.get("dataRoot").is_none());
         assert_eq!(
             result["pages"]
@@ -7680,7 +7805,7 @@ mod tests {
                 .iter()
                 .filter(|page| page["migrationState"] == "ready")
                 .count(),
-            1
+            2
         );
     }
 

@@ -3,6 +3,7 @@ import { BACKEND_ERROR_MESSAGES } from "./error-messages.js";
 import { isJavaHotUpdateRequest, matchesJavaHotUpdateResponse, type JavaHotUpdateRequest, type JavaHotUpdateResponse } from "../shared/java-hot-update-contract.js";
 import { isWindowsIncidentRequest, matchesWindowsIncidentResponse, type WindowsIncidentRequest, type WindowsIncidentResponse } from "../shared/windows-incident-contract.js";
 import { isNginxRepairRequest, matchesNginxRepairResponse, type NginxRepairRequest, type NginxRepairResponse } from "../shared/nginx-repair-contract.js";
+import { isResponseEngineRequest, matchesResponseEngineResponse, type ResponseEngineRequest, type ResponseEngineResponse } from "../shared/response-engine-contract.js";
 import { isLogRulesRequest, matchesLogRulesResponse, type LogRulesRequest, type LogRulesResponse } from "../shared/log-rules-contract.js";
 import { isAiAssistRequest, matchesAiAssistResponse, type AiAssistRequest, type AiAssistResponse } from "../shared/ai-assist-contract.js";
 import { isPostgresqlRuntimeRequest, matchesPostgresqlRuntimeResponse, type PostgresqlRuntimeRequest, type PostgresqlRuntimeResponse } from "../shared/postgresql-runtime-contract.js";
@@ -616,7 +617,7 @@ export const TERMINAL_RPC_METHODS = Object.freeze({
 const REMOTE_NAMESPACES: ReadonlySet<string> = new Set([
   "baseline", "check-audit", "docker", "emergency-command", "firewall",
   "integrity", "kubernetes", "log-analysis", "middleware", "packet-capture",
-  "sftp-browser", "snapshot", "system-info",
+  "response", "sftp-browser", "snapshot", "system-info",
 ]);
 
 /**
@@ -753,6 +754,18 @@ export class BackendClient {
     if (!isNginxRepairRequest(request)) throw new Error("Nginx 修补请求无效。");
     const response = await this.#request("nginx.repair", request, 180_000);
     if (!matchesNginxRepairResponse(request, response)) throw new Error("Nginx 返回了无法核实的结果，请重新读取实例。");
+    return response;
+  }
+
+  async responseEngine(request: ResponseEngineRequest): Promise<ResponseEngineResponse> {
+    if (!isResponseEngineRequest(request)) throw new Error("应急处置请求无效。");
+    // 一次扫描要在目标上跑完十七类检测命令；执行与轮询本身立即返回。
+    const response = await this.#request(
+      "response.engine", request, request.action === "scan" || request.action === "poll-scan" ? 300_000 : 120_000,
+    );
+    if (!matchesResponseEngineResponse(request, response)) {
+      throw new Error("应急处置返回了无法核实的结果，请重新扫描后再操作。");
+    }
     return response;
   }
 

@@ -54,6 +54,12 @@ const ICONS: Record<string, () => ReactElement> = {
       <rect x="8.6" y="8.6" width="5.2" height="5.2" rx=".8" />
     </svg>
   ),
+  "response-engine": () => (
+    <svg {...ICON_PROPS}>
+      <circle cx="8" cy="8" r="6.2" />
+      <path d="M8 5v6M5 8h6" />
+    </svg>
+  ),
   "log-analysis": () => (
     <svg {...ICON_PROPS}>
       <path d="M2.2 3.4h9M2.2 6.4h6.4M2.2 9.4h3.8M2.2 12.4h3" />

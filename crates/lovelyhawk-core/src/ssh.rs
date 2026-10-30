@@ -1210,6 +1210,25 @@ impl SshService {
         BoundSshSession::from_status(target, &status, "SSH session binding")
     }
 
+    /// The stored password of the connection a bound session belongs to, for
+    /// core-internal privilege escalation (`sudo -S` with the password piped
+    /// through stdin). The value stays inside [`SecretValue`]; it is never
+    /// logged, serialized, or handed to the UI-facing API. A key-authenticated
+    /// or unknown connection resolves to `None`.
+    pub(crate) fn bound_session_password(
+        &self,
+        session: &BoundSshSession,
+    ) -> CoreResult<Option<SecretValue>> {
+        match self
+            .connections
+            .resolve_for_backend(session.connection_id())
+        {
+            Ok(resolved) => Ok(resolved.password),
+            Err(CoreError::NotFound { .. }) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
     /// Compatibility surface for callers that have not yet adopted target-bound sessions.
     pub async fn execute(
         &self,
@@ -5287,6 +5306,7 @@ pub(crate) struct TestSessionHarness {
     execute_output: Mutex<Option<String>>,
     execute_outputs: Mutex<std::collections::VecDeque<String>>,
     execute_commands: Mutex<Vec<String>>,
+    sensitive_stdins: Mutex<Vec<Zeroizing<Vec<u8>>>>,
     sftp_immediate: std::sync::atomic::AtomicBool,
     sftp_files: Mutex<HashMap<String, Vec<u8>>>,
     sftp_modes: Mutex<HashMap<String, u32>>,
@@ -5304,6 +5324,17 @@ impl TestSessionHarness {
             .lock()
             .expect("test command log")
             .clone()
+    }
+
+    /// Test-only view of the stdin payloads handed to sensitive commands, so a
+    /// test can prove a secret traveled through stdin and not the command line.
+    pub(crate) fn sensitive_stdins(&self) -> Vec<Vec<u8>> {
+        self.sensitive_stdins
+            .lock()
+            .expect("test sensitive stdin log")
+            .iter()
+            .map(|stdin| stdin.as_slice().to_vec())
+            .collect()
     }
 
     pub(crate) fn set_execute_output(&self, output: impl Into<String>) {
@@ -5521,10 +5552,18 @@ impl TestSessionHarness {
 
     async fn execute_sensitive(
         &self,
-        _command: Zeroizing<String>,
-        _stdin: Zeroizing<Vec<u8>>,
+        command: Zeroizing<String>,
+        stdin: Zeroizing<Vec<u8>>,
         limits: SshSensitiveCommandLimits,
     ) -> CoreResult<SshSensitiveCommandOutput> {
+        self.execute_commands
+            .lock()
+            .expect("test command log")
+            .push(command.as_str().to_owned());
+        self.sensitive_stdins
+            .lock()
+            .expect("test sensitive stdin log")
+            .push(stdin);
         let started = std::time::Instant::now();
         let output = if let Some(output) = self
             .execute_outputs
@@ -5544,6 +5583,11 @@ impl TestSessionHarness {
             self.hold_operation().await;
             "test operation released".to_owned()
         };
+        let (output, exit_code) = output
+            .strip_prefix("<exit ")
+            .and_then(|rest| rest.split_once('>'))
+            .and_then(|(code, rest)| Some((rest.to_owned(), code.parse::<i32>().ok()?)))
+            .unwrap_or((output, 0));
         let mut stdout = Zeroizing::new(Vec::new());
         append_sensitive_output(
             &mut stdout,
@@ -5554,7 +5598,7 @@ impl TestSessionHarness {
         Ok(SshSensitiveCommandOutput {
             stdout,
             stderr: Zeroizing::new(Vec::new()),
-            exit_code: Some(0),
+            exit_code: Some(exit_code),
             duration_ms: started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
         })
     }

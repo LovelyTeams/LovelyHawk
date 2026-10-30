@@ -1406,7 +1406,7 @@ fn restore_script(
     )
 }
 
-fn privileged_script(is_root: bool, script: &str) -> String {
+pub(crate) fn privileged_script(is_root: bool, script: &str) -> String {
     if is_root {
         internal_script(script)
     } else {

@@ -1,5 +1,16 @@
 # 原生功能接线与限制清单
 
+## 2026-10-30 处置后加固：页面入口按用户要求移除
+
+`response.engine` 的 `hardening-scan` / `plan-hardening` 后端能力保留（core `hardening_scan`/`plan_hardening`、backend 注册表与校验、`tools/lab/probe-response-hardening.mjs` 端到端探针全部完好且通过验收），但应急页的「处置后加固」区块按用户要求于 0.0.5 移除，页面不再出现加固入口；恢复入口时把 `ResponseEnginePage` 的加固区块、`response-engine-contract.ts` 的 hardening 类型与校验及其测试加回即可，后端零改动。
+
+
+## 2026-10-29 应急处置页（response.engine）
+
+应急处置页已沿 core → backend → shared 契约 → 页面桥接层 → 页面完成接线：`response_engine.rs` → `response_engine_api.rs`（单方法 `response.engine`：scan / plan-fix / confirm-fix / cancel-fix / execute-fix / poll-fix，已在主窗口方法白名单，poll-fix 与 cancel-fix 走 Control 通道）→ `ui/src/shared/response-engine-contract.ts`（请求与响应双侧校验）→ `ui/src/host/main-api.ts` → `ResponseEnginePage.tsx`（`App.tsx` 懒加载，页面 id `response-engine`，descriptor 的 migration_state 已转 Ready）。页面只提交句柄化的操作意图，不接触路径、命令与账户名；修复前逐条展示方案、影响与归档位置，空口令类可选锁定（默认）或删除，执行后行内轮询至完成或复验结论。
+
+桌面端 CDP 逐页巡检（`pnpm desktop:test:debug` 与 `ui/scripts/` 探针）依赖调试构建的 WebView2 远程调试端口，本次改动在本机 Linux 环境完成，没有覆盖 response-engine 页的真实窗口巡检与截图；现有证据为 `pnpm ui:check`（typecheck + vitest 145 文件 / 1201 用例 + 构建）与后端单元测试。后续需在 Windows 调试构建上补该页的 CDP 巡检，不能用现有合成或单元测试顶替。
+
 ## 2026-10-27 Windows 通道与传输独立窗口
 
 底部抽屉已迁为可缩放、最大化和复用的独立 Tauri 窗口；四个标签共享主工作台状态，关闭收起保留草稿，离开工作台参与任务和草稿检查。专用窗口权限、会话绑定、单次操作领取及全局通知接线见 [实现与验证边界](WINDOWS_CHANNEL_WINDOW.md)。真实 RDP 目标命令与文件传输矩阵仍待验证，合成桌面测试不替代远端验收。

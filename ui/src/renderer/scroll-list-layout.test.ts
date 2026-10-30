@@ -21,6 +21,8 @@ const SCROLL_LISTS: Record<string, string> = {
   ".connection-list": ".connection-list-row",
   ".sftp-operation-dialog": ".sftp-operation-dialog > *",
   ".emergency-path-dialog": ".emergency-path-dialog > *",
+  // The incident fix confirmation, which scrolls when a plan runs long.
+  ".response-fix-dialog": ".response-fix-dialog > *",
   ".kubernetes-action-dialog": ".kubernetes-action-dialog > *",
   ".docker-action-dialog": ".docker-action-dialog > *",
   ".baseline-card-grid": ".baseline-card-grid > *",

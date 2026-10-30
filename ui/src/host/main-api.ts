@@ -10,6 +10,7 @@ import { isPacketCaptureEvidenceRequest, matchesPacketCaptureEvidenceResult, typ
 import { isPodFileEvidenceRequest, matchesPodFileEvidenceResult, type PodFileEvidenceRequest } from "../shared/pod-file-evidence-contract.js";
 import { isConfigVisualCopyResult, isConfigVisualProduct, isConfigVisualRequest, isConfigVisualSaveResult, isConfigVisualView } from "../shared/config-visual-contract.js";
 import { isNginxRepairRequest } from "../shared/nginx-repair-contract.js";
+import { isResponseEngineRequest } from "../shared/response-engine-contract.js";
 import { isLogRulesRequest } from "../shared/log-rules-contract.js";
 import { isAiAssistRequest } from "../shared/ai-assist-contract.js";
 import { isJavaClassStageResult, isJavaHandle, isJavaHotUpdateRequest } from "../shared/java-hot-update-contract.js";
@@ -261,6 +262,11 @@ export function createMainApi(transport: BackendTransport = hostBackendTransport
       requireArity(values, 1, "Nginx 修补请求无效。");
       if (!isNginxRepairRequest(values[0])) refuse("Nginx 修补请求无效。");
       return backend.nginxRepair(values[0]);
+    },
+    responseEngine: async (...values: unknown[]) => {
+      requireArity(values, 1, "应急处置请求无效。");
+      if (!isResponseEngineRequest(values[0])) refuse("应急处置请求无效。");
+      return backend.responseEngine(values[0]);
     },
     javaHotUpdate: async (...values: unknown[]) => {
       requireArity(values, 1, "Java 热更新请求无效。");
