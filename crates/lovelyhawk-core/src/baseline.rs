@@ -508,14 +508,15 @@ const SSHD_FILES: &[&str] = &["/etc/ssh/sshd_config.d/*.conf", "/etc/ssh/sshd_co
 const SSHD_INCLUDES: &str = "BEGIN{m=0; dq=sprintf(\"%c\",34); sq=sprintf(\"%c\",39)} \
      /^[[:space:]]*#/{next} \
      /^[[:space:]]*$/{next} \
-     {p=$0; sub(/^[[:space:]]+/,\"\",p); t=p; sub(/[[:space:]=].*$/,\"\",t); t=tolower(t); \
-      if(t==\"match\"){m=1} \
-      if(m==0 && t==\"include\"){sub(/^[^[:space:]=]+[[:space:]=]+/,\"\",p); \
-       sub(/[[:space:]]+#.*$/,\"\",p); \
-       if(index(p,dq) || index(p,sq)){print \"%unread\"} \
-       else {n=split(p,a,/[[:space:]]+/); \
-        for(i=1;i<=n;i++) if(a[i]!=\"\") print (substr(a[i],1,1)==\"/\" ? a[i] : \"/etc/ssh/\" a[i])} \
-       print \"%next\"}}";
+      {p=$0; sub(/^[[:space:]]+/,\"\",p); t=p; sub(/[[:space:]=].*$/,\"\",t); t=tolower(t); \
+       if(t==\"match\"){m=1} \
+       if(t==\"include\"){sub(/^[^[:space:]=]+[[:space:]=]+/,\"\",p); \
+        sub(/[[:space:]]+#.*$/,\"\",p); \
+        if(m==1) print \"%cond\"; \
+        if(index(p,dq) || index(p,sq)){print \"%unread\"} \
+        else {n=split(p,a,/[[:space:]]+/); \
+         for(i=1;i<=n;i++) if(a[i]!=\"\") print (substr(a[i],1,1)==\"/\" ? a[i] : \"/etc/ssh/\" a[i])} \
+        print \"%next\"}}";
 const LOGIN_DEFS_FILES: &[&str] = &["/etc/login.defs"];
 const FAILLOCK_FILES: &[&str] = &["/etc/security/faillock.conf"];
 const PWQUALITY_FILES: &[&str] = &["/etc/security/pwquality.conf"];
@@ -3864,9 +3865,10 @@ fn scan_functions() -> String {
            lr_n=0; lr_out=\" seg=0 $1\"; \
            for lr_w in $(LC_ALL=C awk '{includes}' \"$1\" 2>/dev/null || echo %unread); do \
              if [ ${{#lr_out}} -gt 16384 ]; then lr_out=\"$lr_out %unread\"; break; fi; \
-             case $lr_w in \
-               %next) lr_n=$((lr_n + 1)); lr_out=\"$lr_out seg=$lr_n $1\";; \
-               %unread) lr_out=\"$lr_out %unread\";; \
+              case $lr_w in \
+                %cond) lr_out=\"$lr_out cond=1\";; \
+                %next) lr_n=$((lr_n + 1)); lr_out=\"$lr_out seg=$lr_n $1\";; \
+                %unread) lr_out=\"$lr_out %unread\";; \
                *[!A-Za-z0-9/._@+-]*) \
                  if [ -e \"$lr_w\" ] || [ -L \"$lr_w\" ]; then lr_out=\"$lr_out %unread\"; fi;; \
                *) if [ -f \"$lr_w\" ]; then lr_out=\"$lr_out$(lr_sshd_walk \"$lr_w\" $(($2 + 1)))\"; \
@@ -4324,10 +4326,11 @@ fn flat_reader_body(precedence: Precedence, conditional_aware: bool) -> String {
             // as `yes` because a Match block says so, and — worse for an
             // incident — it lets a Match block that quietly re-enables root
             // login pass as the global value nobody looked at. The state resets
-            // per file: a drop-in is read on its own terms.
+            // per file: a drop-in is read on its own terms, unless an Include
+            // after a `Match` puts it inside that block (see `lr_sshd_walk`).
             let (reset, guard) = if conditional_aware {
                 (
-                    "FNR==1{m=0} ",
+                    "FNR==1{m=(cond==1)?1:0} ",
                     "if(tolower(t)==\"match\"){m=1; next} \
                      if(m==1){if(tolower(t)==tolower(k)){v=\"__conditional__\"; f=1} next} ",
                 )
@@ -4337,8 +4340,14 @@ fn flat_reader_body(precedence: Precedence, conditional_aware: bool) -> String {
             // sshd reads an `Include` where it stands, so a file is visited
             // once per stretch between its Include lines, the included files
             // in between: `seg=N` before each visit (see `lr_sshd_walk`) says
-            // which stretch this pass reads. Includes after a `Match` belong
-            // to that block and are not followed, here or by the walk.
+            // which stretch this pass reads. An Include after a `Match` opens
+            // a conditional file; `cond=1` travels with that file so its lines
+            // are reported as conditional rather than as the global value.
+            let include_count = if conditional_aware {
+                "if(tolower(t)==\"include\"){cur++; next}"
+            } else {
+                "if(m==0 && tolower(t)==\"include\"){cur++; next}"
+            };
             format!(
                 "BEGIN{{v=\"\";f=0;m=0}} \
                  {reset}\
@@ -4346,7 +4355,7 @@ fn flat_reader_body(precedence: Precedence, conditional_aware: bool) -> String {
                  /^[[:space:]]*#/{{next}} \
                  /^[[:space:]]*$/{{next}} \
                  {{p=$0; sub(/^[[:space:]]+/,\"\",p); t=p; sub(/[[:space:]=].*$/,\"\",t); \
-                  if(m==0 && tolower(t)==\"include\"){{cur++; next}} \
+                  {include_count} \
                   if(cur!=seg+0){{next}} \
                   {guard}\
                   if(f==0 && tolower(t)==tolower(k)){{sub(/^[^[:space:]=]+[[:space:]=]+/,\"\",p); \
@@ -7252,7 +7261,7 @@ mod tests {
             program.contains("if(tolower(t)==\"match\"){m=1; next}"),
             "{program}"
         );
-        assert!(program.contains("FNR==1{m=0}"), "{program}");
+        assert!(program.contains("FNR==1{m=(cond==1)?1:0}"), "{program}");
         assert!(program.contains("v=\"__conditional__\"; f=1"), "{program}");
         // The witness only names a file, so it must not learn to answer with a
         // sentinel — `lr_where` would become one.
@@ -7318,11 +7327,12 @@ mod tests {
                     .candidates()
                     .contains(&"/etc/ssh/sshd_config.d/*.conf")
             );
-            // Reader and witness count the same Include lines, outside Match
-            // blocks only, and read one stretch of a file per visit.
+            // Reader and witness count every Include line, including the ones
+            // after a Match that open conditional files, and read one stretch
+            // of a file per visit.
             for program in [reader_program(definition), witness_program(definition)] {
                 assert!(
-                    program.contains("if(m==0 && tolower(t)==\"include\"){cur++; next}"),
+                    program.contains("if(tolower(t)==\"include\"){cur++; next}"),
                     "{program}"
                 );
                 assert!(program.contains("if(cur!=seg+0){next}"), "{program}");
@@ -7344,7 +7354,8 @@ mod tests {
         // The walk: each Include line's arguments, `%next` after each one, a
         // fresh `seg=N` visit of the including file, recursion bounded as sshd
         // bounds it, and only plain-named regular files handed to awk.
-        assert!(SSHD_INCLUDES.contains("if(m==0 && t==\"include\")"));
+        assert!(SSHD_INCLUDES.contains("if(t==\"include\")"));
+        assert!(SSHD_INCLUDES.contains("if(m==1) print \"%cond\""));
         assert!(SSHD_INCLUDES.contains("print \"%next\""));
         assert!(SSHD_INCLUDES.contains("\"/etc/ssh/\" a[i]"));
         assert!(
@@ -7354,6 +7365,10 @@ mod tests {
         assert!(command.contains(&format!("awk '{SSHD_INCLUDES}' \"$1\"")));
         assert!(command.contains("if [ \"$2\" -gt 16 ]; then printf ' %%unread'"));
         assert!(command.contains("lr_out=\"$lr_out seg=$lr_n $1\""));
+        // An Include after a Match carries `cond=1` into the included file so
+        // its lines are reported as conditional, not as the global value.
+        assert!(command.contains("%cond) lr_out=\"$lr_out cond=1\";;"));
+        assert!(command.contains("FNR==1{m=(cond==1)?1:0}"));
         assert!(command.contains("*[!A-Za-z0-9/._@+-]*)"));
         // A value decided by a file outside the closed set, or by a link, is
         // not reported against a file this tool would then write.
