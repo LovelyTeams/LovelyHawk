@@ -21,7 +21,7 @@ sshd 按 `Include` 行所在的位置读入其他文件，并且每个设置采�
 
 - 从 `/etc/ssh/sshd_config` 开始，逐行跟随 `Include`，在该行的位置读入匹配的文件，按 sshd 的规则把相对路径放在 `/etc/ssh` 下。被包含的文件中的 `Include` 也会跟随，深度上限与 sshd 相同（16 层）。
 - 主文件没有 `Include` 时，`sshd_config.d` 里的文件不计入。此前扫描总是先读所有附加文件：在一台 sshd_config 没有 Include、附加文件里写着 `PermitRootLogin yes` 的 AlmaLinux 9 实验主机上，扫描把那个被忽略的文件当成生效位置，修改写进去后 `sshd -T` 仍然是 yes。
-- `Match` 之后的 `Include` 属于条件块，不跟随；条件块里的值仍按原规则报告为“只对部分连接生效”。
+- `Match` 之后的 `Include` 也会跟随，条件状态传给它包含的文件及嵌套文件；其中出现的同名设置报告为“只对部分连接生效”，不提供自动修改。返回上层文件或继续读取同级文件时，恢复该位置自己的条件状态，不能让子文件的 `Match` 把正常全局设置误标为条件设置。
 - 生效值来自本工具不管理的位置（`/etc/ssh/sshd_config` 和 `/etc/ssh/sshd_config.d/*.conf` 以外）时报告“无法判断”，不提供修改，以免把修改写到 sshd 不会读的文件；来自符号链接或特殊文件时报告“不支持”。`Include` 参数带引号、文件名含特殊字符或包含层数过深时也报告“无法判断”。
 
 右侧文件查看同样打开扫描找到的那个文件（例如胜出的附加文件），并标出其中 sshd 采用的那一行；扫描无法判断时只列出提及，不标任何一行为生效。
@@ -33,6 +33,8 @@ sshd 按 `Include` 行所在的位置读入其他文件，并且每个设置采�
 ```powershell
 cargo test --locked --package lovelyhawk-core baseline::
 cargo build --locked --package lovelyhawk-backend
+# 新建本次独有的 Debian 容器，以 sshd -T -C 核对 Include / Match 的值与来源；不重载服务
+node tools/lab/probe-sshd-includes.mjs
 # 九个发行版：每种 Include 布局先由 sshd -T 给出答案，扫描结果和来源文件必须一致
 LAB=<ubuntu|alpine|debian|rocky|alma|suse|openeuler|anolis|deepin> node tools/lab/probe-baseline.mjs
 # 写入程序：真实 sshd_config 与三种 Match 布局，由 sshd -t / sshd -T（含 -C 指定连接）核对
@@ -52,9 +54,15 @@ BASELINE=<deb|el> node tools/lab/probe-ui-baseline-actions.mjs
 
 2026-10-12 在同一份构建上（门禁 `desktop-quality-gate-2026-10-12i`）：九个发行版的读法探针各 37 项通过；写入探针 arena 39 项，Alpine、Rocky 各 23 项（这两台只装了 sshd，其余格式跳过）；改动链路 Debian 与 AlmaLinux 各 25/25；真实窗口两者各 11/11，无控制台错误。桌面证据在 `target/lab-ui-baseline-actions/<deb|el>/<runId>/`。
 
+2026-10-31 审核 PR #6 时，在本次独有、无挂载的 Debian 12 x86_64 容器（OpenSSH 9.2、mawk 1.3.4）上运行 `probe-sshd-includes.mjs`，经真实 SSH 调用后端扫描和修改计划，并以 `sshd -T -C` 分别核对命中与未命中条件的连接。15 种布局覆盖 Include 顺序、条件及嵌套包含、空/未匹配 Include、返回上层与同级文件、同一文件重复包含、来源归属、引号和符号链接。条件或无法核实的设置必须不合规且拒绝生成自动修改计划；未执行写入、重载或桌面验收。
+
+原 PR 提交 `b1dbe47` 的同一探针为 46/50：条件状态泄漏导致三种全局布局误判，另一次把条件设置的来源误记为主文件。逐次传入并恢复文件访问的条件状态后为 50/50。原始失败证据：`target/pr6-review/original-verified-probe/5618dabb-164d-469c-9f44-b75190f40850/report.json`；修补后证据：`target/pr6-review/fixed/8a75c7c5-abe7-4eaf-b5af-aa4243b91bb8/report.json`。两次容器均核对身份后删除；这份证据不扩展到其他发行版或真实主机的配置恢复能力。
+
+同次隔离检出验证：`cargo test --locked --package lovelyhawk-core --package lovelyhawk-backend`（core 1276 通过、11 忽略；backend 778 通过）、`cargo fmt --all -- --check`、backend 全目标 Clippy（`-D warnings`）及 `pnpm release:source-gate` 通过。忽略项未计为验收通过。
+
 ## 尚未覆盖
 
 - 只在容器中验证。容器内没有 systemd，重载走 `service` 或 pidfile 发送 SIGHUP 的后备方式；systemd 主机上的 `systemctl reload`、真实虚拟机和实机仍待验证，参见 `SSH_COMPATIBILITY.md`。
-- `Match` 块中的 `Include` 不跟随：被它包含的文件中的设置不会被标为条件设置。
+- `Match` 的具体连接条件没有在扫描器中求值；含条件同名设置时保守报告“只对部分连接生效”，不推断所有连接的合规性。新增加的条件 Include 回归仅验证 Debian 12 x86_64 容器，其余发行版、版本、架构与 VM/实机仍待验证。
 - Shell 中的核对不是原子事务；检查与写入之间仍有并发窗口，见 `BASELINE_RESTORE_VERIFICATION.md`。
 - 修改只说明配置文件已写入、程序检查通过并完成重载，不代表业务已恢复健康，也不证明主机没有其他登录途径。
