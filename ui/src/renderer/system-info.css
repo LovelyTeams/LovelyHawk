@@ -42,7 +42,7 @@
 .system-info-tabs h2 { margin: 0 7px 5px; color: var(--faint); font-size: var(--font-caption); letter-spacing: .08em; }
 .system-info-tabs button { display: block; width: 100%; padding: 7px 9px; color: var(--muted); text-align: left; background: transparent; border: 0; border-radius: 7px; font-size: var(--font-small); }
 .system-info-tabs button:hover { background: var(--surface-inset); }
-.system-info-tabs button.active { color: var(--on-accent); background: var(--accent); box-shadow: var(--shadow-sm); }
+.system-info-tabs button.active { color: var(--text); background: var(--surface-inset); font-weight: 600; }
 .system-info-table-panel { display: flex; min-width: 0; min-height: 0; flex-direction: column; padding: 14px; container: system-info-panel / inline-size; }
 @container system-info-panel (max-width: 760px) {
   .system-info-summary article { grid-template-columns: minmax(0, 1fr); gap: 4px; }

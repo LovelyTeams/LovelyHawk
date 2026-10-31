@@ -110,15 +110,17 @@ describe("emergency command state", () => {
     expect(emergencyCommandReducer(state, { type: "run-started", scope: "scope-one", request: invalid })).toBe(state);
   });
 
-  it("rejects late execution after selection, refresh or target switch", () => {
+  it("keeps a running result attached to its selection and rejects late data after a target switch", () => {
     const request = { id: 2, snapshotHandle: "snapshot-one", commandHandle: "command-network" };
     let state = emergencyCommandReducer(loaded(), { type: "run-started", scope: "scope-one", request });
-    state = emergencyCommandReducer(state, { type: "command-selected", commandHandle: "command-system" });
+    expect(emergencyCommandReducer(state, { type: "command-selected", commandHandle: "command-system" })).toBe(state);
+    expect(emergencyCommandReducer(state, { type: "search-changed", search: "系统" })).toBe(state);
+    expect(emergencyCommandReducer(state, { type: "catalog-started", scope: "scope-one", request: 3 })).toBe(state);
     state = emergencyCommandReducer(state, { type: "run-loaded", scope: "scope-one", request, result });
-    expect(state.result).toBeNull();
+    expect(state.result).toEqual(result);
 
     state = emergencyCommandReducer(loaded(), { type: "run-started", scope: "scope-one", request });
-    state = emergencyCommandReducer(state, { type: "catalog-started", scope: "scope-one", request: 3 });
+    state = emergencyCommandReducer(state, { type: "scope-changed", scope: "scope-two" });
     state = emergencyCommandReducer(state, { type: "run-loaded", scope: "scope-one", request, result });
     expect(state.result).toBeNull();
 
@@ -132,6 +134,17 @@ describe("emergency command state", () => {
     expect(filterEmergencyCommands(catalog.commands, "内核").map((item) => item.commandHandle))
       .toEqual(["command-system"]);
     expect(filterEmergencyCommands(catalog.commands, "missing")).toEqual([]);
+  });
+
+  it("clears observations when the execution location changes after completion", () => {
+    const request = { id: 2, snapshotHandle: "snapshot-one", commandHandle: "command-network" };
+    let state = emergencyCommandReducer(loaded(), { type: "run-started", scope: "scope-one", request });
+    expect(emergencyCommandReducer(state, { type: "run-place-changed" })).toBe(state);
+    state = emergencyCommandReducer(state, { type: "run-loaded", scope: "scope-one", request, result });
+    state = emergencyCommandReducer(state, { type: "run-place-changed" });
+    expect(state.result).toBeNull();
+    expect(state.runStatus).toBe("idle");
+    expect(state.selectedCommandHandle).toBe("command-network");
   });
 
   it("groups visible commands into catalog-ordered branches", () => {
@@ -165,14 +178,14 @@ describe("emergency command state", () => {
     expect(state.groupRun?.status).toBe("ready");
   });
 
-  it("drops a group run when the target, catalog or selection changes", () => {
+  it("holds selection and refresh during a group run, and drops results on target changes", () => {
     const run = { id: 5, snapshotHandle: "snapshot-one", category: "network" as const,
       commandHandles: ["command-network"] };
     const started = emergencyCommandReducer(loaded(), { type: "group-run-started", scope: "scope-one", run });
     expect(emergencyCommandReducer(started, { type: "command-selected", commandHandle: "command-system" })
-      .groupRun).toBeNull();
+      .groupRun).toEqual(started.groupRun);
     expect(emergencyCommandReducer(started, { type: "catalog-started", scope: "scope-one", request: 9 })
-      .groupRun).toBeNull();
+      .groupRun).toEqual(started.groupRun);
     expect(emergencyCommandReducer(started, { type: "scope-changed", scope: "scope-two" }).groupRun).toBeNull();
 
     // A single run and a group run can never overlap.
@@ -180,5 +193,28 @@ describe("emergency command state", () => {
     expect(emergencyCommandReducer(started, { type: "run-started", scope: "scope-one", request })).toBe(started);
     const single = emergencyCommandReducer(loaded(), { type: "run-started", scope: "scope-one", request });
     expect(emergencyCommandReducer(single, { type: "group-run-started", scope: "scope-one", run })).toBe(single);
+  });
+
+  it("stops scheduling after the active item while retaining its result and unfinished count", () => {
+    const expanded = { ...catalog, commands: [...catalog.commands,
+      { ...catalog.commands[0]!, commandHandle: "command-network-2" }] };
+    let state = emergencyCommandReducer(loaded(), { type: "catalog-started", scope: "scope-one", request: 8 });
+    state = emergencyCommandReducer(state, { type: "catalog-loaded", scope: "scope-one", request: 8, catalog: expanded });
+    const run = { id: 9, snapshotHandle: "snapshot-one", category: "network" as const,
+      commandHandles: ["command-network", "command-network-2"] };
+    state = emergencyCommandReducer(state, { type: "group-run-started", scope: "scope-one", run });
+    expect(emergencyCommandReducer(state, { type: "group-run-stop-requested", scope: "scope-two", runId: 9 })).toBe(state);
+    state = emergencyCommandReducer(state, { type: "group-run-stop-requested", scope: "scope-one", runId: 9 });
+    expect(state.groupRun?.status).toBe("stopping");
+    expect(emergencyCommandReducer(state, { type: "command-selected", commandHandle: "command-system" })).toBe(state);
+    const entry = { commandHandle: "command-network", result, error: null, elapsedMs: 12 };
+    state = emergencyCommandReducer(state, { type: "group-run-progress", scope: "scope-one", runId: 9, entry });
+    expect(emergencyCommandReducer(state, { type: "group-run-finished", scope: "scope-one", runId: 9 })).toBe(state);
+    state = emergencyCommandReducer(state, { type: "group-run-finished", scope: "scope-one", runId: 9, stopped: true });
+    expect(state.groupRun?.status).toBe("stopped");
+    expect(state.groupRun?.entries).toEqual([entry]);
+    expect(state.groupRun?.commandHandles).toHaveLength(2);
+    expect(emergencyCommandReducer(state, { type: "group-run-progress", scope: "scope-one", runId: 9,
+      entry: { ...entry, commandHandle: "command-network-2" } })).toBe(state);
   });
 });

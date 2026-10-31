@@ -264,7 +264,7 @@ export function CheckAuditPage({ bindingHandle, api, writeClipboard }: CheckAudi
         <EmptyPanel title="命令列表不可用" detail="点“刷新命令列表”重试。" />
       ) : (
         <CatalogExpired.Provider value={catalogExpired}>
-          <nav className="check-audit-tabs" aria-label="命令审计视图">
+          <nav className="check-audit-tabs view-tabs" aria-label="命令审计视图">
             {tabs.map((tab) => <button key={tab} type="button" className={state.tab === tab ? "is-active" : ""}
               aria-current={state.tab === tab ? "page" : undefined}
               onClick={() => dispatch({ type: "tab-selected", tab })}>{checkAuditTabLabel(tab)}</button>)}
@@ -403,7 +403,11 @@ export function CommandsView({ catalog, statusKind, status, error, search, selec
       {statusKind === "loading" && status === null ? <StatusPanel label="正在采集目标命令状态…" /> :
         statusKind === "error" ? <ErrorPanel message={error ?? "命令状态采集失败。"} compact /> :
           visible.length === 0 ? <EmptyPanel title="没有匹配的命令" detail="换个命令名试试，或把它加入检查列表。" compact /> : (
-            <div className="check-audit-command-list">{visible.map((item) => {
+            <div className="check-audit-command-list">
+              <div className="check-audit-command-columns" aria-hidden="true">
+                <span>命令</span><span>采集状态</span><span>类别</span><span>执行位置</span>
+              </div>
+              {visible.map((item) => {
               const current = byHandle.get(item.commandHandle);
               return <button type="button" key={item.commandHandle} className={selectedName === item.name ? "is-selected" : ""}
                 aria-pressed={selectedName === item.name} onClick={() => onSelect(item.name)}>

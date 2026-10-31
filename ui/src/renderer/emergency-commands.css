@@ -18,7 +18,7 @@
   box-sizing: border-box;
   padding: 20px 24px 24px;
   color: var(--text);
-  background: var(--surface-alt);
+  background: var(--surface);
 }
 
 .emergency-commands-page *,
@@ -48,7 +48,7 @@
   background: var(--info-soft);
 }
 
-.emergency-commands-page button:focus-visible,
+:where(.emergency-commands-page) button:focus-visible,
 .emergency-commands-page input:focus-visible {
   outline: 3px solid var(--console-accent);
   outline-offset: 2px;
@@ -234,11 +234,8 @@
   flex: 1;
   grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
   min-height: 360px;
-  border: 1px solid var(--border-strong);
-  border-radius: 12px;
   overflow: hidden;
   background: var(--surface);
-  box-shadow: var(--shadow-sm);
 }
 
 .emergency-commands-list {
@@ -251,7 +248,7 @@
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) transparent;
   border-right: 1px solid var(--border-strong);
-  background: var(--surface-inset);
+  background: var(--surface-alt);
 }
 
 /* Category branch ------------------------------------------------------- */
@@ -337,7 +334,7 @@
 .emergency-command-group-items {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 2px;
   margin: 4px 0 8px;
   padding-left: 15px;
   border-left: 1px solid var(--border);
@@ -350,7 +347,9 @@
   align-items: flex-start;
   gap: 10px;
   padding: 9px 11px;
-  border-radius: 9px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   text-align: left;
 }
 
@@ -384,7 +383,7 @@
 }
 
 .emergency-commands-list .emergency-command-group-items > button.is-selected {
-  border-color: var(--accent);
+  box-shadow: inset 2px 0 var(--accent);
   background: var(--info-soft);
 }
 
@@ -608,6 +607,7 @@
 
 .emergency-command-result > header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   padding: 9px 12px;
@@ -623,9 +623,14 @@
 }
 
 .emergency-command-result.is-success > header {
-  border-bottom-color: var(--success-border);
-  color: var(--success-text);
-  background: var(--success-soft);
+  color: var(--text);
+  background: var(--surface-alt);
+}
+
+.emergency-command-result.is-attention > header {
+  border-bottom-color: var(--warning-border);
+  color: var(--warning-text);
+  background: var(--warning-soft);
 }
 
 .emergency-command-result.is-failure > header {
@@ -638,6 +643,62 @@
 .emergency-command-counts {
   white-space: nowrap;
 }
+
+.emergency-command-run-summary,
+.emergency-command-result-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+
+.emergency-command-run-summary {
+  margin-top: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.emergency-command-run-summary > button { margin-left: auto; }
+
+.emergency-command-result-tools {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.emergency-command-result-tools > .view-tabs { flex: 0 1 auto; border-bottom: 0; }
+
+.emergency-command-step-result {
+  min-width: 0;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.emergency-command-step-result > summary {
+  cursor: pointer;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.emergency-command-step-result > summary:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 4px;
+}
+
+.emergency-command-step-result > summary > .emergency-command-step {
+  display: inline-flex;
+  margin: 0 12px 0 4px;
+}
+
+.emergency-command-step-result > summary > span:last-child {
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+
+.emergency-command-step-result[open] > summary { margin-bottom: 10px; }
 
 .emergency-command-counts {
   padding: 2px 8px;
@@ -824,10 +885,13 @@
   .emergency-commands-toolbar { align-items: stretch; flex-direction: column; }
   .emergency-commands-workbench { grid-template-columns: 1fr; }
   .emergency-commands-list { max-height: 320px; border-right: 0; border-bottom: 1px solid var(--border-strong); }
+  .emergency-commands-search { flex-basis: auto; max-width: none; }
+  .emergency-command-result > header { gap: 8px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .emergency-command-status > span { animation: none; }
+  .emergency-command-progress-track span { transition: none; }
 }
 
 /* Right-click actions on a path an output line named ---------------------- */

@@ -20,7 +20,7 @@
 .baseline-kicker { margin: 0; color: var(--accent-text); font-size: var(--font-small); font-weight: 700; letter-spacing: .12em; }
 .baseline-header h1 { margin: 5px 0 3px; color: var(--text); font-size: var(--page-title-size); }
 .baseline-target { margin: 0; color: var(--muted); font-size: var(--font-small); }
-.baseline-header button, .baseline-view-header button {
+.baseline-header button, .baseline-view-header button, .baseline-change-actions button {
   flex: none;
   padding: 9px 14px;
   color: var(--on-accent);
@@ -30,7 +30,10 @@
   font-size: var(--font-caption);
   font-weight: 700;
 }
-.baseline-header button:disabled, .baseline-view-header button:disabled { cursor: not-allowed; opacity: .55; }
+.baseline-header button:disabled, .baseline-view-header button:disabled, .baseline-change-actions button:disabled { cursor: not-allowed; opacity: .55; }
+.baseline-change-actions button { cursor: pointer; }
+.baseline-change-actions button:hover:not(:disabled) { background: var(--accent-strong); color: var(--on-accent); }
+.baseline-change-actions button:focus-visible, .baseline-restore button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 
 .baseline-readonly-banner {
   margin: 12px 0;
@@ -43,32 +46,10 @@
   line-height: 1.55;
 }
 
-/* Wraps rather than overflows: beside the four-way mode switch the two view
-   tabs ran past the card at a 960px window and put a scroll bar under the
-   whole page. On a narrow window they drop to their own line, still at the
-   card's right corner. */
-.baseline-tabs { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; margin: 12px 0 0; }
-/* The half-switch leads the row the view tabs already need; the tabs then sit
-   at the far end, over the corner of the card they belong to. */
-.baseline-tabs .configuration-modes { margin-right: auto; }
-.baseline-page.is-embedded .baseline-tabs { margin-top: 0; }
-.baseline-tabs button {
-  min-width: 112px;
-  padding: 10px 15px;
-  color: var(--muted);
-  background: var(--surface-inset);
-  border: 1px solid var(--border);
-  border-radius: 9px 9px 0 0;
-  font-size: var(--font-caption);
-  font-weight: 700;
-}
-.baseline-tabs button.is-active { color: var(--accent-text); background: var(--surface); border-bottom-color: var(--surface); }
+.baseline-tabs { margin-top: 10px; }
 
 .baseline-content {
-  padding: 18px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 0 12px 12px;
+  padding: 18px 0 0;
 }
 
 .baseline-view-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
@@ -84,7 +65,8 @@
 /* One row however many counters there are, rather than four per row with the
    fifth stranded underneath. */
 .baseline-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 8px; margin-bottom: 14px; }
-.baseline-summary article { display: flex; align-items: baseline; gap: 7px; padding: 10px 12px; background: var(--surface-inset); border: 1px solid var(--border); border-radius: 8px; }
+.baseline-summary article { display: flex; align-items: baseline; gap: 7px; padding: 6px 12px; border-left: 1px solid var(--border); }
+.baseline-summary article:first-child { padding-left: 0; border-left: 0; }
 .baseline-summary strong { color: var(--text); font-size: var(--font-title); }
 .baseline-summary span { color: var(--muted); font-size: var(--font-small); }
 
@@ -93,13 +75,11 @@
   min-width: 0;
   flex-direction: column;
   gap: 2px;
-  padding: 8px;
+  padding: 0 14px 0 0;
   overflow: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) transparent;
-  background: var(--surface-inset);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  border-right: 1px solid var(--border);
 }
 
 /* Category branch ---------------------------------------------------------
@@ -142,8 +122,8 @@
   align-items: center;
   gap: 9px;
   padding: 7px 9px;
-  border: 1px solid transparent;
-  border-radius: 8px;
+  border: 0;
+  border-radius: 0;
   color: inherit;
   background: transparent;
   font: inherit;
@@ -155,7 +135,6 @@
 .baseline-card:hover:not(:disabled) { background: var(--surface); }
 
 .baseline-card.is-selected {
-  border-color: var(--accent);
   background: var(--info-soft);
 }
 
@@ -326,7 +305,7 @@
 }
 
 .baseline-card button:disabled { cursor: default; }
-.baseline-card.is-selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.baseline-card.is-selected { box-shadow: inset 2px 0 var(--accent); }
 
 .baseline-file-pane {
   display: flex;
@@ -334,17 +313,14 @@
   gap: 12px;
   min-width: 0;
   overflow: auto;
-  padding: 14px;
-  background: var(--surface-inset);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  padding: 0 0 0 4px;
 }
 
 .baseline-file-pane > * { flex: none; }
 
 .baseline-file-pane header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
 .baseline-file-pane header h2 { margin: 3px 0 0; color: var(--text); font-size: var(--font-subtitle); }
-.baseline-file-pane header button {
+.baseline-file-pane header button, .baseline-restore button {
   flex: 0 0 auto;
   white-space: nowrap;
   min-height: 28px;
@@ -357,7 +333,7 @@
   font-size: var(--font-small);
   cursor: pointer;
 }
-.baseline-file-pane header button:disabled { opacity: 0.55; cursor: not-allowed; }
+.baseline-file-pane header button:disabled, .baseline-restore button:disabled { opacity: 0.55; cursor: not-allowed; }
 
 .baseline-file-path {
   margin: 0;
@@ -368,7 +344,8 @@
 }
 
 /* The change itself, next to the file it goes in. */
-.baseline-fix { flex: none; padding: 10px 12px; background: var(--surface-inset); border: 1px solid var(--border); border-radius: 9px; }
+.baseline-fix { flex: none; padding: 12px 0; border-top: 1px solid var(--border); }
+.baseline-fix > p { margin: 0 0 8px; color: var(--text-secondary); font-size: var(--font-small); line-height: 1.6; }
 .baseline-fix > header { display: flex; gap: 10px; align-items: baseline; justify-content: space-between; }
 .baseline-fix > header strong { color: var(--text); font-size: var(--font-small); }
 /* No right-to-left trick to keep the tail visible: it moved the leading slash
@@ -519,10 +496,8 @@
   display: grid;
   gap: 8px;
   flex: none;
-  padding: 12px 14px;
-  border: 1px solid var(--border-strong);
-  border-radius: 10px;
-  background: var(--surface);
+  padding: 0 0 16px;
+  border-bottom: 1px solid var(--border);
   font-size: var(--font-small);
 }
 
@@ -542,6 +517,9 @@
   display: grid;
   gap: 8px;
 }
+
+.baseline-change-fields p { margin: 0; color: var(--muted); line-height: 1.6; }
+.baseline-change-fields .baseline-change-target { color: var(--text); }
 
 .baseline-change-fields label {
   display: grid;

@@ -11,7 +11,7 @@ import { createIntegrityState, integrityReducer } from "./integrity-state";
 
 const catalog: IntegrityPresetCatalog = {
   presets: INTEGRITY_PRESET_DEFINITIONS.map((preset) => ({ ...preset })),
-  maximumSelected: 6,
+  maximumSelected: 10,
 };
 
 const baselines: IntegrityBaselineList = {

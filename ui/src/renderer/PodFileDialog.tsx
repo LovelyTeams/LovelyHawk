@@ -110,7 +110,7 @@ export function PodFileDialog({ api, bindingHandle, snapshotHandle, rowHandle, p
           </div>
           <button type="button" className="exec-file-close" aria-label="关闭 Pod 文件" onClick={onClose}>✕</button>
         </header>
-        <nav className="exec-file-tabs" aria-label="文件视图">
+        <nav className="exec-file-tabs view-tabs view-tabs-underline" aria-label="文件视图">
           <button type="button" aria-pressed={view === "browse"} onClick={() => setView("browse")}>浏览</button>
           <button type="button" aria-pressed={view === "file"} disabled={file === null}
             data-testid="pod-file-view-tab" onClick={() => setView("file")}>

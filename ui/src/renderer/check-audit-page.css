@@ -1,17 +1,18 @@
 .check-audit-page {
   min-height: 100%;
+  padding: 24px 28px;
   color: var(--text);
-  background: var(--bg);
+  background: var(--surface);
   font-size: var(--font-small);
 }
 
-.check-audit-page button,
+:where(.check-audit-page) button,
 .check-audit-page input,
 .check-audit-page select {
   font: inherit;
 }
 
-.check-audit-page button:focus-visible,
+:where(.check-audit-page) button:focus-visible,
 .check-audit-page input:focus-visible,
 .check-audit-page select:focus-visible {
   outline: 3px solid var(--accent-strong);
@@ -30,9 +31,7 @@
 }
 
 .check-audit-header {
-  padding: 24px 28px 18px;
-  border-bottom: 1px solid var(--border-strong);
-  background: var(--surface);
+  padding-bottom: 18px;
 }
 
 .check-audit-header h1,
@@ -63,10 +62,16 @@
 
 .check-audit-header-actions {
   display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 45%;
   align-items: center;
   gap: 12px;
   font-size: var(--font-small);
 }
+.check-audit-header-actions button { white-space: nowrap; }
+.check-audit-expiry { white-space: nowrap; }
 
 :where(.check-audit-page) button {
   border: 1px solid var(--border-strong);
@@ -111,7 +116,7 @@
 }
 
 .check-audit-expired-notice {
-  margin: 10px 28px 0;
+  margin: 10px 0;
   border: 1px solid var(--warning-border);
   border-radius: 10px;
   padding: 9px 13px;
@@ -122,38 +127,19 @@
 }
 
 .check-audit-readonly-banner {
-  margin: 16px 28px 0;
-  border: 1px solid var(--console-accent);
-  border-radius: 10px;
-  padding: 10px 13px;
+  margin: 0 0 10px;
+  padding: 6px 0;
   color: var(--info-text);
-  background: var(--info-soft);
   line-height: 1.5;
 }
 
 .check-audit-tabs {
-  display: flex;
-  gap: 6px;
-  overflow-x: auto;
-  margin: 18px 28px 0;
-}
-
-.check-audit-tabs button {
-  white-space: nowrap;
-  background: var(--surface);
-}
-
-.check-audit-tabs button.is-active {
-  border-color: var(--accent);
-  color: var(--on-accent);
-  background: var(--accent);
+  margin-bottom: 18px;
 }
 
 .check-audit-content {
-  margin: 20px 28px 32px;
-  border: 1px solid var(--border-strong);
-  border-radius: 11px;
-  padding: 18px;
+  min-width: 0;
+  padding-bottom: 8px;
   color: var(--text);
   background: var(--surface);
 }
@@ -172,8 +158,8 @@
 
 .check-audit-command-tools {
   display: grid;
-  grid-template-columns: minmax(180px, 0.7fr) minmax(320px, 1.3fr);
-  gap: 12px;
+  grid-template-columns: minmax(180px, 320px) minmax(320px, 440px);
+  gap: 16px;
   margin-bottom: 12px;
 }
 
@@ -235,25 +221,31 @@
 
 .check-audit-command-list {
   display: grid;
-  gap: 8px;
+  border-bottom: 1px solid var(--border);
 }
 
+.check-audit-command-columns,
 .check-audit-page .check-audit-command-list > button {
   display: grid;
-  grid-template-columns: minmax(120px, 0.6fr) minmax(110px, 0.5fr) minmax(90px, 0.4fr) minmax(180px, 1.5fr);
-  gap: 10px;
+  grid-template-columns: minmax(140px, .8fr) minmax(100px, .65fr) minmax(90px, .55fr) minmax(0, 1.6fr);
+  align-items: center;
+  gap: 16px;
   min-width: 0;
-  padding: 11px;
+  padding: 11px 12px;
   text-align: left;
-  background: var(--surface);
   overflow-wrap: anywhere;
 }
 
+.check-audit-command-columns { color: var(--muted); background: var(--surface-alt); font-size: var(--font-caption); }
+.check-audit-page .check-audit-command-list > button { border: 0; border-top: 1px solid var(--border-subtle); border-radius: 0; background: transparent; }
+.check-audit-page .check-audit-command-list > button:hover:not(:disabled) { background: var(--surface-hover); }
 .check-audit-page .check-audit-command-list > button.is-selected {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus-ring) 30%, transparent);
-  background: var(--info-soft);
+  box-shadow: inset 2px 0 var(--accent);
+  background: var(--accent-soft);
 }
+.check-audit-page .check-audit-command-list > button:focus-visible { outline-offset: -2px; }
+.check-audit-command-list > button > span:last-of-type { color: var(--muted); font-family: var(--font-mono); font-size: var(--font-caption); }
+.check-audit-command-list > button > small { grid-column: 1 / -1; }
 
 .check-audit-command-list button span:first-child {
   display: flex;
@@ -269,10 +261,7 @@
 }
 
 .check-audit-command-list span:first-child small {
-  border-radius: 99px;
-  padding: 2px 6px;
   color: var(--muted);
-  background: var(--surface-inset);
 }
 
 .check-audit-log-query {
@@ -290,12 +279,11 @@
 .check-audit-log-summary article {
   display: grid;
   gap: 3px;
-  border: 1px solid var(--border-strong);
-  border-radius: 9px;
-  padding: 11px;
+  border-left: 1px solid var(--border);
+  padding: 4px 16px;
   color: var(--text);
-  background: var(--surface-inset);
 }
+.check-audit-log-summary article:first-child { border-left: 0; padding-left: 0; }
 
 .check-audit-log-summary strong {
   font-size: var(--font-title);
@@ -310,22 +298,22 @@
 .check-audit-cycle-list,
 .check-audit-suggestion-list {
   display: grid;
-  gap: 10px;
+  gap: 0;
 }
 
 .check-audit-log-list article,
 .check-audit-cycle-list article,
 .check-audit-suggestion-list article {
-  border: 1px solid var(--border-strong);
-  border-radius: 9px;
-  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  padding: 16px 0;
   color: var(--text);
   background: var(--surface);
   overflow: hidden;
 }
 
 .check-audit-log-list article.is-suspicious {
-  border-left: 4px solid var(--danger);
+  border-left: 2px solid var(--danger);
+  padding-inline: 12px;
   background: var(--danger-soft);
 }
 
@@ -371,7 +359,8 @@
 }
 
 .check-audit-suggestion-list article {
-  border-left: 4px solid var(--accent);
+  border-left: 2px solid var(--accent);
+  padding-inline: 12px;
 }
 
 .check-audit-suggestion-list article.severity-warning {
@@ -469,9 +458,7 @@
   place-items: center;
   gap: 8px;
   min-height: 150px;
-  margin: 20px 28px;
-  border: 1px dashed var(--border-strong);
-  border-radius: 12px;
+  margin: 20px 0;
   padding: 22px;
   color: var(--muted);
   background: var(--surface);
@@ -502,8 +489,6 @@
 }
 
 .check-audit-error {
-  border-style: solid;
-  border-color: var(--danger-border);
   color: var(--danger-text);
   background: var(--danger-soft);
 }
@@ -528,6 +513,7 @@
     align-items: flex-start;
     flex-direction: column;
   }
+  .check-audit-header-actions { max-width: 100%; }
 
   .check-audit-command-tools,
   .check-audit-command-tools form,
@@ -535,30 +521,10 @@
     grid-template-columns: 1fr;
   }
 
-  .check-audit-page .check-audit-command-list > button {
-    grid-template-columns: 1fr;
-  }
-
-  .check-audit-header,
-  .check-audit-content {
-    margin-right: 16px;
-    margin-left: 16px;
-    padding-right: 16px;
-    padding-left: 16px;
-  }
-
-  .check-audit-header {
-    margin: 0;
-  }
-
-  .check-audit-tabs,
-  .check-audit-readonly-banner,
-  .check-audit-status-panel,
-  .check-audit-empty,
-  .check-audit-error {
-    margin-right: 16px;
-    margin-left: 16px;
-  }
+  .check-audit-page { padding: 20px 18px; }
+  .check-audit-page .check-audit-command-list > button { grid-template-columns: minmax(0, 1fr) auto; gap: 7px 12px; }
+  .check-audit-command-list > button > span:last-of-type { grid-column: 1 / -1; }
+  .check-audit-command-columns { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -570,11 +536,9 @@
 .check-audit-actions {
   display: grid;
   gap: 8px;
-  margin: 0 0 12px;
-  padding: 10px 12px;
-  border: 1px solid var(--border-strong);
-  border-radius: 10px;
-  background: var(--surface-inset);
+  margin: 0 0 20px;
+  padding: 0 0 14px;
+  border-bottom: 1px solid var(--border);
   font-size: var(--font-small);
 }
 

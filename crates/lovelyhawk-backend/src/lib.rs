@@ -9868,8 +9868,8 @@ mod tests {
         let catalog = handle_frame(&state, &request("integrity.presets.get", "{}")).await;
         assert!(catalog.ok);
         let catalog = catalog.result.unwrap();
-        assert_eq!(catalog["maximumSelected"], 6);
-        assert_eq!(catalog["presets"].as_array().unwrap().len(), 6);
+        assert_eq!(catalog["maximumSelected"], 10);
+        assert_eq!(catalog["presets"].as_array().unwrap().len(), 10);
 
         for (method, params) in [
             (

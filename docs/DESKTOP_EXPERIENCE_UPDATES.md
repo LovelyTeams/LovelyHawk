@@ -1,6 +1,46 @@
 # 加载反馈、连接保存、版本更新与开发构建
 
-日期：2026-10-29。范围为 Windows x64 的 Tauri 桌面端。
+记录自 2026-10-29 起的桌面体验调整。范围为 Windows x64 的 Tauri 桌面端。
+
+## 标签层级与平铺列表 2026-10-31
+
+命令审计、日志分析、配置、Docker 和 Kubernetes 的一级视图复用 `styles.css` 中的
+`view-tabs`：文字标签、柔和选中背景、无按钮外框。配置的“基线检查 / 变更历史”
+移到下一行；草稿文件、容器/Pod 文件操作和命令结果的“全部输出 / 关注与缺口”
+采用 `view-tabs-underline`。保留现有选择状态、键盘入口和操作约束，没有新增功能页或运行依赖。
+
+文件完整性的目录和认证文件改成紧凑的复选项组，随宽度换列；已有基线与比较结果用
+分栏和分隔线组织。命令审计增加列标题，列表去掉逐行圆角外框，选中项用浅色背景与
+侧边标记。原命令工作台收简列表、执行摘要与分组结果的重复外框，保留证据输出区域。
+基线检查和容器概况的概要数字改为连续排布，主机全景的分类选中态改用中性色。
+所有配色沿用主题 token，实际变更仍走原计划和确认链路。
+
+实际运行的验证：
+
+- `pnpm ui:check`：类型检查、143 个文件 / 1189 项测试、生产 UI 构建通过。
+  更新依赖原 class 文本的断言；完整性表面切换后继续验证全部主题的正文对比度。
+- `cargo build --locked --package lovelyhawk-desktop`：真实调试宿主构建通过。
+- `node tools/lab/probe-auth-baseline.mjs`：41/41（24 项 SSH/API、17 项桌面检查）。
+  使用本次创建且核实 ID、镜像、网络、挂载和限制的 Debian 12 x86_64 容器，
+  完整执行权限计划/确认/修补/恢复和认证文件基线采集。桌面同时覆盖两级导航、
+  紧凑认证选项、命令行选择、筛选空状态、键盘切换及焦点、日志未采集状态、
+  900px / 1440px 和深浅主题；从 `2026-10-31T01:04:33.756Z` 观察，无 Runtime、console、Log 错误。
+  证据：`target/lab-auth-baseline/58296e7e-4013-4b5d-b08a-0b106717a581/`，含 `report.json`
+  和 `01-permission-panel.png`、`05-auth-integrity-presets.png`、`09-command-audit-flat.png`、
+  `12-audit-narrow.png`、`13-audit-dark.png`、`14-log-analysis-tabs.png` 等截图；靶机已按确认的 ID 回收。
+- `node ui/scripts/probe-command-workbench.mjs`：最终工作台样式 19/19。
+  真实 WebView2 加生产组件和合成 API 数据，覆盖下划线切换、筛选范围、等待、停止后续检查、
+  迟到结果失效、失败、空结果、恶意长文本、760px 窗口及键盘。观察始于
+  `2026-10-31T01:06:16.864Z`，无 Runtime、console、Log 错误。
+  证据：`target/desktop-debug/command-workbench-511fbace-a72a-4e92-9c39-a696529f195e/evidence/`。
+- `node ui/scripts/run-debug-smoke.mjs --width 1280 --height 900`：92/92，14 个未连接页面和
+  既有弹窗、焦点返回、资源加载、关闭退出正常，无浏览器和网络错误。
+  证据：`target/desktop-debug/5f9e7748-2342-4d4d-8526-287e4c207341/evidence/`。
+  该轮之后只收简了命令工作台外框，并重新运行上面的 UI 检查、构建及工作台原生回归。
+
+源码与 ledger 门禁保持原规则。这些证据覆盖本轮界面调整，不新增 Docker/Podman/Kubernetes
+真实运行时兼容声明，也不替代审计内核、其他平台或发布包验收。当前 Node 24.13.0 与仓库要求的
+26.13.x 不同，既有大 chunk 构建提示仍在；未将本轮标作发布质量门禁通过。
 
 ## 路径菜单与按钮状态
 

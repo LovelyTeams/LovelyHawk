@@ -1306,7 +1306,7 @@ function ConfigGeneratorPage({ api, embedded = false, modeSwitch, onOpenVisual, 
                     <div><span>第 {visibleDraft.revision} 版草稿</span><strong>{visibleDraft.suggestedName}</strong></div>
                     <button type="button" disabled={busy} onClick={() => void closeDraft()} aria-label="关闭配置草稿">×</button>
                   </header>
-                  <div className="config-artifact-tabs" role="tablist" aria-label="草稿文件">
+                  <div className="config-artifact-tabs view-tabs view-tabs-underline" role="tablist" aria-label="草稿文件">
                     {visibleDraft.artifacts.map((artifact) => (
                       <button
                         id={`config-artifact-tab-${artifact.key}`}

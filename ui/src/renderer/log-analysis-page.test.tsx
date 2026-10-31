@@ -153,7 +153,7 @@ describe("LogAnalysisPage", () => {
       source.indexOf('className="log-analysis-toolbar"'),
       source.indexOf('className="log-analysis-workbench"'),
     );
-    expect(toolbar).toContain('className="log-analysis-views"');
+    expect(toolbar).toContain('className="log-analysis-views view-tabs"');
     expect(toolbar).toContain('className="log-analysis-search"');
     expect(toolbar).toContain('className="log-analysis-reload"');
     // The old chrome is gone.

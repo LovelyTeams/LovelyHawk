@@ -33,13 +33,17 @@ const MAXIMUM_DIFF_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
 const BASELINE_TIMEOUT: Duration = Duration::from_secs(600);
 const MUTATION_TIMEOUT: Duration = Duration::from_secs(60);
 
-pub const INTEGRITY_PRESETS: [(&str, &str, bool); 6] = [
+pub const INTEGRITY_PRESETS: [(&str, &str, bool); 10] = [
     ("/var/www（Web 根目录）", "/var/www", true),
     ("/usr/bin", "/usr/bin", true),
     ("/usr/sbin", "/usr/sbin", true),
     ("/bin", "/bin", true),
     ("/etc", "/etc", false),
     ("/usr/local/bin", "/usr/local/bin", false),
+    ("/etc/passwd（账号）", "/etc/passwd", false),
+    ("/etc/group（用户组）", "/etc/group", false),
+    ("/etc/shadow（口令文件，仅摘要）", "/etc/shadow", false),
+    ("/etc/gshadow（组口令文件，仅摘要）", "/etc/gshadow", false),
 ];
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -511,7 +515,19 @@ fn normalize_paths(paths: Vec<String>) -> CoreResult<Vec<String>> {
         let path = validate_remote_path_root(path.trim())?;
         normalized.insert(path.to_owned());
     }
-    Ok(normalized.into_iter().collect())
+    let paths: Vec<String> = normalized.into_iter().collect();
+    Ok(paths
+        .iter()
+        .filter(|path| {
+            !paths.iter().any(|parent| {
+                parent != *path
+                    && path
+                        .strip_prefix(parent.as_str())
+                        .is_some_and(|rest| rest.starts_with('/'))
+            })
+        })
+        .cloned()
+        .collect())
 }
 
 fn validate_remote_path_root(path: &str) -> CoreResult<&str> {
@@ -575,13 +591,14 @@ fn scan_pipeline(paths: &[String]) -> String {
         .collect::<Vec<_>>()
         .join(" ");
     let worker = r#"for lr_file do
-lr_hash=$(sha256sum -- "$lr_file" 2>/dev/null | awk '{print $1}') || continue
+lr_result=$(sha256sum -- "$lr_file") || exit 41
+lr_hash=${lr_result%% *}
 lr_path=$(printf %s "$lr_file" | base64 | tr -d '\n')
-case "$lr_hash" in (*[!0-9a-fA-F]*|'') continue;; esac
+case "$lr_hash" in (*[!0-9a-fA-F]*|'') exit 41;; esac
 printf '%s|%s\n' "$lr_hash" "$lr_path"
 done"#;
     format!(
-        "find {path_arguments} -type f -exec /bin/sh -c {worker} lovelyres-fim {{}} + 2>/dev/null | LC_ALL=C sort",
+        "{{ find {path_arguments} -type f -exec /bin/sh -c {worker} lovelyres-fim {{}} + > \"$lr_tmp.scan\" || exit 41; LC_ALL=C sort -u \"$lr_tmp.scan\" || exit 41; rm -f -- \"$lr_tmp.scan\"; }}",
         worker = shq(worker),
     )
 }
@@ -589,7 +606,7 @@ done"#;
 fn build_create_command(paths: &[String], temporary: &str, destination: &str) -> String {
     let scan = scan_pipeline(paths);
     format!(
-        "set -eu; umask 077; mkdir -p {root}; lr_tmp={temporary}; trap 'rm -f -- \"$lr_tmp\"' 0 1 2 15; {scan} > \"$lr_tmp\"; [ -s \"$lr_tmp\" ] || [ -f \"$lr_tmp\" ]; mv -- \"$lr_tmp\" {destination}; trap - 0 1 2 15; lr_count=$(wc -l < {destination}); lr_hash=$(sha256sum -- {destination} | awk '{{print $1}}'); printf 'LR_FIM_V1|%s|%s\\n' \"$lr_count\" \"$lr_hash\"",
+        "set -eu; umask 077; mkdir -p {root}; lr_tmp={temporary}; trap 'rm -f -- \"$lr_tmp\" \"$lr_tmp.scan\"' 0 1 2 15; {scan} > \"$lr_tmp\"; [ -s \"$lr_tmp\" ] || [ -f \"$lr_tmp\" ]; mv -- \"$lr_tmp\" {destination}; trap - 0 1 2 15; lr_count=$(wc -l < {destination}); lr_hash=$(sha256sum -- {destination} | awk '{{print $1}}'); printf 'LR_FIM_V1|%s|%s\\n' \"$lr_count\" \"$lr_hash\"",
         root = shq(REMOTE_ROOT),
         temporary = shq(temporary),
         destination = shq(destination),
@@ -599,7 +616,7 @@ fn build_create_command(paths: &[String], temporary: &str, destination: &str) ->
 fn build_compare_command(baseline: &IntegrityBaseline, temporary: &str) -> String {
     let scan = scan_pipeline(&baseline.paths);
     format!(
-        "set -eu; lr_base={baseline}; lr_tmp={temporary}; trap 'rm -f -- \"$lr_tmp\"' 0 1 2 15; [ -f \"$lr_base\" ]; lr_hash=$(sha256sum -- \"$lr_base\" | awk '{{print $1}}'); [ \"$lr_hash\" = {expected} ]; {scan} > \"$lr_tmp\"; printf 'LR_FIM_DIFF_V1\\n===ADDED===\\n'; comm -13 \"$lr_base\" \"$lr_tmp\" | head -n {limit}; printf '===REMOVED===\\n'; comm -23 \"$lr_base\" \"$lr_tmp\" | head -n {limit}",
+        "set -eu; lr_base={baseline}; lr_tmp={temporary}; trap 'rm -f -- \"$lr_tmp\" \"$lr_tmp.scan\"' 0 1 2 15; [ -f \"$lr_base\" ]; lr_hash=$(sha256sum -- \"$lr_base\" | awk '{{print $1}}'); [ \"$lr_hash\" = {expected} ]; {scan} > \"$lr_tmp\"; printf 'LR_FIM_DIFF_V1\\n===ADDED===\\n'; comm -13 \"$lr_base\" \"$lr_tmp\" | head -n {limit}; printf '===REMOVED===\\n'; comm -23 \"$lr_base\" \"$lr_tmp\" | head -n {limit}",
         baseline = shq(&baseline.remote_manifest),
         temporary = shq(temporary),
         expected = shq(&baseline.manifest_sha256),
@@ -829,6 +846,8 @@ mod tests {
             "/var/www/a b".to_owned(),
             "/etc".to_owned(),
             "/etc".to_owned(),
+            "/etc/shadow".to_owned(),
+            "/etc/gshadow".to_owned(),
         ])
         .unwrap();
         assert_eq!(paths, vec!["/etc", "/var/www/a b"]);

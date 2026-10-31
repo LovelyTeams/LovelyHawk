@@ -371,7 +371,7 @@ export function LogAnalysisPage({ bindingHandle, api, writeClipboard }: LogAnaly
     <main className="log-analysis-page">
       <div className="log-analysis-toolbar">
         <h1>日志分析</h1>
-        <nav className="log-analysis-views" aria-label="日志分析视图">
+        <nav className="log-analysis-views view-tabs" aria-label="日志分析视图">
           {tabs.map((tab) => (
             <button key={tab} type="button" className={state.tab === tab ? "is-active" : ""}
               aria-current={state.tab === tab ? "page" : undefined}

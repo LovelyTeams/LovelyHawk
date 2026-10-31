@@ -29,10 +29,6 @@
 .config-visual .primary:hover:enabled { background: var(--accent-strong); }
 .config-visual .danger { color: var(--danger-text); border-color: var(--danger-border); }
 .config-visual .danger:hover:enabled { background: var(--danger-soft); }
-/* The mode switch keeps its own look. */
-.config-visual .configuration-modes button { padding: 3px 11px; background: transparent; border-color: transparent; }
-.config-visual .configuration-modes button.is-active { background: var(--surface); border-color: var(--accent); }
-
 .config-visual-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .config-visual-toolbar .configuration-modes { margin-right: auto; }
 .config-visual-actions { display: flex; flex-wrap: wrap; gap: 6px; }

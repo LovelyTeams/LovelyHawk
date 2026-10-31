@@ -200,7 +200,7 @@ node ui/scripts/probe-windows-workspace.mjs
 pnpm release:package -Build
 
 # 在含空格与中文的隔离目录中执行便携包启动、渲染、数据目录隔离与退出冒烟测试
-pnpm release:smoke -ArchivePath artifacts/LovelyHawk-0.0.2-windows-x64.zip
+pnpm release:smoke -ArchivePath artifacts/LovelyHawk-0.0.3-windows-x64.zip
 ```
 
 生成的 `LovelyHawk-<版本>-windows-x64.zip` 解压后为单一目录，包含以下 8 个文件（详见 [`docs/DESKTOP_PORTABLE_RELEASE.md`](docs/DESKTOP_PORTABLE_RELEASE.md)）：

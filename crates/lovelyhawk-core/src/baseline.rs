@@ -4,6 +4,9 @@
 //! and a typed value. Remote paths, shell snippets, regular expressions, and
 //! service names never cross the UI/core boundary.
 
+#[path = "baseline_host.rs"]
+mod host;
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
@@ -378,6 +381,7 @@ enum Reading {
     /// `/etc/sysctl.d`, by a unit, or by hand, and only the running value says
     /// what the machine is doing right now.
     RunningSysctl,
+    HostState,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -456,7 +460,7 @@ impl BaselineDefinition {
     const fn candidates(&self) -> &'static [&'static str] {
         match self.reading {
             Reading::Files(paths) => paths,
-            Reading::RunningSysctl => &[],
+            Reading::RunningSysctl | Reading::HostState => &[],
         }
     }
 
@@ -2475,6 +2479,11 @@ pub const BASELINE_CATALOG: &[BaselineDefinition] = &[
         format: FileFormat::Ini("log.file"),
         reload: ReloadGroup::None,
     },
+    host::permission_definition("permissions-auth-passwd", "/etc/passwd", "账号文件权限"),
+    host::permission_definition("permissions-auth-group", "/etc/group", "用户组文件权限"),
+    host::permission_definition("permissions-auth-shadow", "/etc/shadow", "口令文件权限"),
+    host::permission_definition("permissions-auth-gshadow", "/etc/gshadow", "组口令文件权限"),
+    host::AUDIT_DEFINITION,
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2511,7 +2520,12 @@ impl BaselineObservedValue {
             Self::Unverified => "无法判断（尚未核实配置）",
             Self::NotInstalled => "未安装",
             Self::Conditional => "写在 Match 条件块里，只对部分连接生效",
-            Self::Value(value) => value,
+            Self::Value(value) => match value.as_str() {
+                "persistent-only" => "已保存片段，运行规则未齐全",
+                "runtime-only" => "存在运行规则，尚未保存片段",
+                "not-configured" => "尚未配置本工具监控",
+                _ => value,
+            },
         }
     }
 
@@ -2629,6 +2643,8 @@ pub struct PlannedBaselineChange {
     /// to that path.
     #[serde(default)]
     pub file: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) host_guard: Option<host::Guard>,
 }
 
 #[derive(Debug, Clone)]
@@ -2652,6 +2668,18 @@ impl BaselineChangePlan {
 
     pub const fn reload_policy(&self) -> BaselineReloadPolicy {
         self.reload_policy
+    }
+
+    pub fn execution_label(&self) -> &'static str {
+        if self
+            .changes
+            .iter()
+            .any(|change| change.host_guard.is_some())
+        {
+            "属性或监控规则立即生效；不重启服务，独立核对后报告结果"
+        } else {
+            self.reload_policy.label()
+        }
     }
 }
 
@@ -2809,6 +2837,28 @@ impl BaselineService {
     }
 
     pub async fn scan(&self, session: &BoundSshSession) -> CoreResult<BaselineScan> {
+        let mut scan = self.scan_configuration(session).await?;
+        let host_output = successful_output(
+            "scan authentication attributes and audit rules",
+            self.ssh
+                .execute_bound(session, host::scan_script(), COMMAND_TIMEOUT)
+                .await?,
+        )?;
+        for status in host::scan_from_output(&host_output)? {
+            if let Some(slot) = scan
+                .statuses
+                .iter_mut()
+                .find(|item| item.item_id == status.item_id)
+            {
+                *slot = status;
+            }
+        }
+        self.target.validate(session.target())?;
+        scan.captured_at = Utc::now();
+        Ok(scan)
+    }
+
+    async fn scan_configuration(&self, session: &BoundSshSession) -> CoreResult<BaselineScan> {
         self.target.validate(session.target())?;
         let output = successful_output(
             "scan baseline configuration",
@@ -2839,6 +2889,9 @@ impl BaselineService {
     ) -> CoreResult<BaselineFileView> {
         self.target.validate(session.target())?;
         let definition = definition(item_id)?;
+        if matches!(definition.reading, Reading::HostState) {
+            return host::read_view(self, session, definition).await;
+        }
         // sshd decides by Include position, so the file to show is the one the
         // scan found — the main file's first line was marked as the one sshd
         // obeys while a drop-in read before it had won. When the scan could not
@@ -2846,7 +2899,7 @@ impl BaselineService {
         let (path, decided) = if definition.reads_candidate_risks()
             || definition.follows_sshd_includes()
         {
-            let scan = self.scan(session).await?;
+            let scan = self.scan_configuration(session).await?;
             let status = scan
                 .statuses
                 .iter()
@@ -2912,7 +2965,14 @@ impl BaselineService {
             }
         }
 
-        let scan = self.scan(session).await?;
+        let scan = if requests
+            .iter()
+            .any(|r| definition(&r.item_id).is_ok_and(|d| matches!(d.reading, Reading::HostState)))
+        {
+            self.scan(session).await?
+        } else {
+            self.scan_configuration(session).await?
+        };
         let by_id = scan
             .statuses
             .into_iter()
@@ -2941,11 +3001,24 @@ impl BaselineService {
             if status.observed == BaselineObservedValue::Value(request.value.clone()) {
                 continue;
             }
+            let host_guard = if matches!(definition(&request.item_id)?.reading, Reading::HostState)
+            {
+                if seen.len() != 1 || reload_policy != BaselineReloadPolicy::ApplyNow {
+                    return Err(CoreError::validation(
+                        "baseline host change",
+                        "权限与审计规则须逐项规划、立即执行并复核，不能混合批量或延后生效。",
+                    ));
+                }
+                Some(host::capture(self, session, definition(&request.item_id)?).await?)
+            } else {
+                None
+            };
             changes.push(PlannedBaselineChange {
                 item_id: request.item_id,
                 before: status.observed.clone(),
                 after: request.value,
                 file: status.source_file.clone(),
+                host_guard,
             });
         }
         if changes.is_empty() {
@@ -2961,13 +3034,24 @@ impl BaselineService {
         let digest = change_digest(&changes, &files, reload_policy)?;
         let mut operation = OperationPlan::new(
             session.target().clone(),
-            format!(
-                "应用 {} 项 Linux 安全基线（{}）",
-                changes.len(),
-                reload_policy.label()
-            ),
+            if let Some(guard) = changes
+                .first()
+                .and_then(|change| change.host_guard.as_ref())
+            {
+                guard.summary(&changes[0].file)?
+            } else {
+                format!(
+                    "应用 {} 项 Linux 安全基线（{}）",
+                    changes.len(),
+                    reload_policy.label()
+                )
+            },
             true,
-            Some("从受管备份恢复全部配置文件并读回验证".to_owned()),
+            Some(if changes[0].host_guard.is_some() {
+                "核对完整内容与身份后，仅撤销本次属性或规则变化；后续变化、断连或权限不足时保留备份并明确报告未能恢复。".to_owned()
+            } else {
+                "从受管备份恢复全部配置文件并读回验证".to_owned()
+            }),
         )?;
         operation
             .metadata
@@ -3052,12 +3136,19 @@ impl BaselineService {
         validate_restore_evidence(&record)?;
         let mut operation = OperationPlan::new(
             session.target().clone(),
-            format!(
-                "恢复基线变更 {}（{} 个完整文件：{}）。写入前核对文件仍与原变更后的摘要一致；恢复后核对备份的完整内容。此结果不代表服务已恢复健康，失败后不会自动重新应用旧配置。",
-                record.id,
-                record.files.len(),
-                record.files.join("、")
-            ),
+            if record.changes[0].host_guard.is_some() {
+                format!(
+                    "恢复 {} 的本次属性或 auditd 监控变更。先核对文件、运行规则与原记录一致；权限项只恢复原属主、属组和权限，不覆写正文；审计项只移除本次新增的监控并放回原规则片段。恢复后独立复核，不代表服务或审计事件留存已经恢复健康。",
+                    record.files.join("、")
+                )
+            } else {
+                format!(
+                    "恢复基线变更 {}（{} 个完整文件：{}）。写入前核对文件仍与原变更后的摘要一致；恢复后核对备份的完整内容。此结果不代表服务已恢复健康，失败后不会自动重新应用旧配置。",
+                    record.id,
+                    record.files.len(),
+                    record.files.join("、")
+                )
+            },
             true,
             None,
         )?;
@@ -3213,17 +3304,35 @@ struct ChangeExecutor<'a> {
 impl OperationExecutor for ChangeExecutor<'_> {
     async fn execute(&self, definition: &OperationPlan) -> CoreResult<ExecutionReceipt> {
         ensure_same_plan(definition, &self.plan.operation, "baseline change")?;
-        let output = successful_marker(
-            "apply baseline changes",
-            self.service
-                .ssh
-                .execute_bound(self.session, apply_command(self.plan)?, COMMAND_TIMEOUT)
-                .await?,
-            APPLY_MARKER,
-        )?;
-        let backups = parse_backup_evidence(&output, &self.plan.files)?;
-        let applied_files = parse_file_evidence(&output, &self.plan.files, "APPLIED_FILE=")?;
-        validate_applied_files(&self.plan.files, &applied_files)?;
+        let execution = self
+            .service
+            .ssh
+            .execute_bound(self.session, apply_command(self.plan)?, COMMAND_TIMEOUT)
+            .await;
+        if self.plan.changes[0].host_guard.is_some()
+            && execution.as_ref().map_or(true, |out| {
+                out.timed_out
+                    || out.exit_code != Some(0)
+                    || !out.output.lines().any(|line| line == APPLY_MARKER)
+            })
+        {
+            return Err(host::failed_execution(self.service, self.session, self.plan).await);
+        }
+        let output = successful_marker("apply baseline changes", execution?, APPLY_MARKER)?;
+        let evidence = (|| {
+            let backups = if self.plan.changes[0].host_guard.is_some() {
+                parse_file_evidence(&output, &self.plan.files, "HOST_BACKUP=")?
+            } else {
+                parse_backup_evidence(&output, &self.plan.files)?
+            };
+            let applied = parse_file_evidence(&output, &self.plan.files, "APPLIED_FILE=")?;
+            validate_applied_files(&self.plan.files, &applied)?;
+            Ok::<_, CoreError>((backups, applied))
+        })();
+        if evidence.is_err() && self.plan.changes[0].host_guard.is_some() {
+            return Err(host::failed_execution(self.service, self.session, self.plan).await);
+        }
+        let (backups, applied_files) = evidence?;
         let change_id = self
             .plan
             .operation
@@ -3254,6 +3363,9 @@ impl OperationExecutor for ChangeExecutor<'_> {
             updated_at: now,
         };
         if let Err(error) = self.service.insert_record(record) {
+            if self.plan.changes[0].host_guard.is_some() {
+                return Err(host::failed_execution(self.service, self.session, self.plan).await);
+            }
             let _ = self
                 .service
                 .ssh
@@ -3286,7 +3398,10 @@ impl OperationExecutor for ChangeExecutor<'_> {
         _: &ExecutionReceipt,
     ) -> CoreResult<VerificationResult> {
         ensure_same_plan(definition, &self.plan.operation, "baseline change")?;
-        let scan = self.service.scan(self.session).await?;
+        if self.plan.changes[0].host_guard.is_some() {
+            return host::verify(self.service, self.session, &self.plan.changes[0], false).await;
+        }
+        let scan = self.service.scan_configuration(self.session).await?;
         Ok(verify_expected(&scan.statuses, &self.plan.changes, false))
     }
 
@@ -3318,6 +3433,16 @@ impl OperationExecutor for ChangeExecutor<'_> {
                 .await?,
             RESTORE_MARKER,
         )?;
+        if self.plan.changes[0].host_guard.is_some()
+            && !host::verify(self.service, self.session, &self.plan.changes[0], true)
+                .await?
+                .passed
+        {
+            return Err(CoreError::validation(
+                "authentication baseline",
+                "恢复后的独立属性或规则复核未通过。",
+            ));
+        }
         let change_id = self
             .plan
             .operation
@@ -3380,6 +3505,25 @@ impl OperationExecutor for RestoreExecutor<'_> {
         _: &ExecutionReceipt,
     ) -> CoreResult<VerificationResult> {
         ensure_same_plan(definition, &self.plan.operation, "baseline restore")?;
+        if self.plan.record.changes[0].host_guard.is_some() {
+            let result = host::verify(
+                self.service,
+                self.session,
+                &self.plan.record.changes[0],
+                true,
+            )
+            .await?;
+            if result.passed {
+                self.service.transition_record(
+                    &self.plan.record.id,
+                    &self.plan.record.target,
+                    BaselineChangeState::Applied,
+                    BaselineChangeState::Restored,
+                    &self.plan.operation.id,
+                )?;
+            }
+            return Ok(result);
+        }
         let output = successful_marker(
             "read back restored baseline files",
             self.service
@@ -3495,6 +3639,17 @@ impl BaselineDefinition {
     /// `source_file` is where the scan found the setting on this target; pass
     /// an empty string before a scan and the packaged path is used.
     pub fn remediation(&self, source_file: &str) -> BaselineRemediation {
+        if matches!(self.reading, Reading::HostState) {
+            return BaselineRemediation {
+                file: self.file.to_owned(),
+                lines: vec![
+                    "先核对实际状态，再查看本次属性或审计规则修改计划。".to_owned(),
+                    "立即生效并独立回读；正文不进入页面，后续变更会阻止旧计划和恢复。".to_owned(),
+                ],
+                reload: None,
+                manual_reason: None,
+            };
+        }
         let file = if source_file.trim().is_empty() {
             self.file.to_owned()
         } else {
@@ -3742,6 +3897,12 @@ const PRESENCE_VALUE_CHARS: &str = "A-Za-z0-9_.:*\\/,+-";
 
 fn validate_observed(value: &BaselineObservedValue) -> CoreResult<()> {
     if let BaselineObservedValue::Value(value) = value
+        && (matches!(value.as_str(), host::PERMISSION_SAFE | host::AUDIT_READY)
+            || host::is_attribute_label(value))
+    {
+        return Ok(());
+    }
+    if let BaselineObservedValue::Value(value) = value
         && (value.is_empty()
             || value.len() > 64
             || !value.bytes().all(|byte| {
@@ -3953,6 +4114,7 @@ fn item_command(definition: &BaselineDefinition, table: &mut ProgramTable) -> St
             key = shq(definition.key),
             file = shq(definition.file),
         ),
+        Reading::HostState => host::scan_item(definition),
         Reading::Files(paths) => format!(
             "lr_file {id} {key} {want} {fallback} {program} {witness} {installed} {candidates}; ",
             key = shq(definition.key),
@@ -4917,6 +5079,26 @@ fn validate_change_values(
             ));
         }
         validate_observed(&change.before)?;
+        if matches!(definition.reading, Reading::HostState) {
+            if changes.len() != 1 {
+                return Err(CoreError::validation(
+                    "baseline host change",
+                    "one change at a time",
+                ));
+            }
+            change
+                .host_guard
+                .as_ref()
+                .ok_or_else(|| {
+                    CoreError::validation("baseline host change", "missing immutable state")
+                })?
+                .validate(definition)?;
+        } else if change.host_guard.is_some() {
+            return Err(CoreError::validation(
+                "baseline host change",
+                "unexpected host state",
+            ));
+        }
     }
     Ok(())
 }
@@ -4996,6 +5178,9 @@ fn validate_restore_evidence(record: &BaselineChangeRecord) -> CoreResult<()> {
 
 fn apply_command(plan: &BaselineChangePlan) -> CoreResult<String> {
     validate_changes(&plan.changes)?;
+    if plan.changes[0].host_guard.is_some() {
+        return host::apply_command(plan);
+    }
     let mut command = backup_prelude(&plan.remote_root, &plan.files)?;
     command.push_str("lr_done=0; lr_restore() { ");
     command.push_str(&restore_body_unchecked(&plan.remote_root, &plan.files)?);
@@ -5045,6 +5230,12 @@ fn edit_body(
     index: usize,
 ) -> CoreResult<String> {
     let definition = definition(&change.item_id)?;
+    if matches!(definition.reading, Reading::HostState) {
+        return Err(CoreError::validation(
+            "baseline host change",
+            "属性和审计规则不能使用通用配置编辑器。",
+        ));
+    }
     if normalize_requested_value(definition, &change.after)? != change.after {
         return Err(CoreError::validation(
             "baseline change",
@@ -5433,6 +5624,9 @@ fn restore_command_for_change(
     plan: &BaselineChangePlan,
     backups: &[BaselineBackupEvidence],
 ) -> CoreResult<String> {
+    if plan.changes[0].host_guard.is_some() {
+        return host::restore_command(&plan.changes[0], &plan.remote_root, backups, None);
+    }
     let mut command = format!("set -eu; lr_root={}; ", shq(&plan.remote_root));
     validate_backups(&plan.files, backups)?;
     command.push_str(&restore_body_verified(&plan.remote_root, backups, None)?);
@@ -5447,6 +5641,14 @@ fn restore_command_for_change(
 fn restore_command_for_record(record: &BaselineChangeRecord) -> CoreResult<String> {
     validate_record(record)?;
     validate_restore_evidence(record)?;
+    if record.changes[0].host_guard.is_some() {
+        return host::restore_command(
+            &record.changes[0],
+            &record.remote_root,
+            &record.backups,
+            Some(&record.applied_files),
+        );
+    }
     let mut command = format!("set -eu; lr_root={}; ", shq(&record.remote_root));
     command.push_str(&restore_body_verified(
         &record.remote_root,
@@ -5633,6 +5835,7 @@ mod tests {
     #[test]
     fn a_failed_readback_names_the_setting_and_the_difference_in_chinese() {
         let change = |item_id: &str| PlannedBaselineChange {
+            host_guard: None,
             item_id: item_id.to_owned(),
             before: BaselineObservedValue::Value("yes".to_owned()),
             after: "no".to_owned(),
@@ -5752,6 +5955,7 @@ mod tests {
     ) -> BaselineChangeRecord {
         let id = Uuid::from_u128(index as u128 + 1).to_string();
         let changes = vec![PlannedBaselineChange {
+            host_guard: None,
             item_id: "ssh-max-auth-tries".to_owned(),
             before: BaselineObservedValue::Value("6".to_owned()),
             after: "4".to_owned(),
@@ -5871,6 +6075,7 @@ mod tests {
                 assert!(
                     edit_body(
                         &PlannedBaselineChange {
+                            host_guard: None,
                             item_id: definition.id.to_owned(),
                             before: BaselineObservedValue::Missing,
                             after: definition.recommendation.to_owned(),
@@ -5885,7 +6090,7 @@ mod tests {
                 );
             }
         }
-        assert_eq!(BASELINE_CATALOG.len(), 108);
+        assert_eq!(BASELINE_CATALOG.len(), 113);
         // One plan carries every check this tool will write; the rest are read.
         assert!(
             BASELINE_CATALOG
@@ -6005,6 +6210,7 @@ mod tests {
         ] {
             let definition = definition(item_id).unwrap();
             let change = PlannedBaselineChange {
+                host_guard: None,
                 item_id: item_id.to_owned(),
                 before: BaselineObservedValue::Missing,
                 after: definition.recommendation.to_owned(),
@@ -6026,6 +6232,7 @@ mod tests {
         let redis = definition("redis-protected-mode").unwrap();
         let validation = configuration_validation(
             &[PlannedBaselineChange {
+                host_guard: None,
                 item_id: redis.id.to_owned(),
                 before: BaselineObservedValue::Missing,
                 after: redis.recommendation.to_owned(),
@@ -6041,6 +6248,7 @@ mod tests {
     fn sshd_is_reloaded_under_any_init_and_only_by_its_own_pid() {
         let definition = definition("ssh-permit-root-login").unwrap();
         let change = || PlannedBaselineChange {
+            host_guard: None,
             item_id: definition.id.to_owned(),
             before: BaselineObservedValue::Value("yes".to_owned()),
             after: "no".to_owned(),
@@ -6091,6 +6299,7 @@ mod tests {
             let elsewhere = found_at.replace('*', "written-here");
             let command = edit_body(
                 &PlannedBaselineChange {
+                    host_guard: None,
                     item_id: item_id.to_owned(),
                     before: BaselineObservedValue::Missing,
                     after: definition.recommendation.to_owned(),
@@ -6251,7 +6460,7 @@ mod tests {
         // Nothing said means the place the distribution would put it.
         assert_eq!(resolved_source(mysql, "").unwrap(), mysql.file);
         for hostile in [
-            "/etc/shadow",
+            "/etc/unapproved-auth-file",
             "/etc/mysql/mariadb.conf.d/../../shadow",
             "/etc/mysql/mariadb.conf.d/a/b.cnf",
             "etc/my.cnf",
@@ -6266,6 +6475,7 @@ mod tests {
                 "{hostile} is backed up"
             );
         }
+        assert!(resolved_source(mysql, "/etc/shadow").is_err());
         // The star matches inside one segment and never across a slash.
         assert!(path_matches(
             "/etc/nginx/conf.d/*.conf",
@@ -6290,7 +6500,9 @@ mod tests {
         // a presence check has no value to write.
         let writable = BASELINE_CATALOG
             .iter()
-            .filter(|definition| definition.is_writable())
+            .filter(|definition| {
+                definition.is_writable() && !matches!(definition.reading, Reading::HostState)
+            })
             .collect::<Vec<_>>();
         let requests = writable
             .iter()
@@ -6328,6 +6540,7 @@ mod tests {
         };
         let id = Uuid::new_v4().to_string();
         let changes = vec![PlannedBaselineChange {
+            host_guard: None,
             item_id: "ssh-max-auth-tries".to_owned(),
             before: BaselineObservedValue::Value("6".to_owned()),
             after: "4".to_owned(),
@@ -6718,6 +6931,7 @@ mod tests {
         let (_temp, services, session, harness) = fixture().await;
         let mut record = restorable_record(&session.target().identity);
         record.changes = vec![PlannedBaselineChange {
+            host_guard: None,
             item_id: "redis-protected-mode".to_owned(),
             before: BaselineObservedValue::Value("on".to_owned()),
             after: "off".to_owned(),
@@ -6934,6 +7148,7 @@ mod tests {
     fn tampered_persisted_record_cannot_reach_a_shell_builder() {
         let id = Uuid::new_v4().to_string();
         let changes = vec![PlannedBaselineChange {
+            host_guard: None,
             item_id: "ssh-max-auth-tries".to_owned(),
             before: BaselineObservedValue::Value("6".to_owned()),
             after: "4".to_owned(),
@@ -7194,6 +7409,7 @@ mod tests {
             let call = match definition.reading {
                 Reading::RunningSysctl => format!("lr_sysctl '{}'", definition.id),
                 Reading::Files(_) => format!("lr_file '{}'", definition.id),
+                Reading::HostState => format!("'{}'", definition.id),
             };
             assert_eq!(
                 command.matches(&call).count(),
@@ -7548,6 +7764,7 @@ mod tests {
             assert!(
                 edit_body(
                     &PlannedBaselineChange {
+                        host_guard: None,
                         item_id: item.id.to_owned(),
                         before: BaselineObservedValue::Missing,
                         after: item.recommendation.to_owned(),

@@ -359,7 +359,7 @@ export function IntegrityPage({ bindingHandle, api, initialState }: IntegrityPag
     try {
       const confirmed = await confirm.ask(
         "新建完整性基线？",
-        `会读取 ${locations} 里的每个文件并记下它的哈希，清单写在目标机的 /tmp/.lovelyres_fim 下；被记录的文件不会被改动。` +
+        `会读取 ${locations} 中的文件并记下内容摘要，清单写在目标机的 /tmp/.lovelyres_fim 下。正文不进入清单或页面；读取可能更新访问时间。` +
           "目录很大时可能要几分钟，期间可以取消。之后拿这份基线比较，就能看出哪些文件新增、改动或消失了。",
         "新建基线",
       );
@@ -480,7 +480,7 @@ export function IntegrityPage({ bindingHandle, api, initialState }: IntegrityPag
           {visibleState.catalogStatus === "ready" && (
             <fieldset className="integrity-preset-grid" disabled={creating}>
               <legend>先建一份基线，之后才能比较。勾选要记录的位置：</legend>
-              {presets.map((preset) => (
+              {presets.filter((preset) => !preset.id.startsWith("auth-")).map((preset) => (
                 <label key={preset.id} data-preset-path={preset.path}>
                   <input
                     type="checkbox"
@@ -494,6 +494,19 @@ export function IntegrityPage({ bindingHandle, api, initialState }: IntegrityPag
                   <span>{preset.label}</span>
                 </label>
               ))}
+              <details className="integrity-auth-presets">
+                <summary>关键认证文件（可选） · 已选 {chosen.filter((id) => id.startsWith("auth-")).length} / 4</summary>
+                <p>只记录内容摘要；权限不足或文件缺失会使本次采集失败。已选择 /etc 时自动合并重复范围。</p>
+                <div className="integrity-auth-options">
+                  {presets.filter((preset) => preset.id.startsWith("auth-")).map((preset) => (
+                    <label key={preset.id} data-preset-path={preset.path}>
+                      <input type="checkbox" checked={chosen.includes(preset.id)}
+                        onChange={(event) => setChosenPresets(event.currentTarget.checked ? [...chosen, preset.id] : chosen.filter((id) => id !== preset.id))} />
+                      <span>{preset.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </details>
             </fieldset>
           )}
           {creating && (
@@ -532,6 +545,7 @@ export function IntegrityPage({ bindingHandle, api, initialState }: IntegrityPag
                   type="button"
                   key={baseline.baselineHandle}
                   className={baseline.baselineHandle === visibleState.selectedBaselineHandle ? "active" : undefined}
+                  aria-pressed={baseline.baselineHandle === visibleState.selectedBaselineHandle}
                   disabled={active}
                   onClick={() => dispatch({
                     type: "baseline-selected",

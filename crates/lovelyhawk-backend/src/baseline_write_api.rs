@@ -487,13 +487,22 @@ impl BaselineWriteApi {
             Ok(Ok(result)) if result.verification.passed => (
                 true,
                 false,
-                if action == "change" {
+                if result.record.changes.iter().any(|change| {
+                    change.item_id.starts_with("permissions-auth-")
+                        || change.item_id == "logging-auth-file-watches"
+                }) {
+                    bounded_text(&result.verification.detail)
+                } else if action == "change" {
                     "已写入并由独立读回核对：文件与计划一致，配置检查通过。这只说明配置文件已改好，不代表业务已恢复健康。".to_owned()
                 } else {
                     "已放回变更前的完整文件，并由独立读回核对内容一致。这不代表服务已恢复健康，也不会自动重新应用旧配置。".to_owned()
                 },
             ),
             Ok(Ok(result)) => (false, false, bounded_text(&result.verification.detail)),
+            Ok(Err(CoreError::Validation {
+                subject: "authentication baseline",
+                message,
+            })) => (false, false, bounded_text(&message)),
             // The core puts the plan's own backups back when its read-back
             // differs, and says so in this one refusal.
             Ok(Err(CoreError::Validation {
@@ -606,7 +615,7 @@ fn plan_dto(stored: &StoredPlan, now: Instant) -> Result<BaselinePlanDto, Baseli
                     file: bounded_text(&change.file),
                 })
                 .collect(),
-            Some(plan.reload_policy().label().to_owned()),
+            Some(plan.execution_label().to_owned()),
         ),
         StoredKind::Restore(plan) => (plan.definition(), Vec::new(), None),
     };

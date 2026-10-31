@@ -34,7 +34,7 @@ const port = 9300 + Math.floor(Math.random() * 500);
 const smokeNonce = randomUUID().replaceAll("-", "");
 const smokeRoot = path.join(os.tmpdir(), `lovelyhawk-smoke-${smokeNonce}`);
 
-const EXPECTED_API_METHODS = 169;
+const EXPECTED_API_METHODS = 172;
 const EXPECTED_PAGES = 14;
 const checks = [];
 function check(name, ok, detail = null) {
@@ -82,6 +82,7 @@ try {
   }
   await waitFor(() => session.evaluate("document.querySelector('[data-testid=\"welcome-view\"]') !== null"),
     { label: "the welcome view" });
+  await session.evaluate("document.querySelector('[data-testid=window-minimize]').click(); true");
 
   const shell = await session.evaluate(`(() => ({
     href: location.href,

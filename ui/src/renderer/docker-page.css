@@ -33,12 +33,12 @@
   border-bottom: 1px solid var(--border-strong);
 }
 
-.docker-page button,
+:where(.docker-page) button,
 .docker-page input {
   font: inherit;
 }
 
-.docker-page button:focus-visible,
+:where(.docker-page) button:focus-visible,
 .docker-page input:focus-visible {
   outline: 3px solid var(--accent-strong);
   outline-offset: 2px;
@@ -124,80 +124,12 @@
   background: var(--accent-strong);
 }
 
-/* An underlined strip rather than a row of pill buttons: the tabs sit against
-   the header they belong to, and the active one is marked by the rule beneath
-   it instead of a filled block that competed with the primary action. */
-.docker-tabs[hidden] { display: none; }
-
 .docker-tabs {
-  display: flex;
-  gap: 2px;
-  overflow-x: auto;
-  /* Stated, not left to compute. Setting only `overflow-x` makes `overflow-y`
-     compute to `auto` too, so anything that pokes a single pixel below the box
-     buys a scrollbar the width of a finger. */
-  overflow-y: hidden;
-  padding: 0 28px;
+  padding: 10px 28px;
   background: var(--surface);
 }
 
-.docker-page .docker-tab {
-  position: relative;
-  border: 0;
-  border-radius: 0;
-  padding: 9px 13px 8px;
-  color: var(--muted);
-  background: transparent;
-  font-size: var(--font-small);
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.docker-page .docker-tab:hover:not(:disabled) {
-  border: 0;
-  color: var(--text);
-  background: var(--surface-hover);
-}
-
-.docker-page .docker-tab.is-active {
-  border: 0;
-  color: var(--accent-text);
-  background: transparent;
-}
-
-/* Sits on the band's own rule rather than one pixel below the strip, so the
-   active tab still joins the panel without overflowing its box. */
-.docker-page .docker-tab.is-active::after {
-  position: absolute;
-  right: 8px;
-  bottom: 0;
-  left: 8px;
-  height: 2px;
-  border-radius: 2px 2px 0 0;
-  background: var(--accent);
-  content: "";
-}
-
-/* The count rides with the label rather than in a badge: a badge on six tabs
-   is six pieces of chrome, and the number is not a notification. */
-.docker-page .docker-tab em {
-  margin-left: 6px;
-  color: var(--faint);
-  font-size: var(--font-caption);
-  font-style: normal;
-  font-variant-numeric: tabular-nums;
-}
-
-.docker-page .docker-tab.is-active em {
-  color: var(--accent-text);
-}
-
-/* The six summary numbers. Fixed-width cards in a scrolling row rather than a
-   wrapping grid: they read as one band, and a card that drops to a second line
-   stops looking like part of it. */
-/* Six across while each card keeps room for its line ("88% 运行中"); fewer
-   columns, not wrapped words, when the page is narrower. Fixed at six, the
-   cards left 63px for that line at 1280px and split it after "运行". */
+/* Counts read as one band, with room to wrap on smaller windows. */
 .docker-stat-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -209,10 +141,8 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: 12px;
-  padding: 12px 14px;
-  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 4px 0 12px;
 }
 
 .docker-stat-icon {
@@ -1247,33 +1177,6 @@
 
 .docker-file-dialog {
   width: min(980px, 100%);
-}
-
-.docker-file-tabs {
-  display: flex;
-  gap: 6px;
-}
-
-.docker-file-tabs button {
-  padding: 5px 12px;
-  border: 1px solid var(--border-strong);
-  border-radius: 999px;
-  color: var(--muted);
-  background: var(--surface);
-  font: inherit;
-  font-size: var(--font-caption);
-  cursor: pointer;
-}
-
-.docker-file-tabs button.is-active {
-  border-color: var(--accent);
-  color: var(--accent-text);
-  background: var(--accent-soft);
-}
-
-.docker-file-tabs button:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
 }
 
 .docker-file-row {

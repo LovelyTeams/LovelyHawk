@@ -27,7 +27,7 @@ export interface EmergencyCommandGroupRun {
   category: EmergencyCommandCategory;
   commandHandles: readonly string[];
   entries: readonly EmergencyCommandGroupEntry[];
-  status: "loading" | "ready";
+  status: "loading" | "stopping" | "ready" | "stopped";
 }
 
 export interface EmergencyCommandState {
@@ -72,6 +72,7 @@ export type EmergencyCommandAction =
   | { type: "catalog-loaded"; scope: string; request: number; catalog: EmergencyCommandCatalog }
   | { type: "catalog-failed"; scope: string; request: number; error: string }
   | { type: "command-selected"; commandHandle: string }
+  | { type: "run-place-changed" }
   /** Puts one check in view and selected, e.g. one reopened from command history. */
   | { type: "command-revealed"; scope: string; snapshotHandle: string; commandHandle: string }
   | { type: "run-started"; scope: string; request: EmergencyCommandRunRequest }
@@ -83,7 +84,12 @@ export type EmergencyCommandAction =
     run: { id: number; snapshotHandle: string; category: EmergencyCommandCategory; commandHandles: readonly string[] };
   }
   | { type: "group-run-progress"; scope: string; runId: number; entry: EmergencyCommandGroupEntry }
-  | { type: "group-run-finished"; scope: string; runId: number };
+  | { type: "group-run-stop-requested"; scope: string; runId: number }
+  | { type: "group-run-finished"; scope: string; runId: number; stopped?: boolean };
+
+export function emergencyCommandBusy(state: EmergencyCommandState): boolean {
+  return state.runStatus === "loading" || state.groupRun?.status === "loading" || state.groupRun?.status === "stopping";
+}
 
 export function emergencyCommandReducer(
   state: EmergencyCommandState,
@@ -100,9 +106,9 @@ export function emergencyCommandReducer(
       return { ...state, collapsedCategories: collapsed };
     }
     case "search-changed":
-      return withVisibleSelection({ ...state, search: action.search });
+      return emergencyCommandBusy(state) ? state : withVisibleSelection({ ...state, search: action.search });
     case "catalog-started":
-      if (state.scope !== action.scope) return state;
+      if (state.scope !== action.scope || emergencyCommandBusy(state)) return state;
       return {
         ...state,
         catalogStatus: "loading",
@@ -140,7 +146,8 @@ export function emergencyCommandReducer(
         selectedCommandHandle: null,
       };
     case "command-selected":
-      if (!state.catalog?.commands.some((command) => command.commandHandle === action.commandHandle)) return state;
+      if (emergencyCommandBusy(state) ||
+        !state.catalog?.commands.some((command) => command.commandHandle === action.commandHandle)) return state;
       return {
         ...state,
         selectedCommandHandle: action.commandHandle,
@@ -150,10 +157,13 @@ export function emergencyCommandReducer(
         runError: null,
         groupRun: null,
       };
+    case "run-place-changed":
+      return emergencyCommandBusy(state) ? state : { ...state,
+        runStatus: "idle", runRequest: null, result: null, runError: null, groupRun: null };
     case "command-revealed": {
       // Never in the middle of a run: the operator would lose what is running.
       if (state.scope !== action.scope || state.catalog?.snapshotHandle !== action.snapshotHandle ||
-        state.runStatus === "loading" || state.groupRun?.status === "loading") return state;
+        emergencyCommandBusy(state)) return state;
       const command = state.catalog.commands.find((entry) => entry.commandHandle === action.commandHandle);
       if (command === undefined) return state;
       return {
@@ -170,7 +180,7 @@ export function emergencyCommandReducer(
       };
     }
     case "run-started":
-      if (state.scope !== action.scope || state.catalogStatus !== "ready" || state.groupRun?.status === "loading" ||
+      if (state.scope !== action.scope || state.catalogStatus !== "ready" || emergencyCommandBusy(state) ||
         state.catalog?.snapshotHandle !== action.request.snapshotHandle ||
         state.selectedCommandHandle !== action.request.commandHandle ||
         !state.catalog.commands.some((command) => command.commandHandle === action.request.commandHandle)) return state;
@@ -194,7 +204,7 @@ export function emergencyCommandReducer(
       const catalog = state.catalog;
       if (state.scope !== action.scope || state.catalogStatus !== "ready" || catalog === null ||
         catalog.snapshotHandle !== action.run.snapshotHandle || action.run.commandHandles.length === 0 ||
-        state.runStatus === "loading" || state.groupRun?.status === "loading" ||
+        emergencyCommandBusy(state) || new Set(action.run.commandHandles).size !== action.run.commandHandles.length ||
         !action.run.commandHandles.every((handle) => catalog.commands.some((command) =>
           command.commandHandle === handle && command.category === action.run.category))) return state;
       return {
@@ -213,10 +223,17 @@ export function emergencyCommandReducer(
         run.commandHandles[run.entries.length] !== action.entry.commandHandle) return state;
       return { ...state, groupRun: { ...run, entries: [...run.entries, action.entry] } };
     }
+    case "group-run-stop-requested": {
+      const run = state.groupRun;
+      if (run === null || !sameGroupRun(state, run, action.scope, action.runId)) return state;
+      return { ...state, groupRun: { ...run, status: "stopping" } };
+    }
     case "group-run-finished": {
       const run = state.groupRun;
       if (run === null || !sameGroupRun(state, run, action.scope, action.runId)) return state;
-      return { ...state, groupRun: { ...run, status: "ready" } };
+      if (run.entries.length < run.commandHandles.length && !action.stopped) return state;
+      return { ...state, groupRun: { ...run,
+        status: run.entries.length === run.commandHandles.length ? "ready" : "stopped" } };
     }
   }
 }
@@ -254,6 +271,6 @@ function sameGroupRun(
   scope: string,
   runId: number,
 ): boolean {
-  return state.scope === scope && run.id === runId && run.status === "loading" &&
+  return state.scope === scope && run.id === runId && (run.status === "loading" || run.status === "stopping") &&
     state.catalog?.snapshotHandle === run.snapshotHandle;
 }

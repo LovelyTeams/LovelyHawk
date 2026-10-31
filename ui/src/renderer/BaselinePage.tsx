@@ -244,10 +244,8 @@ export function BaselinePage({
         <BaselineEmptyPanel title="基线目录为空" detail="手动刷新本地目录后重试。" />
       ) : (
         <>
-          <nav className="baseline-tabs" aria-label="安全基线视图">
-            {/* The half-switch leads the row, where the other two halves also
-                put it, so it does not jump across the window when clicked. */}
-            {modeSwitch}
+          {modeSwitch}
+          <nav className={`baseline-tabs view-tabs${modeSwitch ? " view-tabs-underline" : ""}`} aria-label="安全基线视图">
             {tabs.map((tab) => (
               <button key={tab} type="button" className={state.tab === tab ? "is-active" : ""}
                 aria-current={state.tab === tab ? "page" : undefined}

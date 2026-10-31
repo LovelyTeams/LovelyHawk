@@ -525,7 +525,7 @@ export function DockerPage({ bindingHandle, api, initialState, onInvestigate }: 
       {/* Counts on the tabs, because "how many networks are there" is a
           question the operator is asking anyway and the tab strip was empty
           space that could answer it without a click. */}
-      <nav className="docker-tabs" aria-label="Docker 资源视图" hidden={visibleState.snapshotStatus === "error" && visibleState.snapshot === null}>
+      <nav className="docker-tabs view-tabs" aria-label="Docker 资源视图" hidden={visibleState.snapshotStatus === "error" && visibleState.snapshot === null}>
         {tabs.map((tab) => {
           const count = dockerTabCount(visibleState, tab);
           return (

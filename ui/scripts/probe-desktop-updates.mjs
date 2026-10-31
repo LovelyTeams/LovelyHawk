@@ -187,7 +187,7 @@ try {
   await session.send("Runtime.enable");
   await session.send("Log.enable");
   await session.send("Page.bringToFront");
-  await waitFor(() => session.evaluate("document.querySelector('[data-testid=\"app-version\"]')?.textContent === 'v0.0.2'"), { label: "the native app version" });
+  await waitFor(() => session.evaluate("document.querySelector('[data-testid=\"app-version\"]')?.textContent === 'v0.0.3'"), { label: "the native app version" });
   check("version is shown at the far right of the status bar", await session.evaluate("document.querySelector('.statusbar-end')?.lastElementChild?.dataset.testid === 'app-version'"));
 
   if (!panorama) {
