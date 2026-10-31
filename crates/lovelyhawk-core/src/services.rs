@@ -26,7 +26,6 @@ use crate::operations::PortableOperationJournal;
 use crate::packet_capture::PacketCaptureService;
 use crate::path_guard::PathGuard;
 use crate::report::ReportService;
-use crate::response_engine::ResponseEngineService;
 use crate::settings::SettingsRepository;
 use crate::sftp::SftpService;
 use crate::ssh::{BoundSshSession, SshService};
@@ -70,7 +69,6 @@ struct BackendServicesInner {
     baseline: BaselineService,
     java: JavaService,
     windows_incident: WindowsIncidentService,
-    response_engine: ResponseEngineService,
 }
 
 impl BackendServices {
@@ -132,7 +130,6 @@ impl BackendServices {
         let settings = SettingsRepository::new(store.clone(), crypto.clone());
         let ai = runtime.map(|runtime| AiService::new(runtime, settings.clone()));
         let windows_incident = WindowsIncidentService::with_store(store.clone());
-        let response_engine = ResponseEngineService::new(ssh.clone(), target.clone());
         Ok(Self {
             inner: Arc::new(BackendServicesInner {
                 target,
@@ -160,7 +157,6 @@ impl BackendServices {
                 baseline,
                 java,
                 windows_incident,
-                response_engine,
                 store,
             }),
         })
@@ -270,10 +266,6 @@ impl BackendServices {
 
     pub fn commands(&self) -> &CommandWorkbenchService {
         &self.inner.commands
-    }
-
-    pub fn response_engine(&self) -> &ResponseEngineService {
-        &self.inner.response_engine
     }
 
     pub fn activate_target(&self, identity: TargetIdentity) -> CoreResult<TargetGuard> {

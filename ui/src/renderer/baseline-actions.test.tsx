@@ -123,6 +123,17 @@ describe("baseline change controls", () => {
         ask={async () => false} receipt={kept} onReceipt={() => undefined} onChanged={() => undefined} />,
     );
 
+  it("keeps attribute and audit changes immediate and still planned", () => {
+    for (const recommendation of ["权限符合策略", "规则已保存并载入"]) {
+      const html = render({ ...item, component: "system", recommendation,
+        valueKind: { kind: "choice", options: [recommendation] } }, status("value", "mode:0666,uid:0,gid:42"));
+      expect(html).toContain("不会重启服务");
+      expect(html).toContain("查看修改计划");
+      expect(html).not.toContain('type="radio"');
+      expect(html).not.toContain("稍后由你手动重载");
+    }
+  });
+
   // The rescan after a change remounts the panel; a receipt it kept itself was
   // gone before anyone could read it, so the page keeps it and hands it back.
   it("shows the receipt the page kept, and none of its own", () => {

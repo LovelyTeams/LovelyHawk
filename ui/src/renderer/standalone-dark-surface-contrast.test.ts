@@ -17,10 +17,14 @@ describe("standalone dark-surface foregrounds", () => {
     expect(css).toMatch(/\.application-log-entry dd \{[^}]*color: var\(--console-text\);/u);
   });
 
-  it("gives Integrity dark cards an explicit inherited console foreground", () => {
+  it("gives Integrity an explicit surface and inherited readable foreground", () => {
     const css = readFileSync(new URL("./integrity.css", import.meta.url), "utf8");
-    expect(css).toMatch(/\.integrity-page \{[^}]*color: var\(--console-text\);/u);
+    expect(css).toMatch(/\.integrity-page \{[^}]*background: var\(--surface\);[^}]*color: var\(--text\);/u);
     expect(css).toMatch(/\.integrity-heading-actions button,[\s\S]*?color: inherit;/u);
+    for (const theme of THEMES) {
+      expect(contrastRatio(themeToken(table, theme.id, "text"), themeToken(table, theme.id, "surface")),
+        `${theme.id}: Integrity text on surface`).toBeGreaterThanOrEqual(7);
+    }
   });
 
   it("keeps console foregrounds readable in every registered theme", () => {

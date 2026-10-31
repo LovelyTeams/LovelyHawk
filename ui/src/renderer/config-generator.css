@@ -272,9 +272,8 @@
 .config-preview > header span { color: var(--accent-text); font-size: var(--font-caption); font-weight: 600; }
 .config-preview > header strong { overflow: hidden; color: var(--text-secondary); font-size: var(--font-small); text-overflow: ellipsis; white-space: nowrap; }
 .config-preview > header button { width: 27px; height: 27px; color: var(--muted); background: var(--surface); border: 1px solid var(--border); border-radius: 7px; font-size: var(--font-subtitle); }
-.config-artifact-tabs { display: flex; gap: 2px; overflow-x: auto; padding: 7px 7px 0; background: var(--surface-alt); }
-.config-artifact-tabs button { flex: none; max-width: 220px; overflow: hidden; padding: 7px 9px; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; background: transparent; border: 0; border-radius: 6px 6px 0 0; font-family: "Cascadia Mono", monospace; font-size: var(--font-caption); }
-.config-artifact-tabs button[aria-selected="true"] { color: var(--accent-text); background: var(--surface); box-shadow: var(--shadow-sm); }
+.config-artifact-tabs { padding-inline: 12px; }
+.config-artifact-tabs button { max-width: 220px; overflow: hidden; text-overflow: ellipsis; font-family: "Cascadia Mono", monospace; font-size: var(--font-caption); }
 .config-artifact-tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 /* Grows into spare height but never below its text box's own minimum: a
    panel allowed to shrink further let the text spill under the notes and

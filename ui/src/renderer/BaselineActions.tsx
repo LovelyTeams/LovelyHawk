@@ -49,7 +49,7 @@ export async function performBaselineAction(
         : null,
       action.kind === "restore"
         ? "放回前会核对这些文件仍与当时改完时完全一致；之后又被改过就不放回，以免覆盖别人的改动。"
-        : "这只改配置文件，不代表业务已经恢复健康；改完请用业务自己的方式核对。",
+        : "这次变更的范围与生效方式以上面的计划为准；结果不代表业务已经恢复健康，请用业务自己的方式核对。",
       `这次确认只对这一个计划有效，${Math.ceil(plan.expiresInSeconds / 60)} 分钟内有效。`,
     ].filter((line): line is string => line !== null).join("\n\n");
     const approved = await ask(
@@ -151,6 +151,8 @@ export function BaselineChangePanel({ item, status, bindingHandle, api, ask, rec
 }) {
   const [value, setValue] = useState(item.recommendation);
   const [reload, setReload] = useState<BaselineReloadChoice>("apply-now");
+  const immediate = item.valueKind.kind === "choice" &&
+    item.valueKind.options.some((option) => option === "权限符合策略" || option === "规则已保存并载入");
   const { busy, error, run } = useAction(`${bindingHandle}:${item.itemHandle}`, onReceipt);
   useEffect(() => { setValue(item.recommendation); }, [item.itemHandle, item.recommendation]);
   const blocked = baselineChangeBlockedReason(item, status);
@@ -167,7 +169,7 @@ export function BaselineChangePanel({ item, status, bindingHandle, api, ask, rec
       {blocked !== null ? <p className="baseline-change-blocked" data-testid="baseline-change-blocked">{blocked}</p> : (
         <>
           <div className="baseline-change-fields">
-            <label>改为
+            {immediate ? <p className="baseline-change-target">操作目标：<strong>{item.recommendation}</strong></p> : <label>改为
               {item.valueKind.kind === "choice" ? (
                 <select value={value} onChange={(event) => setValue(event.target.value)} data-testid="baseline-change-value">
                   {item.valueKind.options.map((option) => (
@@ -178,8 +180,8 @@ export function BaselineChangePanel({ item, status, bindingHandle, api, ask, rec
                 <input value={value} inputMode="numeric" maxLength={10} data-testid="baseline-change-value"
                   onChange={(event) => setValue(event.target.value.trim())} />
               )}
-            </label>
-            <fieldset>
+            </label>}
+            {immediate ? <p>属性或运行规则会立即生效，计划列出具体差异和恢复条件；不会重启服务。</p> : <fieldset>
               <legend>生效方式</legend>
               {(["apply-now", "defer"] as const).map((choice) => (
                 <label key={choice}>
@@ -188,7 +190,7 @@ export function BaselineChangePanel({ item, status, bindingHandle, api, ask, rec
                   {RELOAD_LABELS[choice]}
                 </label>
               ))}
-            </fieldset>
+            </fieldset>}
           </div>
           {valueError !== null ? <p className="baseline-change-error" role="alert">{valueError}</p> : null}
           <div className="baseline-change-actions">
@@ -196,7 +198,7 @@ export function BaselineChangePanel({ item, status, bindingHandle, api, ask, rec
               disabled={busy || valueError !== null || value === status?.observed}
               title={value === status?.observed ? "已经是这个值" : undefined}
               onClick={() => void run(() => performBaselineAction(api, bindingHandle, {
-                kind: "change", changes: [{ itemHandle: item.itemHandle, value }], reload,
+                kind: "change", changes: [{ itemHandle: item.itemHandle, value }], reload: immediate ? "apply-now" : reload,
               }, ask), onChanged)}>
               {busy ? "处理中…" : "查看修改计划…"}
             </button>

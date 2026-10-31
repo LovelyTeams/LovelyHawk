@@ -266,7 +266,7 @@ export function DockerFileDialog({
           <h2>容器文件</h2>
           <p>{containerName}</p>
         </header>
-        <nav className="docker-file-tabs" aria-label="文件操作">
+        <nav className="docker-file-tabs view-tabs view-tabs-underline" aria-label="文件操作">
           {(["browse", "edit", "copy"] as const).map((entry) => (
             <button key={entry} type="button" aria-pressed={mode === entry} className={mode === entry ? "is-active" : undefined}
               data-testid={`docker-file-mode-${entry}`}

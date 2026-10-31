@@ -885,7 +885,7 @@ impl ProcessInvestigationAction {
             Self::Uptime => "运行时长",
             Self::SuspiciousPath => "可疑路径检测",
             Self::HiddenProcess => "隐藏进程检测",
-            Self::LdPreload => "LD_PRELOAD 检测",
+            Self::LdPreload => "预加载、会话与映射关联",
             Self::DeletedExecutable => "已删除可执行文件",
             Self::SuspiciousNetwork => "可疑网络连接",
             Self::CryptoMining => "挖矿特征检测",
@@ -3623,7 +3623,11 @@ impl SystemInfoService {
             .execute_bound(session, request.command(), request.action.timeout())
             .await?;
         self.target.validate(session.target())?;
-        if output.timed_out || output.exit_code.is_some_and(|code| code != 0) {
+        if output.timed_out
+            || output.exit_code.is_some_and(|code| {
+                code != 0 && !(request.action == ProcessInvestigationAction::LdPreload && code == 1)
+            })
+        {
             return Err(command_failed("process investigation", &output));
         }
         let (bounded, truncated) = bounded_process_output(&output.output);
@@ -8012,6 +8016,9 @@ fn parse_process_identity(output: &str) -> CoreResult<ProcessIdentitySnapshot> {
 }
 
 fn process_investigation_command(pid: u32, action: ProcessInvestigationAction) -> String {
+    if action == ProcessInvestigationAction::LdPreload {
+        return crate::command_workbench::process_correlation_command(pid);
+    }
     let pid = shq(&pid.to_string());
     let probe = match action {
         ProcessInvestigationAction::CommandLine => {
@@ -8100,7 +8107,7 @@ fn process_investigation_command(pid: u32, action: ProcessInvestigationAction) -
             "if ps -p \"$p\" >/dev/null 2>&1; then printf 'ps visibility\\tvisible\\n'; else printf 'ps visibility\\tnot-visible\\n'; fi; if [ -d \"/proc/$p\" ]; then printf 'proc visibility\\tpresent\\n'; else printf 'proc visibility\\tabsent\\n'; fi"
         }
         ProcessInvestigationAction::LdPreload => {
-            "tr '\\0' '\\n' < \"/proc/$p/environ\" 2>/dev/null | grep -E '^(LD_PRELOAD|LD_LIBRARY_PATH)=' || printf 'No LD_PRELOAD or LD_LIBRARY_PATH in process environment\\n'"
+            unreachable!("handled by the shared bounded collector")
         }
         ProcessInvestigationAction::DeletedExecutable => {
             "exe=$(readlink \"/proc/$p/exe\" 2>/dev/null); printf '%s\\n' \"$exe\"; case \"$exe\" in *' (deleted)') printf 'Result\\tdeleted executable\\n';; *) printf 'Result\\texecutable present\\n';; esac"

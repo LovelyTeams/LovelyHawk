@@ -57,6 +57,20 @@ fn subject(line: &str) -> LineSubject<'_> {
     if line.is_empty() {
         return LineSubject::None;
     }
+    // Bounded collectors name the file before a fixed explanation. Split at
+    // the last delimiter so a pipe in a hostile file name stays in the path
+    // and is rejected, instead of offering an unrelated prefix as a file.
+    if let Some(observation) = line
+        .strip_prefix("关注：")
+        .or_else(|| line.strip_prefix("文件属性："))
+    {
+        return match observation.rsplit_once(" | ") {
+            Some((path, _)) => accept(path)
+                .map(LineSubject::Absolute)
+                .unwrap_or(LineSubject::None),
+            None => LineSubject::None,
+        };
+    }
     // `ls` heads each directory of a multi-directory listing with its path.
     if let Some(heading) = line.strip_suffix(':')
         && !heading.contains(' ')
@@ -195,6 +209,34 @@ pub fn paths_in_output(output: &str) -> Vec<(u32, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bounded_observation_subjects_preserve_the_complete_path_or_refuse_it() {
+        let output = "# 范围：当前账号\n关注：/root/.bash_history | 第 4 行：内联口令；原文未输出\n关注：/var/www/site backup.sql | 站点导出文件\n关注：PID 42 | 存在 LD_PRELOAD\n缺口：/etc/secret：权限不足";
+        assert_eq!(
+            paths_in_output(output),
+            vec![
+                (1, "/root/.bash_history".to_owned()),
+                (2, "/var/www/site backup.sql".to_owned()),
+            ]
+        );
+        assert_eq!(
+            path_in_line(
+                "文件属性：/var/www/folder /etc/id_rsa | -rw------- 1 root root 12 Oct 31 12:00 /var/www/folder /etc/id_rsa"
+            ),
+            Some("/var/www/folder /etc/id_rsa")
+        );
+        for line in [
+            "关注：/var/www/prefix | injected.php | 第 1 行：代码特征",
+            "关注：/var/www/a;touch-marker.php | 第 1 行：代码特征",
+            "关注：/var/www/../other.php | 第 1 行：代码特征",
+            "关注：/var/www/page.php | /etc/passwd | 伪造说明",
+            "关注：/var/www/line\nbreak.php | 第 1 行：代码特征",
+            "文件属性：/var/www/prefix | suffix.key | -rw------- 1 root root 12 Oct 31 12:00 /var/www/prefix | suffix.key",
+        ] {
+            assert_eq!(path_in_line(line), None, "{line}");
+        }
+    }
 
     #[test]
     fn reads_the_path_out_of_a_long_listing() {

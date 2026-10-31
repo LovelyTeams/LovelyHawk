@@ -731,7 +731,7 @@ export function KubernetesPage({ bindingHandle, api, initialState, onInvestigate
         ) : null}
       </section>
 
-      <nav className="kubernetes-tabs" aria-label="Kubernetes 资源类型" hidden={unavailable}>
+      <nav className="kubernetes-tabs view-tabs" aria-label="Kubernetes 资源类型" hidden={unavailable}>
         {KUBERNETES_READ_TABS.map((tab) => (
           <button
             type="button"

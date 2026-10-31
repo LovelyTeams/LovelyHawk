@@ -1,3 +1,59 @@
+/* View navigation stays quieter than action buttons. Nested views use a rule. */
+.view-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 3px 0;
+  scrollbar-width: thin;
+}
+.view-tabs[hidden] { display: none; }
+.view-tabs > button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 11px;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  box-shadow: none;
+  font: inherit;
+  font-size: var(--font-small);
+  font-weight: 500;
+  line-height: 1.5;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.view-tabs > button:hover:not(:disabled) { color: var(--text); background: var(--surface-hover); }
+.view-tabs > button:is([aria-current="page"], [aria-pressed="true"], [aria-selected="true"]) {
+  color: var(--text);
+  background: var(--surface-inset);
+  font-weight: 600;
+}
+.view-tabs > button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.view-tabs > button:disabled { cursor: not-allowed; opacity: .55; }
+.view-tabs > button em { color: var(--muted); font-size: var(--font-caption); font-style: normal; font-weight: 400; font-variant-numeric: tabular-nums; }
+.view-tabs-underline { gap: 20px; padding-block: 0; border-bottom: 1px solid var(--border); }
+.view-tabs-underline > button { position: relative; min-height: 38px; padding: 8px 2px; border-radius: 0; }
+.view-tabs-underline > button:hover:not(:disabled) { background: transparent; }
+.view-tabs-underline > button:is([aria-current="page"], [aria-pressed="true"], [aria-selected="true"]) { color: var(--accent-text); background: transparent; }
+.view-tabs-underline > button:is([aria-current="page"], [aria-pressed="true"], [aria-selected="true"])::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: var(--accent);
+  content: "";
+}
+
 @font-face {
   font-family: "Inter";
   src: url("/fonts/Inter-Regular.ttf") format("truetype");
@@ -539,7 +595,7 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 1180px) {
-  .app-frame:not(.is-rail) { grid-template-columns: clamp(200px, var(--sidebar-width, 240px), 24vw) minmax(0, 1fr); }
+  .app-frame:not(.is-rail):not(.is-welcome) { grid-template-columns: clamp(200px, var(--sidebar-width, 240px), 24vw) minmax(0, 1fr); }
   .page { width: calc(100% - 32px); }
   .notes-workbench { grid-template-columns: 290px minmax(0, 1fr); }
   .connection-manager-body { grid-template-columns: 275px minmax(0, 1fr); }

@@ -111,7 +111,7 @@ describe("integrity read-only contract", () => {
     expect(isIntegrityCreationPoll({ ...running, fileCount: 3 })).toBe(false);
     expect(isIntegrityCreationPoll({ ...running, stage: "completed", fileCount: 812, pathCount: 4 })).toBe(true);
     expect(isIntegrityCreationPoll({ ...running, stage: "completed" })).toBe(false);
-    expect(isIntegrityCreationPoll({ ...running, stage: "completed", fileCount: 812, pathCount: 7 })).toBe(false);
+    expect(isIntegrityCreationPoll({ ...running, stage: "completed", fileCount: 812, pathCount: 11 })).toBe(false);
     expect(isIntegrityCreationPoll({ ...running, stage: "failed" })).toBe(true);
     expect(isIntegrityCreationPoll({ ...running, stage: "paused" })).toBe(false);
     expect(isIntegrityCreationPoll({ ...running, path: "/etc" })).toBe(false);
@@ -122,7 +122,7 @@ describe("integrity read-only contract", () => {
   it("accepts only the fixed preset catalog", () => {
     const catalog = {
       presets: INTEGRITY_PRESET_DEFINITIONS.map((preset) => ({ ...preset })),
-      maximumSelected: 6,
+      maximumSelected: 10,
     };
     expect(isIntegrityPresetCatalog(catalog)).toBe(true);
     // The page shows only the label, so each label has to name its path.

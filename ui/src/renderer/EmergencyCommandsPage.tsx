@@ -36,6 +36,7 @@ import {
 } from "./emergency-command-icons";
 import {
   createEmergencyCommandState,
+  emergencyCommandBusy,
   emergencyCommandReducer,
   type EmergencyCommandGroupRun,
   type EmergencyCommandLoadStatus,
@@ -93,7 +94,8 @@ export function EmergencyCommandsPage({ bindingHandle, api, rerun = null, runIn 
   // actually waited for.
   const [runElapsedMs, setRunElapsedMs] = useState<number | null>(null);
   const runStartedAtRef = useRef<number | null>(null);
-  const [groupRun, setGroupRun] = useState<{ version: number; category: EmergencyCommandCategory } | null>(null);
+  const [groupRun, setGroupRun] = useState<{ version: number; category: EmergencyCommandCategory; commandHandles: string[] } | null>(null);
+  const stopGroupRef = useRef(false);
   const requestRef = useRef(0);
   const consumedRunVersion = useRef(0);
   const consumedGroupRunVersion = useRef(0);
@@ -138,7 +140,7 @@ export function EmergencyCommandsPage({ bindingHandle, api, rerun = null, runIn 
   // the list is here, and say plainly when the list does not have it.
   useEffect(() => {
     if (runIn === null || consumedRunIn.current === runIn.key || scope === null ||
-      state.scope !== scope || state.catalog === null) return;
+      state.scope !== scope || state.catalog === null || emergencyCommandBusy(state)) return;
     consumedRunIn.current = runIn.key;
     const found = state.catalog.containers.find((container) =>
       container.kind === runIn.kind && container.name === runIn.name);
@@ -154,19 +156,20 @@ export function EmergencyCommandsPage({ bindingHandle, api, rerun = null, runIn 
       return;
     }
     setRunChoice({ kind: found.kind, name: found.name });
+    dispatch({ type: "run-place-changed" });
     setRerunNotice({
       scope,
       found: true,
       text: `运行位置已切到 ${label}。在左边选一项检查后点“运行只读调查”，或点分类旁的“快速执行”。`,
     });
-  }, [runIn, scope, state.catalog, state.scope]);
+  }, [runIn, scope, state.catalog, state.scope, state.runStatus, state.groupRun?.status]);
 
   useEffect(() => {
     if (rerun === null || consumedRerun.current === rerun.key || scope === null || bindingHandle === null ||
       state.scope !== scope || state.catalog === null) return;
     const { key } = rerun;
     const snapshotHandle = state.catalog.snapshotHandle;
-    const busyNow = state.runStatus === "loading" || state.groupRun?.status === "loading";
+    const busyNow = emergencyCommandBusy(state);
     let cancelled = false;
     if (busyNow) {
       consumedRerun.current = key;
@@ -269,9 +272,8 @@ export function EmergencyCommandsPage({ bindingHandle, api, rerun = null, runIn 
     if (groupRun === null || consumedGroupRunVersion.current === groupRun.version || scope === null ||
       bindingHandle === null || state.scope !== scope || state.catalog === null) return;
     consumedGroupRunVersion.current = groupRun.version;
-    const commandHandles = state.catalog.commands
-      .filter((command) => command.category === groupRun.category)
-      .map((command) => command.commandHandle);
+    // Freeze exactly the visible items named by the button, including a search.
+    const commandHandles = groupRun.commandHandles;
     if (commandHandles.length === 0) return;
     const run = {
       id: ++requestRef.current,
@@ -280,12 +282,14 @@ export function EmergencyCommandsPage({ bindingHandle, api, rerun = null, runIn 
       commandHandles,
     };
     let cancelled = false;
+    stopGroupRef.current = false;
     dispatch({ type: "group-run-started", scope, run });
     void (async () => {
       // The catalog runs one fixed command at a time, so a group is a strictly
       // sequential walk; a target switch or reload cancels the rest.
       for (const commandHandle of commandHandles) {
         if (cancelled) return;
+        if (stopGroupRef.current) break;
         const startedAt = Date.now();
         let entry;
         try {
@@ -311,7 +315,7 @@ export function EmergencyCommandsPage({ bindingHandle, api, rerun = null, runIn 
         if (cancelled) return;
         dispatch({ type: "group-run-progress", scope, runId: run.id, entry });
       }
-      if (!cancelled) dispatch({ type: "group-run-finished", scope, runId: run.id });
+      if (!cancelled) dispatch({ type: "group-run-finished", scope, runId: run.id, stopped: stopGroupRef.current });
     })();
     return () => {
       cancelled = true;
@@ -332,7 +336,7 @@ export function EmergencyCommandsPage({ bindingHandle, api, rerun = null, runIn 
   const groups = groupEmergencyCommands(filtered);
   const selected = state.catalog?.commands.find((command) =>
     command.commandHandle === state.selectedCommandHandle) ?? null;
-  const busy = state.runStatus === "loading" || state.groupRun?.status === "loading";
+  const busy = emergencyCommandBusy(state);
   const acting = pathActions.state;
   return (
     <main className="emergency-commands-page">
@@ -343,7 +347,7 @@ export function EmergencyCommandsPage({ bindingHandle, api, rerun = null, runIn 
         <div className="emergency-commands-search">
           <SearchIcon />
           <input aria-label="搜索命令" value={state.search} maxLength={256} placeholder="搜索命令标题、用途或分类"
-            disabled={state.catalog === null}
+            disabled={state.catalog === null || busy}
             onChange={(event) => dispatch({ type: "search-changed", search: event.currentTarget.value })} />
         </div>
         {/* Where the checks run. Only offered when the target actually has
@@ -354,12 +358,14 @@ export function EmergencyCommandsPage({ bindingHandle, api, rerun = null, runIn 
             <span>运行位置</span>
             <select
               value={runPlaceMissing ? "missing" : containerHandle ?? ""}
-              disabled={state.runStatus === "loading"}
+              disabled={busy}
               data-testid="emergency-commands-run-place"
               onChange={(event) => {
+                if (busy) return;
                 const picked = state.catalog?.containers.find((container) =>
                   container.containerHandle === event.currentTarget.value);
                 setRunChoice(picked === undefined ? null : { kind: picked.kind, name: picked.name });
+                dispatch({ type: "run-place-changed" });
               }}
             >
               {runPlaceMissing && runChoice !== null ? (
@@ -399,7 +405,7 @@ export function EmergencyCommandsPage({ bindingHandle, api, rerun = null, runIn 
             </span>
           )}
           <button type="button" className={catalogExpired ? "emergency-commands-reload is-attention" : "emergency-commands-reload"}
-            disabled={!current || state.catalogStatus === "loading" || state.runStatus === "loading"}
+            disabled={!current || state.catalogStatus === "loading" || busy}
             onClick={() => setRefreshVersion((value) => value + 1)}>
             <RefreshIcon />{state.catalogStatus === "loading" ? "加载中…" : "重新加载"}
           </button>
@@ -449,7 +455,15 @@ export function EmergencyCommandsPage({ bindingHandle, api, rerun = null, runIn 
             setRerunNotice(null);
             setRunVersion((value) => value + 1);
           }}
-          onRunGroup={(category) => setGroupRun((value) => ({ version: (value?.version ?? 0) + 1, category }))}
+          onRunGroup={(category) => setGroupRun((value) => ({
+            version: (value?.version ?? 0) + 1, category,
+            commandHandles: filtered.filter((command) => command.category === category).map((command) => command.commandHandle),
+          }))}
+          onStopGroup={() => {
+            if (scope === null || state.groupRun === null) return;
+            stopGroupRef.current = true;
+            dispatch({ type: "group-run-stop-requested", scope, runId: state.groupRun.id });
+          }}
           onPathMenu={pathActions.openMenu}
         />
       )}
@@ -493,7 +507,7 @@ export function EmergencyCommandsPage({ bindingHandle, api, rerun = null, runIn 
 
 export function EmergencyCommandWorkbench({ groups, commands = [], collapsed = [], selected, selectedHandle,
   runStatus, result, runError, search, elapsedMs = null, groupRun = null, busy = false, blockedReason = null,
-  onToggleCategory = () => undefined, onSelect, onRun, onRunGroup = () => undefined, onPathMenu }: {
+  onToggleCategory = () => undefined, onSelect, onRun, onRunGroup = () => undefined, onStopGroup, onPathMenu }: {
   groups: EmergencyCommandGroup[];
   commands?: readonly EmergencyCommandCatalogItem[];
   collapsed?: readonly EmergencyCommandCategory[];
@@ -512,6 +526,7 @@ export function EmergencyCommandWorkbench({ groups, commands = [], collapsed = [
   onSelect: (commandHandle: string) => void;
   onRun: () => void;
   onRunGroup?: (category: EmergencyCommandCategory) => void;
+  onStopGroup?: (() => void) | undefined;
   onPathMenu?: ((event: MouseEvent, offer: EmergencyCommandPathOffer) => void) | undefined;
 }) {
   return (
@@ -522,13 +537,13 @@ export function EmergencyCommandWorkbench({ groups, commands = [], collapsed = [
           detail={search.trim() === "" ? "当前没有可运行的调查项。" : "调整本地搜索条件。"} compact /> :
           groups.map((group) => <EmergencyCommandBranch key={group.category} group={group}
             collapsed={collapsed.includes(group.category)} selectedHandle={selectedHandle} busy={busy} blockedReason={blockedReason}
-            running={groupRun?.status === "loading" && groupRun.category === group.category}
+            running={(groupRun?.status === "loading" || groupRun?.status === "stopping") && groupRun.category === group.category}
             onToggle={() => onToggleCategory(group.category)} onSelect={onSelect}
             onRunGroup={() => onRunGroup(group.category)} />)}
       </aside>
       <section className="emergency-command-detail">
         {groupRun !== null ? <EmergencyCommandGroupView run={groupRun} commands={commands}
-          onPathMenu={onPathMenu} /> :
+          onStop={onStopGroup} onPathMenu={onPathMenu} /> :
           selected === null ? <EmergencyCommandEmpty title="未选择调查项" detail="从左侧选择一项内置命令。" /> : (
           <>
             <header>
@@ -599,6 +614,7 @@ function EmergencyCommandBranch({ group, collapsed, selectedHandle, busy, blocke
       {!collapsed && <div className="emergency-command-group-items">
         {group.commands.map((command) => <button type="button" key={command.commandHandle}
           className={selectedHandle === command.commandHandle ? "is-selected" : ""}
+          disabled={busy}
           aria-pressed={selectedHandle === command.commandHandle}
           onClick={() => onSelect(command.commandHandle)}>
           <span className="emergency-command-card-body">
@@ -615,9 +631,10 @@ function EmergencyCommandBranch({ group, collapsed, selectedHandle, busy, blocke
 }
 
 /** Sequential group run: one result block per finished step. */
-export function EmergencyCommandGroupView({ run, commands, onPathMenu }: {
+export function EmergencyCommandGroupView({ run, commands, onStop, onPathMenu }: {
   run: EmergencyCommandGroupRun;
   commands: readonly EmergencyCommandCatalogItem[];
+  onStop?: (() => void) | undefined;
   onPathMenu?: ((event: MouseEvent, offer: EmergencyCommandPathOffer) => void) | undefined;
 }) {
   const total = run.commandHandles.length;
@@ -626,32 +643,53 @@ export function EmergencyCommandGroupView({ run, commands, onPathMenu }: {
     (entry.result.resultKind !== "success" && entry.result.resultKind !== "empty")).length;
   const title = (commandHandle: string) =>
     commands.find((command) => command.commandHandle === commandHandle)?.title ?? "内置调查项";
-  const pending = run.status === "loading" && done < total ? run.commandHandles[done] ?? null : null;
+  const active = run.status === "loading" || run.status === "stopping";
+  const pending = active && done < total ? run.commandHandles[done] ?? null : null;
+  const attention = run.entries.filter((entry) => (entry.result?.findingLines.length ?? 0) > 0).length;
   return (
     <>
       <header>
         <EmergencyCommandIcon category={run.category} />
         <div>
           <h2>{emergencyCommandCategoryLabel(run.category)} · 快速执行</h2>
-          <p>按目录顺序运行该分组的 {total} 项只读调查，结果依次显示在下方。</p>
+          <p>按当前筛选依次运行 {total} 项只读调查。先查看关注线索，再展开各项输出核实。</p>
         </div>
       </header>
       <div className="emergency-command-progress">
-        <div className="emergency-command-progress-track" aria-label="分组执行进度">
+        <div className="emergency-command-progress-track" role="progressbar" aria-label="分组执行进度"
+          aria-valuemin={0} aria-valuemax={total} aria-valuenow={done}>
           <span style={{ width: `${total === 0 ? 0 : Math.round((done / total) * 100)}%` }} />
         </div>
         <p aria-live="polite">
-          {run.status === "loading" ? `正在执行第 ${Math.min(done + 1, total)} 项，共 ${total} 项` :
-            `已完成 ${total} 项`}{failed > 0 ? ` · ${failed} 项未成功` : ""}
+          {run.status === "stopping" ? "正在等待当前检查结束，不再执行后续项目" :
+            run.status === "loading" ? `正在执行第 ${Math.min(done + 1, total)} 项，共 ${total} 项` :
+              run.status === "stopped" ? `已停止 · 完成 ${done}/${total} 项，${total - done} 项未执行` :
+                `已完成 ${done} 项`}{failed > 0 ? ` · ${failed} 项未成功` : ""}
         </p>
+        <div className="emergency-command-run-summary">
+          <span>{done}/{total} 项已返回</span>
+          <span>{attention} 项有关注线索</span>
+          <span>{failed} 项未完整完成</span>
+          {active && onStop !== undefined && <button type="button" disabled={run.status === "stopping"} onClick={onStop}>
+            {run.status === "stopping" ? "正在停止后续检查…" : "停止后续检查"}
+          </button>}
+        </div>
+        {active && <p>停止后会保留已返回结果；当前命令仍会等到返回或超时，不代表远端进程已立即终止。</p>}
       </div>
       <ol className="emergency-command-steps">
         {run.entries.map((entry, index) => <li key={entry.commandHandle}>
-          <p className="emergency-command-step"><span>{index + 1}</span>{title(entry.commandHandle)}</p>
-          {entry.error !== null ? <EmergencyCommandError message={entry.error} compact /> :
-            entry.result === null ? null :
-              <EmergencyCommandResultView result={entry.result} elapsedMs={entry.elapsedMs}
-                onPathMenu={onPathMenu} />}
+          <details className="emergency-command-step-result" open={entry.error !== null ||
+            (entry.result !== null && (entry.result.findingLines.length > 0 ||
+              (entry.result.resultKind !== "success" && entry.result.resultKind !== "empty") || entry.result.truncated))}>
+            <summary><span className="emergency-command-step"><span>{index + 1}</span>{title(entry.commandHandle)}</span>
+              <span>{entry.result === null ? "未完成" : entry.result.findingLines.length > 0
+                ? `${entry.result.findingLines.length} 处关注` : emergencyCommandResultLabel(entry.result.resultKind)}</span>
+            </summary>
+            {entry.error !== null ? <EmergencyCommandError message={entry.error} compact /> :
+              entry.result === null ? null :
+                <EmergencyCommandResultView result={entry.result} elapsedMs={entry.elapsedMs}
+                  onPathMenu={onPathMenu} />}
+          </details>
         </li>)}
         {pending !== null && <li>
           <p className="emergency-command-step"><span>{done + 1}</span>{title(pending)}</p>
@@ -668,8 +706,10 @@ export function EmergencyCommandResultView({ result, elapsedMs = null, onPathMen
   onPathMenu?: ((event: MouseEvent, offer: EmergencyCommandPathOffer) => void) | undefined;
 }) {
   const successful = result.resultKind === "success" || result.resultKind === "empty";
+  const [focusFindings, setFocusFindings] = useState(false);
+  const hasFindings = result.findingLines.length > 0;
   return (
-    <div className={successful ? "emergency-command-result is-success" : "emergency-command-result is-failure"}>
+    <div className={`emergency-command-result ${successful ? hasFindings ? "is-attention" : "is-success" : "is-failure"}`}>
       <header>
         <strong>
           {successful ? <CheckIcon /> : null}
@@ -689,10 +729,18 @@ export function EmergencyCommandResultView({ result, elapsedMs = null, onPathMen
       {result.findingLines.length > 0 && result.findingReason !== null &&
         <p className="emergency-command-reason">{result.findingReason}</p>}
       {result.truncated && <p className="emergency-command-warning" role="status">输出已按行数或大小上限截断。</p>}
+      <div className="emergency-command-result-tools">
+        <div className="view-tabs view-tabs-underline" role="group" aria-label="结果显示范围">
+          <button type="button" aria-pressed={!focusFindings} onClick={() => setFocusFindings(false)}>全部输出</button>
+          <button type="button" aria-pressed={focusFindings} disabled={!hasFindings}
+            onClick={() => setFocusFindings(true)}>关注与缺口</button>
+        </div>
+        <span>{focusFindings ? "保留原始行号，完整上下文见全部输出" : "标记用于辅助核查，不代表入侵结论"}</span>
+      </div>
       {result.output.length === 0 ? <EmergencyCommandEmpty title="命令没有输出"
-        detail="固定调查项已完成，但没有可显示的匹配内容。" compact /> :
+        detail="没有可显示的内容；请结合执行状态、权限和工具情况判断，不能据此确认没有风险。" compact /> :
         <EmergencyCommandOutput output={result.output} findingLines={result.findingLines}
-          paths={result.paths} onPathMenu={onPathMenu} />}
+          focusFindings={focusFindings} paths={result.paths} onPathMenu={onPathMenu} />}
     </div>
   );
 }
@@ -705,23 +753,26 @@ export function EmergencyCommandResultView({ result, elapsedMs = null, onPathMen
  * through the handle that came back with the result, so the window never names
  * a path of its own.
  */
-export function EmergencyCommandOutput({ output, findingLines = [], paths = [], onPathMenu }: {
+export function EmergencyCommandOutput({ output, findingLines = [], paths = [], focusFindings = false, onPathMenu }: {
   output: string;
   findingLines?: readonly number[];
   paths?: readonly EmergencyCommandPathOffer[];
+  focusFindings?: boolean;
   onPathMenu?: ((event: MouseEvent, offer: EmergencyCommandPathOffer) => void) | undefined;
 }) {
-  const lines = output.split("\n");
   const abnormal = new Set(findingLines);
+  const lines = output.split("\n").map((line, index) => ({ line, index })).filter(({ line, index }) =>
+    !focusFindings || abnormal.has(index) || /^(缺口：|工具不可用：|# 范围：|# 已检查对象)/.test(line) ||
+      /permission denied|not permitted|not found|不可用|权限不足|未执行/i.test(line));
   const offers = new Map(paths.map((offer) => [offer.line, offer]));
   const actionable = onPathMenu !== undefined;
   return (
     <div className="emergency-command-output">
       <span className="emergency-command-gutter" aria-hidden="true">
-        {lines.map((_line, index) => <span key={index}
+        {lines.map(({ index }) => <span key={index}
           className={abnormal.has(index) ? "is-abnormal" : undefined}>{index + 1}</span>)}
       </span>
-      <pre>{lines.map((line, index) => {
+      <pre>{lines.map(({ line, index }) => {
         const offer = actionable ? offers.get(index) : undefined;
         const marks = [
           abnormal.has(index) ? "is-abnormal" : null,

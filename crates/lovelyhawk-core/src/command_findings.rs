@@ -134,6 +134,11 @@ const DANGEROUS_CAPABILITIES: [&str; 12] = [
 /// are never findings, whatever the rule says.
 pub fn informational(line: &str) -> bool {
     let trimmed = line.trim();
+    // A file name may itself contain diagnostic words. A collector has already
+    // classified these rows, so their names must not suppress the finding.
+    if trimmed.starts_with("关注：") {
+        return false;
+    }
     if trimmed.is_empty() || trimmed.starts_with("---") || trimmed.starts_with('#') {
         return true;
     }
@@ -463,6 +468,20 @@ pub fn any_hit(line: &str) -> bool {
     !line.trim().is_empty()
 }
 
+/// Fixed bounded collectors distinguish observations from scope and gaps.
+pub fn collection_finding(line: &str) -> bool {
+    line.starts_with("关注：")
+}
+
+pub fn credential_file_finding(line: &str) -> bool {
+    let attributes = line
+        .strip_prefix("文件属性：")
+        .and_then(|rest| rest.rsplit_once(" | "))
+        .map(|(_, attributes)| attributes)
+        .unwrap_or(line);
+    collection_finding(line) || ssh_key_exposure(attributes)
+}
+
 /// A process running out of a writable area, fetching code, or mining.
 pub fn suspicious_process(line: &str) -> bool {
     in_writable_area(line) || mentions(line, &REMOTE_EXECUTION) || mentions(line, &MINER_NAMES)
@@ -470,7 +489,14 @@ pub fn suspicious_process(line: &str) -> bool {
 
 /// A job or startup script that pulls something down and runs it.
 pub fn remote_execution_hint(line: &str) -> bool {
-    mentions(without_grep_prefix(line), &REMOTE_EXECUTION) || in_writable_area(line)
+    let content = without_grep_prefix(line).trim();
+    if content.starts_with('#') {
+        return false;
+    }
+    mentions(content, &REMOTE_EXECUTION)
+        || in_writable_area(content)
+        || (content.contains("PROMPT_COMMAND=")
+            && mentions(content, &["history -a", "tee ", "logger ", "script "]))
 }
 
 /// A shell history that can no longer record anything, or a recorded command
@@ -1127,6 +1153,14 @@ pub fn boot_event(line: &str) -> bool {
 /// uses has an entry; the table is checked against the catalog by test.
 static REASONS: &[(LineRule, &str)] = &[
     (
+        credential_file_finding as LineRule,
+        "标记的是凭据类文件的访问权限线索，或站点目录内的环境配置、备份和数据库文件。需要核对文件用途、站点映射与实际访问控制；文件存在不代表能够从网站下载。",
+    ),
+    (
+        collection_finding as LineRule,
+        "标记的是固定检查发现的线索，具体原因见该行。先核对来源、进程归属和实际用途；合法配置、维护或升级也可能命中，不能据此直接删除或结束进程。",
+    ),
+    (
         accepted_login as LineRule,
         "标红的是口令登录成功，或者有人直接登录到了 root；这两种都比密钥登录更该核实。",
     ),
@@ -1308,7 +1342,7 @@ static REASONS: &[(LineRule, &str)] = &[
     ),
     (
         remote_execution_hint as LineRule,
-        "标红的条目会下载并执行外部内容，或指向可写目录里的文件；计划任务和启动脚本里出现这些基本可以判定为植入。",
+        "标记的条目带下载执行特征、引用可写目录，或通过提示命令记录会话。需核对来源与用途，维护脚本也可能命中，不能直接判定为植入。",
     ),
     (
         tampered_or_telling_history as LineRule,
@@ -1430,6 +1464,40 @@ pub fn reason_for(rule: LineRule) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn credential_files_keep_permission_findings_and_add_site_clues() {
+        let output = "# 范围：目录检查\n文件属性：/root/id_rsa | -rw------- 1 root root 24 Oct 31 12:00 /root/id_rsa\n文件属性：/root/id_ed25519 | -rw-r--r-- 1 root root 24 Oct 31 12:00 /root/id_ed25519\n关注：/var/www/backup.zip | 需核查访问控制\n缺口：目录遍历失败";
+        assert_eq!(
+            super::finding_lines(output, Some(super::credential_file_finding)),
+            vec![2, 3]
+        );
+        assert_eq!(
+            super::finding_lines(
+                "关注：/var/www/未发现.php | 请求参数进入执行函数",
+                Some(super::collection_finding)
+            ),
+            vec![0]
+        );
+    }
+
+    #[test]
+    fn collected_clues_keep_scope_gaps_and_metadata_neutral() {
+        let output = "# 范围：当前账号\n关注：PID 42 | 存在 LD_PRELOAD，值未输出\n缺口：PID 43：权限不足\n# 属性：/etc/pam.d/sshd\n# 已检查对象 3";
+        assert_eq!(
+            super::finding_lines(output, Some(super::collection_finding)),
+            vec![1]
+        );
+        assert!(super::remote_execution_hint(
+            "PROMPT_COMMAND='history -a /var/log/session'"
+        ));
+        assert!(!super::remote_execution_hint(
+            "PROMPT_COMMAND='update_terminal_title'"
+        ));
+        assert!(!super::remote_execution_hint(
+            "/etc/profile:12:# PROMPT_COMMAND='history -a /tmp/commands'"
+        ));
+    }
+
     /// `lsattr -R` prints bare `path:` headers between its listings, and almost
     /// any path contains an "a" or an "i". Reading the attribute column instead
     /// of the whole line is what separates a real finding from all of /etc.

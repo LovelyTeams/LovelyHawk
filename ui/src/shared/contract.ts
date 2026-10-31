@@ -2,7 +2,6 @@ import type { WindowsRdpRequest, WindowsRdpStatus } from "./windows-rdp-contract
 import type { JavaClassStageResult, JavaHotUpdateRequest, JavaHotUpdateResponse } from "./java-hot-update-contract.js";
 import type { WindowsFileSaveResult, WindowsIncidentRequest, WindowsIncidentResponse } from "./windows-incident-contract.js";
 import type { NginxRepairRequest, NginxRepairResponse } from "./nginx-repair-contract.js";
-import type { ResponseEngineRequest, ResponseEngineResponse } from "./response-engine-contract.js";
 import type { LogRulesRequest, LogRulesResponse } from "./log-rules-contract.js";
 import type { AiAssistRequest, AiAssistResponse } from "./ai-assist-contract.js";
 import type { PostgresqlRuntimeRequest, PostgresqlRuntimeResponse } from "./postgresql-runtime-contract.js";
@@ -207,7 +206,6 @@ export * from "./local-browser-contract.js";
 export * from "./packet-capture-live-contract.js";
 export * from "./application-log-contract.js";
 export * from "./integrity-contract.js";
-export * from "./response-engine-contract.js";
 
 export const BACKEND_PROTOCOL = "lovelyhawk-backend/v1" as const;
 
@@ -477,8 +475,6 @@ export interface LovelyHawkApi {
   packetCaptureEvidence(request: PacketCaptureEvidenceRequest): Promise<PacketCaptureEvidenceResult | null>;
   podFileEvidence(request: PodFileEvidenceRequest): Promise<PodFileEvidenceResult | null>;
   nginxRepair(request: NginxRepairRequest): Promise<NginxRepairResponse>;
-  /** 应急处置：扫描入侵痕迹，按句柄逐条计划、确认、执行并轮询复验。 */
-  responseEngine(request: ResponseEngineRequest): Promise<ResponseEngineResponse>;
   /** The operator's own log match rules; local only, nothing reaches a target. */
   logRules(request: LogRulesRequest): Promise<LogRulesResponse>;
   /** Asks a configured AI provider to read what a page holds; only on the operator's request. */
@@ -1051,7 +1047,7 @@ export function isBootstrapResult(value: unknown): value is BootstrapResult {
     typeof value.appVersion === "string" &&
     value.protocolVersion === BACKEND_PROTOCOL &&
     Array.isArray(value.pages) &&
-    value.pages.length === 15 &&
+    value.pages.length === 14 &&
     value.pages.every(isPageDescriptor) &&
     new Set(value.pages.map((page) => page.id)).size === value.pages.length &&
     isStringArray(value.securityReferenceFavoriteIds, 512)

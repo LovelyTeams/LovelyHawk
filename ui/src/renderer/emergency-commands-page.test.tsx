@@ -12,6 +12,7 @@ import {
   EmergencyCommandEmpty,
   EmergencyCommandError,
   EmergencyCommandGroupView,
+  EmergencyCommandOutput,
   EmergencyCommandResultView,
   EmergencyCommandsPage,
   EmergencyCommandStatus,
@@ -182,6 +183,29 @@ describe("EmergencyCommandsPage", () => {
     // Nothing is hidden: what the target printed reaches the operator.
     expect(html).toContain("root:$6$salt$hash");
     expect(html).toContain("输出已按行数或大小上限截断");
+    expect(html).toContain("权限不足");
+  });
+
+  it("keeps gaps and original line numbers when focusing on findings", () => {
+    const html = renderToStaticMarkup(<EmergencyCommandOutput
+      output={'# 范围：当前账号\n普通信息\n关注：<img src=x>\n缺口：权限不足\n# 已检查对象 2'}
+      findingLines={[2]} focusFindings />);
+    expect(html).not.toContain("普通信息");
+    expect(html).toContain("缺口：权限不足");
+    expect(html).toContain("# 范围：当前账号");
+    expect(html).toContain('class="is-abnormal">3</span>');
+    expect(html).toContain("&lt;img src=x&gt;");
+    expect(html).not.toContain("<img");
+  });
+
+  it("shows incomplete group execution without claiming all checks finished", () => {
+    const html = renderToStaticMarkup(<EmergencyCommandGroupView commands={[command]} run={{
+      id: 1, snapshotHandle: "opaque-snapshot", category: "network", status: "stopped",
+      commandHandles: [command.commandHandle, "pending-check"],
+      entries: [{ commandHandle: command.commandHandle, result, error: null, elapsedMs: 100 }],
+    }} />);
+    expect(html).toContain("完成 1/2 项，1 项未执行");
+    expect(html).not.toContain("已完成 2 项");
     expect(html).toContain("权限不足");
   });
 

@@ -35,6 +35,30 @@
  },
  "verificationRuns": [
   {
+   "id": "desktop-view-layout-2026-10-31",
+   "command": "pnpm ui:check; cargo build --locked --package lovelyhawk-desktop; node tools/lab/probe-auth-baseline.mjs; node ui/scripts/probe-command-workbench.mjs; node ui/scripts/run-debug-smoke.mjs --width 1280 --height 900; pnpm release:source-gate; pnpm release:ledger-gate",
+   "result": "Passed",
+   "notes": "Shared soft primary tabs and underline secondary views; compact FIM options, flat audit and workbench lists, baseline panes and container summaries. UI 143 files / 1189 tests. Actual owned Debian 12 x86_64 SSH plus debug WebView2: 41/41 (24 API, 17 UI), target/lab-auth-baseline/58296e7e-4013-4b5d-b08a-0b106717a581, observed from 2026-10-31T01:04:33.756Z; plan/confirm/repair/restore, FIM, selected context, empty filter/log states, keyboard focus and 900/1440px light/dark. Final workbench CDP with synthetic API: 19/19, target/desktop-debug/command-workbench-511fbace-a72a-4e92-9c39-a696529f195e/evidence, observed from 2026-10-31T01:06:16.864Z; underline switch, stop, stale target, failure, empty/hostile output and 760px layout. Full disconnected 14-page/overlay smoke 92/92: target/desktop-debug/5f9e7748-2342-4d4d-8526-287e4c207341/evidence; only workbench frame styling changed afterward and UI/build/workbench CDP rerun. Zero observed Runtime/console/Log errors; smoke zero network errors. No production target changed; owned container removed. Node 24.13.0 differs from required 26.13.x; no additional runtime/platform or release-package acceptance. Details docs/DESKTOP_EXPERIENCE_UPDATES.md. No Pending statuses changed."
+  },
+  {
+   "id": "desktop-authentication-baseline-2026-10-31",
+   "command": "pnpm ui:check; cargo test --locked -p lovelyhawk-core --lib; cargo test --locked -p lovelyhawk-backend -p lovelyhawk-desktop -- --quiet; cargo clippy --locked -p lovelyhawk-core -p lovelyhawk-backend -p lovelyhawk-desktop --all-targets --no-deps -- -D warnings; node tools/lab/probe-command-observations.mjs; node tools/lab/probe-auth-audit-fixture.mjs; cargo build --locked -p lovelyhawk-backend -p lovelyhawk-desktop; node tools/lab/probe-auth-baseline.mjs",
+   "result": "Passed",
+   "notes": "Four selective PR #5 integrations reuse process/workbench, baseline and integrity pages. Catalogs: 147 commands, 113 baseline checks, 10 integrity presets; no new page/API or distributed Python/collector files. UI 1189; core 1286 with 12 ignored; backend 778; desktop 53 with 1 ignored. Owned WSL collector fixtures 35/35: target/lab-command-observations/2b5b0568-738c-423a-8c40-586f580202eb. Modeled auditctl in private chroot 15/15 including partial recovery and unknown environment refusal: target/lab-auth-audit-fixture/6e368e7d-deb6-48df-9e32-a45cdc73bcf8; this is NOT real kernel audit validation. Actual SSH to owned Debian 12 x86_64 Docker plus final debug WebView2 CDP 34/34 (24 API and 10 desktop), zero observed Runtime/console/Log errors: target/lab-auth-baseline/a8a4f9f3-fecf-4e76-af8d-1c306e9b5b02. Covers attribute-only repair/restore, later content changes, extended ACL/missing tools, four-file FIM and failed partial input, existing dialogs/history/notifications, keyboard expansion and narrow layout. Container identity/image/limits/network/mounts checked, only its ID removed. Audit events, boot loading, real kernel/VM and wider distro matrix remain unverified; Node 24.13.0 differs from required 26.13.x. Prior probe failures/CSP errors retained, not filtered or counted as passes. Details docs/AUTHENTICATION_BASELINE_VERIFICATION.md. No Pending status closed."
+  },
+  {
+   "id": "desktop-command-workbench-clues-2026-10-31",
+   "command": "pnpm ui:check; cargo test --locked --package lovelyhawk-core command_ --lib; cargo test --locked --package lovelyhawk-backend emergency_; cargo clippy --locked --package lovelyhawk-core --all-targets --no-deps -- -D warnings; node tools/lab/probe-command-observations.mjs; cargo build --locked --package lovelyhawk-desktop; node ui/scripts/probe-command-workbench.mjs (LOVELYHAWK_OBSERVATION_REPORT set)",
+   "result": "Passed",
+   "notes": "PR #5 follow-up adds history credential summaries, site backup/database file clues and narrower PHP/JSP/ASP code shapes to three existing catalog entries; still 147 commands, no additional API/page, Python or distributed collector files. UI 143 files / 1186 tests; core command_ 92 (including observation-path binding); backend emergency_ 68; core clippy passed. WSL Ubuntu 24.04.1 x86_64 /bin/sh owned fixtures 31/31 (target/lab-command-observations/8bcba504-0e1f-432c-8779-ff4653e66eaf). Current debug WebView2 CDP 24/24, zero observed Runtime/console/Log errors (target/desktop-debug/command-workbench-262e573f-8522-4a6d-bdbf-a13db269e651/evidence): production page, synthetic API replaying the actual fixture collector output. Screenshots include all three existing entries and focused findings/gaps. Initial fixture line-count failure and directory-limit diagnostic failure retained, detailed in docs/RESPONSE_ENGINE.md. Node 24.13.0, below repository 26.13.x requirement; no live SSH/container/Pod, other distribution/architecture or packaged release verification. No completion statuses changed."
+  },
+  {
+   "id": "desktop-command-workbench-integration-2026-10-30",
+   "command": "pnpm ui:check; cargo build --locked --package lovelyhawk-desktop; node ui/scripts/probe-command-workbench.mjs; node ui/scripts/run-debug-smoke.mjs; node tools/lab/probe-command-observations.mjs",
+   "result": "Passed",
+   "notes": "Original 146 catalog entries retained, one command-wrapper check added; preload, deleted maps and PAM use existing entry IDs. Separate response-engine page/API and automatic write paths removed. UI 143 files / 1186 tests. Real debug WebView2 with synthetic API data: 18/18, no Runtime/console/Log errors; filtered group scope, stop after current command with retained results and unfinished count, selection/location locks, clearing old location results, stale-target rejection, hostile text, honest empty/failure feedback, 760px layout and keyboard switching. Evidence target/desktop-debug/command-workbench-33b14cf1-fc77-4048-968a-84b8be7c5084/evidence. Full disconnected desktop 92/92, 14 pages and the existing 172 methods: target/desktop-debug/ff7d2800-3fe1-4886-a6b2-a84e821f8d96/evidence. WSL Ubuntu 24.04.1 x86_64 owned file fixtures 17/17: target/lab-command-observations/9449a3a1-08ca-4220-bd1f-d3f898f76277. These do not verify a new SSH/container/Pod/VM matrix or production repair. Node used was 24.13.0, not the repository's required 26.13.x; no release acceptance is claimed. See docs/RESPONSE_ENGINE.md."
+  },
+  {
    "id": "desktop-quality-gate-2026-10-11x",
    "command": "cargo fmt --all -- --check; pnpm release:quality-gate; cargo clippy --workspace --all-targets --locked -- -D warnings; cargo test --workspace --all-targets --locked; pnpm desktop:test:debug",
    "result": "Passed",
@@ -1738,7 +1762,9 @@
      "desktop-quality-gate-2026-10-11c",
      "desktop-system-info-2026-10-11",
      "desktop-lab-probes-2026-10-11",
-     "desktop-ui-polish-2026-10-11"
+     "desktop-ui-polish-2026-10-11",
+     "desktop-authentication-baseline-2026-10-31",
+     "desktop-view-layout-2026-10-31"
     ]
    }
   },
@@ -1791,7 +1817,8 @@
      "desktop-docker-files-2026-10-11",
      "desktop-window-kinds-regression-2026-10-11",
      "desktop-ui-polish-2026-10-11",
-     "desktop-docker-kubernetes-tools-2026-10-11"
+     "desktop-docker-kubernetes-tools-2026-10-11",
+     "desktop-view-layout-2026-10-31"
     ]
    }
   },
@@ -1858,7 +1885,8 @@
      "desktop-quality-gate-2026-10-12g",
      "desktop-kubernetes-manifest-export-2026-10-12",
      "desktop-quality-gate-2026-10-12l",
-     "desktop-receipt-language-2026-10-13"
+     "desktop-receipt-language-2026-10-13",
+     "desktop-view-layout-2026-10-31"
     ]
    }
   },
@@ -1949,6 +1977,8 @@
      "desktop-lab-probes-2026-10-11",
      "desktop-emergency-path-2026-10-11",
      "desktop-emergency-path-undo-2026-10-11",
+     "desktop-command-workbench-integration-2026-10-30",
+     "desktop-command-workbench-clues-2026-10-31",
      "lovelyres-core-emergency-history-hardening-2026-08-24",
      "electron-backend-emergency-command-standalone-2026-08-24",
      "electron-renderer-emergency-command-standalone-2026-08-24",
@@ -1956,7 +1986,9 @@
      "electron-check-emergency-command-central-2026-08-25",
      "electron-source-gate-emergency-command-central-2026-08-25",
      "electron-cdp-exact91-emergency-command-central-2026-08-25",
-     "desktop-ui-polish-2026-10-11b"
+     "desktop-ui-polish-2026-10-11b",
+     "desktop-authentication-baseline-2026-10-31",
+     "desktop-view-layout-2026-10-31"
     ]
    }
   },
@@ -2017,7 +2049,8 @@
      "desktop-ui-polish-2026-10-13",
      "desktop-log-analysis-copy-2026-10-13",
      "desktop-log-rules-2026-10-13",
-     "desktop-ai-assist-2026-10-13"
+     "desktop-ai-assist-2026-10-13",
+     "desktop-view-layout-2026-10-31"
     ]
    }
   },
@@ -2120,7 +2153,8 @@
      "desktop-ui-polish-2026-10-11b",
      "desktop-check-audit-actions-2026-10-12",
      "desktop-quality-gate-2026-10-12h",
-     "desktop-check-audit-actions-2026-10-12b"
+     "desktop-check-audit-actions-2026-10-12b",
+     "desktop-view-layout-2026-10-31"
     ]
    }
   },
@@ -2163,7 +2197,9 @@
      "electron-renderer-integrity-read-phase0-2026-08-25",
      "desktop-integrity-2026-10-11",
      "desktop-quality-gate-2026-10-11l",
-     "desktop-ui-polish-2026-10-11b"
+     "desktop-ui-polish-2026-10-11b",
+     "desktop-authentication-baseline-2026-10-31",
+     "desktop-view-layout-2026-10-31"
     ]
    }
   },
@@ -2259,7 +2295,9 @@
      "electron-cdp-baseline-central-2026-08-25",
      "desktop-baseline-actions-2026-10-12",
      "desktop-quality-gate-2026-10-12i",
-     "desktop-receipt-language-2026-10-13"
+     "desktop-receipt-language-2026-10-13",
+     "desktop-authentication-baseline-2026-10-31",
+     "desktop-view-layout-2026-10-31"
     ]
    }
   },

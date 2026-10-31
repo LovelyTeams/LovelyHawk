@@ -97,12 +97,14 @@ async fn candidate_record(
     .unwrap();
     let changes = vec![
         PlannedBaselineChange {
+            host_guard: None,
             item_id: "redis-protected-mode".to_owned(),
             before: BaselineObservedValue::Value("on".to_owned()),
             after: "off".to_owned(),
             file: files[1].clone(),
         },
         PlannedBaselineChange {
+            host_guard: None,
             item_id: "redis-debug-command".to_owned(),
             before: if missing_second {
                 BaselineObservedValue::Missing

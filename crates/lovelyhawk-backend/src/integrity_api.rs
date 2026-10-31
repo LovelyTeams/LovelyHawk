@@ -29,7 +29,7 @@ use crate::{
 };
 
 const MAX_HANDLE_BYTES: usize = 128;
-const MAX_PRESETS: usize = 6;
+const MAX_PRESETS: usize = INTEGRITY_PRESETS.len();
 const MAX_BASELINES_PER_LIST: usize = 64;
 const MAX_BASELINE_HANDLES: usize = 128;
 const MAX_BASELINE_PATHS: usize = 16;
@@ -58,6 +58,10 @@ pub(crate) const INTEGRITY_PRESET_IDS: [&str; MAX_PRESETS] = [
     "bin",
     "etc",
     "usr-local-bin",
+    "auth-passwd",
+    "auth-group",
+    "auth-shadow",
+    "auth-gshadow",
 ];
 
 #[derive(Clone)]

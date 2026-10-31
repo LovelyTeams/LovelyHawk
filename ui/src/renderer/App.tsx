@@ -76,7 +76,6 @@ const JavaHotUpdatePage = lazy(async () => ({ default: (await import("./JavaHotU
 const KubernetesPage = lazy(async () => ({ default: (await import("./KubernetesPage")).KubernetesPage }));
 const DockerPage = lazy(async () => ({ default: (await import("./DockerPage")).DockerPage }));
 const EmergencyCommandsPage = lazy(async () => ({ default: (await import("./EmergencyCommandsPage")).EmergencyCommandsPage }));
-const ResponseEnginePage = lazy(async () => ({ default: (await import("./ResponseEnginePage")).ResponseEnginePage }));
 const WindowsIncidentPage = lazy(async () => ({ default: (await import("./WindowsIncidentPage")).WindowsIncidentPage }));
 import {
   initialNotificationState,
@@ -736,11 +735,6 @@ export function App() {
               api={window.lovelyhawk}
               rerun={historyRerun}
               runIn={investigateTarget}
-            />
-          ) : activePage.id === "response-engine" ? (
-            <ResponseEnginePage
-              bindingHandle={activeTarget?.bindingHandle ?? null}
-              api={window.lovelyhawk}
             />
           ) : activePage.id === "java-hot-update" ? (
             <JavaHotUpdatePage

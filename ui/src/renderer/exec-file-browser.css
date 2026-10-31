@@ -44,7 +44,7 @@
   overflow-wrap: anywhere;
 }
 
-.exec-file-dialog button {
+.exec-file-dialog :where(button) {
   min-height: 30px;
   padding: 4px 12px;
   border: 1px solid var(--border-strong);
@@ -70,23 +70,6 @@
 .exec-file-dialog .exec-file-close {
   min-width: 30px;
   padding: 2px 8px;
-}
-
-.exec-file-tabs {
-  display: flex;
-  gap: 6px;
-}
-
-.exec-file-tabs button {
-  border-radius: 999px;
-  color: var(--muted);
-  font-size: var(--font-caption);
-}
-
-.exec-file-tabs button[aria-pressed="true"] {
-  border-color: var(--accent);
-  color: var(--accent-text);
-  background: var(--accent-soft);
 }
 
 .exec-file-view {

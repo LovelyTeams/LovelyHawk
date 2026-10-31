@@ -83,6 +83,20 @@ const history: BaselineHistory = {
 };
 
 describe("central Baseline page", () => {
+  it("shows authentication metadata without claiming a missing config key uses defaults", () => {
+    for (const key of ["文件属主与权限", "认证文件监控"]) {
+      const html = renderToStaticMarkup(<BaselineFilePane item={catalog.items[0]!} status={null}
+        file={{ itemHandle: "item-a", path: "/etc/shadow", key, exists: true,
+          text: "权限 0640，属主 UID 0，属组 GID 42", lineCount: 1, truncated: false,
+          mentions: [] }}
+        fileStatus="ready" error={null} connected onReload={() => undefined} />);
+      expect(html).toContain("状态核对");
+      expect(html).toContain("账号与口令文件正文不会显示");
+      expect(html).not.toContain("程序自己的默认值");
+      expect(html).not.toContain("真正生效的那条");
+    }
+  });
+
   it.each(["nginx", "redis", "postgresql"] as const)("shows uncertain %s candidates separately and never invents a winning line", (component) => {
     const item = { ...catalog.items[0]!, component, title: component === "nginx" ? "关闭目录浏览" : component === "redis" ? "保持保护模式" : "记录连接建立", writable: false };
     const pending = { ...scan.statuses[0]!, observedKind: "unverified" as const,

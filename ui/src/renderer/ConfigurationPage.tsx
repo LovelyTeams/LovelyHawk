@@ -131,7 +131,7 @@ function ConfigurationPage({ bindingHandle, api, onCopyRecord }, ref) {
   }
 
   const modeSwitch = (
-    <div className="configuration-modes" role="group" aria-label="配置视图">
+    <div className="configuration-modes view-tabs" role="group" aria-label="配置视图">
       {MODES.map((entry) => (
         <button
           key={entry.mode}

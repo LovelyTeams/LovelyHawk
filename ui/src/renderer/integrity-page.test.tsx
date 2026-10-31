@@ -42,7 +42,7 @@ function readyState(stage: IntegrityState["operationStage"] = "completed"): Inte
     catalogStatus: "ready",
     catalog: {
       presets: INTEGRITY_PRESET_DEFINITIONS.map((preset) => ({ ...preset })),
-      maximumSelected: 6,
+      maximumSelected: 10,
     },
     listStatus: "ready",
     baselineList: {
@@ -104,6 +104,18 @@ function readyState(stage: IntegrityState["operationStage"] = "completed"): Inte
 }
 
 describe("standalone Integrity page", () => {
+  it("groups optional authentication files in a collapsed accessible section", () => {
+    const html = renderToStaticMarkup(
+      <IntegrityPage bindingHandle={bindingHandle} api={api} initialState={readyState("idle")} />,
+    );
+    const auth = html.match(/<details class="integrity-auth-presets">([\s\S]*?)<\/details>/u)?.[1];
+    expect(auth).toContain("关键认证文件（可选）");
+    expect(auth).toContain("已选 0 / 4");
+    expect(auth?.match(/type="checkbox"/gu)).toHaveLength(4);
+    expect(auth).not.toContain("checked=");
+    for (const name of ["/etc/passwd", "/etc/group", "/etc/shadow", "/etc/gshadow"]) expect(auth).toContain(name);
+  });
+
   it("renders hostile remote paths only as escaped text and hides capabilities", () => {
     const html = renderToStaticMarkup(
       <IntegrityPage bindingHandle={bindingHandle} api={api} initialState={readyState()} />,

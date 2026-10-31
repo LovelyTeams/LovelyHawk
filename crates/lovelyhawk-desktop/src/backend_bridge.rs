@@ -57,7 +57,6 @@ const MAIN_WINDOW_METHODS: &[&str] = &[
     "baseline.action.execute",
     "baseline.action.cancel",
     "nginx.repair",
-    "response.engine",
     "log.rules",
     "ai.assist",
     "java.hot-update",
@@ -233,14 +232,6 @@ fn lane_for_request(method: &str, params: &Value) -> Lane {
             Some("status" | "baseline-plan-progress" | "cancel-baseline-plan")
         )
     {
-        Lane::Control
-    } else if method == "response.engine"
-        && matches!(
-            params.get("action").and_then(Value::as_str),
-            Some("poll-fix" | "cancel-fix" | "poll-scan")
-        )
-    {
-        // A poll or cancel must not queue behind the work it follows.
         Lane::Control
     } else {
         lane_for(method)
@@ -470,19 +461,6 @@ mod tests {
         ] {
             assert_eq!(
                 lane_for_request("windows.incident", &json!({"action":action})),
-                Lane::Main
-            );
-        }
-        for action in ["poll-fix", "cancel-fix", "poll-scan"] {
-            assert_eq!(
-                lane_for_request("response.engine", &json!({"action":action})),
-                Lane::Control
-            );
-        }
-        for action in ["scan", "plan-fix", "confirm-fix", "execute-fix"] {
-            // poll-scan 走 Control
-            assert_eq!(
-                lane_for_request("response.engine", &json!({"action":action})),
                 Lane::Main
             );
         }

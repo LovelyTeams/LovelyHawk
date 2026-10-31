@@ -1,15 +1,12 @@
 # 原生功能接线与限制清单
 
-## 2026-10-30 处置后加固：页面入口按用户要求移除
+## 2026-10-30 命令工作台整合
 
-`response.engine` 的 `hardening-scan` / `plan-hardening` 后端能力保留（core `hardening_scan`/`plan_hardening`、backend 注册表与校验、`tools/lab/probe-response-hardening.mjs` 端到端探针全部完好且通过验收），但应急页的「处置后加固」区块按用户要求于 0.0.5 移除，页面不再出现加固入口；恢复入口时把 `ResponseEnginePage` 的加固区块、`response-engine-contract.ts` 的 hardening 类型与校验及其测试加回即可，后端零改动。
+PR #5 的独立应急引擎、写操作和隐藏加固 API 已撤下。可复用的只读能力并入原目录与执行链，详情见 [归类与验证边界](RESPONSE_ENGINE.md)。本轮不保留等待恢复的第二页面，也不把旧自动修复验收当作当前能力。真实 SSH、Docker/Podman、Pod 与发行版矩阵仍待验证；更完整的 PAM 链、凭据特征、站点暴露和可信离线核查没有因此完成。
 
+2026-10-31 已接通有限的单行历史口令摘要、常见站点备份/数据库文件与 Web 请求执行特征；检查代码内嵌主程序。复杂 Shell/代码语法、跨行变量传播、自定义站点和网络访问控制没有因这些线索检查完成。
 
-## 2026-10-29 应急处置页（response.engine）
-
-应急处置页已沿 core → backend → shared 契约 → 页面桥接层 → 页面完成接线：`response_engine.rs` → `response_engine_api.rs`（单方法 `response.engine`：scan / plan-fix / confirm-fix / cancel-fix / execute-fix / poll-fix，已在主窗口方法白名单，poll-fix 与 cancel-fix 走 Control 通道）→ `ui/src/shared/response-engine-contract.ts`（请求与响应双侧校验）→ `ui/src/host/main-api.ts` → `ResponseEnginePage.tsx`（`App.tsx` 懒加载，页面 id `response-engine`，descriptor 的 migration_state 已转 Ready）。页面只提交句柄化的操作意图，不接触路径、命令与账户名；修复前逐条展示方案、影响与归档位置，空口令类可选锁定（默认）或删除，执行后行内轮询至完成或复验结论。
-
-桌面端 CDP 逐页巡检（`pnpm desktop:test:debug` 与 `ui/scripts/` 探针）依赖调试构建的 WebView2 远程调试端口，本次改动在本机 Linux 环境完成，没有覆盖 response-engine 页的真实窗口巡检与截图；现有证据为 `pnpm ui:check`（typecheck + vitest 145 文件 / 1201 用例 + 构建）与后端单元测试。后续需在 Windows 调试构建上补该页的 CDP 巡检，不能用现有合成或单元测试顶替。
+后续四项已沿既有页面接通：进程/会话/映射关联、认证文件属性修补与历史恢复、固定 auditd 规则管理、四个完整性预设。详见 [实现与证据](AUTHENTICATION_BASELINE_VERIFICATION.md)。真实 auditd 内核、事件落盘、启动加载与故障恢复仍待 VM/实机验证；模拟规则执行不算该能力的实机验收。其他发行版、架构、ACL 与容器组合保持 Pending。
 
 ## 2026-10-27 Windows 通道与传输独立窗口
 

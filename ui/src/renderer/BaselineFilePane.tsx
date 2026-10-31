@@ -169,6 +169,11 @@ export function BaselineFilePane({
         <p className="baseline-file-note" role="status">正在读取目标机上的这个文件…</p>
       ) : file === null ? (
         <p className="baseline-file-note" role="status">点上面的重新读取，看这台机器上的实际内容。</p>
+      ) : file.key === "文件属主与权限" || file.key === "认证文件监控" ? (
+        <section className="baseline-fix" aria-label="状态核对">
+          <p>以下是属性或规则的核对摘要，账号与口令文件正文不会显示。</p>
+          <pre>{file.text}</pre>
+        </section>
       ) : !file.exists ? (
         <p className="baseline-file-note" role="status">
           这个路径没有可读取的普通文件；设置仍可能来自其他文件、启动参数或程序默认值。

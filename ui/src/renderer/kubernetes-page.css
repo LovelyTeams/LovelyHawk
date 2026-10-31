@@ -47,12 +47,12 @@
 }
 
 :where(.kubernetes-page) button:where(:hover:not(:disabled)),
-.kubernetes-page button.active {
+:where(.kubernetes-page) button.active {
   background: var(--console-accent-surface);
   border-color: var(--console-accent);
 }
 
-.kubernetes-page button:focus-visible,
+:where(.kubernetes-page) button:focus-visible,
 .kubernetes-page input:focus-visible {
   outline: 2px solid var(--console-accent);
   outline-offset: 2px;
@@ -198,16 +198,7 @@
 }
 
 .kubernetes-tabs {
-  display: flex;
-  gap: 8px;
   margin-bottom: 12px;
-}
-
-.kubernetes-tabs button {
-  min-width: 92px;
-  padding: 6px 14px;
-  font-size: var(--font-small);
-  font-weight: 600;
 }
 
 /* One column. The details used to sit beside the table and hold 40% of the
@@ -226,10 +217,8 @@
 }
 
 .kubernetes-stat-card {
-  border: 1px solid var(--console-border);
-  border-radius: 11px;
-  padding: 11px 13px;
-  background: var(--console-bg);
+  border-bottom: 1px solid var(--border);
+  padding: 4px 0 12px;
 }
 
 .kubernetes-stat-label {

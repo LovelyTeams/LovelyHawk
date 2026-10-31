@@ -5,6 +5,10 @@ export const INTEGRITY_PRESET_DEFINITIONS = [
   { id: "bin", label: "/bin", path: "/bin", defaultSelected: true },
   { id: "etc", label: "/etc", path: "/etc", defaultSelected: false },
   { id: "usr-local-bin", label: "/usr/local/bin", path: "/usr/local/bin", defaultSelected: false },
+  { id: "auth-passwd", label: "/etc/passwd（账号）", path: "/etc/passwd", defaultSelected: false },
+  { id: "auth-group", label: "/etc/group（用户组）", path: "/etc/group", defaultSelected: false },
+  { id: "auth-shadow", label: "/etc/shadow（口令文件，仅摘要）", path: "/etc/shadow", defaultSelected: false },
+  { id: "auth-gshadow", label: "/etc/gshadow（组口令文件，仅摘要）", path: "/etc/gshadow", defaultSelected: false },
 ] as const;
 
 export const INTEGRITY_REDACTED_PATH = "[SENSITIVE INTEGRITY PATH REDACTED]" as const;
@@ -23,7 +27,7 @@ export interface IntegrityPreset {
 
 export interface IntegrityPresetCatalog {
   presets: IntegrityPreset[];
-  maximumSelected: 6;
+  maximumSelected: 10;
 }
 
 export interface IntegrityBaseline {
@@ -203,7 +207,7 @@ function projectedPath(
 
 export function isIntegrityPresetCatalog(value: unknown): value is IntegrityPresetCatalog {
   if (!record(value) || !exact(value, ["presets", "maximumSelected"]) ||
-    value.maximumSelected !== 6 || !Array.isArray(value.presets) ||
+    value.maximumSelected !== INTEGRITY_PRESET_DEFINITIONS.length || !Array.isArray(value.presets) ||
     value.presets.length !== INTEGRITY_PRESET_DEFINITIONS.length) return false;
   return value.presets.every((preset, index) => {
     const expected = INTEGRITY_PRESET_DEFINITIONS[index];

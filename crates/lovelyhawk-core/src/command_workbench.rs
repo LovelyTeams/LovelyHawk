@@ -179,6 +179,7 @@ struct CommandDefinition {
     alpine_command: Option<&'static str>,
     /// Marks the output lines an operator should look at first.
     abnormal: Option<LineRule>,
+    checks_tools: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -211,6 +212,7 @@ impl CommandDefinition {
             redhat_command: None,
             alpine_command: None,
             abnormal: None,
+            checks_tools: false,
         }
     }
 
@@ -235,12 +237,18 @@ impl CommandDefinition {
             redhat_command: commands.redhat,
             alpine_command: commands.alpine,
             abnormal: None,
+            checks_tools: false,
         }
     }
 
     /// Attaches the rule that decides which output lines are abnormal.
     const fn flagging(mut self, rule: LineRule) -> Self {
         self.abnormal = Some(rule);
+        self
+    }
+
+    const fn self_checked(mut self) -> Self {
+        self.checks_tools = true;
         self
     }
 
@@ -261,7 +269,7 @@ impl CommandDefinition {
 }
 
 macro_rules! portable {
-    ($id:literal, $category:ident, $title:literal, $description:literal, $command:literal) => {
+    ($id:literal, $category:ident, $title:literal, $description:literal, $command:expr) => {
         CommandDefinition::portable(
             $id,
             CommandCategory::$category,
@@ -271,6 +279,435 @@ macro_rules! portable {
         )
     };
 }
+
+// These fixed collectors are compiled into the same catalog and use its target,
+// timeout, history and result path. Nothing is installed or executed from a file
+// on the target. Limits and read failures stay in the ordinary command output.
+macro_rules! bounded_observation {
+    ($body:literal) => {
+        concat!(r#"
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+LC_ALL=C
+export PATH LC_ALL
+for lh_tool in head tr wc awk readlink ls; do
+  command -v "$lh_tool" >/dev/null 2>&1 || { printf '工具不可用：%s，本项未执行\n' "$lh_tool"; exit 1; }
+done
+lh_objects=0 lh_hits=0 lh_gaps=0
+lh_gap() {
+  lh_gaps=$((lh_gaps + 1))
+  if [ "$lh_gaps" -le 12 ] || [ "${2:-}" = always ]; then printf '缺口：%s\n' "$1"; fi
+}
+lh_hit() {
+  lh_hits=$((lh_hits + 1))
+  if [ "$lh_hits" -le 256 ]; then printf '关注：%s\n' "$1"; fi
+}
+lh_finish() {
+  printf '# 已检查对象 %s；关注线索 %s；读取缺口 %s。线索不等于入侵结论。\n' "$lh_objects" "$lh_hits" "$lh_gaps"
+  if [ "$lh_hits" -gt 256 ]; then printf '缺口：只展示前 256 条关注线索，其余未展示。\n'; lh_gaps=$((lh_gaps + 1)); fi
+  if [ "$lh_gaps" -gt 12 ]; then printf '缺口：仅列出前 12 条读取缺口。\n'; fi
+  [ "$lh_gaps" -eq 0 ]
+}
+lh_step() {
+  lh_objects=$((lh_objects + 1))
+  if [ "$lh_objects" -gt 2048 ]; then
+    lh_objects=2048
+    lh_gap '对象数量达到 2048，本项剩余对象未检查。' always
+    lh_finish
+    exit 1
+  fi
+}
+lh_read() {
+  lh_ref=$(printf '%s' "$1" | tr '\000-\037\177' '?' | head -c 480)
+  [ "${3:-}" = counted ] || lh_step
+  if [ -L "$1" ] || [ ! -f "$1" ]; then lh_gap "$lh_ref：跳过链接或非常规文件。"; return 1; fi
+  if [ ! -r "$1" ]; then lh_gap "$lh_ref：权限不足，未读取。"; return 1; fi
+  if [ "${2:-}" = environment ]; then
+    # A newline inside a value is not another environment variable.
+    lh_data=$({ head -c 65537 "$1" 2>/dev/null; printf '\000LH_READ_STATUS:%s' "$?"; } | tr '\n\r' '??' | tr '\000' '\n')
+  elif [ "${2:-}" = text ]; then
+    # NUL bytes must not create invented file line numbers.
+    lh_data=$({ head -c 65537 "$1" 2>/dev/null; printf '\nLH_READ_STATUS:%s' "$?"; } | tr '\000' '?')
+  else
+    lh_data=$({ head -c 65537 "$1" 2>/dev/null; printf '\000LH_READ_STATUS:%s' "$?"; } | tr '\000' '\n')
+  fi
+  lh_status=${lh_data##*'
+LH_READ_STATUS:'}
+  lh_data=${lh_data%'
+LH_READ_STATUS:'*}
+  if [ "$lh_status" != 0 ]; then lh_gap "$lh_ref：读取失败，本对象未检查。"; return 1; fi
+  # The check and read are not atomic. An empty result from a disappearing
+  # /proc entry cannot establish that the process had no such environment.
+  if [ ! -r "$1" ]; then lh_gap "$lh_ref：读取期间对象消失或权限变化。"; return 1; fi
+  lh_size=$(printf '%s' "$lh_data" | wc -c)
+  if [ "$lh_size" -ge 65536 ]; then
+    lh_gap "$lh_ref：达到 64 KiB 读取上限，剩余内容未检查。"
+    lh_data=$(printf '%s' "$lh_data" | head -c 65536)
+    if [ "${2:-}" = text ]; then
+      case "$lh_data" in *'
+'*) lh_data=${lh_data%'
+'*};; *) lh_data='';; esac
+    fi
+  fi
+}
+# Enumerate bounded, newline-safe paths without installing a collector. Keep
+# one NUL record pending so a byte-limited final record is never used as a path.
+lh_parents() {
+  lh_parent=$1
+  while [ -n "$lh_parent" ]; do
+    if [ -L "$lh_parent" ]; then lh_gap '目录或其上级是符号链接，本目录未跟随。'; return 1; fi
+    if [ -d "$lh_parent" ] && [ ! -x "$lh_parent" ]; then lh_gap '目录或其上级权限不足，本目录未检查。'; return 1; fi
+    lh_parent=${lh_parent%/*}
+  done
+}
+lh_tree() {
+  command -v find >/dev/null 2>&1 || { lh_gap 'find 不可用，本目录未检查。'; return 1; }
+  lh_clean=$(printf '%s' "$1" | tr '\000-\037\177' '?')
+  if [ "$lh_clean" != "$1" ] || [ "${#1}" -gt 480 ]; then lh_gap '起始目录路径过长或含控制字符，未检查。'; return 1; fi
+  lh_parents "$1" || return 1
+  if [ ! -e "$1" ]; then printf '# 未找到目录：%s（未检查）\n' "$1"; return 1; fi
+  if [ ! -d "$1" ] || [ ! -r "$1" ] || [ ! -x "$1" ]; then lh_gap '目录不可读或类型发生变化。'; return 1; fi
+  lh_paths=$({ find "$1" -xdev -maxdepth 6 -print0 2>/dev/null; printf '\000LH_TREE_STATUS:%s\000' "$?"; } | head -c 262145 | awk '
+    BEGIN {RS="\0"}
+    function emit(p) {
+      if (p == "") return
+      if (++n > 2048) {if (n == 2049) print "!limit"; return}
+      if (length(p) > 480 || p ~ /[[:cntrl:]]/) print "!name"
+      else print p
+    }
+    NR > 1 {emit(previous)}
+    {previous=$0}
+    END {if (previous != "LH_TREE_STATUS:0") print "!incomplete"}') || { lh_gap '目录列表处理失败。'; return 1; }
+}
+lh_tree_entry() {
+  case "$1" in
+    '!limit') lh_gap '目录列表达到 2048 项，剩余对象未检查。' always; return 1;;
+    '!name') lh_gap '路径过长或含控制字符，已跳过且未生成文件操作入口。'; return 1;;
+    '!incomplete') lh_gap '目录遍历失败或列表达到 256 KiB；部分对象未检查。' always; return 1;;
+    '') return 1;;
+  esac
+  lh_step
+  if [ -L "$1" ]; then lh_gap '发现符号链接，未跟随其目标。'; return 1; fi
+  if [ -d "$1" ]; then
+    lh_relative=${1#"$lh_root"}
+    case "$lh_relative" in /*/*/*/*/*/*) lh_gap '目录达到 6 层，下一层内容未检查。';; esac
+    return 1
+  fi
+  if [ ! -f "$1" ]; then lh_gap '对象已消失或不是普通文件，未读取。'; return 1; fi
+}
+printf '# 范围：当前账号可读内容；不提权、不执行被检查文件，不保证目标上的工具可信。\n'
+"#, $body, "\nlh_finish\n")
+    };
+}
+
+const COMMAND_WRAPPERS: &str = bounded_observation!(
+    r#"
+printf '# 检查 /usr/local/bin 中常用排查命令的脚本包装；自定义目录未覆盖。\n'
+if [ ! -d /usr/local/bin ] || [ ! -r /usr/local/bin ] || [ ! -x /usr/local/bin ]; then lh_gap '本地命令目录不可用或权限不足。'; fi
+for lh_name in ps ss netstat top lsof ls find grep cat; do
+  lh_file=/usr/local/bin/$lh_name
+  if [ -L "$lh_file" ]; then lh_gap "$lh_file：符号链接未跟随。"; continue; fi
+  [ -e "$lh_file" ] || continue
+  lh_read "$lh_file" || continue
+  case "$lh_data" in '#!'*) ;; *) continue;; esac
+  lh_match=$(printf '%s\n' "$lh_data" | awk '
+    /^[[:space:]]*#/ {next}
+    /\/(usr\/)?(s?bin)\// {original=1}
+    /grep[[:space:]].*(-v|--invert-match)|sed[[:space:]].*d|awk[[:space:]].*!/ {filter=1}
+    END {if (original && filter) print "yes"}')
+  if [ "$lh_match" = yes ]; then lh_hit "$lh_ref | 调用系统程序并过滤输出；核对来源与用途，不执行此脚本。"; fi
+done
+"#
+);
+
+const PROCESS_PRELOAD: &str = bounded_observation!(
+    r#"
+printf '# 关联进程、父进程、会话及文件映射；环境只输出 LD_PRELOAD、LD_AUDIT、LD_LIBRARY_PATH、PROMPT_COMMAND 名称，不输出值。\n'
+printf '# 同一进程中同时出现变量和映射，不证明该映射由该变量加载；观察不授权结束进程。\n'
+lh_single=0
+if [ ! -d /proc ] || [ ! -r /proc ] || [ ! -x /proc ]; then lh_gap '进程目录不可用或权限不足。'; fi
+if [ -e /etc/ld.so.preload ] || [ -L /etc/ld.so.preload ]; then
+  if lh_read /etc/ld.so.preload; then
+    lh_match=$(printf '%s\n' "$lh_data" | awk '!/^[[:space:]]*(#|$)/ {print NR}')
+    for lh_line in $lh_match; do lh_hit "$lh_ref | 第 $lh_line 行有预加载配置，需核对来源。"; done
+  fi
+fi
+for lh_proc in /proc/[0-9]*; do
+  if [ ! -d "$lh_proc" ]; then
+    [ "$lh_single" = 0 ] || lh_gap '所选进程已退出或当前无法读取，未取得关联结果。'
+    continue
+  fi
+  lh_pid=${lh_proc##*/}
+  [ "$lh_pid" = "$$" ] && continue
+  lh_read "$lh_proc/stat" text || continue
+  lh_identity=$(printf '%s\n' "$lh_data" | awk '{sub(/^.*\) /, ""); if (NF >= 20 && $2 ~ /^[0-9]+$/ && $4 ~ /^[0-9]+$/ && $20 ~ /^[0-9]+$/) print $2 " " $4 " " $20}')
+  [ -n "$lh_identity" ] || { lh_gap "PID $lh_pid：无法核对进程启动时间。"; continue; }
+  lh_exe_before=$(readlink "$lh_proc/exe" 2>/dev/null) || { lh_gap "PID $lh_pid：无法核对可执行对象。"; continue; }
+  lh_ns_before=$(readlink "$lh_proc/ns/mnt" 2>/dev/null) || { lh_gap "PID $lh_pid：无法核对进程命名空间。"; continue; }
+  lh_names=''
+  if lh_read "$lh_proc/environ" environment; then
+    lh_names=$(printf '%s\n' "$lh_data" | awk -F= '/^(LD_PRELOAD|LD_AUDIT|LD_LIBRARY_PATH|PROMPT_COMMAND)=./ {if (!seen[$1]++) print $1}')
+  fi
+  [ -n "$lh_names" ] || [ "$lh_single" = 1 ] || continue
+  lh_exe=$(readlink "$lh_proc/exe" 2>/dev/null | tr '\000-\037\177' '?' | head -c 480)
+  [ -n "$lh_exe" ] || lh_gap "PID $lh_pid：可执行路径不可读。"
+  lh_maps=''
+  if lh_read "$lh_proc/maps" text; then
+    lh_maps=$(printf '%s\n' "$lh_data" | awk '
+      NF >= 6 && $5 != "0" {p=$0; sub(/^[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+/, "", p)
+        if (!seen[p]++) {n++; if (n <= 32) {gsub(/[[:cntrl:]]/, "?", p); print substr(p, 1, 480)}}}
+      END {if (n > 32) print "[只显示前 32 个映射文件，更多路径未展示]"}')
+  fi
+  lh_read "$lh_proc/stat" text || continue
+  lh_after=$(printf '%s\n' "$lh_data" | awk '{sub(/^.*\) /, ""); if (NF >= 20 && $2 ~ /^[0-9]+$/ && $4 ~ /^[0-9]+$/ && $20 ~ /^[0-9]+$/) print $2 " " $4 " " $20}')
+  lh_exe_after=$(readlink "$lh_proc/exe" 2>/dev/null)
+  lh_ns_after=$(readlink "$lh_proc/ns/mnt" 2>/dev/null)
+  if [ "$lh_identity" != "$lh_after" ] || [ "$lh_exe_before" != "$lh_exe_after" ] || [ "$lh_ns_before" != "$lh_ns_after" ]; then lh_gap "PID $lh_pid：采集期间进程身份或关系变化，关联结果已丢弃。"; continue; fi
+  printf '进程关联：PID %s | PPID / SID / 启动时钟 %s | 程序 %s\n' "$lh_pid" "$lh_identity" "$lh_exe"
+  for lh_name in $lh_names; do lh_hit "PID $lh_pid | 存在 $lh_name，值未输出；需核对进程归属与用途。"; done
+  if [ -n "$lh_maps" ]; then
+    while IFS= read -r lh_map; do printf '文件映射：PID %s | %s\n' "$lh_pid" "$lh_map"; done <<LH_PROCESS_MAPS
+$lh_maps
+LH_PROCESS_MAPS
+  fi
+done
+"#
+);
+
+/// The existing process-row action shares the workbench collector, narrowed to
+/// the PID validated by the system-information snapshot. No text becomes code.
+pub(crate) fn process_correlation_command(pid: u32) -> String {
+    format!(
+        "p='{pid}'; {}",
+        PROCESS_PRELOAD.replace(
+            "for lh_proc in /proc/[0-9]*; do",
+            &format!("lh_single=1; for lh_proc in /proc/{pid}; do"),
+        )
+    )
+}
+
+const DELETED_PROCESS_FILES: &str = bounded_observation!(
+    r#"
+printf '# 检查当前可见进程持有的已删除文件描述符和文件映射；升级、日志轮转也可能产生此现象。\n'
+if [ ! -d /proc ] || [ ! -r /proc ] || [ ! -x /proc ]; then lh_gap '进程目录不可用或权限不足。'; fi
+for lh_proc in /proc/[0-9]*; do
+  [ -d "$lh_proc" ] || continue
+  lh_pid=${lh_proc##*/}
+  [ "$lh_pid" = "$$" ] && continue
+  if [ ! -r "$lh_proc/fd" ] || [ ! -x "$lh_proc/fd" ]; then lh_gap "PID $lh_pid：文件描述符目录不可读。"; else
+    for lh_fd in "$lh_proc"/fd/*; do
+      [ -L "$lh_fd" ] || continue
+      lh_step
+      lh_link=$(readlink "$lh_fd" 2>/dev/null) || { lh_gap "PID $lh_pid：描述符读取失败或已关闭。"; continue; }
+      case "$lh_link" in *' (deleted)')
+        lh_label=$(printf '%s' "$lh_link" | tr '\000-\037\177' '?' | head -c 480)
+        lh_hit "PID $lh_pid | FD ${lh_fd##*/} | $lh_label";;
+      esac
+    done
+  fi
+  lh_read "$lh_proc/maps" || continue
+  lh_maps=$(printf '%s\n' "$lh_data" | awk '/ \/.* \(deleted\)$/ {print NR}')
+  for lh_line in $lh_maps; do lh_hit "PID $lh_pid | maps 第 $lh_line 行存在已删除文件映射；尚未核实文件来源。"; done
+done
+"#
+);
+
+const PAM_AUTH_RULES: &str = bounded_observation!(
+    r#"
+printf '# 检查 /etc/pam.d 第一层文件中 auth sufficient pam_permit.so；不解析 include/substack，不代表已生效认证链。\n'
+printf '# 同时列出配置和常见模块目录的文件属性，修改时间本身不代表恶意。\n'
+if [ ! -d /etc/pam.d ] || [ ! -r /etc/pam.d ] || [ ! -x /etc/pam.d ]; then lh_gap 'PAM 配置目录不可用或权限不足。'; fi
+for lh_file in /etc/pam.d/*; do
+  [ -e "$lh_file" ] || [ -L "$lh_file" ] || continue
+  lh_read "$lh_file" || continue
+  lh_metadata=$(ls -ld "$lh_file" 2>/dev/null | tr '\000-\037\177' '?' | head -c 1024)
+  printf '# 属性：%s\n' "$lh_metadata"
+  lh_lines=$(printf '%s\n' "$lh_data" | awk '$1 == "auth" && $2 == "sufficient" && $3 ~ /(^|\/)pam_permit\.so$/ {print NR}')
+  for lh_line in $lh_lines; do lh_hit "$lh_ref | 第 $lh_line 行：auth sufficient pam_permit.so，需核对完整认证链。"; done
+done
+for lh_file in /lib/security/*.so /lib64/security/*.so /usr/lib/security/*.so /usr/lib64/security/*.so /lib/*/security/*.so; do
+  [ -e "$lh_file" ] || [ -L "$lh_file" ] || continue
+  lh_step
+  lh_metadata=$(ls -ld "$lh_file" 2>/dev/null | tr '\000-\037\177' '?' | head -c 1024)
+  printf '# 模块属性：%s\n' "$lh_metadata"
+done
+"#
+);
+
+const SHELL_HISTORY_OBSERVATIONS: &str = bounded_observation!(
+    r#"
+printf '# 检查 /root 与 /home 第一层账号的 Bash/Zsh 历史，每文件前 64 KiB；仅返回位置与特征，不输出命令或口令原文。\n'
+printf '# 识别常见单行调用；复杂 Shell 语法、自定义历史位置和未写入文件的会话历史未覆盖。读取可能更新访问时间。\n'
+for lh_home in /root /home /home/*; do
+  [ -e "$lh_home" ] || [ -L "$lh_home" ] || continue
+  lh_step
+  lh_clean=$(printf '%s' "$lh_home" | tr '\000-\037\177' '?')
+  if [ "$lh_clean" != "$lh_home" ] || [ "${#lh_home}" -gt 450 ]; then lh_gap '账号目录路径过长或含控制字符，已跳过。'; continue; fi
+  lh_parents "$lh_home" || continue
+  [ -d "$lh_home" ] || continue
+  if [ ! -r "$lh_home" ] || [ ! -x "$lh_home" ]; then lh_gap '账号目录权限不足，历史文件未检查。'; continue; fi
+  for lh_file in "$lh_home/.bash_history" "$lh_home/.zsh_history"; do
+    [ -e "$lh_file" ] || [ -L "$lh_file" ] || continue
+    if [ -L "$lh_file" ]; then lh_gap "$lh_file：历史文件为符号链接，未跟随；请核查是否改变记录位置。"; continue; fi
+    lh_read "$lh_file" text || continue
+    lh_metadata=$(ls -ld "$lh_file" 2>/dev/null) || lh_gap "$lh_ref：文件属性读取失败。"
+    printf '# 属性：%s\n' "$lh_metadata"
+    if [ ! -s "$lh_file" ]; then lh_hit "$lh_ref | 历史文件为空，需核对记录策略；不能据此判断被清理。"; continue; fi
+    printf '# 已读取：%s（原文不输出）\n' "$lh_ref"
+    lh_matches=$(printf '%s\n' "$lh_data" | awk '
+      # Lex only a single line; quoted command-looking text is never a command.
+      function words(s,    i,c,q,v,d,started,n,escaped) {
+        n=0; q=""; v=""; d=0; started=0; escaped=0
+        for (i=1; i<=length(s); i++) {
+          c=substr(s,i,1)
+          if (escaped) {v=v c; escaped=0; started=1; continue}
+          if (c == "\\" && q != sq) {escaped=1; started=1; continue}
+          if (q != "") {
+            if (c == q) q=""
+            else {v=v c; if (q != sq && (c == "$" || c == "`")) d=1}
+            continue
+          }
+          if (c == sq || c == "\"") {q=c; started=1; continue}
+          if (c == hash && !started) break
+          if (c ~ /[[:space:];|&]/) {
+            if (started) {word[++n]=v; dynamic[n]=d; operator[n]=0; v=""; d=0; started=0}
+            if (c ~ /[;|&]/) {word[++n]=c; dynamic[n]=0; operator[n]=1}
+          } else {v=v c; started=1; if (c == "$" || c == "`") d=1}
+        }
+        if (q != "" || escaped) return 0
+        if (started) {word[++n]=v; dynamic[n]=d; operator[n]=0}
+        return n
+      }
+      function base(s) {sub(/^.*\//,"",s); return s}
+      BEGIN {sq=sprintf("%c",39); hash=sprintf("%c",35)}
+      {
+        line=$0; sub(/^: [0-9]+:[0-9]+;/,"",line)
+        n=words(line); start=1; feature=""
+        for (i=1; i<=n; i++) {
+          if (operator[i]) {start=1; continue}
+          if (!start) continue
+          value=word[i]; lower=tolower(value)
+          if (lower ~ /^(password|passwd|mysql_pwd|pgpassword)=/) {
+            sub(/^[^=]*=/,"",value)
+            if (value != "" && !dynamic[i]) feature="口令变量含字面值"
+            continue
+          }
+          if (value == "export" || value == "env" || value == "sudo") continue
+          if (value ~ /^[[:alpha:]_][[:alnum:]_]*=/) continue
+          start=0; command=base(value)
+          if (command ~ /^(mysql|mysqladmin|mysqldump|mariadb|mariadb-dump)$/ && !dynamic[i]) {
+            for (j=i+1; j<=n && !operator[j]; j++) {
+              if (word[j] == "--") break
+              if (!dynamic[j] && (word[j] ~ /^-p.+/ || word[j] ~ /^--password=.+/)) feature="数据库客户端内联口令"
+            }
+          }
+          if (command == "echo" || command == "printf") {
+            literal=0
+            for (j=i+1; j<=n && !operator[j]; j++)
+              if (!dynamic[j] && word[j] ~ /^[^:[:space:]]+:.+/) literal=1
+            if (literal && j<n && operator[j] && word[j] == "|" && base(word[j+1]) == "chpasswd" && !dynamic[j+1] && (j+1 == n || operator[j+2])) feature="明文账号口令传入 chpasswd"
+          }
+          if (command == "curl" || command == "wget") {
+            for (j=i+1; j<n && !operator[j]; j++) {}
+            if (j<n && operator[j] && word[j] == "|" && base(word[j+1]) ~ /^(sh|bash|dash)$/) feature="下载内容经管道交给 Shell"
+          }
+          if (command == "history" && i<n && word[i+1] == "-c") feature="清理会话历史的命令"
+        }
+        if (feature != "") print NR " " feature
+      }') || { lh_gap "$lh_ref：历史特征分析失败。"; continue; }
+    while IFS=' ' read -r lh_line lh_feature; do
+      [ -n "$lh_line" ] || continue
+      lh_hit "$lh_ref | 第 $lh_line 行：$lh_feature；原文未输出，请核实后处理凭据或记录策略。"
+    done <<LH_HISTORY_MATCHES
+$lh_matches
+LH_HISTORY_MATCHES
+  done
+done
+"#
+);
+
+const CREDENTIAL_FILE_OBSERVATIONS: &str = bounded_observation!(
+    r#"
+printf '# 列出凭据类文件属性；在常见站点目录补查环境配置、备份压缩包及数据库导出，不读取这些文件内容。\n'
+printf '# 每目录最多 6 层、仅当前文件系统；自定义站点目录未覆盖，文件存在不证明能够通过网站下载。\n'
+for lh_root in /var/www /usr/share/nginx /srv/www /root /home /etc /opt; do
+  lh_tree "$lh_root" || continue
+  while IFS= read -r lh_file; do
+    lh_tree_entry "$lh_file" || continue
+    lh_name=$(printf '%s' "${lh_file##*/}" | tr '[:upper:]' '[:lower:]')
+    lh_credential=0 lh_feature=''
+    case "$lh_name" in id_rsa*|id_ed25519*|*.pem|*.key|.env|.env.*|*.p12) lh_credential=1;; esac
+    case "$lh_file" in /var/www/*|/usr/share/nginx/*|/srv/www/*|/home/*/public_html/*)
+      case "$lh_name" in
+        .env|.env.*) lh_feature='站点目录内环境配置文件';;
+        *.sql|*.dump|*.sqlite|*.db) lh_feature='站点目录内数据库或导出文件';;
+        *.bak) lh_feature='站点目录内备份文件';;
+        *.zip|*.tar|*.tgz|*.tbz2|*.txz|*.gz|*.bz2|*.xz|*.7z|*.rar)
+          case "$lh_name" in *backup*|*dump*|*bak*) lh_feature='站点目录内疑似备份压缩包';; esac;;
+      esac;;
+    esac
+    if [ "$lh_credential" -eq 1 ] || [ -n "$lh_feature" ]; then
+      lh_metadata=$(ls -ld "$lh_file" 2>/dev/null) || { lh_gap '文件属性读取失败或文件已变化。'; continue; }
+      printf '文件属性：%s | %s\n' "$lh_file" "$lh_metadata"
+      if [ -n "$lh_feature" ]; then lh_hit "$lh_file | $lh_feature，需核查站点映射与访问控制。"; fi
+    fi
+  done <<LH_CREDENTIAL_PATHS
+$lh_paths
+LH_CREDENTIAL_PATHS
+done
+"#
+);
+
+const WEB_CODE_OBSERVATIONS: &str = bounded_observation!(
+    r#"
+printf '# 检查常见站点目录内 PHP/JSP/ASP 类文件，每目录最多 6 层、每文件前 64 KiB；读取可能更新访问时间。\n'
+printf '# 只返回行号与代码特征；忽略常见注释和字符串展示，不执行代码。跨行调用、变量传递与混淆可能漏检，命中不等于 WebShell。\n'
+for lh_root in /var/www /usr/share/nginx /srv/www /home/*/public_html; do
+  lh_tree "$lh_root" || continue
+  while IFS= read -r lh_file; do
+    lh_tree_entry "$lh_file" || continue
+    lh_name=$(printf '%s' "${lh_file##*/}" | tr '[:upper:]' '[:lower:]')
+    case "$lh_name" in *.php|*.php5|*.phtml|*.jsp|*.jspx|*.asp|*.aspx) ;; *) continue;; esac
+    lh_read "$lh_file" text counted || continue
+    lh_matches=$(printf '%s\n' "$lh_data" | awk '
+      # Remove common comments and quoted values before matching code shapes.
+      function code(s,    i,c,nextc,out) {
+        out=""
+        for (i=1; i<=length(s); i++) {
+          c=substr(s,i,1); nextc=substr(s,i+1,1)
+          if (block) {if (c == "*" && nextc == "/") {block=0; i++}; continue}
+          if (quote != "") {
+            if (escape) escape=0
+            else if (c == "\\") escape=1
+            else if (c == quote) quote=""
+            continue
+          }
+          if (c == "/" && nextc == "*") {block=1; i++; out=out " "; continue}
+          if ((c == "/" && nextc == "/") || c == hash) break
+          if (c == sq || c == "\"" || c == "`") {quote=c; out=out "?"; continue}
+          out=out c
+        }
+        return tolower(out)
+      }
+      BEGIN {sq=sprintf("%c",39); hash=sprintf("%c",35)}
+      {
+        s=code($0); feature=""
+        if (s ~ /(^|[^[:alnum:]_])(eval|assert|system|shell_exec|passthru|popen|exec)[[:space:]]*\([[:space:]]*\$_(post|get|request|cookie)[[:space:]]*\[/) feature="请求参数直接进入代码或命令执行函数"
+        else if (s ~ /(^|[^[:alnum:]_])(eval|assert)[[:space:]]*\([[:space:]]*(base64_decode|gzinflate|gzuncompress|str_rot13)[[:space:]]*\(/) feature="解码或解压结果进入代码执行函数"
+        else if (s ~ /(\.exec|new[[:space:]]+processbuilder|execute|eval)[[:space:]]*\([[:space:]]*(request\.getparameter[[:space:]]*\(|request[[:space:]]*[\[(])/) feature="Web 请求输入直接进入执行调用"
+        if (feature != "") print NR " " feature
+      }') || { lh_gap "$lh_ref：代码特征分析失败。"; continue; }
+    while IFS=' ' read -r lh_line lh_feature; do
+      [ -n "$lh_line" ] || continue
+      lh_hit "$lh_ref | 第 $lh_line 行：$lh_feature；需人工核对代码用途与来源。"
+    done <<LH_WEB_MATCHES
+$lh_matches
+LH_WEB_MATCHES
+  done <<LH_WEB_PATHS
+$lh_paths
+LH_WEB_PATHS
+done
+"#
+);
 
 static CATALOG: &[CommandDefinition] = &[
     portable!(
@@ -388,11 +825,13 @@ static CATALOG: &[CommandDefinition] = &[
     portable!(
         "process-deleted",
         Processes,
-        "已删除可执行映射",
-        "定位仍由进程持有的 deleted 文件。",
-        "command -v find >/dev/null 2>&1 || { echo 'find 不可用，本项未执行'; exit 0; }; find /proc/[0-9]*/fd -lname '* (deleted)' -exec ls -l {} + 2>/dev/null | head -n 300"
+        "已删除文件与映射",
+        "查看进程仍持有的已删除文件和映射；升级、日志轮转也可能产生此现象。",
+        DELETED_PROCESS_FILES
     )
-    .flagging(command_findings::any_hit),
+    .self_checked()
+    .with_timeout(60)
+    .flagging(command_findings::collection_finding),
     portable!(
         "process-tree",
         Processes,
@@ -861,11 +1300,13 @@ static CATALOG: &[CommandDefinition] = &[
     portable!(
         "process-preload",
         Processes,
-        "动态库注入痕迹",
-        "检查全局预加载配置和带注入环境变量的进程。",
-        "cat /etc/ld.so.preload 2>/dev/null; echo '--- 进程环境 ---'; grep -l 'LD_PRELOAD' /proc/[0-9]*/environ 2>/dev/null | head -n 100"
+        "预加载与会话环境",
+        "关联预加载线索、父进程、会话与文件映射；核对采集前后的进程身份，环境只显示变量名。",
+        PROCESS_PRELOAD
     )
-    .flagging(command_findings::any_hit),
+    .self_checked()
+    .with_timeout(60)
+    .flagging(command_findings::collection_finding),
     portable!(
         "process-exe-path",
         Processes,
@@ -1040,12 +1481,22 @@ static CATALOG: &[CommandDefinition] = &[
     portable!(
         "persistence-pam",
         Persistence,
-        "认证模块变更",
-        "检查近期被改动的认证配置与模块文件。",
-        "command -v find >/dev/null 2>&1 || { echo 'find 不可用，本项未执行'; exit 0; }; find /etc/pam.d -type f -mtime -60 -exec ls -ld -- {} + 2>/dev/null | head -n 100; echo '--- 模块文件 ---'; find /lib/security /lib64/security /usr/lib/security /usr/lib64/security -name '*.so' -mtime -60 -exec ls -ld -- {} + 2>/dev/null | head -n 100"
+        "PAM 认证规则与变更",
+        "检查直接放行认证的 pam_permit 规则并查看配置、模块文件属性；需结合完整认证链核实。",
+        PAM_AUTH_RULES
     )
+    .self_checked()
     .with_timeout(60)
-    .flagging(command_findings::any_hit),
+    .flagging(command_findings::collection_finding),
+    portable!(
+        "persistence-command-wrapper",
+        Persistence,
+        "排查命令包装器",
+        "检查 /usr/local/bin 中调用系统程序并过滤输出的脚本；只读核对，不执行或删除。",
+        COMMAND_WRAPPERS
+    )
+    .self_checked()
+    .flagging(command_findings::collection_finding),
     portable!(
         "persistence-alias",
         Persistence,
@@ -1149,10 +1600,12 @@ static CATALOG: &[CommandDefinition] = &[
         "log-shell-history",
         Logs,
         "命令历史文件",
-        "列出各账号的命令历史文件并读取 root 的最近记录。",
-        "ls -l /root/.bash_history /home/*/.bash_history /root/.zsh_history /home/*/.zsh_history 2>/dev/null | head -n 100; echo '--- root 最近命令 ---'; tail -n 150 /root/.bash_history 2>/dev/null"
+        "检查常见历史文件中的口令、下载执行与清理记录线索；只显示位置和特征，不展示原文。",
+        SHELL_HISTORY_OBSERVATIONS
     )
-    .flagging(command_findings::tampered_or_telling_history),
+    .self_checked()
+    .with_timeout(60)
+    .flagging(command_findings::collection_finding),
     portable!(
         "file-recent-modified",
         Files,
@@ -1183,11 +1636,12 @@ static CATALOG: &[CommandDefinition] = &[
         "file-webshell-hint",
         Files,
         "站点可疑代码特征",
-        "在站点目录里按危险函数特征筛选文件路径。",
-        "grep -rlniE '(eval\\(|assert\\(|base64_decode|shell_exec|passthru\\(|system\\(|popen\\()' /var/www /usr/share/nginx /srv/www /home/*/public_html 2>/dev/null | head -n 200"
+        "检查请求输入或解码结果进入执行函数的单行特征；返回位置供人工核查，不执行代码。",
+        WEB_CODE_OBSERVATIONS
     )
+    .self_checked()
     .with_timeout(60)
-    .flagging(command_findings::any_hit),
+    .flagging(command_findings::collection_finding),
     portable!(
         "file-web-recent",
         Files,
@@ -1241,12 +1695,13 @@ static CATALOG: &[CommandDefinition] = &[
     portable!(
         "file-credential",
         Files,
-        "凭据类文件位置",
-        "列出私钥、证书和环境变量文件的位置，不读取内容。",
-        "command -v find >/dev/null 2>&1 || { echo 'find 不可用，本项未执行'; exit 0; }; find /etc /root /home /var/www /opt -xdev -type f \\( -name 'id_rsa*' -o -name 'id_ed25519*' -o -name '*.pem' -o -name '*.key' -o -name '.env' -o -name '*.p12' \\) -exec ls -ld -- {} + 2>/dev/null | head -n 200"
+        "凭据与站点备份文件",
+        "列出凭据文件属性，补查常见站点内的备份与数据库导出；不读取内容，不代表已通过网站暴露。",
+        CREDENTIAL_FILE_OBSERVATIONS
     )
+    .self_checked()
     .with_timeout(60)
-    .flagging(command_findings::ssh_key_exposure),
+    .flagging(command_findings::credential_file_finding),
     portable!(
         "file-disk-usage",
         Files,
@@ -1779,6 +2234,11 @@ const SHELL_WORDS: &[&str] = &[
 /// nothing is exactly what "this container is clean" looks like.
 fn guarded_container_command(definition: &CommandDefinition, family: SystemFamily) -> String {
     let command = definition.command_for(family);
+    // The bounded collectors check their tools themselves. The legacy lexical
+    // guard cannot distinguish their shell functions and AWK from executables.
+    if definition.checks_tools {
+        return command.to_owned();
+    }
     let needed = container_programs_used(command);
     if needed.is_empty() {
         return command.to_owned();
@@ -2198,6 +2658,17 @@ mod tests {
                     "{} lost its command",
                     entry.entry.id
                 );
+                if entry.checks_tools {
+                    // These collectors check a closed tool list before reading
+                    // anything; their AWK and shell functions are not programs.
+                    // The WSL fixture also removes each tool in turn and checks
+                    // the actual nonzero refusal, rather than just this wiring.
+                    assert!(wrapped.contains("for lh_tool in head tr wc awk readlink ls; do"));
+                    assert!(wrapped.contains("command -v \"$lh_tool\" >/dev/null 2>&1 ||"));
+                    assert!(wrapped.contains("工具不可用：%s，本项未执行\\n"));
+                    assert!(wrapped.contains("exit 1; }"));
+                    continue;
+                }
                 for program in container_programs_used(raw) {
                     guarded += 1;
                     assert!(
@@ -2466,6 +2937,36 @@ Permission denied"
                 "{} has no usable reason",
                 definition.entry.id
             );
+        }
+    }
+
+    #[test]
+    fn integrated_observations_use_existing_catalog_and_container_execution() {
+        for (id, category) in [
+            ("process-preload", CommandCategory::Processes),
+            ("process-deleted", CommandCategory::Processes),
+            ("persistence-pam", CommandCategory::Persistence),
+            ("persistence-command-wrapper", CommandCategory::Persistence),
+            ("log-shell-history", CommandCategory::Logs),
+            ("file-webshell-hint", CommandCategory::Files),
+            ("file-credential", CommandCategory::Files),
+        ] {
+            let definition = lookup(id).unwrap();
+            assert_eq!(definition.entry.category, category);
+            assert_eq!(
+                guarded_container_command(&definition, SystemFamily::Alpine),
+                definition.default_command
+            );
+            assert_eq!(
+                command_findings::finding_lines(
+                    "# 范围：检查\n关注：需要核实\n缺口：权限不足",
+                    definition.abnormal
+                ),
+                vec![1]
+            );
+            for forbidden in ["python", "sudo ", "eval ", "source ", "chmod ", "kill "] {
+                assert!(!definition.default_command.contains(forbidden));
+            }
         }
     }
 

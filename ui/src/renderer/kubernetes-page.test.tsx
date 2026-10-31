@@ -414,7 +414,7 @@ describe("a host with no reachable cluster", () => {
     // The empty cluster interface is hidden behind it, not shown under it.
     const source = readFileSync(new URL("./KubernetesPage.tsx", import.meta.url), "utf8");
     for (const marker of ['className="kubernetes-scope" aria-label="Namespace 范围" hidden={unavailable}',
-      'className="kubernetes-tabs" aria-label="Kubernetes 资源类型" hidden={unavailable}',
+      'className="kubernetes-tabs view-tabs" aria-label="Kubernetes 资源类型" hidden={unavailable}',
       'className="kubernetes-workbench" hidden={unavailable}']) expect(source).toContain(marker);
   });
 });

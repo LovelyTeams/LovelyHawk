@@ -65,7 +65,6 @@ pub mod postgresql_role_graph;
 mod postgresql_wire;
 pub mod redis_config;
 pub mod report;
-pub mod response_engine;
 pub mod services;
 pub mod settings;
 pub mod sftp;
