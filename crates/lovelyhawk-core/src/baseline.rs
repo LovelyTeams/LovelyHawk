@@ -3828,7 +3828,7 @@ fn scan_functions() -> String {
            lr_files=; lr_odd=0; lr_unread=0; lr_mode=; \
            if [ \"${{1-}}\" = %sshd ]; then lr_mode=sshd; \
              if [ -L \"$2\" ] || {{ [ -e \"$2\" ] && [ ! -f \"$2\" ]; }}; then lr_odd=1; \
-             elif [ -f \"$2\" ]; then lr_files=$(lr_sshd_walk \"$2\" 0); fi; \
+             elif [ -f \"$2\" ]; then lr_files=$(lr_sshd_walk \"$2\" 0 0); fi; \
              case $lr_files in *%odd*) lr_odd=1;; *%unread*) lr_unread=1;; esac; \
            else \
            for lr_candidate in \"$@\"; do \
@@ -3862,16 +3862,16 @@ fn scan_functions() -> String {
            printf 'ITEM=%s\\t%s\\t%s\\n' \"$lr_id\" \"$lr_value\" \"$lr_where\"; }}; \
          lr_sshd_walk() {{ \
            if [ \"$2\" -gt 16 ]; then printf ' %%unread'; return 0; fi; \
-           lr_n=0; lr_out=\" seg=0 $1\"; \
+           lr_n=0; lr_cond=$3; lr_out=\" cond=$lr_cond seg=0 $1\"; \
            for lr_w in $(LC_ALL=C awk '{includes}' \"$1\" 2>/dev/null || echo %unread); do \
              if [ ${{#lr_out}} -gt 16384 ]; then lr_out=\"$lr_out %unread\"; break; fi; \
-              case $lr_w in \
-                %cond) lr_out=\"$lr_out cond=1\";; \
-                %next) lr_n=$((lr_n + 1)); lr_out=\"$lr_out seg=$lr_n $1\";; \
-                %unread) lr_out=\"$lr_out %unread\";; \
+             case $lr_w in \
+               %cond) lr_cond=1;; \
+               %next) lr_n=$((lr_n + 1)); lr_out=\"$lr_out cond=$lr_cond seg=$lr_n $1\";; \
+               %unread) lr_out=\"$lr_out %unread\";; \
                *[!A-Za-z0-9/._@+-]*) \
                  if [ -e \"$lr_w\" ] || [ -L \"$lr_w\" ]; then lr_out=\"$lr_out %unread\"; fi;; \
-               *) if [ -f \"$lr_w\" ]; then lr_out=\"$lr_out$(lr_sshd_walk \"$lr_w\" $(($2 + 1)))\"; \
+               *) if [ -f \"$lr_w\" ]; then lr_out=\"$lr_out$(lr_sshd_walk \"$lr_w\" $(($2 + 1)) \"$lr_cond\")\"; \
                   elif [ -e \"$lr_w\" ] || [ -L \"$lr_w\" ]; then lr_out=\"$lr_out %odd\"; fi;; \
              esac; \
            done; \
@@ -4341,8 +4341,8 @@ fn flat_reader_body(precedence: Precedence, conditional_aware: bool) -> String {
             // once per stretch between its Include lines, the included files
             // in between: `seg=N` before each visit (see `lr_sshd_walk`) says
             // which stretch this pass reads. An Include after a `Match` opens
-            // a conditional file; `cond=1` travels with that file so its lines
-            // are reported as conditional rather than as the global value.
+            // a conditional file. Every visit carries its own `cond=N`, so a
+            // child's Match state cannot leak into its parent or siblings.
             let include_count = if conditional_aware {
                 "if(tolower(t)==\"include\"){cur++; next}"
             } else {
@@ -7364,10 +7364,13 @@ mod tests {
         );
         assert!(command.contains(&format!("awk '{SSHD_INCLUDES}' \"$1\"")));
         assert!(command.contains("if [ \"$2\" -gt 16 ]; then printf ' %%unread'"));
-        assert!(command.contains("lr_out=\"$lr_out seg=$lr_n $1\""));
+        assert!(command.contains("lr_files=$(lr_sshd_walk \"$2\" 0 0)"));
+        assert!(command.contains("lr_n=0; lr_cond=$3; lr_out=\" cond=$lr_cond seg=0 $1\""));
+        assert!(command.contains("lr_out=\"$lr_out cond=$lr_cond seg=$lr_n $1\""));
         // An Include after a Match carries `cond=1` into the included file so
         // its lines are reported as conditional, not as the global value.
-        assert!(command.contains("%cond) lr_out=\"$lr_out cond=1\";;"));
+        assert!(command.contains("%cond) lr_cond=1;;"));
+        assert!(command.contains("lr_sshd_walk \"$lr_w\" $(($2 + 1)) \"$lr_cond\""));
         assert!(command.contains("FNR==1{m=(cond==1)?1:0}"));
         assert!(command.contains("*[!A-Za-z0-9/._@+-]*)"));
         // A value decided by a file outside the closed set, or by a link, is
