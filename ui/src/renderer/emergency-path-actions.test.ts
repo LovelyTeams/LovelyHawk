@@ -170,6 +170,9 @@ describe("emergency file action lifecycle", () => {
     const request = view().start("disarm", offer);
     await Promise.resolve();
     expect(api.planEmergencyPathAction).toHaveBeenCalledOnce();
+    expect(view().state?.detail).toEqual(detail);
+    expect(view().state?.busy).toBe(true);
+    expect(api.executeEmergencyPathAction).not.toHaveBeenCalled();
     view().close();
     view("target-two");
     pending.resolve(plan);
@@ -234,9 +237,10 @@ describe("emergency file action lifecycle", () => {
     },
   );
 
-  it("says an expired undo changed nothing, instead of pointing back at the output", async () => {
+  it.each(["emergency-path-unavailable", "emergency-path-plan-unavailable"])(
+    "explains an unavailable undo without sending the operator back to stale output: %s", async (code) => {
     api.undoEmergencyPathAction.mockRejectedValueOnce(
-      new Error("这个文件操作入口已过期或已使用，请从输出行重新打开。 (emergency-path-unavailable)"));
+      new Error(`文件操作不可用。 (${code})`));
     await view().start("disarm", offer);
     await view().confirm();
     await view().undo();

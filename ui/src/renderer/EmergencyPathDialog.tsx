@@ -118,9 +118,12 @@ export function EmergencyPathDialog({
                 </dl>
               </div>
             )}
+            {busy && detail !== null && plan === null ? (
+              <p className="emergency-path-note" role="status">正在生成操作计划，尚未修改文件…</p>
+            ) : null}
             {error === null ? null : <p className="emergency-path-error" role="alert">{error}</p>}
             <footer>
-              <button type="button" onClick={onClose} disabled={busy}>取消</button>
+              <button type="button" onClick={onClose} disabled={busy && plan !== null}>取消</button>
               <button
                 type="button"
                 className="is-dangerous"
@@ -128,7 +131,7 @@ export function EmergencyPathDialog({
                 data-testid="emergency-path-execute"
                 onClick={onConfirm}
               >
-                {busy ? "执行中…" : "确认并执行"}
+                {busy ? plan === null ? "准备中…" : "执行并复核中…" : "确认并执行"}
               </button>
             </footer>
           </>

@@ -2207,6 +2207,24 @@ impl fmt::Debug for SessionHandle {
     }
 }
 
+/// Keep at most one idle channel per actor-owned SSH session. Each request
+/// takes exclusive ownership; concurrent transfers can open another channel
+/// without waiting for one another. Only completed successful requests return
+/// their channel. Failure, timeout and cancellation drop it without replaying
+/// any request whose remote effect might already have happened.
+struct SftpChannelCache {
+    idle: Mutex<Option<SftpSession>>,
+    cancellation: CancellationToken,
+}
+
+impl fmt::Debug for SftpChannelCache {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SftpChannelCache")
+            .finish_non_exhaustive()
+    }
+}
+
 struct SessionData {
     handle: SessionHandle,
     _jump_handle: Option<Arc<Handle<ClientHandler>>>,
@@ -2215,6 +2233,7 @@ struct SessionData {
     pending: Arc<Semaphore>,
     execution: Arc<Semaphore>,
     terminals: Arc<Mutex<Vec<TerminalCloseHandle>>>,
+    sftp: Arc<SftpChannelCache>,
 }
 
 impl SessionData {
@@ -2228,6 +2247,10 @@ impl SessionData {
             handle,
             _jump_handle: jump_handle,
             status,
+            sftp: Arc::new(SftpChannelCache {
+                idle: Mutex::new(None),
+                cancellation: cancellation.token(),
+            }),
             cancellation,
             pending: Arc::new(Semaphore::new(SESSION_OPERATION_CAPACITY)),
             execution: Arc::new(Semaphore::new(SESSION_OPERATION_CONCURRENCY)),
@@ -2257,6 +2280,7 @@ impl SessionData {
                 status: self.status.clone(),
                 cancellation: self.cancellation.token(),
                 execution: self.execution.clone(),
+                sftp: self.sftp.clone(),
             },
             admission,
         ))
@@ -2264,6 +2288,9 @@ impl SessionData {
 
     fn cancel(&self) {
         self.cancellation.cancel();
+        if let Ok(mut idle) = self.sftp.idle.lock() {
+            idle.take();
+        }
         if let Ok(mut terminals) = self.terminals.lock() {
             for terminal in terminals.drain(..) {
                 terminal.request_close();
@@ -2278,6 +2305,7 @@ struct ActorBoundSession {
     status: SshConnectionStatus,
     cancellation: CancellationToken,
     execution: Arc<Semaphore>,
+    sftp: Arc<SftpChannelCache>,
 }
 
 enum ActorCompletion {
@@ -2527,13 +2555,14 @@ async fn router_loop(
                         "SFTP session binding",
                     ) {
                         Ok((session, admission)) => {
+                            let sftp = session.sftp.clone();
                             tasks.spawn(run_session_response(
                                 session,
                                 admission,
                                 reply,
                                 "SFTP request",
                                 deadline,
-                                move |handle| sftp_on_handle(handle, *request),
+                                move |handle| sftp_on_handle(handle, sftp, *request),
                             ));
                         }
                         Err(error) => {
@@ -2997,9 +3026,32 @@ async fn execute_sensitive_on_handle(
     }
 }
 
-async fn sftp_on_handle(handle: SessionHandle, request: SftpRequest) -> CoreResult<SftpResponse> {
+async fn sftp_on_handle(
+    handle: SessionHandle,
+    cache: Arc<SftpChannelCache>,
+    request: SftpRequest,
+) -> CoreResult<SftpResponse> {
     match handle {
-        SessionHandle::Real(handle) => sftp_request(&handle, request).await,
+        SessionHandle::Real(handle) => {
+            let cached = cache
+                .idle
+                .lock()
+                .map_err(|_| CoreError::ssh("SFTP request", "channel cache unavailable"))?
+                .take();
+            let sftp = match cached {
+                Some(sftp) => sftp,
+                None => open_sftp(&handle).await?,
+            };
+            let result = sftp_request(&sftp, request).await;
+            if result.is_ok()
+                && let Ok(mut idle) = cache.idle.lock()
+                && !cache.cancellation.is_cancelled()
+                && idle.is_none()
+            {
+                *idle = Some(sftp);
+            }
+            result
+        }
         #[cfg(test)]
         SessionHandle::Test(harness) => harness.sftp(request).await,
     }
@@ -3988,11 +4040,7 @@ async fn open_sftp(handle: &Handle<ClientHandler>) -> CoreResult<SftpSession> {
         .map_err(|error| CoreError::ssh(SFTP_HANDSHAKE_OPERATION, error.to_string()))
 }
 
-async fn sftp_request(
-    handle: &Handle<ClientHandler>,
-    request: SftpRequest,
-) -> CoreResult<SftpResponse> {
-    let sftp = open_sftp(handle).await?;
+async fn sftp_request(sftp: &SftpSession, request: SftpRequest) -> CoreResult<SftpResponse> {
     match request {
         SftpRequest::Canonicalize { path } => sftp
             .canonicalize(path)
@@ -4063,7 +4111,7 @@ async fn sftp_request(
                     format!("exceeds the {maximum_bytes}-byte read limit"),
                 ));
             }
-            let bytes = read_sftp_bounded(&sftp, &path, maximum_bytes).await?;
+            let bytes = read_sftp_bounded(sftp, &path, maximum_bytes).await?;
             Ok(SftpResponse::Bytes(bytes))
         }
         SftpRequest::WriteNew {
@@ -4071,7 +4119,7 @@ async fn sftp_request(
             content,
             mode,
         } => {
-            ensure_sftp_absent(&sftp, &path).await?;
+            ensure_sftp_absent(sftp, &path).await?;
             let mut file = sftp
                 .open_with_flags(
                     path.as_str(),
@@ -4121,7 +4169,7 @@ async fn sftp_request(
             if cancel.is_cancelled() {
                 return Err(CoreError::validation("SFTP transfer", TRANSFER_CANCELLED));
             }
-            ensure_sftp_absent(&sftp, &remote_path).await?;
+            ensure_sftp_absent(sftp, &remote_path).await?;
             let metadata = tokio::fs::metadata(&local_path)
                 .await
                 .map_err(|source| CoreError::io("inspect staged upload", &local_path, source))?;
@@ -4181,7 +4229,7 @@ async fn sftp_request(
             remote_path,
             destination,
             progress,
-        } => crate::file_evidence::collect_sftp_file(&sftp, &remote_path, destination, progress)
+        } => crate::file_evidence::collect_sftp_file(sftp, &remote_path, destination, progress)
             .await
             .map(SftpResponse::FileEvidence),
         SftpRequest::DownloadNew {
@@ -4221,7 +4269,7 @@ async fn sftp_request(
             // The file it creates removes itself unless the download finishes,
             // even when this request is dropped half-way.
             download_sftp_file(
-                &sftp,
+                sftp,
                 &remote_path,
                 &local_path,
                 maximum_bytes,
@@ -4232,7 +4280,7 @@ async fn sftp_request(
             .map(|bytes| SftpResponse::Transfer { bytes })
         }
         SftpRequest::CreateDirectory { path } => {
-            ensure_sftp_absent(&sftp, &path).await?;
+            ensure_sftp_absent(sftp, &path).await?;
             sftp.create_dir(path)
                 .await
                 .map_err(|error| CoreError::ssh("create SFTP directory", error.to_string()))?;
@@ -4244,7 +4292,7 @@ async fn sftp_request(
             require_destination_absent,
         } => {
             if require_destination_absent {
-                ensure_sftp_absent(&sftp, &to).await?;
+                ensure_sftp_absent(sftp, &to).await?;
             }
             sftp.rename(from, to)
                 .await
@@ -4274,7 +4322,7 @@ async fn sftp_request(
                         ),
                     ));
                 }
-                let current = read_sftp_bounded(&sftp, &path, maximum_bytes).await?;
+                let current = read_sftp_bounded(sftp, &path, maximum_bytes).await?;
                 let actual_sha256 = sha256_bytes(&current);
                 if actual_sha256 != expected_sha256 {
                     return Err(CoreError::validation(
@@ -4303,9 +4351,9 @@ async fn sftp_request(
             // Whether or not this call made the directory, it must not be one
             // anybody else can walk into: a directory left open inside a web
             // root is how a removed file stays reachable.
-            narrow_sftp_mode(&sftp, backup_directory.as_str(), BACKUP_DIRECTORY_MODE).await;
+            narrow_sftp_mode(sftp, backup_directory.as_str(), BACKUP_DIRECTORY_MODE).await;
             let move_result = async {
-                ensure_sftp_absent(&sftp, &backup_path).await?;
+                ensure_sftp_absent(sftp, &backup_path).await?;
                 sftp.rename(path, backup_path.clone())
                     .await
                     .map_err(|error| CoreError::ssh("move SFTP path to backup", error.to_string()))
@@ -4318,7 +4366,7 @@ async fn sftp_request(
             // The file that was just set aside keeps whatever mode it had —
             // often world-readable, sometimes executable. It is not in service
             // any more and nothing should be able to read or run it.
-            narrow_sftp_mode(&sftp, backup_path.as_str(), BACKUP_FILE_MODE).await;
+            narrow_sftp_mode(sftp, backup_path.as_str(), BACKUP_FILE_MODE).await;
             Ok(SftpResponse::Unit)
         }
         SftpRequest::Remove { path, directory } => {
@@ -4362,7 +4410,7 @@ async fn sftp_request(
             expected_sha256,
             expected_canonical_path,
         } => atomic_write_sftp(
-            &sftp,
+            sftp,
             path,
             backup_directory,
             backup_path,

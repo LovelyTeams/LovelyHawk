@@ -135,6 +135,7 @@ export function useEmergencyPathActions(api: EmergencyCommandApi, bindingHandle:
         setState({ offer, action, detail, plan: null, receipt: null, undo: null, undoSpent: false, busy: false, error: null });
         return;
       }
+      setState((current) => current === null ? null : { ...current, detail });
       const plan = await api.planEmergencyPathAction(bindingHandle, offer.pathHandle, action);
       if (!isEmergencyPathPlan(plan)) throw new Error("目标机返回的操作计划无法识别。");
       operation.plan = plan;
@@ -239,7 +240,7 @@ export function useEmergencyPathActions(api: EmergencyCommandApi, bindingHandle:
  * written. The window is the backend's UNDO_TTL (emergency_path_api.rs).
  */
 export function undoFailure(text: string): string {
-  if (/\(emergency-path-unavailable\)$/u.test(text)) {
+  if (/\(emergency-path(?:-plan)?-unavailable\)$/u.test(text)) {
     return "撤销的时限已过（完成后 10 分钟内有效），这个文件没有被改动。请重新查看文件属性后再决定。";
   }
   // The undo may or may not have reached the file before the deadline.

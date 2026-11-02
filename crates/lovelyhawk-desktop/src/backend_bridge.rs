@@ -216,7 +216,13 @@ fn lane_for(method: &str) -> Lane {
         Lane::Terminal
     } else if method == "sftp-browser.transfer.cancel" {
         Lane::Control
-    } else if method.starts_with("sftp-browser.") {
+    } else if method.starts_with("sftp-browser.")
+        || method.starts_with("emergency-command.path.")
+        || method == "emergency.file-evidence"
+    {
+        // An investigation can still be collecting later results when the
+        // operator acts on an earlier file. Keep those actions with the file
+        // browser's ordered writes, out of the long-running scan queue.
         Lane::Files
     } else {
         Lane::Main
@@ -226,11 +232,16 @@ fn lane_for(method: &str) -> Lane {
 fn lane_for_request(method: &str, params: &Value) -> Lane {
     // Only in-memory status/cancel actions bypass the main queue. The backend
     // still validates the complete request and its session; writes stay queued.
-    if method == "windows.incident"
+    if (method == "windows.incident"
         && matches!(
             params.get("action").and_then(Value::as_str),
             Some("status" | "baseline-plan-progress" | "cancel-baseline-plan")
-        )
+        ))
+        || (method == "emergency.file-evidence"
+            && matches!(
+                params.get("action").and_then(Value::as_str),
+                Some("poll" | "cancel")
+            ))
     {
         Lane::Control
     } else {
@@ -441,11 +452,28 @@ mod tests {
             "sftp-browser.open",
             "sftp-browser.directory.list",
             "sftp-browser.operation.execute",
+            "emergency-command.path.inspect",
+            "emergency-command.path.plan",
+            "emergency-command.path.confirm",
+            "emergency-command.path.execute",
+            "emergency-command.path.cancel",
+            "emergency-command.path.undo",
+            "emergency.file-evidence",
         ] {
             assert_eq!(lane_for(method), Lane::Files, "{method}");
         }
         // A cancel cannot queue behind the transfer it is meant to stop.
         assert_eq!(lane_for("sftp-browser.transfer.cancel"), Lane::Control);
+        for action in ["poll", "cancel"] {
+            assert_eq!(
+                lane_for_request("emergency.file-evidence", &json!({"action":action})),
+                Lane::Control
+            );
+        }
+        assert_eq!(
+            lane_for_request("emergency.file-evidence", &json!({"action":"begin"})),
+            Lane::Files
+        );
         for action in ["status", "baseline-plan-progress", "cancel-baseline-plan"] {
             assert_eq!(
                 lane_for_request("windows.incident", &json!({"action":action})),
@@ -470,6 +498,7 @@ mod tests {
             "docker.container.list",
             "terminal",
             "sftp-browserx",
+            "emergency-command.pathx.inspect",
         ] {
             assert_eq!(lane_for(method), Lane::Main, "{method}");
         }
@@ -498,6 +527,27 @@ mod tests {
             )
             .await;
             assert!(matches!(terminal, Ok(Err(_))), "{terminal:?}");
+            // File actions opened from an earlier result must remain usable
+            // while a later investigation still owns the main queue.
+            for method in [
+                "emergency-command.path.inspect",
+                "emergency-command.path.plan",
+                "emergency-command.path.confirm",
+                "emergency-command.path.execute",
+                "emergency-command.path.cancel",
+                "emergency-command.path.undo",
+            ] {
+                let response = tokio::time::timeout(deadline, bridge.call(method, json!({}))).await;
+                assert!(matches!(response, Ok(Err(_))), "{method}: {response:?}");
+            }
+            let evidence = tokio::time::timeout(deadline, bridge.call("emergency.file-evidence", json!({"action":"begin"}))).await;
+            assert!(matches!(evidence, Ok(Err(_))), "{evidence:?}");
+            let busy_files = bridge.lanes[Lane::Files as usize].lock().await;
+            for action in ["poll", "cancel"] {
+                let response = tokio::time::timeout(deadline, bridge.call("emergency.file-evidence", json!({"action":action}))).await;
+                assert!(matches!(response, Ok(Err(_))), "{action}: {response:?}");
+            }
+            drop(busy_files);
             for action in ["status", "baseline-plan-progress", "cancel-baseline-plan"] {
                 let params = if action == "status" { json!({"action":action}) } else {
                     json!({"action":action,"planId":"00000000-0000-4000-8000-000000000001","sessionId":"00000000-0000-4000-8000-000000000002"})

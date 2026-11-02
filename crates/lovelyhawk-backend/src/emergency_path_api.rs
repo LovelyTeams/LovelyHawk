@@ -31,8 +31,8 @@ use uuid::Uuid;
 use crate::ssh_api::SshApi;
 
 const MAX_HANDLE_BYTES: usize = 128;
-/// Paths one binding may hold at once. A run offers at most 500, so this keeps
-/// the last few runs addressable without letting a sweep grow without bound.
+/// Paths retained across all pages and bindings. A workbench run offers at
+/// most 500; keep earlier group results usable without an unbounded cache.
 const MAX_STORED_PATHS: usize = 2_000;
 const MAX_PLANS: usize = 16;
 const MAX_PATH_DISPLAY_BYTES: usize = 1_024;
@@ -158,8 +158,8 @@ pub(crate) struct PathScope {
     pub(crate) target: TargetGuard,
 }
 
-/// Which page offered a path. Each keeps its own offers: a fresh run on one
-/// page replaces that page's handles and leaves the other's alone.
+/// Which page offered a path. Workbench groups display several runs together;
+/// integrity and log analysis each display only their latest collection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PathOfferSource {
     /// Lines of a command-workbench run.
@@ -245,22 +245,43 @@ impl PathRegistry {
             .ok_or(EmergencyPathApiError::PlanStale)
     }
 
-    /// Replaces what this binding was offering from one page, so a fresh run's
-    /// handles are the only ones that page can act through.
-    fn replace_for_binding(
+    /// Workbench results accumulate during a group run. Do not invalidate
+    /// their file entries when the next command returns (even with no paths).
+    /// Other pages replace their previous collection. All entries remain
+    /// bounded by the original TTL, target identity and shared cache ceiling.
+    fn store_for_binding(
         &mut self,
         scope: &PathScope,
         source: PathOfferSource,
         offered: Vec<(String, RemotePath)>,
     ) {
         self.paths.retain(|_, stored| {
-            stored.scope.binding_handle != scope.binding_handle || stored.source != source
+            stored.scope.binding_handle != scope.binding_handle
+                || (stored.scope == *scope
+                    && (stored.source != source || source == PathOfferSource::Workbench))
         });
-        let expires_at = Instant::now() + PATH_TTL;
-        for (handle, path) in offered {
-            if self.paths.len() >= MAX_STORED_PATHS {
-                break;
+        let incoming = offered.len().min(MAX_STORED_PATHS);
+        let remove_count = self
+            .paths
+            .len()
+            .saturating_add(incoming)
+            .saturating_sub(MAX_STORED_PATHS);
+        if remove_count > 0 {
+            // Prefer fresh results at capacity; never issue an entry that was
+            // not stored. Expired/evicted output remains readable and can be
+            // collected again, without renewing an old mutation plan.
+            let mut oldest: Vec<_> = self
+                .paths
+                .iter()
+                .map(|(handle, stored)| (stored.expires_at, handle.clone()))
+                .collect();
+            oldest.sort_unstable();
+            for (_, handle) in oldest.into_iter().take(remove_count) {
+                self.paths.remove(&handle);
             }
+        }
+        let expires_at = Instant::now() + PATH_TTL;
+        for (handle, path) in offered.into_iter().take(MAX_STORED_PATHS) {
             self.paths.insert(
                 handle,
                 StoredPath {
@@ -412,7 +433,8 @@ impl EmergencyPathApi {
             return Vec::new();
         };
         registry.prune(Instant::now());
-        registry.replace_for_binding(scope, PathOfferSource::Workbench, stored);
+        registry.store_for_binding(scope, PathOfferSource::Workbench, stored);
+        offered.retain(|offer| registry.paths.contains_key(&offer.path_handle));
         offered
     }
 
@@ -442,7 +464,15 @@ impl EmergencyPathApi {
             return vec![None; paths.len()];
         };
         registry.prune(Instant::now());
-        registry.replace_for_binding(scope, source, stored);
+        registry.store_for_binding(scope, source, stored);
+        for handle in &mut handles {
+            if handle
+                .as_ref()
+                .is_some_and(|value| !registry.paths.contains_key(value))
+            {
+                *handle = None;
+            }
+        }
         handles
     }
 
@@ -877,7 +907,7 @@ mod tests {
         let mine = scope("binding-a", "target-a", 0);
         let theirs = scope("binding-b", "target-b", 0);
         let mut registry = PathRegistry::default();
-        registry.replace_for_binding(
+        registry.store_for_binding(
             &mine,
             PathOfferSource::Workbench,
             offered(&["/tmp/.x", "/tmp/.y"]),
@@ -905,7 +935,7 @@ mod tests {
         let before = scope("binding-a", "target-a", 0);
         let after = scope("binding-a", "target-a", 1);
         let mut registry = PathRegistry::default();
-        registry.replace_for_binding(&before, PathOfferSource::Workbench, offered(&["/tmp/.x"]));
+        registry.store_for_binding(&before, PathOfferSource::Workbench, offered(&["/tmp/.x"]));
         assert!(matches!(
             registry.path(&after, "handle-0", Instant::now()),
             Err(EmergencyPathApiError::PathStale),
@@ -913,15 +943,48 @@ mod tests {
     }
 
     #[test]
-    fn a_fresh_run_replaces_what_the_previous_one_offered() {
+    fn later_group_results_keep_earlier_file_entries_usable() {
         let scope = scope("binding-a", "target-a", 0);
         let mut registry = PathRegistry::default();
-        registry.replace_for_binding(
+        registry.store_for_binding(
             &scope,
             PathOfferSource::Workbench,
+            vec![(
+                "suid-file".to_owned(),
+                RemotePath::new("/tmp/first").unwrap(),
+            )],
+        );
+        registry.store_for_binding(
+            &scope,
+            PathOfferSource::Workbench,
+            vec![(
+                "pam-file".to_owned(),
+                RemotePath::new("/etc/pam.d/sshd").unwrap(),
+            )],
+        );
+        // A subsequent check with no file output must not clear the group either.
+        registry.store_for_binding(&scope, PathOfferSource::Workbench, Vec::new());
+        for (handle, expected) in [("suid-file", "/tmp/first"), ("pam-file", "/etc/pam.d/sshd")] {
+            assert_eq!(
+                registry
+                    .path(&scope, handle, Instant::now())
+                    .unwrap()
+                    .as_str(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn a_fresh_comparison_replaces_what_the_previous_one_offered() {
+        let scope = scope("binding-a", "target-a", 0);
+        let mut registry = PathRegistry::default();
+        registry.store_for_binding(
+            &scope,
+            PathOfferSource::Integrity,
             offered(&["/tmp/.x", "/tmp/.y"]),
         );
-        registry.replace_for_binding(&scope, PathOfferSource::Workbench, offered(&["/tmp/.z"]));
+        registry.store_for_binding(&scope, PathOfferSource::Integrity, offered(&["/tmp/.z"]));
 
         let now = Instant::now();
         assert_eq!(
@@ -946,14 +1009,14 @@ mod tests {
         // Handles are unique in use; give each offer its own here too.
         let named =
             |handle: &str, path: &str| vec![(handle.to_owned(), RemotePath::new(path).unwrap())];
-        registry.replace_for_binding(&scope, PathOfferSource::Workbench, named("w", "/tmp/.x"));
-        registry.replace_for_binding(
+        registry.store_for_binding(&scope, PathOfferSource::Workbench, named("w", "/tmp/.x"));
+        registry.store_for_binding(
             &scope,
             PathOfferSource::Integrity,
             named("i1", "/usr/bin/.y"),
         );
         assert_eq!(registry.paths.len(), 2);
-        registry.replace_for_binding(
+        registry.store_for_binding(
             &scope,
             PathOfferSource::Integrity,
             named("i2", "/usr/bin/.z"),
@@ -965,13 +1028,12 @@ mod tests {
             .collect();
         paths.sort_unstable();
         assert_eq!(paths, ["/tmp/.x", "/usr/bin/.z"]);
-        registry.replace_for_binding(&scope, PathOfferSource::Workbench, Vec::new());
-        let paths: Vec<&str> = registry
-            .paths
-            .values()
-            .map(|stored| stored.path.as_str())
-            .collect();
-        assert_eq!(paths, ["/usr/bin/.z"]);
+        registry.store_for_binding(&scope, PathOfferSource::Integrity, Vec::new());
+        assert_eq!(registry.paths.len(), 1);
+        assert_eq!(
+            registry.path(&scope, "w", Instant::now()).unwrap().as_str(),
+            "/tmp/.x"
+        );
     }
 
     #[test]
@@ -982,15 +1044,77 @@ mod tests {
             .map(|index| format!("/tmp/.f{index}"))
             .collect();
         let refs: Vec<&str> = many.iter().map(String::as_str).collect();
-        registry.replace_for_binding(&scope, PathOfferSource::Workbench, offered(&refs));
+        registry.store_for_binding(&scope, PathOfferSource::Workbench, offered(&refs));
         assert_eq!(registry.paths.len(), MAX_STORED_PATHS);
+    }
+
+    #[test]
+    fn a_full_cache_admits_fresh_results_and_only_evicts_the_oldest_entries() {
+        let scope = scope("binding-a", "target-a", 0);
+        let mut registry = PathRegistry::default();
+        let many: Vec<String> = (0..MAX_STORED_PATHS)
+            .map(|index| format!("/tmp/file-{index}"))
+            .collect();
+        let refs: Vec<&str> = many.iter().map(String::as_str).collect();
+        registry.store_for_binding(&scope, PathOfferSource::Workbench, offered(&refs));
+        registry.paths.get_mut("handle-42").unwrap().expires_at -= Duration::from_secs(30);
+        registry.store_for_binding(
+            &scope,
+            PathOfferSource::Workbench,
+            vec![(
+                "fresh-entry".to_owned(),
+                RemotePath::new("/tmp/fresh").unwrap(),
+            )],
+        );
+        let now = Instant::now();
+        assert_eq!(registry.paths.len(), MAX_STORED_PATHS);
+        assert_eq!(
+            registry.path(&scope, "fresh-entry", now).unwrap().as_str(),
+            "/tmp/fresh"
+        );
+        assert!(matches!(
+            registry.path(&scope, "handle-42", now),
+            Err(EmergencyPathApiError::PathStale)
+        ));
+        assert_eq!(
+            registry.path(&scope, "handle-0", now).unwrap().as_str(),
+            "/tmp/file-0"
+        );
+    }
+
+    #[test]
+    fn new_results_do_not_extend_old_expiry_or_keep_an_old_target_generation() {
+        let before = scope("binding-a", "target-a", 0);
+        let after = scope("binding-a", "target-a", 1);
+        let mut registry = PathRegistry::default();
+        registry.store_for_binding(&before, PathOfferSource::Workbench, offered(&["/tmp/old"]));
+        let deadline = registry.paths["handle-0"].expires_at;
+        registry.store_for_binding(&before, PathOfferSource::Workbench, Vec::new());
+        assert_eq!(registry.paths["handle-0"].expires_at, deadline);
+        registry.store_for_binding(
+            &after,
+            PathOfferSource::Workbench,
+            vec![(
+                "new-target".to_owned(),
+                RemotePath::new("/tmp/new").unwrap(),
+            )],
+        );
+        assert_eq!(registry.paths.len(), 1);
+        assert!(matches!(
+            registry.path(&before, "handle-0", Instant::now()),
+            Err(EmergencyPathApiError::PathStale)
+        ));
+        assert!(matches!(
+            registry.path(&before, "new-target", Instant::now()),
+            Err(EmergencyPathApiError::PathStale)
+        ));
     }
 
     #[test]
     fn an_expired_capability_names_nothing() {
         let scope = scope("binding-a", "target-a", 0);
         let mut registry = PathRegistry::default();
-        registry.replace_for_binding(&scope, PathOfferSource::Workbench, offered(&["/tmp/.x"]));
+        registry.store_for_binding(&scope, PathOfferSource::Workbench, offered(&["/tmp/.x"]));
         let later = Instant::now() + PATH_TTL + Duration::from_secs(1);
         assert!(matches!(
             registry.path(&scope, "handle-0", later),
@@ -1005,8 +1129,13 @@ mod tests {
         let mine = scope("binding-a", "target-a", 0);
         let theirs = scope("binding-b", "target-b", 0);
         let mut registry = PathRegistry::default();
-        registry.replace_for_binding(&mine, PathOfferSource::Workbench, offered(&["/tmp/.x"]));
-        registry.replace_for_binding(&theirs, PathOfferSource::Workbench, offered(&["/tmp/.y"]));
+        registry.store_for_binding(&mine, PathOfferSource::Workbench, offered(&["/tmp/.x"]));
+        registry.store_for_binding(
+            &theirs,
+            PathOfferSource::Workbench,
+            vec![("neighbor".to_owned(), RemotePath::new("/tmp/.y").unwrap())],
+        );
+        assert_eq!(registry.paths.len(), 2);
         registry.close_binding("binding-a");
 
         let now = Instant::now();
@@ -1016,7 +1145,7 @@ mod tests {
         ));
         // A neighbouring window keeps working.
         assert_eq!(
-            registry.path(&theirs, "handle-0", now).unwrap().as_str(),
+            registry.path(&theirs, "neighbor", now).unwrap().as_str(),
             "/tmp/.y",
         );
     }

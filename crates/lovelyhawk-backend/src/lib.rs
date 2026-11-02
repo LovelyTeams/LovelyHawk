@@ -5932,10 +5932,16 @@ fn emergency_path_failure(error: EmergencyPathApiError) -> RpcFailure {
             public_message: "The emergency command request parameters are invalid.",
             source: None,
         },
-        EmergencyPathApiError::PathStale | EmergencyPathApiError::PlanStale => RpcFailure {
+        EmergencyPathApiError::PathStale => RpcFailure {
             operation: "validate emergency path capability",
             code: "emergency-path-unavailable",
-            public_message: "That path capability is missing, expired, or already used.",
+            public_message: "That file entry is missing or expired. Collect fresh results before trying again.",
+            source: None,
+        },
+        EmergencyPathApiError::PlanStale => RpcFailure {
+            operation: "validate emergency path plan",
+            code: "emergency-path-plan-unavailable",
+            public_message: "That file action plan is missing, expired, unconfirmed, or already used.",
             source: None,
         },
         EmergencyPathApiError::Capacity => RpcFailure {

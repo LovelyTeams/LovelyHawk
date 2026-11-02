@@ -95,7 +95,8 @@ export const BACKEND_ERROR_MESSAGES: Readonly<Record<string, string>> = Object.f
   "emergency-command-result-invalid": "命令结果不完整或格式异常，已丢弃。",
   "emergency-command-timeout": "命令超出时限，请在目标主机上核对是否仍在运行。",
   "emergency-path-operation-failed": "对这个文件的操作没有完成，详细原因见应用日志。",
-  "emergency-path-unavailable": "这个文件操作入口已过期或已使用，请从输出行重新打开。",
+  "emergency-path-unavailable": "这份结果的文件操作入口已过期或被较新的结果替换，请重新采集对应结果后再操作。",
+  "emergency-path-plan-unavailable": "这次文件操作计划已过期、未确认或已使用，请重新发起并核对计划。",
 
   // Baseline and audits.
   "baseline-binding-unavailable": "目标连接已断开或已切换，基线检查没有执行。",

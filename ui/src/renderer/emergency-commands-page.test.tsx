@@ -311,6 +311,22 @@ describe("EmergencyCommandsPage", () => {
     expect(planned).toContain("restore the captured permission bits");
     expect(planned).toContain("确认并执行");
 
+    const preparing = renderToStaticMarkup(
+      <EmergencyPathDialog path={offer.path} action="disarm" detail={detail} plan={null}
+        receipt={null} busy={true} error={null}
+        onConfirm={() => undefined} onClose={() => undefined} />,
+    );
+    expect(preparing).toContain("正在生成操作计划，尚未修改文件");
+    expect(preparing).toContain("准备中…");
+    expect(preparing).toContain('<button type="button">取消</button>');
+    const running = renderToStaticMarkup(
+      <EmergencyPathDialog path={offer.path} action="disarm" detail={detail} plan={plan}
+        receipt={null} busy={true} error={null}
+        onConfirm={() => undefined} onClose={() => undefined} />,
+    );
+    expect(running).toContain("执行并复核中…");
+    expect(running).toContain('<button type="button" disabled="">取消</button>');
+
     const done = renderToStaticMarkup(
       <EmergencyPathDialog path={offer.path} action="disarm" detail={detail} plan={plan}
         receipt={{ planHandle: "opaque-plan", path: offer.path, action: "disarm",

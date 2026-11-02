@@ -58,6 +58,14 @@ describe("backend error messages", () => {
     ]) expect(operatorErrorMessage(text)).toBe(text);
   });
 
+  it("distinguishes collecting fresh file results from obtaining a new action plan", () => {
+    const path = operatorErrorMessage("That file entry is missing. (emergency-path-unavailable)");
+    const plan = operatorErrorMessage("That action plan is missing. (emergency-path-plan-unavailable)");
+    expect(path).toContain("重新采集对应结果");
+    expect(path).not.toMatch(/从输出行重新打开|已使用/u);
+    expect(plan).toContain("重新发起并核对计划");
+  });
+
   it("is what a page sees when the host refuses", async () => {
     expect(hostError("LovelyHawk could not complete the notes operation. (notes-operation-failed)").message)
       .toBe(`${BACKEND_ERROR_MESSAGES["notes-operation-failed"]} (notes-operation-failed)`);

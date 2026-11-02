@@ -308,9 +308,13 @@ impl EmergencyCommandApi {
         let (mut dto, clipped_lines) = project_receipt(&access, &command, receipt)?;
         // Read from what the window will display, so a line the operator
         // clicks is the line the path was taken from.
-        dto.paths = self
-            .paths
-            .offer(&scope.to_path_scope(), &dto.output, &clipped_lines);
+        // These actions use the SSH host's SFTP namespace. A container/Pod's
+        // printed path must never become an action on the host's same path.
+        if container.is_none() {
+            dto.paths = self
+                .paths
+                .offer(&scope.to_path_scope(), &dto.output, &clipped_lines);
+        }
         ensure_serialized_bound(&dto, MAX_RUN_RESPONSE_BYTES)?;
         self.validate_binding(&scope)?;
         self.verify_run(&access, &command)?;
