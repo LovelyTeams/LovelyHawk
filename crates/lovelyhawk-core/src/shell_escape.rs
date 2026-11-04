@@ -23,6 +23,27 @@ pub fn is_valid_username(value: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
+/// Validate an SSH login name, i.e. the `user` half of `ssh user@host`.
+///
+/// This is deliberately looser than [`is_valid_username`]: a login name is only
+/// ever handed to the SSH client's authentication call, never interpolated into
+/// a remote command, and real deployments do use dots and at-signs (a gateway
+/// account such as `ops.8c40277dcb`, or a directory-style `svc@corp`). The
+/// stricter Linux account-name whitelist stays in place for everything that
+/// parses `/etc/passwd`, log lines, or command arguments.
+///
+/// The length limit matches the page's own field bound, so a name the editor
+/// accepts is not refused here.
+pub fn is_valid_ssh_login(value: &str) -> bool {
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    value.len() <= 32
+        && (first.is_ascii_alphanumeric() || first == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '@'))
+}
+
 /// Validate an IPv4/IPv6 literal with an optional prefix length.
 pub fn is_valid_ip_or_cidr(value: &str) -> bool {
     let value = value.trim();
@@ -176,6 +197,34 @@ mod tests {
         }
         for value in ["-1", "1.5", "100000", "abc", "", "7;id"] {
             assert!(!is_valid_non_negative_int(value));
+        }
+    }
+
+    #[test]
+    fn ssh_login_names_allow_gateway_style_accounts() {
+        for value in [
+            "root",
+            "www-data",
+            "ops.8c40277dcb",
+            "svc@corp",
+            "_svc.jump",
+            &"a".repeat(32),
+        ] {
+            assert!(is_valid_ssh_login(value), "should accept {value:?}");
+        }
+        for value in [
+            "",
+            ".hidden",
+            "-oProxyCommand=x",
+            "a b",
+            "a;id",
+            "a|id",
+            "a$(id)",
+            "a`id`",
+            "a\nid",
+            &"a".repeat(33),
+        ] {
+            assert!(!is_valid_ssh_login(value), "should reject {value:?}");
         }
     }
 
