@@ -4345,6 +4345,23 @@ fn connections_failure(error: CoreError) -> RpcFailure {
 }
 
 fn ssh_failure(error: CoreError) -> RpcFailure {
+    // A refused login name is the one draft failure an operator cannot guess
+    // from the form: the field looks right, and the generic sentence never says
+    // which one was turned down. The subject on the core error names it, both
+    // for the page's own length bound and for the domain validator.
+    let username_rejected = matches!(
+        &error,
+        CoreError::Validation { subject, .. }
+            if matches!(*subject, "SSH username" | "desktop SSH username")
+    );
+    if username_rejected {
+        return RpcFailure::core(
+            "run SSH controller operation",
+            "ssh-invalid-username",
+            "The SSH login name is not usable.",
+            error,
+        );
+    }
     let (code, public_message) = match &error {
         CoreError::Validation { .. } => ("ssh-invalid", "The SSH request is invalid."),
         CoreError::NotFound { .. } => (
@@ -11165,6 +11182,47 @@ mod tests {
         let encoded = serde_json::to_string(&response).unwrap();
         assert!(!encoded.contains("probe-secret-must-not-return"));
         assert!(!encoded.contains("server.example;id"));
+    }
+
+    #[tokio::test]
+    async fn ssh_probe_rpc_names_the_login_name_it_refuses() {
+        let root = TestRoot::new();
+        let state = BackendState::open(root.0.clone()).unwrap();
+        // One name the domain validator refuses, one the page's own length
+        // bound refuses: the operator has to learn which field was wrong in
+        // both cases, not just that "the request" was.
+        for username in ["-oProxyCommand=leak-must-not-return", &"A".repeat(33)] {
+            let payload = serde_json::json!({
+                "connection": {
+                    "id": "server-1",
+                    "name": "Hostile login name",
+                    "host": "server.example",
+                    "port": 22,
+                    "username": username,
+                    "authMethod": "password",
+                    "privateKeyPath": null,
+                    "certificatePath": null,
+                    "agentIdentityFingerprint": null,
+                    "jumpHost": null,
+                    "tags": [],
+                    "notes": null,
+                    "environment": null,
+                    "role": null,
+                    "group": null
+                },
+                "secrets": {
+                    "password": { "action": "replace", "value": "probe-secret-must-not-return" }
+                }
+            })
+            .to_string();
+            let response = handle_frame(&state, &request("ssh.probe.start", &payload)).await;
+            assert!(!response.ok, "should refuse {username:?}");
+            let error = response.error.as_ref().unwrap();
+            assert_eq!(error.code, "ssh-invalid-username", "for {username:?}");
+            let encoded = serde_json::to_string(&response).unwrap();
+            assert!(!encoded.contains("leak-must-not-return"));
+            assert!(!encoded.contains("probe-secret-must-not-return"));
+        }
     }
 
     #[tokio::test]

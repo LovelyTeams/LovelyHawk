@@ -19,7 +19,7 @@ use crate::operations::{
     DangerousConfirmation, ExecutionReceipt, OperationExecutor, OperationJournal, OperationPlan,
     OperationState, PlannedOperation, VerificationResult,
 };
-use crate::shell_escape::is_valid_username;
+use crate::shell_escape::is_valid_ssh_login;
 use crate::store::StoreFile;
 use crate::target::{TargetContext, TargetGuard, TargetIdentity};
 use crate::{CoreError, CoreResult, PortableStore};
@@ -79,15 +79,15 @@ impl ConnectionConfig {
         if self.port == 0 {
             return Err(CoreError::validation("SSH port", "must be non-zero"));
         }
-        if !is_valid_username(&self.username) {
+        if !is_valid_ssh_login(&self.username) {
             return Err(CoreError::validation(
                 "SSH username",
-                "must be a valid Linux account name",
+                "must be a valid SSH login name",
             ));
         }
         if let Some(jump) = &self.jump_host {
             validate_host(&jump.host)?;
-            if jump.port == 0 || !is_valid_username(&jump.username) {
+            if jump.port == 0 || !is_valid_ssh_login(&jump.username) {
                 return Err(CoreError::validation(
                     "jump host",
                     "port and username must be valid",
@@ -1472,6 +1472,21 @@ mod tests {
         invalid = config();
         invalid.username = "root;id".to_owned();
         assert!(invalid.validate().is_err());
+    }
+
+    #[test]
+    fn accepts_gateway_style_login_names() {
+        // Competition and bastion gateways hand out accounts like
+        // `ops.8c40277dcb`; a dot is not a shell metacharacter, so the
+        // connection must be savable and testable.
+        let mut gateway = config();
+        gateway.username = "ops.8c40277dcb".to_owned();
+        assert!(gateway.validate().is_ok());
+
+        let mut dotted = config();
+        dotted.host = "ssh.gateway.example".to_owned();
+        dotted.username = "svc@corp".to_owned();
+        assert!(dotted.validate().is_ok());
     }
 
     #[test]

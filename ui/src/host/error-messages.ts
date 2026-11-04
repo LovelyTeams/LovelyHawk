@@ -22,6 +22,7 @@ export const BACKEND_ERROR_MESSAGES: Readonly<Record<string, string>> = Object.f
 
   // SSH connections and targets.
   "ssh-invalid": "SSH 连接参数不正确。",
+  "ssh-invalid-username": "SSH 登录用户名不能用：只能用字母、数字、下划线、短横线、点和 @，最多 32 个字符，且不能以短横线开头。请按服务器上实际的登录名核对后再试。",
   "ssh-attempt-failed": "SSH 连接没有完成，详细原因见应用日志。",
   "ssh-host-not-found": "找不到这个主机名。请检查主机名拼写，或本机的 DNS 设置。",
   "ssh-unreachable": "没能和这台主机建立 SSH 连接：地址或端口不通、目标机没有运行 SSH 服务、网络超时，或双方没有共同支持的加密算法。请检查地址、端口和网络。",
